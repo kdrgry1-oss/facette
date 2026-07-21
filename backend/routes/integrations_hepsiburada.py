@@ -1314,17 +1314,18 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
 
     brand = product.get("brand") or product.get("brand_name")
     desc = re.sub(r"<[^>]+>", " ", product.get("description") or "").strip()
-    imgs = []
+    # KULLANICI KARARI: ölçü görseli artık HB'ye de SON görsel olarak gönderilir
+    # (eski 'gönderme' kuralı kaldırıldı). Normal görseller önce; data: URL'ler atlanır.
+    imgs, _size_imgs = [], []
     for img in (product.get("images") or []):
-        # Beden tablosu görselleri ({url, is_size_table:true}) ÜRÜN GÖRSELİ DEĞİLDİR —
-        # HB'ye Image1..5 olarak gidince görsel standardı ihlali/aksiyon üretiyor.
-        if isinstance(img, dict) and img.get("is_size_table"):
-            continue
         u = img.get("url") if isinstance(img, dict) else img
-        if u:
+        if not u or str(u).startswith("data:"):
+            continue
+        if isinstance(img, dict) and img.get("is_size_table"):
+            _size_imgs.append(u)
+        else:
             imgs.append(u)
-        if len(imgs) >= 5:
-            break
+    imgs = (imgs[:4] + _size_imgs[:1]) if _size_imgs else imgs[:5]
     if not imgs and product.get("image"):
         imgs.append(product["image"])
 

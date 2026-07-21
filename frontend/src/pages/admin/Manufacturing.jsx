@@ -821,19 +821,16 @@ export default function Manufacturing() {
                     </button>
                   </td>
                   <td className="px-3 py-3 text-center">
-                    {["teslim_alindi", "fatura_kesildi"].includes(item.current_stage) ? (
-                      item.product_created ? (
-                        <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">ürün açıldı ✓</span>
-                      ) : (
-                        <button onClick={() => openProductFromMfg(item)}
-                          data-testid={`open-product-${item.id}`}
-                          title="Ürün Aç — üretim bilgileriyle (ad, stok kodu, sezon, alış fiyatı, renk×beden stokları) Yeni Ürün formunu açar"
-                          className="w-10 h-10 inline-flex items-center justify-center text-black hover:bg-gray-100 rounded-lg text-3xl font-light leading-none">
-                          +
-                        </button>
-                      )
+                    {/* Ürün Aç HER aşamada kullanılabilir (kullanıcı isteği — dosya açılır açılmaz kart oluşturulabilsin) */}
+                    {item.product_created ? (
+                      <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">ürün açıldı ✓</span>
                     ) : (
-                      <span className="text-xs text-gray-300">—</span>
+                      <button onClick={() => openProductFromMfg(item)}
+                        data-testid={`open-product-${item.id}`}
+                        title="Ürün Aç — üretim bilgileriyle (ad, stok kodu, sezon, KDV dahil alış fiyatı, renk×beden yapısı) Yeni Ürün formunu açar"
+                        className="w-10 h-10 inline-flex items-center justify-center text-black hover:bg-gray-100 rounded-lg text-3xl font-light leading-none">
+                        +
+                      </button>
                     )}
                   </td>
                 </tr>

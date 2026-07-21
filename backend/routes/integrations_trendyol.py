@@ -1663,6 +1663,19 @@ async def sync_products_to_trendyol(
                     errors.append(f"{product.get('name')} - Açıklama eksik (Trendyol min 30 karakter zorunlu).")
                     continue
 
+            # Görseller: normal görseller önce, ÖLÇÜ GÖRSELİ ({is_size_table:true}) SON sırada
+            # (kullanıcı kararı — eski 'pazaryerine gönderme' kuralı kaldırıldı). data: URL atlanır.
+            _ty_norm, _ty_size = [], []
+            for _im in (product.get("images", []) or []):
+                _u = _im.get("url") if isinstance(_im, dict) else _im
+                if not _u or str(_u).startswith("data:"):
+                    continue
+                if isinstance(_im, dict) and _im.get("is_size_table"):
+                    _ty_size.append(_u)
+                else:
+                    _ty_norm.append(_u)
+            _ty_imgs = (_ty_norm[:7] + _ty_size[:1]) if _ty_size else _ty_norm[:8]
+
             # 3. Base Product Details
             base_item = {
                 "title": product.get("name"),
@@ -1676,7 +1689,7 @@ async def sync_products_to_trendyol(
                 "vatRate": int(product.get("vat_rate", config.get("default_vat_rate") or 20)),
                 "cargoCompanyId": int(config.get("default_cargo_company_id") or 10), # Assuming 10 is MNG Kargo (Needs specific Cargo Provider ID)
                 "dimensionalWeight": float(product.get("cargo_weight", 1)),
-                "images": [{"url": img} for img in product.get("images", [])[:8]]
+                "images": [{"url": u} for u in _ty_imgs]
             }
             
             if not base_item["images"]:

@@ -1229,11 +1229,22 @@ export default function AdminProducts() {
   // işaretlenince müşteriye gizlenir (storefront eler) ama admin galeride durmaya devam eder.
   const imgUrl = (img) => (typeof img === 'object' && img !== null ? (img.url || img.src || img.image || '') : img);
   const isSizeTableImg = (img) => (typeof img === 'object' && img !== null && !!img.is_size_table);
-  const toggleSizeTableImg = (index) => {
-    const newImages = [...formData.images];
-    const cur = newImages[index];
-    newImages[index] = isSizeTableImg(cur) ? imgUrl(cur) : { url: imgUrl(cur), is_size_table: true };
-    setFormData({ ...formData, images: newImages });
+  // Ölçü Görseli alanına taşı: işaretle + dizinin SONUNA al (pazaryerine son görsel gider)
+  const markAsSizeImage = (index) => {
+    setFormData(prev => {
+      const arr = [...prev.images];
+      const [it] = arr.splice(index, 1);
+      arr.push({ url: imgUrl(it), is_size_table: true });
+      return { ...prev, images: arr };
+    });
+  };
+  // Galeriye geri taşı: işareti kaldır (sitede tekrar görünür olur)
+  const unmarkSizeImage = (index) => {
+    setFormData(prev => {
+      const arr = [...prev.images];
+      arr[index] = imgUrl(arr[index]);
+      return { ...prev, images: arr };
+    });
   };
 
   /**
@@ -3872,6 +3883,7 @@ export default function AdminProducts() {
 
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
                     {formData.images.map((img, idx) => (
+                      isSizeTableImg(img) ? null : (
                       <div
                         key={idx}
                         draggable
@@ -3880,7 +3892,7 @@ export default function AdminProducts() {
                         onDragLeave={() => setDragOverImgIdx((cur) => (cur === idx ? null : cur))}
                         onDrop={(e) => { if (e.dataTransfer?.files && e.dataTransfer.files.length) return; e.preventDefault(); reorderImages(draggedImgIdx, idx); setDraggedImgIdx(null); setDragOverImgIdx(null); }}
                         onDragEnd={() => { setDraggedImgIdx(null); setDragOverImgIdx(null); }}
-                        className={`relative group aspect-[2/3] rounded-2xl overflow-hidden border-4 shadow-md hover:shadow-xl transition-all cursor-move ${isSizeTableImg(img) ? "border-amber-400" : "border-white"} ${draggedImgIdx === idx ? "opacity-40" : ""} ${dragOverImgIdx === idx && draggedImgIdx !== idx ? "ring-4 ring-orange-400 scale-[1.03]" : ""}`}
+                        className={`relative group aspect-[2/3] rounded-2xl overflow-hidden border-4 border-white shadow-md hover:shadow-xl transition-all cursor-move ${draggedImgIdx === idx ? "opacity-40" : ""} ${dragOverImgIdx === idx && draggedImgIdx !== idx ? "ring-4 ring-orange-400 scale-[1.03]" : ""}`}
                       >
                         <img src={fixImg(imgUrl(img))} draggable={false} className="w-full h-full object-cover pointer-events-none" alt="" />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
@@ -3895,9 +3907,9 @@ export default function AdminProducts() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => toggleSizeTableImg(idx)}
-                            title={isSizeTableImg(img) ? "Müşteriye tekrar göster" : "Ölçü tablosu / pazaryeri görseli — müşteriden gizle"}
-                            className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${isSizeTableImg(img) ? "bg-amber-500 text-white hover:bg-amber-600" : "bg-white text-black hover:bg-gray-100"}`}
+                            onClick={() => markAsSizeImage(idx)}
+                            title="Ölçü Görseli alanına taşı (sitede gizlenir, pazaryerine son görsel gider)"
+                            className="w-9 h-9 rounded-full bg-amber-500 text-white flex items-center justify-center hover:bg-amber-600 transition-colors"
                           >
                             <EyeOff size={16} />
                           </button>
@@ -3919,14 +3931,62 @@ export default function AdminProducts() {
                             <ChevronRight size={18} />
                           </button>
                         </div>
-                        {isSizeTableImg(img) ? (
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-amber-500 text-white text-[10px] font-black uppercase tracking-tighter rounded-full">Ölçü · Gizli</div>
-                        ) : idx === 0 ? (
+                        {idx === 0 && (
                           <div className="absolute top-2 left-2 px-3 py-1 bg-black text-white text-[10px] font-black uppercase tracking-tighter rounded-full">Kapak</div>
-                        ) : null}
+                        )}
                         <div className="absolute bottom-2 right-2 w-6 h-6 rounded-full bg-white/90 text-black flex items-center justify-center text-[10px] font-black">{idx + 1}</div>
                       </div>
+                      )
                     ))}
+                  </div>
+
+                  {/* ÖLÇÜ GÖRSELİ — sitede ürün galerisinde GÖRÜNMEZ; pazaryerlerine SON görsel olarak gider.
+                      Ölçü Tablosu'ndan "Görsel Oluştur" buraya otomatik düşer; galeriden sürükleyerek de taşınır. */}
+                  <div
+                    className="mt-8 p-5 rounded-2xl border-2 border-dashed border-amber-300 bg-amber-50/40"
+                    onDragOver={(e) => { if (draggedImgIdx !== null) e.preventDefault(); }}
+                    onDrop={(e) => { if (draggedImgIdx === null) return; e.preventDefault(); markAsSizeImage(draggedImgIdx); setDraggedImgIdx(null); setDragOverImgIdx(null); }}
+                    data-testid="size-image-zone"
+                  >
+                    <h3 className="font-bold text-amber-700 uppercase tracking-widest text-sm">📏 Ölçü Görseli</h3>
+                    <p className="text-xs text-amber-700/70 mt-1 mb-4">
+                      Sitede ürün görselleri arasında görünmez; pazaryerlerine (Trendyol / Hepsiburada) <b>son görsel</b> olarak gönderilir.
+                      Ölçü Tablosu sekmesinden "Görsel Oluştur" deyince buraya otomatik eklenir — galeriden istediğiniz görseli buraya sürükleyebilirsiniz.
+                    </p>
+                    {formData.images.filter(isSizeTableImg).length === 0 ? (
+                      <div className="text-xs text-amber-500/80 italic py-8 text-center border border-dashed border-amber-200 rounded-xl">
+                        Henüz ölçü görseli yok — galeriden bir görseli buraya sürükleyin ya da Ölçü Tablosu sekmesinden oluşturun.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                        {formData.images.map((img, idx) => (
+                          !isSizeTableImg(img) ? null : (
+                          <div key={idx} className="relative group aspect-[2/3] rounded-2xl overflow-hidden border-4 border-amber-400 shadow-md">
+                            <img src={fixImg(imgUrl(img))} className="w-full h-full object-cover" alt="" />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => unmarkSizeImage(idx)}
+                                title="Galeriye geri taşı (sitede tekrar görünür olur)"
+                                className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center hover:bg-gray-100"
+                              >
+                                <ChevronLeft size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeImage(idx)}
+                                title="Sil"
+                                className="w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                            <div className="absolute top-2 left-2 px-2 py-1 bg-amber-500 text-white text-[10px] font-black uppercase tracking-tighter rounded-full">Ölçü</div>
+                          </div>
+                          )
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </TabsContent>

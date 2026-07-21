@@ -239,12 +239,23 @@ async def generate_size_table_image(product_id: str, current_user: dict = Depend
     )
     data_url = "data:image/jpeg;base64," + base64.b64encode(png).decode("ascii")
 
+    # Görseli CDN'e (R2) yükle — pazaryerlerine SON görsel olarak gönderilebilmesi için
+    # gerçek URL gerekir (data: URL pazaryerine gidemez). R2 kapalıysa data_url'e düşülür.
+    stored_url = data_url
+    try:
+        from services import r2_storage as r2
+        if r2.is_enabled():
+            _key = f"products/{product_id}/size-table-{uuid.uuid4().hex[:8]}.jpg"
+            stored_url = r2.put_object(_key, png, "image/jpeg")
+    except Exception as _e:
+        logger.warning(f"size-table R2 upload başarısız, base64'e düşüldü: {_e}")
+
     # Remove any previous size-table images and append fresh one as the last image
     imgs = list(product.get("images") or [])
     imgs = [i for i in imgs if not (isinstance(i, dict) and i.get("is_size_table"))]
     imgs.append({
         "id": str(uuid.uuid4()),
-        "url": data_url,
+        "url": stored_url,
         "is_size_table": True,
         "alt": "Ölçü Tablosu",
         "created_at": datetime.now(timezone.utc).isoformat(),
