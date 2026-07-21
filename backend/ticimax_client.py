@@ -44,6 +44,24 @@ _uye_client_cache = None
 #   VERI DB'de; canli pull'a gerek yok. Acil yeniden acmak icin: env TICIMAX_LIVE=1.
 TICIMAX_LIVE = (os.environ.get("TICIMAX_LIVE", "").strip().lower() in ("1", "true", "yes"))
 _TICIMAX_OFF_MSG = "Ticimax SOAP baglantisi kapali (2026-06-22). Acmak icin env TICIMAX_LIVE=1."
+# Geçmiş-veri kurtarma (ticimax_history) için KONTROLLÜ runtime anahtarı:
+# yalnız admin backfill/probe çağrısı süresince set_live(True) ile açılır,
+# finally bloğunda kapatılır. Kalıcı açmak için yine env TICIMAX_LIVE kullanılır.
+_RUNTIME_LIVE = False
+
+
+def set_live(flag: bool = True):
+    global _RUNTIME_LIVE, _urun_client_cache, _siparis_client_cache, _uye_client_cache
+    _RUNTIME_LIVE = bool(flag)
+    if flag:
+        _urun_client_cache = None
+        _siparis_client_cache = None
+        _uye_client_cache = None
+    logger.info(f"Ticimax runtime live → {_RUNTIME_LIVE}")
+
+
+def _live_ok() -> bool:
+    return TICIMAX_LIVE or _RUNTIME_LIVE
 
 
 def set_domain(domain: str):
@@ -72,7 +90,7 @@ def set_domain(domain: str):
 
 
 def _urun_client():
-    if not TICIMAX_LIVE:
+    if not _live_ok():
         raise RuntimeError(_TICIMAX_OFF_MSG)
     global _urun_client_cache
     if _urun_client_cache is None:
@@ -87,7 +105,7 @@ def _urun_client():
 
 
 def _siparis_client():
-    if not TICIMAX_LIVE:
+    if not _live_ok():
         raise RuntimeError(_TICIMAX_OFF_MSG)
     global _siparis_client_cache
     if _siparis_client_cache is None:
@@ -102,7 +120,7 @@ def _siparis_client():
 
 
 def _uye_client():
-    if not TICIMAX_LIVE:
+    if not _live_ok():
         raise RuntimeError(_TICIMAX_OFF_MSG)
     global _uye_client_cache
     if _uye_client_cache is None:
