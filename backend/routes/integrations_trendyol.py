@@ -3806,19 +3806,9 @@ async def _sync_trendyol_claims_core(days_back: int = 1095):
                             order_cache[cache_key] = {}
                     
                     cached = order_cache.get(cache_key, {})
-                    for pkg in cached.get("content", []):
-                        for line in pkg.get("lines", []):
-                            bc = line.get("barcode", "")
-                            line_gross = line.get("lineGrossAmount", line.get("amount", 0))
-                            line_net = line.get("price", 0)
-                            line_disc = line.get("discount", 0)
-                            qty = max(line.get("quantity", 1), 1)
-                            if bc:
-                                order_discount_map[bc] = {
-                                    "gross": line_gross / qty if line_gross else 0,
-                                    "net": line_net / qty if line_net else 0,
-                                    "discount": line_disc / qty if line_disc else 0,
-                                }
+                    # BİRİM fiyat haritası (adede bölme YOK, iptal paket gerçek satırı ezmez).
+                    # Eski /qty bölmesi qty>1 satırlarda tutarı yarıya düşürüyordu (11419198311).
+                    order_discount_map = _build_order_unit_price_map(cached)
 
                 for item in claim.get("items", []):
                     order_line = item.get("orderLine", {})
@@ -4130,6 +4120,116 @@ async def sync_trendyol_claims_background(days_back: int = 1095, current_user: d
 async def sync_trendyol_claims_background_status(current_user: dict = Depends(require_admin)):
     doc = await db.settings.find_one({"id": "ty_claims_backfill"}, {"_id": 0})
     return doc or {"status": "none"}
+def _build_order_unit_price_map(order_data: dict) -> dict:
+    """Trendyol sipariş verisinden barkod → BİRİM fiyat haritası kurar.
+    KRİTİK: TY satır alanları (price/amount/lineGrossAmount/discount) ZATEN BİRİM'dir —
+    adede BÖLÜNMEZ (eski /qty bölmesi qty>1'de tutarı yarıya düşürüyordu; 11419198311 kanıtı).
+    Aynı barkod birden çok pakette olabilir → İPTAL/teslim edilmeyen paket satırları,
+    gerçek (teslim/aktif) satırı EZMESİN (yalnız hiç kayıt yoksa fallback)."""
+    _CANCEL = {"Cancelled", "UnDelivered", "UnSupplied", "Returned"}
+    m = {}
+    for pkg in (order_data or {}).get("content", []):
+        _pkg_cancel = str(pkg.get("status") or "") in _CANCEL
+        for line in pkg.get("lines", []):
+            bc = line.get("barcode", "")
+            if not bc:
+                continue
+            line_cancel = _pkg_cancel or str(line.get("orderLineItemStatusName") or "") in _CANCEL
+            if bc in m and line_cancel:
+                continue  # gerçek satır varken iptal satırı ezmesin
+            m[bc] = {
+                "gross": line.get("lineGrossAmount", line.get("amount", 0)) or 0,
+                "net": line.get("price", 0) or 0,
+                "discount": line.get("discount", 0) or 0,
+                "_cancel": line_cancel,
+            }
+    return m
+
+
+@router.post("/trendyol/claims/resync-amounts")
+async def resync_claim_amounts(payload: Optional[dict] = Body(default=None),
+                               current_user: dict = Depends(require_admin)):
+    """İade tutarlarını Trendyol sipariş verisinden YENİDEN türetir (BİRİM fiyat düzeltmesi).
+    Eski /qty bölme hatasıyla YARIYA düşmüş tutarları onarır (11419198311 gibi).
+
+    payload: {order_number?, claim_id?, status?, limit=50, dry_run=true, force=false}
+    - dry_run: kaydetmeden eski↔yeni tutar karşılaştırması döner.
+    - force=false: amount_overridden (elle düzeltilmiş) iadeleri ATLAR."""
+    p = payload or {}
+    order_number = str(p.get("order_number") or "").strip()
+    claim_id = str(p.get("claim_id") or "").strip()
+    status = str(p.get("status") or "").strip()
+    limit = max(1, min(int(p.get("limit") or 50), 500))
+    dry = bool(p.get("dry_run", True))
+    force = bool(p.get("force"))
+
+    q = {"platform": {"$ne": "hepsiburada"}}
+    if claim_id:
+        q["claim_id"] = claim_id
+    if order_number:
+        q["order_number"] = order_number
+    if status:
+        q["claim_status"] = status
+    claims = await db.trendyol_claims.find(
+        q, {"_id": 0, "claim_id": 1, "order_number": 1, "items": 1,
+            "refund_amount": 1, "amount_overridden": 1}).sort("created_date", -1).to_list(limit)
+
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(supplier_id=config["supplier_id"], api_key=config["api_key"],
+                            api_secret=config["api_secret"], mode=config["mode"])
+
+    order_cache = {}
+    changed, skipped_override, no_order, unchanged = [], 0, 0, 0
+    for c in claims:
+        if c.get("amount_overridden") and not force:
+            skipped_override += 1
+            continue
+        onum = str(c.get("order_number") or "")
+        if not onum:
+            no_order += 1
+            continue
+        if onum not in order_cache:
+            try:
+                order_cache[onum] = await client.get_orders(order_number=onum)
+            except Exception as e:
+                logger.warning(f"[resync-amounts] {onum}: {e}")
+                order_cache[onum] = {}
+        umap = _build_order_unit_price_map(order_cache.get(onum, {}))
+        if not umap:
+            no_order += 1
+            continue
+        new_items, new_refund = [], 0.0
+        for it in (c.get("items") or []):
+            bc = str(it.get("barcode") or "")
+            u = umap.get(bc)
+            _it = dict(it)
+            if u:
+                _it["unit_price"] = u["gross"]
+                _it["discount_amount"] = u["discount"]
+                _it["price"] = u["net"]
+            new_refund += float(_it.get("price", 0) or 0) * max(int(_it.get("quantity", 1) or 1), 1)
+            new_items.append(_it)
+        new_refund = round(new_refund, 2)
+        old_refund = round(float(c.get("refund_amount") or 0), 2)
+        if abs(new_refund - old_refund) < 0.01:
+            unchanged += 1
+            continue
+        rec = {"claim_id": c.get("claim_id"), "order_number": onum,
+               "eski_tutar": old_refund, "yeni_tutar": new_refund}
+        changed.append(rec)
+        if not dry:
+            await db.trendyol_claims.update_one(
+                {"claim_id": c.get("claim_id")},
+                {"$set": {"items": new_items, "refund_amount": new_refund,
+                          "amount_resynced_at": datetime.now(timezone.utc).isoformat()}})
+    return {"dry_run": dry, "taranan": len(claims), "degisen": len(changed),
+            "degismeyen": unchanged, "override_atlandi": skipped_override,
+            "siparissiz": no_order, "detay": changed[:100]}
+
+
 @router.post("/trendyol/claims/fix-discounts")
 async def fix_claim_discounts(current_user: dict = Depends(require_admin)):
     """Fix discount data for existing claims by fetching from order API"""
@@ -4164,20 +4264,13 @@ async def fix_claim_discounts(current_user: dict = Depends(require_admin)):
                 order_cache[order_number] = {}
         
         cached = order_cache.get(order_number, {})
-        discount_map = {}
+        # BİRİM fiyat (adede bölme YOK, iptal paket ezmez) — ortak helper.
+        discount_map = _build_order_unit_price_map(cached)
         invoice_number = ""
         for pkg in cached.get("content", []):
-            if not invoice_number:
+            if pkg.get("invoiceNumber"):
                 invoice_number = pkg.get("invoiceNumber", "")
-            for line in pkg.get("lines", []):
-                bc = line.get("barcode", "")
-                qty = max(line.get("quantity", 1), 1)
-                if bc:
-                    discount_map[bc] = {
-                        "gross": (line.get("lineGrossAmount", line.get("amount", 0)) or 0) / qty,
-                        "net": (line.get("price", 0) or 0) / qty,
-                        "discount": (line.get("discount", 0) or 0) / qty,
-                    }
+                break
         
         # MANUEL TUTAR KORUMASI: elle düzeltilmiş iadeyi (amount_overridden) atla.
         if claim.get("amount_overridden"):
