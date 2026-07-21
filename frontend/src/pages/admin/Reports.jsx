@@ -509,7 +509,7 @@ export function ProductsReport() {
         </div>
         <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-xs uppercase text-gray-500 sticky top-0">
+            <thead className="bg-gray-50 text-xs uppercase text-gray-500 sticky top-0 z-10">
               <tr>
                 <SortTh k="name">Ürün</SortTh>
                 <SortTh k="season">Sezon</SortTh>
