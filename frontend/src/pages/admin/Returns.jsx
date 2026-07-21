@@ -261,6 +261,7 @@ export default function Returns() {
   const [gpExporting, setGpExporting] = useState(false);
   const [gpFrom, setGpFrom] = useState("");
   const [gpTo, setGpTo] = useState("");
+  const [gpSource, setGpSource] = useState("all"); // Excel iade kaynağı filtresi
   // Hazır tarih aralıkları — "son 30 gün" gibi çekimleri tek tıkla, elle yazmadan doldurur.
   // Yerel (TR) tarihi YYYY-MM-DD üretir; type="date" bu formatı bekler.
   const _ymd = (dt) => {
@@ -289,6 +290,8 @@ export default function Returns() {
       const params = new URLSearchParams();
       if (gpFrom) params.append("date_from", gpFrom);
       if (gpTo) params.append("date_to", gpTo);
+      // İade kaynağı filtresi (kullanıcı isteği): tümü | site | trendyol | hepsiburada
+      if (gpSource && gpSource !== "all") params.append("source", gpSource);
       const qs = params.toString();
       const res = await fetch(`${API}/orders/returns/gider-pusulasi/export${qs ? `?${qs}` : ""}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
@@ -298,7 +301,7 @@ export default function Returns() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "gider-pusulasi.xlsx";
+      a.download = `gider-pusulasi${gpSource && gpSource !== "all" ? `-${gpSource}` : ""}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -569,9 +572,20 @@ export default function Returns() {
                 <input type="date" value={gpTo} onChange={(e) => setGpTo(e.target.value)}
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
               </div>
+              <div className="flex flex-col">
+                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">İade Kaynağı</label>
+                <select value={gpSource} onChange={(e) => setGpSource(e.target.value)}
+                  data-testid="gp-source-filter"
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white">
+                  <option value="all">Tümü</option>
+                  <option value="site">Web Sitesi</option>
+                  <option value="trendyol">Trendyol</option>
+                  <option value="hepsiburada">Hepsiburada</option>
+                </select>
+              </div>
               <button onClick={exportGiderPusulasi} disabled={gpExporting}
                 data-testid="export-gider-pusulasi-btn"
-                title="Tüm gider pusulalarını (seçili tarih aralığında, iade talep tarihine göre) muhasebe formatında Excel indir"
+                title="Gider pusulalarını (seçili tarih aralığı + iade kaynağına göre) muhasebe formatında Excel indir"
                 className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors disabled:opacity-50">
                 <Download size={16} />
                 {gpExporting ? "Hazırlanıyor..." : "Gider Pusulası Excel"}
