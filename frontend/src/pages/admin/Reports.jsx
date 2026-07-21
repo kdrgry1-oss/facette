@@ -374,7 +374,9 @@ export function ProductsReport() {
     let r = top.map(p => {
       const wr = (p.velocity || {}).weekly_rate ?? 0;
       const prev = top90Map[p.product_id];
-      const totQ = (p.qty || 0) + (p.return_qty || 0);
+      // İade % paydası = Toplam Satış (net+iptal+iade) — iptaller oranı ŞİŞİRMEZ
+      // (kullanıcı isteği: iade oranına iptal siparişleri dahil edilmez).
+      const totQ = (p.qty || 0) + (p.cancel_qty || 0) + (p.return_qty || 0);
       return {
         ...p,
         _cover: (p.current_stock != null && wr > 0) ? p.current_stock / wr : null,
@@ -554,7 +556,7 @@ export function ProductsReport() {
                     {p.return_qty || 0}
                   </td>
                   <td className={`p-3 text-right tabular-nums text-xs ${p._retpct >= 15 ? "text-red-600 font-bold" : p._retpct >= 8 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
-                    title={p._retpct >= 15 ? "İade oranı %15+ — bu ürün muhtemelen zarar ettiriyor (kalıp/beden denetimi önerilir)" : ""}>
+                    title={`İade % = İade / Toplam Satış (${p.return_qty || 0}/${p._gross})${p._retpct >= 15 ? " — %15+ iade: bu ürün muhtemelen zarar ettiriyor (kalıp/beden denetimi önerilir)" : ""}`}>
                     {p._retpct > 0 ? `%${p._retpct.toFixed(1)}` : ""}
                   </td>
                   <td className="p-3 text-right">{p.qty}</td>
@@ -564,7 +566,12 @@ export function ProductsReport() {
                     {p._cover == null ? (
                       ((p.velocity || {}).weekly_rate ?? 0) === 0 && (p.current_stock || 0) > 0 ? <span className="text-gray-400" title="Bu aralıkta hiç satmadı — stok eritilemiyor">∞</span> : "—"
                     ) : p._cover <= 4 ? (
-                      <span className="text-red-600 font-bold" title="4 haftadan az stok kaldı — acil üretim/tedarik">{p._cover.toFixed(1)} hf ⚠</span>
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-600 text-white font-bold animate-pulse cursor-help"
+                        title={`RPT (yeniden üretim) açılmalı: mevcut satış hızıyla (${((p.velocity || {}).weekly_rate ?? 0).toLocaleString("tr-TR")}/hafta) eldeki ${p.current_stock ?? "?"} adet stok yalnız ~${p._cover.toFixed(1)} hafta yetiyor. Üretim süresi ~3 hafta olduğundan 4 haftalık kapsamanın altı kritiktir — hemen imalat siparişi açın.`}
+                      >
+                        RPT AÇ · {p._cover.toFixed(1)} hf
+                      </span>
                     ) : p._cover >= 26 ? (
                       <span className="text-gray-400" title="26+ haftalık stok — aşırı stok, eritme adayı">{p._cover.toFixed(0)} hf</span>
                     ) : (

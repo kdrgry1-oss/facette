@@ -257,12 +257,36 @@ async def bulk_set_default_attributes(current_user: dict = Depends(require_admin
     products = await db.products.find({}, {"_id": 0, "id": 1, "attributes": 1}).to_list(None)
     updated = 0
     for p in products:
-        attrs = p.get("attributes", [])
-        attr_map = {(a.get("type") or a.get("name")): a for a in attrs}
+        attrs = p.get("attributes") or []
+        # Veri hijyeni: bazı eski kayıtlarda attributes listesi string öğeler
+        # içerebiliyor ('str' has no attribute 'get' → 500). Dict olmayanları atla.
+        if isinstance(attrs, dict):
+            changed = False
+            for _nm, _val in _defaults:
+                if not attrs.get(_nm):
+                    attrs[_nm] = _val
+                    changed = True
+            if changed:
+                await db.products.update_one(
+                    {"id": p["id"]},
+                    {"$set": {"attributes": attrs, "updated_at": datetime.now(timezone.utc).isoformat()}}
+                )
+                updated += 1
+            continue
+        if not isinstance(attrs, list):
+            continue
+        have = set()
+        for a in attrs:
+            if isinstance(a, dict):
+                nm = a.get("type") or a.get("name")
+                if nm:
+                    have.add(nm)
+            elif isinstance(a, str) and a.strip():
+                have.add(a.strip())
         changed = False
 
         for _nm, _val in _defaults:
-            if _nm not in attr_map:
+            if _nm not in have:
                 attrs.append({"type": _nm, "name": _nm, "value": _val})
                 changed = True
 
