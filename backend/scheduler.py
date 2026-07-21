@@ -595,6 +595,17 @@ async def _run_trendyol_deep_backfill_once():
         logger.error(f"[cron] Trendyol terminal backfill hatası: {e}")
 
 
+async def _run_trendyol_open_claims_refresh():
+    """AÇIK iade kovalarını (talep/kargoda/aksiyon) TY canlı verisiyle eşitler — dakikada bir."""
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(__file__))
+        from routes.integrations_trendyol import _refresh_open_claims_core
+        await _refresh_open_claims_core()
+    except Exception as e:
+        logger.error(f"[cron] açık iade canlı eşitleme hatası: {e}")
+
+
 async def _run_trendyol_claims_sync():
     """Trendyol iade/iptal (claims) senkronu — periyodik. Müşterinin Trendyol'da seçtiği
     GERÇEK iptal sebebini çeker ve CANCEL claim'leri eşleşen iptal siparişlerine bağlar
@@ -2002,6 +2013,18 @@ def start_scheduler():
         minutes=30,
         id="trendyol_claims_sync_30m",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+        max_instances=1,
+        coalesce=True,
+    )
+    # AÇIK iade kovaları CANLI eşitleme — DAKİKADA BİR (kullanıcı isteği): Talep Oluşturulan /
+    # Kargoya Verilen / Aksiyon Bekleyen sayıları TY panelle aynı; kapanan claim Onaylanan/
+    # Reddedilen'e anında taşınır. Hafif iş: statü filtreli birkaç sayfa + artık başına tekil sorgu.
+    _add(
+        _run_trendyol_open_claims_refresh,
+        "interval",
+        minutes=1,
+        id="trendyol_open_claims_1m",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
         max_instances=1,
         coalesce=True,
     )

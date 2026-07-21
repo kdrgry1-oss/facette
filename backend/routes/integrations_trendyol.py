@@ -3998,6 +3998,106 @@ async def sync_trendyol_claims(
     durum geçişleri her çağrıda canlı tazelenir.
     """
     return await _sync_trendyol_claims_core(days_back)
+async def _refresh_open_claims_core() -> dict:
+    """AÇIK iade kovalarını (talep/kargoda/aksiyon) Trendyol'un CANLI durumuyla eşitler.
+    Hafif iştir (statü filtreli birkaç sayfa + artık başına tekil sorgu) — scheduler
+    DAKİKADA BİR çağırır; Onaylanan/Reddedilen dahil tüm statü geçişleri anında yansır.
+
+    1) TY'den claimItemStatus=Created/WaitingInAction/InAnalysis kayıtları TARİHSİZ çekilir
+       → statü + kargo takip no güncellenir (kova ayrımı tazelenir).
+    2) DB'de açık görünüp TY canlı açık setinde OLMAYAN kayıtlar orderNumber ile tekil
+       sorgulanır → gerçek statüsüne (Accepted/Rejected/Cancelled...) taşınır.
+    """
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        return {"skipped": "config"}
+    from trendyol_client import TrendyolClient
+    import httpx as _httpx
+    client = TrendyolClient(supplier_id=config["supplier_id"], api_key=config["api_key"],
+                            api_secret=config["api_secret"], mode=config["mode"])
+    url = f"{client.base_url}/order/sellers/{client.supplier_id}/claims"
+    headers = client._get_headers()
+    live = {}  # claim_id -> {status, cargo}
+    async with _httpx.AsyncClient(timeout=25.0) as hc:
+        for st in ("Created", "WaitingInAction", "InAnalysis"):
+            page = 0
+            while page < 10:
+                try:
+                    r = await hc.get(url, headers=headers,
+                                     params={"page": page, "size": 200, "claimItemStatus": st})
+                    data = r.json() if r.status_code == 200 else {}
+                except Exception as e:
+                    logger.warning(f"[open-claims] {st} p{page}: {e}")
+                    break
+                content = data.get("content") or []
+                for cl in content:
+                    cid = str(cl.get("id") or "")
+                    if not cid:
+                        continue
+                    live[cid] = {
+                        "status": st,
+                        "cargo": str(cl.get("cargoTrackingNumber") or cl.get("claimCargoTrackingNumber") or ""),
+                        "last_modified": cl.get("lastModifiedDate"),
+                    }
+                if page >= int(data.get("totalPages") or 1) - 1 or not content:
+                    break
+                page += 1
+
+        updated = closed = claimed = 0
+        # 1) Canlı açık kayıtları DB'ye işle (statü/kargo değiştiyse)
+        for cid, info in live.items():
+            _set = {"claim_status": info["status"], "updated_at": datetime.now(timezone.utc).isoformat()}
+            if info["cargo"]:
+                _set["cargo_tracking_number"] = info["cargo"]
+            res = await db.trendyol_claims.update_one(
+                {"claim_id": cid,
+                 "$or": [{"claim_status": {"$ne": info["status"]}},
+                         *([{"cargo_tracking_number": {"$ne": info["cargo"]}}] if info["cargo"] else [])]},
+                {"$set": _set})
+            if res.modified_count:
+                updated += 1
+
+        # 2) DB'de açık görünen ama canlı açık sette OLMAYANLAR → tekil canlı sorgu
+        stale = await db.trendyol_claims.find(
+            {"claim_status": {"$in": ["Created", "WaitingInAction", "InAnalysis"]},
+             "platform": {"$ne": "hepsiburada"}},
+            {"_id": 0, "claim_id": 1, "order_number": 1}).to_list(2000)
+        for c in stale:
+            cid = str(c.get("claim_id") or "")
+            if not cid or cid in live:
+                continue
+            onum = str(c.get("order_number") or "")
+            new_status = None
+            if not cid.startswith("ord:") and onum:
+                try:
+                    r = await hc.get(url, headers=headers,
+                                     params={"page": 0, "size": 20, "orderNumber": onum})
+                    for cl in (r.json().get("content") or []) if r.status_code == 200 else []:
+                        if str(cl.get("id")) == cid:
+                            try:
+                                new_status = str(((cl.get("items") or [{}])[0].get("claimItems") or [{}])[0]
+                                                 .get("claimItemStatus", {}).get("name") or "")
+                            except Exception:
+                                new_status = ""
+                            break
+                except Exception as e:
+                    logger.warning(f"[open-claims] tekil {onum}: {e}")
+            if new_status:
+                await db.trendyol_claims.update_one(
+                    {"claim_id": cid},
+                    {"$set": {"claim_status": new_status,
+                              "updated_at": datetime.now(timezone.utc).isoformat()}})
+                closed += 1
+        return {"live_open": len(live), "updated": updated, "closed_or_moved": closed,
+                "stale_checked": len(stale)}
+
+
+@router.get("/trendyol/claims/refresh-open")
+async def refresh_open_claims(current_user: dict = Depends(require_admin)):
+    """Açık iade kovalarını Trendyol canlı verisiyle ANINDA eşitler (cron da dakikada bir çağırır)."""
+    return await _refresh_open_claims_core()
+
+
 @router.get("/trendyol/claims/sync-background")
 async def sync_trendyol_claims_background(days_back: int = 1095, current_user: dict = Depends(require_admin)):
     """Uzun geçmiş (ör. 3 yıl) claim senkronunu ARKA PLANDA başlatır — Cloudflare'in
