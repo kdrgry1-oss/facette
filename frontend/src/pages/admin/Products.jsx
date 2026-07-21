@@ -1261,6 +1261,20 @@ export default function AdminProducts() {
       toast.error("Sezon Bilgisi zorunlu — Temel sekmesinde 'Envanter & Kimlik' altından seçin");
       return;
     }
+    // Beden Önerisi (Kalıp) zorunlu (kullanıcı isteği) — ürün sayfası kalıp tavsiyesi buradan beslenir
+    if (!formData.size_advice) {
+      toast.error("Beden Önerisi (Kalıp) zorunlu — Temel sekmesinde Sezon'un altından seçin");
+      return;
+    }
+    // Alış ve Satış fiyatı zorunlu (kullanıcı isteği)
+    if (!(Number(formData.purchase_price) > 0)) {
+      toast.error("Alış Fiyatı zorunlu — Fiyat sekmesinden girin");
+      return;
+    }
+    if (!(Number(formData.price) > 0)) {
+      toast.error("Satış Fiyatı zorunlu — Fiyat sekmesinden girin");
+      return;
+    }
     try {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
@@ -2704,14 +2718,14 @@ export default function AdminProducts() {
 
                       {/* SKU ve Tedarikçi alanları kullanıcı isteğiyle kaldırıldı */}
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Beden Önerisi (Kalıp)</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Beden Önerisi (Kalıp) <span className="text-red-500">*</span></label>
                         <select
                           value={formData.size_advice || ""}
                           onChange={(e) => setFormData({ ...formData, size_advice: e.target.value })}
-                          className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all text-sm"
+                          className={`w-full border px-3 py-2 rounded-lg outline-none transition-all text-sm ${formData.size_advice ? "border-gray-200 focus:border-black" : "border-red-300"}`}
                           title="Ürün sayfasında beden seçiminin yanında öneri yazısı çıkar"
                         >
-                          <option value="">Belirtme</option>
+                          <option value="">— Kalıp seçin (zorunlu) —</option>
                           <option value="dar">Dar / Slim Fit → bir beden büyük öner</option>
                           <option value="normal">Normal / Regular → kendi bedenini al</option>
                           <option value="bol">Bol / Oversize → bir beden küçük öner</option>
@@ -2732,17 +2746,7 @@ export default function AdminProducts() {
                       <div className="pt-3 border-t">
                         <div className="text-xs font-bold text-gray-500 uppercase mb-2">Entegrasyon Kodları</div>
                         <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[10px] text-gray-400 mb-1">Ürün ID (Ana)</label>
-                            <input
-                              type="text"
-                              value={formData.urun_id || ""}
-                              onChange={(e) => setFormData({ ...formData, urun_id: e.target.value })}
-                              placeholder="—"
-                              data-testid="input-urun-id"
-                              className="w-full border-gray-200 border px-3 py-2 rounded-lg font-mono text-xs bg-gray-50 focus:bg-white focus:border-black outline-none"
-                            />
-                          </div>
+                          {/* Ürün ID (Ana) alanı kullanıcı isteğiyle kaldırıldı (veri durur, formda gösterilmez) */}
                           {/* Kimlik & Kodlar bölümü kaldırıldı — Ürün Kart ID ve GTİP buraya taşındı */}
                           <div>
                             <label className="block text-[10px] text-gray-400 mb-1">Ürün Kart ID</label>
@@ -2814,7 +2818,7 @@ export default function AdminProducts() {
                     <h3 className="font-semibold text-gray-900 border-b pb-2 mb-4">Fiyatlandırma</h3>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Satış Fiyatı (TL)</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Satış Fiyatı (TL) <span className="text-red-500">*</span></label>
                         <input
                           type="number"
                           value={formData.price || ""}
@@ -2867,7 +2871,7 @@ export default function AdminProducts() {
                       </div>
                       {/* Beden Önerisi (Kalıp) Temel sekmesine (Sezon'un altına) taşındı */}
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Alış Fiyatı (TL)</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Alış Fiyatı (TL) <span className="text-red-500">*</span></label>
                         <input
                           type="number"
                           value={formData.purchase_price || ""}
@@ -2913,29 +2917,8 @@ export default function AdminProducts() {
                     </div>
                   </div>
 
-                  <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
-                    <h3 className="font-semibold text-gray-900 border-b pb-2 mb-4">Ürün Durumları</h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      {[
-                        { label: "Mağazada Aktif", key: "is_active" },
-                        { label: "Yeni Ürün Etiketi", key: "is_new" },
-                        { label: "Öne Çıkan Ürün", key: "is_featured" },
-                        { label: "Vitrin Ürünü", key: "is_showcase" },
-                        { label: "Fırsat Ürünü", key: "is_opportunity" },
-                        { label: "Ücretsiz Kargo", key: "is_free_shipping" }
-                      ].map(item => (
-                        <label key={item.key} className="flex items-center gap-3 cursor-pointer group p-2 hover:bg-orange-50 rounded-lg transition-all">
-                          <input
-                            type="checkbox"
-                            className="w-4 h-4 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
-                            checked={formData[item.key]}
-                            onChange={(e) => setFormData({ ...formData, [item.key]: e.target.checked })}
-                          />
-                          <span className="text-sm font-medium text-gray-700 group-hover:text-orange-900">{item.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
+                  {/* "Ürün Durumları" paneli kullanıcı isteğiyle kaldırıldı — Aktif/Yeni/Fırsat
+                      anahtarları Temel sekmesindeki Özellikler kartından yönetiliyor. */}
                 </div>
 
                 <div className="bg-orange-50 p-8 rounded-xl border border-orange-200 shadow-sm">
@@ -2987,7 +2970,7 @@ export default function AdminProducts() {
                     </div>
                   </div>
                 </div>
-                {renderDetailFields(["Fiyatlandırma", "Üye Tipi Fiyatları"])}
+                {/* "Fiyatlandırma / Üye Tipi Fiyatları" akordeonu kullanıcı isteğiyle kaldırıldı */}
               </TabsContent>
 
               {/* Attributes Tab */}
