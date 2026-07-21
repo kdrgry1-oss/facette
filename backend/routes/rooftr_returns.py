@@ -240,15 +240,44 @@ async def list_rooftr_return_orders(
         _is_approved = bool(_appr) or _cr_status in ("approved", "return_approved", "refunded", "partial_refunded") \
             or r.get("status") in ("return_approved", "refunded", "partial_refunded")
         r["return_is_approved"] = _is_approved
+        # KRİTİK: panel r["items"] = SİPARİŞİN TÜM kalemleri; customer_returns.items = GERÇEKTE
+        # İADE EDİLEN kalemler (alt küme olabilir). "Tam onay" = iadenin TÜM kalemleri, siparişin
+        # tümü DEĞİL. W10205: 2 kalemli siparişte yalnız M iade edildi; eski kod range(2) yazıp
+        # her ikisini onaylı gösteriyordu. Burada iade kalemlerini sipariş-index'ine eşliyoruz.
+        _order_items = r.get("items") or []
+        _ret_items = cr.get("items") or []
+
+        def _match_order_idx(ri):
+            _bc = str(ri.get("barcode") or ri.get("product_id") or "").strip()
+            if _bc:
+                for _i, _oi in enumerate(_order_items):
+                    if str(_oi.get("barcode") or "").strip() == _bc:
+                        return _i
+            _nm = str(ri.get("name") or "").strip().lower()
+            _sz = str(ri.get("size") or "").strip().lower()
+            for _i, _oi in enumerate(_order_items):
+                if str(_oi.get("name") or "").strip().lower() == _nm and \
+                   str(_oi.get("size") or "").strip().lower() == _sz:
+                    return _i
+            # beden bilgisi yoksa yalnız ada göre (tek eşleşme varsa)
+            _cands = [_i for _i, _oi in enumerate(_order_items)
+                      if str(_oi.get("name") or "").strip().lower() == _nm]
+            return _cands[0] if len(_cands) == 1 else None
+
         _ap_idx = cr.get("approved_item_indexes")
         if _is_approved:
+            # Onaylanan İADE kalemleri (kısmi onayda alt küme; yoksa iadenin tümü)
             if isinstance(_ap_idx, list) and _ap_idx:
-                r["approved_item_indexes"] = _ap_idx
-                r["approved_full"] = False
+                _appr_ret = [_ret_items[i] for i in _ap_idx if 0 <= i < len(_ret_items)]
             else:
-                # tam onay → tüm kalemler
-                r["approved_item_indexes"] = list(range(len(r.get("items") or [])))
-                r["approved_full"] = True
+                _appr_ret = _ret_items
+            _idxs = []
+            for _ri in _appr_ret:
+                _mi = _match_order_idx(_ri)
+                if _mi is not None and _mi not in _idxs:
+                    _idxs.append(_mi)
+            r["approved_item_indexes"] = _idxs
+            r["approved_full"] = bool(_idxs) and len(_idxs) == len(_order_items)
         else:
             r["approved_item_indexes"] = []
             r["approved_full"] = False
