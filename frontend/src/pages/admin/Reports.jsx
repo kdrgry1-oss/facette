@@ -581,15 +581,20 @@ export function ProductsReport() {
                     <td colSpan={14} className="px-8 py-3">
                       <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
                         <div>
-                          <div className="font-semibold text-gray-700 mb-1">Beden Bazında — Toplam / İptal / İade / Net</div>
+                          <div className="font-semibold text-gray-700 mb-1">Beden Bazında — Toplam / İptal / İade / Net / Kalan Stok</div>
                           {(() => {
-                            // Net (size_breakdown) + iptal/iade (cancel_return_by_size) beden bazında birleşir
+                            // Net (size_breakdown) + iptal/iade (cancel_return_by_size) + kalan stok (stock_by_size)
                             const m = {};
-                            (p.size_breakdown || []).forEach(s => { m[s.size || "—"] = { net: s.qty, c: 0, r: 0 }; });
+                            (p.size_breakdown || []).forEach(s => { m[s.size || "—"] = { net: s.qty, c: 0, r: 0, st: null }; });
                             (p.cancel_return_by_size || []).forEach(s => {
                               const k = s.size || "—";
-                              if (!m[k]) m[k] = { net: 0, c: 0, r: 0 };
+                              if (!m[k]) m[k] = { net: 0, c: 0, r: 0, st: null };
                               m[k].c += s.cancel || 0; m[k].r += s.return || 0;
+                            });
+                            Object.entries(p.stock_by_size || {}).forEach(([k0, st]) => {
+                              const k = k0 || "—";
+                              if (!m[k]) m[k] = { net: 0, c: 0, r: 0, st: 0 };
+                              m[k].st = (m[k].st || 0) + Number(st || 0);
                             });
                             const rowsz = Object.entries(m).sort((a, b) => a[0].localeCompare(b[0], "tr", { numeric: true }));
                             return rowsz.length ? (
@@ -601,6 +606,7 @@ export function ProductsReport() {
                                     <th className="px-2.5 py-1 text-right">İptal</th>
                                     <th className="px-2.5 py-1 text-right">İade</th>
                                     <th className="px-2.5 py-1 text-right">Net</th>
+                                    <th className="px-2.5 py-1 text-right">Kalan Stok</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -611,6 +617,7 @@ export function ProductsReport() {
                                       <td className={`px-2.5 py-1 text-right tabular-nums ${v.c ? "text-rose-600" : "text-gray-300"}`}>{v.c}</td>
                                       <td className={`px-2.5 py-1 text-right tabular-nums ${v.r ? "text-amber-600" : "text-gray-300"}`}>{v.r}</td>
                                       <td className="px-2.5 py-1 text-right tabular-nums font-bold">{v.net}</td>
+                                      <td className={`px-2.5 py-1 text-right tabular-nums font-semibold ${v.st === 0 ? "text-red-600" : v.st == null ? "text-gray-300" : ""}`}>{v.st == null ? "—" : v.st}</td>
                                     </tr>
                                   ))}
                                 </tbody>

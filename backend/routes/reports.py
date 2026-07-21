@@ -513,7 +513,13 @@ async def top_products(
                                              "attributes": 1, "season": 1}):
             variants = p.get("variants") or []
             stock = sum(int(v.get("stock") or 0) for v in variants) if variants else int(p.get("stock") or 0)
+            # Beden bazında KALAN stok (açılır satırdaki mini tabloya)
+            _sbs = {}
+            for v in variants:
+                _vs = str(v.get("size") or "").strip() or "—"
+                _sbs[_vs] = _sbs.get(_vs, 0) + int(v.get("stock") or 0)
             info = {"id": str(p.get("id")), "name": p.get("name") or "", "stock": stock,
+                    "stock_by_size": _sbs,
                     "collection": (p.get("collection") or "").strip(),
                     "created_at": p.get("created_at") or None,
                     "stock_code": (p.get("stock_code") or "").strip(),
@@ -540,6 +546,7 @@ async def top_products(
                 "product_id": pm.get("id") or r.get("pid"), "name": name,
                 "qty": 0, "revenue": 0.0, "orders": 0,
                 "current_stock": pm.get("stock", None), "_sizes": {}, "_plats": {},
+                "stock_by_size": pm.get("stock_by_size") or {},
                 # Koleksiyon: stok kodu ön ekinden (fcfw/fcss) — filtre değerleri tek tip (FcFw/FCss)
                 # kalsın diye önce kod ön eki; kod yoksa serbest metin collection alanına düşer.
                 "collection": _collection_from_code(pm.get("stock_code"), r.get("barcode"), r.get("pid"))
@@ -601,9 +608,14 @@ async def top_products(
             continue
         variants = p.get("variants") or []
         stock = sum(int(v.get("stock") or 0) for v in variants) if variants else int(p.get("stock") or 0)
+        _sbs0 = {}
+        for v in variants:
+            _vs = str(v.get("size") or "").strip() or "—"
+            _sbs0[_vs] = _sbs0.get(_vs, 0) + int(v.get("stock") or 0)
         merged[f"zero:{p.get('id')}"] = {
             "product_id": str(p.get("id")), "name": p.get("name") or "",
             "qty": 0, "revenue": 0.0, "orders": 0, "current_stock": stock,
+            "stock_by_size": _sbs0,
             "_sizes": {}, "_plats": {},
             "collection": _collection_from_code(p.get("stock_code")) or (p.get("collection") or "").strip(),
             "created_at": p.get("created_at"), "stock_code": (p.get("stock_code") or "").strip(),
