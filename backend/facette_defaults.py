@@ -31,6 +31,7 @@ FACETTE_FIXED_ATTR_DEFAULTS = {
     "Kutu Durumu": "Kutu Yok",
     "Persona": "Fashion Forward",
     "Performans": "Cool & Comfort",
+    "Sürdürülebilirlik Detayı": "Hayır",
 }
 
 

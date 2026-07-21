@@ -1301,6 +1301,7 @@ export default function AdminProducts() {
         "Koleksiyon": "Casual/Günlük", "Ortam": "Casual/Günlük",
         "Ek Özellik": "Yok", "Performans": "Cool & Comfort",
         "Kutu Durumu": "Kutu Yok", "Persona": "Fashion Forward",
+        "Sürdürülebilirlik Detayı": "Hayır",
         ...(formData.attributes || {}),
       };
       // #16: "Yaka" formdan kaldırıldı; arka planda lazımsa "Yaka Tipi" değerinden türet.
@@ -1863,6 +1864,7 @@ export default function AdminProducts() {
         "Performans": "Cool & Comfort",    // #11
         "Kutu Durumu": "Kutu Yok",         // #12
         "Persona": "Fashion Forward",      // sabit
+        "Sürdürülebilirlik Detayı": "Hayır", // sabit (kullanıcı isteği)
       },
       ticimax_fields: {},
     });
@@ -3026,8 +3028,9 @@ export default function AdminProducts() {
                   // "Alt-Üst Takım" HARİÇ tutuldu (listede kalır).
                   const hiddenAttrNames = [
                     "beden", "renk", "web color", "yaka",
-                    "alt siluet", "ust siluet", "kesim", "ozellik", "stil",
+                    "alt siluet", "ust siluet", "silüet", "kesim", "ozellik", "stil",
                     "urun icerik bilgisi", "kumas", "yikama talimati", "materyal analiz testi",
+                    "kimyasal analiz testi", "ürün tipi", "ürün detayı",
                   ].map(_attrNorm);
                   const _isHiddenAttr = (nm) => hiddenAttrNames.includes(_attrNorm(nm));
 
@@ -3110,6 +3113,7 @@ export default function AdminProducts() {
                     "Ortam": "Casual/Günlük", "Koleksiyon": "Casual/Günlük",
                     "Ek Özellik": "Yok", "Kutu Durumu": "Kutu Yok",
                     "Persona": "Fashion Forward", "Performans": "Cool & Comfort",
+                    "Sürdürülebilirlik Detayı": "Hayır",
                   };
                   // 🏭 GPSR üretici/ithalatçı — backend facette_defaults.company_field_for_attr AYNASI.
                   // TEK otorite backend'dir (push'ta facette_company_value uygular); bu yalnız KARTTA
@@ -3191,6 +3195,9 @@ export default function AdminProducts() {
                       const out = [];
                       const seen = new Set();
                       Object.values(tyByName).forEach(ty => {
+                        // Gizli özellikler (Kimyasal/Materyal Analiz Testi, Ürün Tipi/Detayı,
+                        // Silüet...) TY şemasında olsa da formda LİSTELENMEZ (kullanıcı isteği).
+                        if (_isHiddenAttr(ty.name)) return;
                         const g = baseList.find(a => (a.name || "").toLowerCase() === ty.name.toLowerCase());
                         const values = g ? Array.from(new Set([...(g.values || []), ...ty.values])) : ty.values;
                         out.push({ id: g?.id || `ty-${ty.id}`, name: ty.name, values });

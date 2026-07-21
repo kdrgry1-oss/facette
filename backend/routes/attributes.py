@@ -250,7 +250,10 @@ async def cleanup_non_textile_attributes(current_user: dict = Depends(require_ad
 
 @router.post("/bulk-set-defaults")
 async def bulk_set_default_attributes(current_user: dict = Depends(require_admin)):
-    """Set Yaş Grubu=Yetişkin and Menşei=TR for all products that don't have them"""
+    """Set Yaş Grubu=Yetişkin, Menşei=TR ve Sürdürülebilirlik Detayı=Hayır
+    for all products that don't have them"""
+    _defaults = [("Yaş Grubu", "Yetişkin"), ("Menşei", "TR"),
+                 ("Sürdürülebilirlik Detayı", "Hayır")]
     products = await db.products.find({}, {"_id": 0, "id": 1, "attributes": 1}).to_list(None)
     updated = 0
     for p in products:
@@ -258,12 +261,10 @@ async def bulk_set_default_attributes(current_user: dict = Depends(require_admin
         attr_map = {(a.get("type") or a.get("name")): a for a in attrs}
         changed = False
 
-        if "Yaş Grubu" not in attr_map:
-            attrs.append({"type": "Yaş Grubu", "name": "Yaş Grubu", "value": "Yetişkin"})
-            changed = True
-        if "Menşei" not in attr_map:
-            attrs.append({"type": "Menşei", "name": "Menşei", "value": "TR"})
-            changed = True
+        for _nm, _val in _defaults:
+            if _nm not in attr_map:
+                attrs.append({"type": _nm, "name": _nm, "value": _val})
+                changed = True
 
         if changed:
             await db.products.update_one(

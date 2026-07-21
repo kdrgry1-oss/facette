@@ -23,6 +23,7 @@ Tek kaynak: `backend/facette_defaults.py`
 | Kutu Durumu | Kutu Yok | ✅ | ❌ HB'de hane yok |
 | Persona | Fashion Forward | ✅ | ❌ HB'de hane yok |
 | Performans | Cool & Comfort | ✅ | ❌ HB'de hane yok |
+| Sürdürülebilirlik Detayı | Hayır | ✅ | ❌ HB'de hane yok |
 
 **Gerçek:** 9'un hepsi Trendyol'da var. HB'de **sadece eşleşenler** (gerçekçi olarak Cinsiyet, Menşei, kategoriye göre Yaş Grubu) gider. Geri kalanlar Trendyol'a özgü kavramlardır — HB şemasında karşılığı YOKTUR, gönderilmez (bu hata değil, doğru davranış). Bu 6'sı formda **manuel-doldurulabilir** olarak HB bölümünde de görünür ama push'a gitmez.
 
@@ -55,7 +56,7 @@ Eşleme:
 - Yeni üründe 9 sabit `formData.attributes`'a seed edilir; her kayıtta boş kalanlar gap-fill (kullanıcı değeri ezilmez).
 - `renderSection` her pazaryeri bölümünde 9 sabiti **dolu** gösterir: değer önce pazaryerine-özel haritadan, yoksa nötr `formData.attributes`'tan, yoksa sabitten (`_effVal`). Bölüm listesinde yoksa dolu satır olarak enjekte edilir (`fixedRows`).
 - **Form'da dolu görünmesi ≠ pazaryerine gitmesi.** Push kuralı §2'dir. HB'de hane yoksa form dolu olsa da gitmez.
-- Gizli özellikler (`hiddenAttrNames`, normalize): beden/renk/web color/yaka + Alt/Üst Silüet, Kesim, Özellik, Stil, Ürün İçerik Bilgisi, Kumaş, Yıkama Talimatı, Materyal Analiz Testi. **Alt-Üst Takım HARİÇ (gizlenmez).** Sadece form görünümü; veri korunur, push etkilenmez.
+- Gizli özellikler (`hiddenAttrNames`, normalize): beden/renk/web color/yaka + Alt/Üst Silüet, Kesim, Özellik, Stil, Ürün İçerik Bilgisi, Kumaş, Yıkama Talimatı, Materyal Analiz Testi, Kimyasal Analiz Testi, Silüet, Ürün Tipi, Ürün Detayı. **Alt-Üst Takım HARİÇ (gizlenmez).** Sadece form görünümü; veri korunur, push etkilenmez.
 
 ## 6) Sabit kurallar
 - Tüm `.py` → `ast.parse` OK; tüm `.jsx` → `esbuild` OK.
