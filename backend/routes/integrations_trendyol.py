@@ -4146,6 +4146,88 @@ def _build_order_unit_price_map(order_data: dict) -> dict:
     return m
 
 
+@router.post("/trendyol/claims/resync-amounts-all")
+async def resync_claim_amounts_all(payload: Optional[dict] = Body(default=None),
+                                   current_user: dict = Depends(require_admin)):
+    """TÜM TY iadelerini arka planda sipariş verisinden yeniden türetir (birim fiyat
+    düzeltmesi). CF timeout'unu aşmamak için asyncio.create_task; durum settings
+    id='ty_amount_resync'. payload: {dry_run=true, force=false}."""
+    p = payload or {}
+    dry = bool(p.get("dry_run", True))
+    force = bool(p.get("force"))
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    from trendyol_client import TrendyolClient
+
+    async def _run():
+        client = TrendyolClient(supplier_id=config["supplier_id"], api_key=config["api_key"],
+                                api_secret=config["api_secret"], mode=config["mode"])
+        st = {"id": "ty_amount_resync", "status": "running", "dry_run": dry, "force": force,
+              "started_at": datetime.now(timezone.utc).isoformat(),
+              "scanned": 0, "changed": 0, "skipped_override": 0, "no_order": 0, "examples": []}
+        await db.settings.update_one({"id": "ty_amount_resync"}, {"$set": st}, upsert=True)
+        order_cache = {}
+        try:
+            claims = await db.trendyol_claims.find(
+                {"platform": {"$ne": "hepsiburada"}},
+                {"_id": 0, "claim_id": 1, "order_number": 1, "items": 1,
+                 "refund_amount": 1, "amount_overridden": 1}).to_list(None)
+            for c in claims:
+                st["scanned"] += 1
+                if c.get("amount_overridden") and not force:
+                    st["skipped_override"] += 1
+                elif not str(c.get("order_number") or ""):
+                    st["no_order"] += 1
+                else:
+                    onum = str(c.get("order_number"))
+                    if onum not in order_cache:
+                        try:
+                            order_cache[onum] = await client.get_orders(order_number=onum)
+                        except Exception:
+                            order_cache[onum] = {}
+                    umap = _build_order_unit_price_map(order_cache.get(onum, {}))
+                    if umap:
+                        new_items, new_refund = [], 0.0
+                        for it in (c.get("items") or []):
+                            u = umap.get(str(it.get("barcode") or ""))
+                            _it = dict(it)
+                            if u:
+                                _it["unit_price"] = u["gross"]; _it["discount_amount"] = u["discount"]; _it["price"] = u["net"]
+                            new_refund += float(_it.get("price", 0) or 0) * max(int(_it.get("quantity", 1) or 1), 1)
+                            new_items.append(_it)
+                        new_refund = round(new_refund, 2)
+                        old_refund = round(float(c.get("refund_amount") or 0), 2)
+                        if abs(new_refund - old_refund) >= 0.01:
+                            st["changed"] += 1
+                            if len(st["examples"]) < 50:
+                                st["examples"].append({"order_number": onum, "eski": old_refund, "yeni": new_refund})
+                            if not dry:
+                                await db.trendyol_claims.update_one(
+                                    {"claim_id": c.get("claim_id")},
+                                    {"$set": {"items": new_items, "refund_amount": new_refund,
+                                              "amount_resynced_at": datetime.now(timezone.utc).isoformat()}})
+                    else:
+                        st["no_order"] += 1
+                if st["scanned"] % 100 == 0:
+                    await db.settings.update_one({"id": "ty_amount_resync"}, {"$set": st})
+            st["status"] = "done"
+            st["finished_at"] = datetime.now(timezone.utc).isoformat()
+            await db.settings.update_one({"id": "ty_amount_resync"}, {"$set": st})
+        except Exception as e:
+            st["status"] = "error"; st["error"] = str(e)[:400]
+            await db.settings.update_one({"id": "ty_amount_resync"}, {"$set": st})
+
+    asyncio.create_task(_run())
+    return {"started": True, "dry_run": dry, "force": force}
+
+
+@router.get("/trendyol/claims/resync-amounts-all/status")
+async def resync_claim_amounts_all_status(current_user: dict = Depends(require_admin)):
+    doc = await db.settings.find_one({"id": "ty_amount_resync"}, {"_id": 0})
+    return doc or {"status": "none"}
+
+
 @router.post("/trendyol/claims/resync-amounts")
 async def resync_claim_amounts(payload: Optional[dict] = Body(default=None),
                                current_user: dict = Depends(require_admin)):
