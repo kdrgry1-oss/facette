@@ -60,7 +60,6 @@ import Pagination from "../../components/admin/Pagination";
 import SearchableAttribute from "../../components/admin/product-form/SearchableAttribute";
 import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
 import SeoTab from "../../components/admin/product-form/SeoTab";
-import StockTab from "../../components/admin/product-form/StockTab";
 import CombineProductsTab from "../../components/admin/product-form/CombineProductsTab";
 import ProductDetailFields from "../../components/admin/product-form/ProductDetailFields";
 import ProductFilters from "../../components/admin/ProductFilters";
@@ -2492,7 +2491,6 @@ export default function AdminProducts() {
                  <TabsTrigger value="basic" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Temel</TabsTrigger>
                  <TabsTrigger value="pricing" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Fiyat</TabsTrigger>
                  <TabsTrigger value="images" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Görseller</TabsTrigger>
-                 <TabsTrigger value="stock" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Stok</TabsTrigger>
                  <TabsTrigger value="variants" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Varyantlar</TabsTrigger>
                  <TabsTrigger value="seo" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">SEO</TabsTrigger>
                  <TabsTrigger value="attributes" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Özellikler</TabsTrigger>
@@ -3562,15 +3560,14 @@ export default function AdminProducts() {
                             onFocus={() => setSizeSearchOpen(true)}
                           />
                           {sizeSearchOpen && (
-                            <div className="absolute z-[9999] w-full mt-1 bg-white border-2 border-orange-300 rounded-xl shadow-2xl" style={{maxHeight: '320px', overflowY: 'auto'}}>
-                              <div className="p-2">
+                            <div className="absolute z-[9999] w-full mt-1 bg-white border-2 border-orange-300 rounded-xl shadow-2xl overscroll-contain" style={{maxHeight: '240px', overflowY: 'auto'}} onWheel={(e) => e.stopPropagation()}>
+                              <div className="p-1">
                                 {globalSizes
-                                  .filter(s => s.value.toLowerCase().includes((sizeSearchTerm || "").toLowerCase()))
-                                  .slice(0, 30)
+                                  .filter(s => s.value.toLocaleLowerCase("tr").includes((sizeSearchTerm || "").toLocaleLowerCase("tr")))
                                   .map(s => (
                                   <div 
                                     key={s.id}
-                                    className="px-4 py-3 text-sm hover:bg-orange-100 cursor-pointer rounded-lg font-semibold transition-colors border-b border-gray-100 last:border-b-0"
+                                    className="px-3 py-1.5 text-sm hover:bg-orange-100 cursor-pointer rounded-md font-semibold transition-colors"
                                     onClick={() => { 
                                       setFormData({...formData, newVariant: {...(formData.newVariant || {}), size: s.value}}); 
                                       setSizeSearchOpen(false); 
@@ -3580,7 +3577,7 @@ export default function AdminProducts() {
                                     {s.value}
                                   </div>
                                 ))}
-                                {globalSizes.filter(s => s.value.toLowerCase().includes((sizeSearchTerm || "").toLowerCase())).length === 0 && (
+                                {globalSizes.filter(s => s.value.toLocaleLowerCase("tr").includes((sizeSearchTerm || "").toLocaleLowerCase("tr"))).length === 0 && (
                                   <div className="px-4 py-3 text-sm text-gray-400 italic">Sonuç bulunamadı</div>
                                 )}
                               </div>
@@ -3600,15 +3597,14 @@ export default function AdminProducts() {
                             onFocus={() => setColorSearchOpen(true)}
                           />
                           {colorSearchOpen && (
-                            <div className="absolute z-[9999] w-full mt-1 bg-white border-2 border-orange-300 rounded-xl shadow-2xl" style={{maxHeight: '320px', overflowY: 'auto'}}>
-                              <div className="p-2">
+                            <div className="absolute z-[9999] w-full mt-1 bg-white border-2 border-orange-300 rounded-xl shadow-2xl overscroll-contain" style={{maxHeight: '240px', overflowY: 'auto'}} onWheel={(e) => e.stopPropagation()}>
+                              <div className="p-1">
                                 {globalColors
-                                  .filter(c => c.value.toLowerCase().includes((colorSearchTerm || "").toLowerCase()))
-                                  .slice(0, 30)
+                                  .filter(c => c.value.toLocaleLowerCase("tr").includes((colorSearchTerm || "").toLocaleLowerCase("tr")))
                                   .map(c => (
                                   <div 
                                     key={c.id}
-                                    className="px-4 py-3 text-sm hover:bg-orange-100 cursor-pointer rounded-lg font-semibold transition-colors border-b border-gray-100 last:border-b-0"
+                                    className="px-3 py-1.5 text-sm hover:bg-orange-100 cursor-pointer rounded-md font-semibold transition-colors"
                                     onClick={() => { 
                                       setFormData({...formData, newVariant: {...(formData.newVariant || {}), color: c.value}}); 
                                       setColorSearchOpen(false); 
@@ -3618,7 +3614,7 @@ export default function AdminProducts() {
                                     {c.value}
                                   </div>
                                 ))}
-                                {globalColors.filter(c => c.value.toLowerCase().includes((colorSearchTerm || "").toLowerCase())).length === 0 && (
+                                {globalColors.filter(c => c.value.toLocaleLowerCase("tr").includes((colorSearchTerm || "").toLocaleLowerCase("tr"))).length === 0 && (
                                   <div className="px-4 py-3 text-sm text-gray-400 italic">Sonuç bulunamadı</div>
                                 )}
                               </div>
@@ -3951,11 +3947,7 @@ export default function AdminProducts() {
               </TabsContent>
 
               {/* Stock Tab — hızlı stok güncelleme; tam CRUD için "Varyantlar" sekmesi */}
-              <TabsContent value="stock" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <StockTab formData={formData} setFormData={setFormData} />
-                {/* "Stok & Durum / Puan / Sipariş Limitleri / Boyut & Kargo / Teslimat" akordeonu
-                    kullanıcı isteğiyle kaldırıldı — stok yönetimi yukarıdaki ana alanlardan yapılır. */}
-              </TabsContent>
+              {/* Stok sekmesi kullanıcı isteğiyle kaldırıldı — varyant stokları Varyantlar sekmesinde */}
             </Tabs>
           </div>
         </DialogContent>
