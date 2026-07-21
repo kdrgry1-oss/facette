@@ -2484,9 +2484,8 @@ export default function AdminProducts() {
                  <TabsTrigger value="attributes" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Özellikler</TabsTrigger>
                  <TabsTrigger value="sizetable" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Ölçü Tablosu</TabsTrigger>
                  <TabsTrigger value="combine" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Kombin</TabsTrigger>
-                 <TabsTrigger value="trendyol" className="data-[state=active]:bg-orange-500 data-[state=active]:text-white px-6 py-2 text-sm font-medium rounded-lg transition-all ml-auto flex gap-2">
-                   <Store size={16} /> Trendyol Ayarları
-                 </TabsTrigger>
+                 {/* "Trendyol Ayarları" sekmesi kullanıcı isteğiyle kaldırıldı — Trendyol
+                     eşleştirme/aktarım Pazaryeri Hub ve ürün listesi araçlarından yönetiliyor. */}
                </TabsList>
 
               {/* Basic Info Tab */}
