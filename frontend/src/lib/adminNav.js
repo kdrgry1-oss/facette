@@ -67,7 +67,6 @@ export const navigationGroups = [
     icon: Factory,
     children: [
       { label: "İmalat Takip", path: "/admin/imalat", icon: Factory },
-      { label: "İmalat Planı (Tablo)", path: "/admin/uretim-plani", icon: Factory },
     ],
   },
   {

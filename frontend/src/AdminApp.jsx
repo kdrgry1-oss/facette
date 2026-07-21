@@ -58,7 +58,6 @@ import NotificationSettings from "./pages/admin/NotificationSettings";
 import EmailSettings from "./pages/admin/EmailSettings";
 import NotificationTemplates from "./pages/admin/NotificationTemplates";
 import BlockedCustomers from "./pages/admin/BlockedCustomers";
-import ProductionPlan from "./pages/admin/ProductionPlan";
 import MarketingPixels from "./pages/admin/MarketingPixels";
 import Influencers from "./pages/admin/Influencers";
 import AmazonSpApi from "./pages/admin/AmazonSpApi";
@@ -134,7 +133,8 @@ export default function AdminApp() {
         <Route path="ayarlar/eposta" element={<EmailSettings />} />
         <Route path="ayarlar/bildirim/sablonlar" element={<NotificationTemplates />} />
         <Route path="bloklu-musteriler" element={<BlockedCustomers />} />
-        <Route path="uretim-plani" element={<ProductionPlan />} />
+        {/* İmalat Planı (Tablo) menüden kaldırıldı — eski yer imleri İmalat Takip'e gider */}
+        <Route path="uretim-plani" element={<Navigate to="/admin/imalat" replace />} />
         <Route path="ayarlar/pixel" element={<MarketingPixels />} />
         <Route path="influencer" element={<Influencers />} />
         <Route path="amazon" element={<AmazonSpApi />} />
