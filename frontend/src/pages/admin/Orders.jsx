@@ -1287,6 +1287,17 @@ export default function AdminOrders({ unpaidView = false }) {
                             <span className="text-xs font-medium text-[#8b1e3f]">İskonto -{(order.discount_amount || order.discount || 0).toFixed(2)} TL</span>
                           </>
                         )}
+                        {/* Brüt−İskonto ile Net arasındaki farkı açıklayan ek kalemler (kullanıcı isteği):
+                            kargo / hediye paketi / puan görünmeyince tutar 'yanlış' sanılıyordu. */}
+                        {Number(order.shipping_cost) > 0 && (
+                          <span className="text-xs text-gray-500">Kargo +{Number(order.shipping_cost).toFixed(2)} TL</span>
+                        )}
+                        {order.gift_wrap && Number(order.gift_wrap_price) > 0 && (
+                          <span className="text-xs text-gray-500">🎁 Paket +{Number(order.gift_wrap_price).toFixed(2)} TL</span>
+                        )}
+                        {Number(order.points_used) > 0 && (
+                          <span className="text-xs text-gray-500">Puan -{Number(order.points_used).toFixed(2)} TL</span>
+                        )}
                         <span className="text-sm font-semibold text-gray-900">{order.total?.toFixed(2)} TL</span>
                         {isUnpaidHavale && (
                           <span className="text-xs text-gray-500">Ödeme bekliyor</span>
