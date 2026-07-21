@@ -44,120 +44,73 @@ def render_size_table_image(
     unit: str = "cm",
     product_size: str = "",
     model_info: dict = None,
+    product_image: bytes = None,
 ) -> bytes:
-    """Render a 1200x1800 JPEG size-table with a mannequin silhouette (suudcollection-tarzı)."""
+    """SADE ŞABLON (kullanıcının verdiği örnek birebir): beyaz zemin üzerinde
+    1) üstte ürünün İLK görseli (ortalı), 2) altında ortalı büyük ürün adı,
+    3) altında kutusuz/çizgisiz ferah tablo — 'Bedenler  S  M  L' başlık satırı,
+    her ölçü ayrı satırda (etiket solda, değerler beden kolonlarının altında ortalı).
+    Manken silüeti, başlık bandı ve marka damgası kaldırıldı."""
     W, H = 1200, 1800
     img = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
 
-    font_title = _find_font(64)
-    font_subtitle = _find_font(32)
-    font_th = _find_font(30)
-    font_td = _find_font(28)
-    font_brand = _find_font(80)
-    font_sm = _find_font(26)
+    font_name = _find_font(62)
+    font_head = _find_font(44)
+    font_cell = _find_font(42)
 
-    # Header band
-    draw.rectangle([(0, 0), (W, 160)], fill=(17, 24, 39))  # near-black
-    draw.text((60, 40), "ÖLÇÜ TABLOSU", fill="white", font=font_title)
-    draw.text((60, 115), product_name[:70], fill=(203, 213, 225), font=font_subtitle)
+    rows = [str(c) for c in (columns or [])]
+    n_rows = len(rows)
 
-    # Meta line + Ürün Bedeni / Manken ("suud" örneği)
-    _meta = f"Tüm ölçüler {unit} cinsindendir."
-    if product_size:
-        _meta += f"   ·   Ürün Bedeni: {product_size}"
-    draw.text((60, 190), _meta, fill=(107, 114, 128), font=font_subtitle)
-    if model_info:
-        _mparts = [f"{k} {v} cm" for k, v in model_info.items() if str(v).strip()]
-        if _mparts:
-            draw.text((60, 238), "Manken: " + ", ".join(_mparts), fill=(107, 114, 128), font=font_sm)
+    y = 40
+    # 1) Ürün görseli — oran korunarak sığdırılır; tablo satır sayısına göre yükseklik ayarlanır
+    if product_image:
+        try:
+            pim = Image.open(BytesIO(product_image)).convert("RGB")
+            _needed_below = 150 + (n_rows + 1) * 112 + 60  # ad + tablo satırları + alt boşluk
+            max_h = max(480, H - y - _needed_below)
+            max_w = 680
+            r = min(max_w / pim.width, max_h / pim.height)
+            pim = pim.resize((max(1, int(pim.width * r)), max(1, int(pim.height * r))))
+            img.paste(pim, ((W - pim.width) // 2, y))
+            y += pim.height + 44
+        except Exception:
+            y += 10
+    else:
+        y += 10
 
-    # --- MANKEN SİLUETİ (sol panel) + ölçü çizgileri ---
-    # Ölçü sütun adlarına göre hangi çizgilerin gösterileceğini belirle.
-    _col_lower = [str(c).lower() for c in columns]
-    def _has(*keys):
-        return any(any(k in c for k in keys) for c in _col_lower)
-    cx = 290  # siluet merkez x
-    # (yarı_genişlik, y) profili — düz omuz üstü / göğüs / bel / kalça / etek
-    profile = [(150, 342), (150, 385), (138, 560), (146, 615), (92, 800), (148, 1010), (128, 1245), (120, 1320)]
-    right_pts = [(cx + hw, y) for hw, y in profile]
-    left_pts = [(cx - hw, y) for hw, y in reversed(profile)]
-    draw.polygon(right_pts + left_pts, fill=(236, 238, 242), outline=(190, 196, 206))
-    # Ölçü seviyeleri: (etiket, y, aktif mi) — etiketler tabloya değmeden SAĞA hizalanır.
-    levels = [
-        ("Omuz", 385, _has("omuz", "shoulder")),
-        ("Göğüs", 585, _has("göğüs", "gogus", "bust", "chest")),
-        ("Bel", 800, _has("bel", "waist")),
-        ("Kalça", 1010, _has("kalça", "kalca", "hip", "basen")),
-    ]
-    for label, y, active in levels:
-        if not active:
-            continue
-        hw = 150
-        # kısa kesikli yatay ölçü çizgisi (formun içinden geçer)
-        for xseg in range(cx - hw, cx + hw, 24):
-            draw.line([(xseg, y), (min(xseg + 14, cx + hw), y)], fill=(154, 52, 18), width=3)
-        txt = label.upper()
-        tw = draw.textlength(txt, font=font_sm)
-        lx = 540 - tw  # etiket sağ kenarı tablodan (560) önce biter
-        draw.text((lx, y - 18), txt, fill=(60, 60, 68), font=font_sm)
-        # siluet kenarından etikete uzanan gösterge çizgisi + nokta
-        draw.line([(cx + hw, y), (lx - 14, y)], fill=(154, 52, 18), width=3)
-        draw.ellipse([(cx + hw - 4, y - 4), (cx + hw + 4, y + 4)], fill=(154, 52, 18))
-    # Boy oku (sol kenar)
-    draw.line([(120, 320), (120, 1290)], fill=(150, 156, 166), width=3)
-    draw.polygon([(112, 330), (128, 330), (120, 312)], fill=(150, 156, 166))
-    draw.polygon([(112, 1280), (128, 1280), (120, 1298)], fill=(150, 156, 166))
-    draw.text((70, 780), "BOY", fill=(120, 126, 136), font=font_sm)
+    # 2) Ürün adı — ortalı
+    name = (product_name or "").strip()[:60]
+    tw = draw.textlength(name, font=font_name)
+    draw.text(((W - tw) / 2, y), name, fill=(17, 24, 39), font=font_name)
+    y += 130
 
-    # Table geometry — sağ panele kaydırıldı (siluete yer aç)
-    table_top = 300
-    table_left = 560
-    table_right = W - 60
-    table_width = table_right - table_left
-    # First column narrower (beden etiketi)
-    col_size_w = 120
-    rest_cols = max(1, len(columns))
-    col_w = (table_width - col_size_w) / rest_cols
-    row_h = 78
-    header_h = 90
+    # 3) Tablo — çizgisiz/ferah. Sol etiket + beden kolonları (değerler kolon merkezinde)
+    label_x = 60
+    col_area_l, col_area_r = 520, W - 80
+    n_sizes = max(1, len(sizes))
+    col_w = (col_area_r - col_area_l) / n_sizes
 
-    # Header row
-    draw.rectangle(
-        [(table_left, table_top), (table_right, table_top + header_h)],
-        fill=(241, 245, 249), outline=(203, 213, 225), width=2,
-    )
-    draw.text((table_left + 30, table_top + 28), "BEDEN", fill=(30, 41, 59), font=font_th)
-    for i, col in enumerate(columns):
-        x = table_left + col_size_w + i * col_w
-        draw.line([(x, table_top), (x, table_top + header_h)], fill=(203, 213, 225), width=2)
-        text = col[:14]
-        draw.text((x + 20, table_top + 28), text.upper(), fill=(30, 41, 59), font=font_th)
+    def _center_x(i, text, font):
+        cx0 = col_area_l + i * col_w + col_w / 2
+        return cx0 - draw.textlength(text, font=font) / 2
 
-    # Body rows
-    for ri, size in enumerate(sizes):
-        y = table_top + header_h + ri * row_h
-        fill = (255, 255, 255) if ri % 2 == 0 else (249, 250, 251)
-        draw.rectangle([(table_left, y), (table_right, y + row_h)], fill=fill, outline=(226, 232, 240), width=1)
-        # Size label cell
-        draw.rectangle([(table_left, y), (table_left + col_size_w, y + row_h)], fill=(255, 237, 213), outline=(226, 232, 240), width=1)
-        draw.text((table_left + 40, y + 22), str(size), fill=(154, 52, 18), font=font_th)
-        for i, col in enumerate(columns):
-            x = table_left + col_size_w + i * col_w
-            val = str(values.get(size, {}).get(col, "")).strip() or "-"
-            draw.text((x + 30, y + 24), val, fill=(30, 41, 59), font=font_td)
+    remaining = H - y - 60
+    row_gap = max(100, min(180, int(remaining / max(1, n_rows + 1))))
 
-    # Brand stamp bottom-right
-    draw.text((W - 420, H - 180), brand, fill=(17, 24, 39), font=font_brand)
-    draw.text((W - 420, H - 90), "facette.com", fill=(148, 163, 184), font=font_subtitle)
+    draw.text((label_x, y), "Bedenler", fill=(17, 24, 39), font=font_head)
+    for i, s in enumerate(sizes):
+        t = str(s)
+        draw.text((_center_x(i, t, font_head), y), t, fill=(17, 24, 39), font=font_head)
+    y += row_gap
 
-    # Footer note
-    draw.text(
-        (60, H - 110),
-        "Değerler ± 1-2 cm tolerans taşıyabilir.",
-        fill=(148, 163, 184),
-        font=font_subtitle,
-    )
+    for col in rows:
+        draw.text((label_x, y), col[:22], fill=(17, 24, 39), font=font_head)
+        for i, s in enumerate(sizes):
+            val = str(values.get(s, {}).get(col, "")).strip() or "-"
+            val = val.replace(".", ",")  # örnekteki gibi ondalık virgülle (70,5)
+            draw.text((_center_x(i, val, font_cell), y), val, fill=(17, 24, 39), font=font_cell)
+        y += row_gap
 
     out = BytesIO()
     img.save(out, format="JPEG", quality=90, optimize=True)  # 1200x1800 JPEG
@@ -245,6 +198,29 @@ async def generate_size_table_image(product_id: str, current_user: dict = Depend
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
 
+    # Şablonun üst yarısı için ürünün İLK gerçek görselini indir (ölçü tablosu görselleri atlanır)
+    _img_bytes = None
+    _tries = 0
+    for _im in (product.get("images") or []):
+        if _tries >= 3 or _img_bytes:
+            break
+        _u = _im.get("url") if isinstance(_im, dict) else _im
+        if isinstance(_im, dict) and _im.get("is_size_table"):
+            continue
+        if not isinstance(_u, str) or not _u or _u.startswith("data:"):
+            continue
+        if not _u.startswith("http"):
+            _u = "https://api.facette.com.tr" + (_u if _u.startswith("/") else "/" + _u)
+        _tries += 1
+        try:
+            import httpx as _httpx
+            async with _httpx.AsyncClient(timeout=25, follow_redirects=True) as _c:
+                _r = await _c.get(_u)
+            if _r.status_code == 200 and _r.content:
+                _img_bytes = _r.content
+        except Exception as _e:
+            logger.warning(f"size-table: ürün görseli indirilemedi ({_u}): {_e}")
+
     png = render_size_table_image(
         product_name=product.get("name", ""),
         sizes=st.get("sizes") or [],
@@ -252,6 +228,7 @@ async def generate_size_table_image(product_id: str, current_user: dict = Depend
         values=st.get("values") or {},
         product_size=st.get("product_size") or "",
         model_info=st.get("model_info") or {},
+        product_image=_img_bytes,
     )
     data_url = "data:image/jpeg;base64," + base64.b64encode(png).decode("ascii")
 
