@@ -3969,7 +3969,8 @@ export default function AdminProducts() {
               {/* Stock Tab — hızlı stok güncelleme; tam CRUD için "Varyantlar" sekmesi */}
               <TabsContent value="stock" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <StockTab formData={formData} setFormData={setFormData} />
-                {renderDetailFields(["Stok & Durum", "Puan", "Sipariş Limitleri & Ödeme", "Boyut & Kargo", "Teslimat"])}
+                {/* "Stok & Durum / Puan / Sipariş Limitleri / Boyut & Kargo / Teslimat" akordeonu
+                    kullanıcı isteğiyle kaldırıldı — stok yönetimi yukarıdaki ana alanlardan yapılır. */}
               </TabsContent>
             </Tabs>
           </div>
