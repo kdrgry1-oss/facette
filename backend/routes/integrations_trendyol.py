@@ -3005,6 +3005,92 @@ async def import_selected_trendyol_orders(req: TrendyolOrderImportReq, current_u
     except Exception as e:
         logger.error(f"Error importing selected orders: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+@router.post("/trendyol/orders/backfill")
+async def backfill_trendyol_orders(payload: dict, current_user: dict = Depends(require_admin)):
+    """GEÇMİŞ Trendyol siparişlerini tarih aralığıyla içe aktarır (tek seferlik veri kurtarma).
+
+    KURALLAR (kullanıcı şartı — bozma):
+    - STOK DÜŞÜMÜ YAPILMAZ: güncel stok zaten doğru; geçmiş siparişin düşümü stoku bozar.
+    - Bildirim/mail/push tetiklenmez — yalnız sipariş kaydı yazılır (raporlar için).
+    - Var olan sipariş (order_number + platform=trendyol) ATLANIR, asla güncellenmez.
+    - TY orders API ~2 haftalık pencere ister → aralık 13 günlük dilimlerle taranır.
+    payload: {"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "dry_run": false}
+    """
+    from datetime import datetime, timezone, timedelta
+    from .deps import generate_id
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    try:
+        sd = datetime.strptime(str(payload.get("start_date")), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        ed = datetime.strptime(str(payload.get("end_date")), "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+    except Exception:
+        raise HTTPException(status_code=400, detail="start_date/end_date YYYY-MM-DD biçiminde olmalı")
+    if ed <= sd:
+        raise HTTPException(status_code=400, detail="end_date, start_date'ten büyük olmalı")
+    dry = bool(payload.get("dry_run"))
+
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(
+        supplier_id=config["supplier_id"], api_key=config["api_key"],
+        api_secret=config["api_secret"], mode=config["mode"]
+    )
+
+    WIN = timedelta(days=13)
+    scanned = imported = skipped = 0
+    errors = []
+    windows = []
+    cur = sd
+    while cur < ed:
+        wend = min(cur + WIN, ed)
+        s_ms, e_ms = int(cur.timestamp() * 1000), int(wend.timestamp() * 1000)
+        w_scan = w_imp = w_skip = 0
+        page = 0
+        while True:
+            try:
+                resp = await client.get_orders(start_date_ms=s_ms, end_date_ms=e_ms, size=200, page=page)
+            except Exception as e:
+                errors.append({"window": cur.date().isoformat(), "page": page, "error": str(e)[:300]})
+                break
+            content = resp.get("content") or []
+            for t_order in content:
+                w_scan += 1
+                onum = str(t_order.get("orderNumber") or "")
+                if not onum:
+                    continue
+                if await db.orders.find_one({"order_number": onum, "platform": "trendyol"}, {"_id": 1}):
+                    w_skip += 1
+                    continue
+                if dry:
+                    w_imp += 1
+                    continue
+                try:
+                    od = map_trendyol_order(t_order)
+                    od["id"] = generate_id()
+                    od["created_at"] = _ms_to_iso(t_order.get("orderDate")) or datetime.now(timezone.utc).isoformat()
+                    od["backfill"] = True  # geçmiş veri kurtarma işareti (stok/bildirim akışına girmedi)
+                    await db.orders.insert_one(od)
+                    w_imp += 1
+                except Exception as e:
+                    errors.append({"orderNumber": onum, "error": str(e)[:300]})
+            total_pages = resp.get("totalPages") or 0
+            page += 1
+            if not content or page >= total_pages:
+                break
+        windows.append({"start": cur.date().isoformat(), "end": (wend - timedelta(seconds=1)).date().isoformat(),
+                        "scanned": w_scan, "imported": w_imp, "skipped_existing": w_skip})
+        scanned += w_scan
+        imported += w_imp
+        skipped += w_skip
+        cur = wend
+    await log_integration_event("trendyol", "backfill_orders", "orders",
+                                f"{payload.get('start_date')}..{payload.get('end_date')}",
+                                "success", f"tarandı={scanned} aktarıldı={imported} atlandı={skipped} dry={dry}")
+    return {"dry_run": dry, "scanned": scanned, "imported": imported,
+            "skipped_existing": skipped, "windows": windows, "errors": errors[:20]}
 @router.post("/trendyol/orders/import")
 async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
     """Import orders from Trendyol (Last 15 days) auto job"""
