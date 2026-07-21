@@ -259,7 +259,26 @@ async def save_size_table(product_id: str, payload: dict, current_user: dict = D
         "updated_by": current_user.get("email", ""),
     }
     await db.size_tables.update_one({"product_id": product_id}, {"$set": doc}, upsert=True)
-    return {"success": True}
+
+    # RENK KARDEŞİ SENKRONU (kullanıcı isteği): ölçüler model düzeyindedir — aynı stok
+    # kodlu diğer renk kartlarına da aynı tablo yazılır. (Tablosu olmayan kardeş zaten
+    # kalıtımla okuyordu; artık ESKİ tablosu olan kardeş de bayat kalmaz.)
+    synced = 0
+    try:
+        p = await db.products.find_one({"id": product_id}, {"_id": 0, "stock_code": 1})
+        sc = str((p or {}).get("stock_code") or "").strip()
+        if sc:
+            async for s in db.products.find(
+                    {"stock_code": sc, "id": {"$ne": product_id}, "is_deleted": {"$ne": True}},
+                    {"_id": 0, "id": 1}):
+                sib_doc = dict(doc)
+                sib_doc["product_id"] = s["id"]
+                sib_doc["synced_from"] = product_id
+                await db.size_tables.update_one({"product_id": s["id"]}, {"$set": sib_doc}, upsert=True)
+                synced += 1
+    except Exception as e:
+        logger.error(f"[ölçü tablosu kardeş senkron {product_id}] {e}")
+    return {"success": True, "synced_siblings": synced}
 
 
 @router.post("/{product_id}/generate-image")

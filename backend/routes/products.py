@@ -2064,9 +2064,48 @@ async def update_product(
         product_data.pop("urun_karti_id", None)
 
     product_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
+
     await db.products.update_one({"id": product_id}, {"$set": product_data})
-    
+
+    # RENK KARDEŞİ OTOMATİK SENKRONU (kullanıcı isteği): stok kodu AYNI olan kartlarda
+    # model-düzeyi alanlar bu kayıtla birlikte eşitlenir — Sezon, Beden Önerisi (Kalıp)
+    # ve Özellikler (Renk/Web Color HARİÇ; kardeşin kendi rengi korunur). Varyantlar,
+    # stok, fiyat, görseller, isim/slug ASLA kopyalanmaz.
+    try:
+        _scode = str((product_data.get("stock_code") if "stock_code" in product_data
+                      else existing.get("stock_code")) or "").strip()
+        COLOR_NAMES = {"renk", "web color", "color"}
+        def _cn(s): return (s or "").strip().lower()
+        _sib_base = {}
+        if "season" in product_data:
+            _sib_base["season"] = product_data.get("season")
+        if "size_advice" in product_data:
+            _sib_base["size_advice"] = product_data.get("size_advice")
+        _has_attrs = isinstance(product_data.get("attributes"), list)
+        _mp_keys = [k for k in ("hepsiburada_attributes", "temu_attributes")
+                    if isinstance(product_data.get(k), dict)]
+        if _scode and (_sib_base or _has_attrs or _mp_keys):
+            _src_attrs_nc = ([a for a in product_data["attributes"]
+                              if isinstance(a, dict) and _cn(a.get("name") or a.get("type")) not in COLOR_NAMES]
+                             if _has_attrs else None)
+            async for s in db.products.find(
+                    {"stock_code": _scode, "id": {"$ne": product_id}, "is_deleted": {"$ne": True}},
+                    {"_id": 0, "id": 1, "attributes": 1, "hepsiburada_attributes": 1, "temu_attributes": 1}):
+                _set = dict(_sib_base)
+                if _src_attrs_nc is not None:
+                    _s_color = [a for a in (s.get("attributes") or [])
+                                if isinstance(a, dict) and _cn(a.get("name") or a.get("type")) in COLOR_NAMES]
+                    _set["attributes"] = _src_attrs_nc + _s_color
+                for _k in _mp_keys:
+                    _src_map = {k: v for k, v in product_data[_k].items() if _cn(k) not in COLOR_NAMES}
+                    _s_map_color = {k: v for k, v in (s.get(_k) or {}).items() if _cn(k) in COLOR_NAMES}
+                    _set[_k] = {**_src_map, **_s_map_color}
+                if _set:
+                    _set["updated_at"] = product_data["updated_at"]
+                    await db.products.update_one({"id": s["id"]}, {"$set": _set})
+    except Exception as _sib_e:
+        logger.error(f"[renk-kardeşi senkron {product_id}] {_sib_e}")
+
     return {"message": "Ürün güncellendi"}
 
 @router.delete("/{product_id}")
