@@ -3145,20 +3145,30 @@ export default function AdminProducts() {
                           .filter(Boolean),
                       };
                     });
-                    const tyMerged = (() => {
-                      const out = baseList.map(attr => {
-                        const ty = tyByName[(attr.name || "").trim().toLowerCase()];
-                        if (ty && ty.values.length) {
-                          const merged = Array.from(new Set([...(attr.values || []), ...ty.values]));
-                          return { ...attr, values: merged };
-                        }
-                        return attr;
-                      });
-                      const globalNames = new Set(baseList.map(a => (a.name || "").toLowerCase()));
+                    // KULLANICI KARARI: Trendyol bölümünde 159 özelliklik global kütüphane DEĞİL,
+                    // YALNIZ Trendyol API'sinin bu kategori için döndürdüğü özellikler listelenir.
+                    // (Ürüne zaten girilmiş dolu değerler şemada olmasa da görünür kalır — veri kaybolmaz.)
+                    const tySchemaLoaded = Object.keys(tyByName).length > 0;
+                    const tyOnly = (() => {
+                      if (!tySchemaLoaded) {
+                        // Şema henüz çekilmediyse (kategori eşli değil) yalnız DOLU özellikler gösterilir
+                        return baseList.filter(a => (formData.attributes || {})[a.name]);
+                      }
+                      const out = [];
+                      const seen = new Set();
                       Object.values(tyByName).forEach(ty => {
-                        if (!globalNames.has(ty.name.toLowerCase())) {
-                          out.push({ id: `ty-${ty.id}`, name: ty.name, values: ty.values });
-                        }
+                        const g = baseList.find(a => (a.name || "").toLowerCase() === ty.name.toLowerCase());
+                        const values = g ? Array.from(new Set([...(g.values || []), ...ty.values])) : ty.values;
+                        out.push({ id: g?.id || `ty-${ty.id}`, name: ty.name, values });
+                        seen.add(ty.name.toLowerCase());
+                      });
+                      // TY şemasında olmayan ama üründe DOLU olan özellikler görünür kalsın
+                      Object.keys(formData.attributes || {}).forEach(nm => {
+                        const low = (nm || "").toLowerCase();
+                        if (!nm || seen.has(low) || _isHiddenAttr(nm)) return;
+                        if (!(formData.attributes || {})[nm]) return;
+                        out.push({ id: `cur-${nm}`, name: nm, values: [] });
+                        seen.add(low);
                       });
                       return out.filter(a => (a.name || "").toLowerCase().includes(attributeSearchTerm.toLowerCase()));
                     })();
@@ -3166,7 +3176,7 @@ export default function AdminProducts() {
                     const sourceList = marketplace === 'hepsiburada'
                       ? hbSource.filter(a => (a.name || '').toLowerCase().includes(attributeSearchTerm.toLowerCase()))
                       : marketplace === 'trendyol'
-                      ? tyMerged
+                      ? tyOnly
                       : baseList;
 
                     // 🎯 Değer çözümü: önce pazaryerine-özel harita, yoksa NÖTR formData.attributes,
