@@ -2815,14 +2815,13 @@ def map_trendyol_order(t_order: dict) -> dict:
     
     for line in t_order.get("lines", []):
         qty = max(line.get("quantity", 1), 1)
-        line_gross = line.get("lineGrossAmount", line.get("amount", 0))
-        unit_price = line_gross / qty # İndirimsiz birim fiyat
-        
-        # Trendyol 'price' field is actually the net discounted price
-        net_price = line.get("price", line.get("lineUnitPrice", 0))
-        
-        discount = line.get("discount", 0)
-        discount_per_item = discount / qty if discount else 0
+        # KRİTİK: TY satır alanları (lineGrossAmount/amount/price/discount) ZATEN BİRİM'dir —
+        # adede BÖLÜNMEZ. Eski /qty bölmesi qty>1 siparişte birim fiyatı YARIYA düşürüyordu
+        # (11419198311 kanıtı; paket totalPrice = birim × adet ile doğrulandı).
+        unit_price = line.get("lineGrossAmount", line.get("amount", 0)) or 0  # birim brüt
+        # Trendyol 'price' alanı = net (indirimli) BİRİM fiyat
+        net_price = line.get("price", line.get("lineUnitPrice", 0)) or 0
+        discount_per_item = line.get("discount", 0) or 0  # birim indirim
 
         items.append({
             "product_id": line.get("productCode"),
