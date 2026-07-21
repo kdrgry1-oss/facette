@@ -4218,6 +4218,7 @@ async def resync_claim_amounts_all(payload: Optional[dict] = Body(default=None),
             st["status"] = "error"; st["error"] = str(e)[:400]
             await db.settings.update_one({"id": "ty_amount_resync"}, {"$set": st})
 
+    import asyncio
     asyncio.create_task(_run())
     return {"started": True, "dry_run": dry, "force": force}
 
