@@ -4951,6 +4951,10 @@ async def trendyol_shipment_probe(order_number: str = "", current_user: dict = D
                     "id": pkg.get("id"),
                     "status": pkg.get("status"),
                     "cargoTrackingNumber": pkg.get("cargoTrackingNumber"),
+                    "grossAmount": pkg.get("grossAmount"),
+                    "totalDiscount": pkg.get("totalDiscount"),
+                    "totalPrice": pkg.get("totalPrice"),
+                    "packageTotalPrice": pkg.get("packageTotalPrice"),
                     "lines_status": [l.get("orderLineItemStatusName") for l in (pkg.get("lines") or [])[:4]],
                     # KESİN TUTAR KAYNAĞI: satır bazlı fiyat alanları (birim vs satır ayrımı için)
                     "lines_fin": [{

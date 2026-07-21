@@ -949,7 +949,7 @@ export default function Returns() {
                                       )}
                                       <span className="flex-1">
                                         <span className="font-medium">{item.productName || "-"}</span>
-                                        {item.size ? <span className="ml-1.5 px-1.5 py-0.5 rounded bg-gray-800 text-white text-[10px] font-bold">Beden: {item.size}</span> : null}
+                                        {item.size ? <span className="ml-1.5 text-gray-600 font-semibold whitespace-nowrap">{item.size}</span> : null}
                                         {(item.quantity || 1) > 1 ? <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-bold">× {item.quantity} adet</span> : null}
                                         {item.barcode ? <span className="ml-2 font-mono text-[10px] text-gray-500">{item.barcode}</span> : null}
                                         {item.reason ? <span className="ml-2 text-[10px] text-gray-400">({item.reason})</span> : null}

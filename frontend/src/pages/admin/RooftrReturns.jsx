@@ -721,7 +721,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                     );
                                   })()}
                                   {it.barcode && <span className="text-gray-700">#{it.barcode}</span>}
-                                  {it.size && <span className="text-gray-700">Beden: {it.size}</span>}
+                                  {it.size && <span className="text-gray-700 font-semibold whitespace-nowrap">{it.size}</span>}
                                   {it.color && <span className="text-gray-700">Renk: {it.color}</span>}
                                   <span className="flex-1" />
                                 </label>
