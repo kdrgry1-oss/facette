@@ -57,9 +57,21 @@ def _deep(o, depth=0):
     return str(o)
 
 
+# Eski mağaza verileri artık bu domainde (facette.com.tr YENİ siteyi gösteriyor;
+# Railway'deki TICIMAX_DOMAIN env'i eski günlerden www.facette.com.tr kalmış olabilir —
+# history modülü her çağrıda domaini ZORLA doğru adrese çevirir).
+HISTORY_DOMAIN_DEFAULT = "facette.ticimaxeticaret.com"
+
+
 async def _api_key() -> str:
     s = await db.settings.find_one({"id": "ticimax"}) or {}
     return s.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
+
+
+async def _ensure_domain():
+    from ticimax_client import set_domain
+    s = await db.settings.find_one({"id": "ticimax"}) or {}
+    set_domain(s.get("history_domain") or HISTORY_DOMAIN_DEFAULT)
 
 
 @router.get("/wsdl-probe")
@@ -67,7 +79,9 @@ async def ticimax_wsdl_probe(current_user: dict = Depends(require_admin)):
     """SiparisServis WSDL'ine Railway'den erişimi ve harici şema referanslarını teşhis eder."""
     import httpx
     import re as _re
-    from ticimax_client import SIPARIS_WSDL
+    import ticimax_client as _tc
+    await _ensure_domain()
+    SIPARIS_WSDL = _tc.SIPARIS_WSDL  # set_domain SONRASI güncel değer
     out = {"wsdl_url": SIPARIS_WSDL}
     try:
         async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as c:
@@ -102,6 +116,7 @@ async def ticimax_orders_probe(
     """Ticimax WS'ten örnek sipariş yapısı — backfill alan eşlemesi doğrulaması."""
     from ticimax_client import get_orders as tc_get_orders, set_live
     key = await _api_key()
+    await _ensure_domain()
     set_live(True)
     try:
         orders = await asyncio.to_thread(
