@@ -3998,6 +3998,38 @@ async def sync_trendyol_claims(
     durum geçişleri her çağrıda canlı tazelenir.
     """
     return await _sync_trendyol_claims_core(days_back)
+@router.get("/trendyol/claims/sync-background")
+async def sync_trendyol_claims_background(days_back: int = 1095, current_user: dict = Depends(require_admin)):
+    """Uzun geçmiş (ör. 3 yıl) claim senkronunu ARKA PLANDA başlatır — Cloudflare'in
+    100 sn sınırına takılmaz. Durum: GET /trendyol/claims/sync-background/status."""
+    import asyncio
+    await db.settings.update_one(
+        {"id": "ty_claims_backfill"},
+        {"$set": {"status": "running", "days_back": days_back,
+                  "started_at": datetime.now(timezone.utc).isoformat()},
+         "$unset": {"result": "", "error": ""}},
+        upsert=True)
+
+    async def _run():
+        try:
+            res = await _sync_trendyol_claims_core(days_back)
+            await db.settings.update_one(
+                {"id": "ty_claims_backfill"},
+                {"$set": {"status": "done", "result": res,
+                          "finished_at": datetime.now(timezone.utc).isoformat()}})
+        except Exception as e:
+            logger.error(f"[ty claims backfill] {e}")
+            await db.settings.update_one(
+                {"id": "ty_claims_backfill"},
+                {"$set": {"status": "error", "error": str(e)[:500],
+                          "finished_at": datetime.now(timezone.utc).isoformat()}})
+
+    asyncio.create_task(_run())
+    return {"started": True, "days_back": days_back}
+@router.get("/trendyol/claims/sync-background/status")
+async def sync_trendyol_claims_background_status(current_user: dict = Depends(require_admin)):
+    doc = await db.settings.find_one({"id": "ty_claims_backfill"}, {"_id": 0})
+    return doc or {"status": "none"}
 @router.post("/trendyol/claims/fix-discounts")
 async def fix_claim_discounts(current_user: dict = Depends(require_admin)):
     """Fix discount data for existing claims by fetching from order API"""

@@ -59,6 +59,54 @@ def _unwrap_variants(raw) -> List[Dict]:
     return [_to_dict(v) for v in raw if v]
 
 
+def _deep_serialize(o, depth=0):
+    """Zeep nesnesini JSON'a çevrilebilir yapıya derinlemesine aç (probe/backfill için)."""
+    if depth > 8:
+        return str(o)
+    if o is None or isinstance(o, (str, int, float, bool)):
+        return o
+    if isinstance(o, (list, tuple)):
+        return [_deep_serialize(x, depth + 1) for x in o]
+    if hasattr(o, "__values__"):
+        try:
+            return {k: _deep_serialize(v, depth + 1) for k, v in dict(o.__values__).items()}
+        except Exception:
+            return str(o)
+    if isinstance(o, dict):
+        return {k: _deep_serialize(v, depth + 1) for k, v in o.items()}
+    try:
+        from datetime import datetime as _dt, date as _d
+        if isinstance(o, (_dt, _d)):
+            return o.isoformat()
+    except Exception:
+        pass
+    try:
+        from decimal import Decimal as _Dec
+        if isinstance(o, _Dec):
+            return float(o)
+    except Exception:
+        pass
+    return str(o)
+
+
+@router.get("/orders/probe")
+async def ticimax_orders_probe(
+    start_date: str, end_date: str, page: int = 1,
+    include_marketplace: bool = True,
+    current_user: dict = Depends(require_admin),
+):
+    """Ticimax WS'ten örnek sipariş yapısını döndürür — geçmiş sipariş backfill'inin
+    alan eşlemesini canlı şemayla doğrulamak için (yalnız admin)."""
+    import asyncio
+    from ticimax_client import get_orders as tc_get_orders
+    s = await db.settings.find_one({"id": "ticimax"}) or {}
+    api_key = s.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
+    orders = await asyncio.to_thread(
+        tc_get_orders, page, 5, api_key, start_date, end_date,
+        not include_marketplace, False)
+    return {"count": len(orders), "samples": [_deep_serialize(o) for o in orders[:2]]}
+
+
 @router.post("/sync-stock")
 async def sync_ticimax_stock(
     max_products: int = Query(2000, ge=10, le=20000),
