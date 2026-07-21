@@ -131,6 +131,9 @@ export default function Returns() {
   };
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [expandedId, setExpandedId] = useState(null);
+  const [perms, setPerms] = useState([]);
+  const [editRows, setEditRows] = useState({}); // onaylanmış iadede kalem kilidi açık mı: {claim_id: true}
+  const canEditApproval = () => perms.includes("*") || perms.includes("returns.expense_note");
   const [gpModalOpen, setGpModalOpen] = useState(false);
   const [gpData, setGpData] = useState(null);
   const [gpLoading, setGpLoading] = useState(false);
@@ -182,6 +185,13 @@ export default function Returns() {
   }, [page, debouncedSearch, statusTab, platform]);
 
   useEffect(() => { fetchClaims(); }, [fetchClaims]);
+
+  // Yetkiler — onay geçmişini düzenleme yalnız muhasebe (returns.expense_note) / admin (*).
+  useEffect(() => {
+    axios.get(`${API}/admin/me/permissions`, { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } })
+      .then((r) => setPerms(r.data?.permissions || []))
+      .catch(() => {});
+  }, []);
 
   // CANLI EŞ ZAMANLILIK: sayfa açılır açılmaz + her 2 dakikada bir pazaryerinden
   // HIZLI senkron (30 günlük pencere) çekilir; sekme sayıları TY/HB paneliyle uyuşur.
@@ -568,7 +578,8 @@ export default function Returns() {
   };
 
   const toggleSelectAll = () => {
-    const selectable = claims.filter(c => !c.manual);
+    // e-Fatura siparişler seçilemez — gider pusulası düzenlenemez (katı kural).
+    const selectable = claims.filter(c => !c.manual && !c.is_efatura);
     if (selectable.length > 0 && selectedIds.size === selectable.length) {
       setSelectedIds(new Set());
     } else {
@@ -835,7 +846,7 @@ export default function Returns() {
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="px-3 py-3 w-10">
-                  <input type="checkbox" checked={claims.filter(c => !c.manual).length > 0 && selectedIds.size === claims.filter(c => !c.manual).length}
+                  <input type="checkbox" checked={claims.filter(c => !c.manual && !c.is_efatura).length > 0 && selectedIds.size === claims.filter(c => !c.manual && !c.is_efatura).length}
                     onChange={toggleSelectAll} className="rounded" data-testid="select-all-checkbox" />
                 </th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sipariş No</th>
@@ -880,7 +891,7 @@ export default function Returns() {
                 return (
                   <tr key={claim.claim_id} className={`${selectedIds.has(claim.claim_id) ? "bg-blue-50" : "hover:bg-gray-50"} transition-colors`}>
                     <td className="px-3 py-3">
-                      {!claim.manual && (
+                      {!claim.manual && !claim.is_efatura && (
                         <input type="checkbox" checked={selectedIds.has(claim.claim_id)}
                           onChange={() => toggleSelect(claim.claim_id)} className="rounded"
                           data-testid={`select-claim-${claim.claim_id}`} />
@@ -892,6 +903,12 @@ export default function Returns() {
                         {claim.order_number}
                         {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                       </button>
+                      {claim.is_efatura && (
+                        <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold border border-red-700 animate-pulse"
+                             title="Bu sipariş e-Fatura / kurumsal siparişidir. Gider pusulası düzenlenemez — müşteriden iade faturası alınmalıdır.">
+                          ⚠️ BU SİPARİŞ E-FATURADIR
+                        </div>
+                      )}
                       {claim.merged_count > 1 && (
                         <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-semibold border border-amber-200"
                              title={`Bu sipariş Hepsiburada'da ${claim.merged_count} ayrı kalem-claim olarak açılmış; tek iade olarak birleştirildi. İşlemler (onay/gider pusulası) hepsine birden uygulanır.`}>
@@ -915,18 +932,24 @@ export default function Returns() {
                           {(() => {
                             const allIds = (claim.items || []).map(i => i.claim_item_id).filter(Boolean);
                             const selIds = itemSel[claim.claim_id] || new Set(allIds);
+                            // Onaylanmış iadede kalemler KİLİTLİ (yalnız muhasebe/admin "Düzenle" ile açar).
+                            const locked = isApproved && !editRows[claim.claim_id];
                             return (
                               <>
                                 <div className="rounded-lg border bg-white divide-y">
                                   {(claim.items || []).map((item, ii) => (
-                                    <label key={ii} className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-gray-50">
+                                    <label key={ii} className={`flex items-center gap-2 px-2 py-1.5 ${locked ? "cursor-default" : "cursor-pointer hover:bg-gray-50"}`}>
                                       {!claim.manual && (
-                                        <input type="checkbox" className="rounded"
+                                        <input type="checkbox" className="rounded" disabled={locked}
                                           checked={selIds.has(item.claim_item_id)}
-                                          onChange={() => toggleItem(claim.claim_id, item.claim_item_id, allIds)} />
+                                          onChange={() => !locked && toggleItem(claim.claim_id, item.claim_item_id, allIds)} />
+                                      )}
+                                      {isApproved && selIds.has(item.claim_item_id) && (
+                                        <span className="text-green-600 text-[10px] font-bold" title="Bu kalem onaylandı">✓</span>
                                       )}
                                       <span className="flex-1">
                                         <span className="font-medium">{item.productName || "-"}</span>
+                                        {item.size ? <span className="ml-1.5 px-1.5 py-0.5 rounded bg-gray-800 text-white text-[10px] font-bold">Beden: {item.size}</span> : null}
                                         {(item.quantity || 1) > 1 ? <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-bold">× {item.quantity} adet</span> : null}
                                         {item.barcode ? <span className="ml-2 font-mono text-[10px] text-gray-500">{item.barcode}</span> : null}
                                         {item.reason ? <span className="ml-2 text-[10px] text-gray-400">({item.reason})</span> : null}
@@ -939,11 +962,28 @@ export default function Returns() {
                                   ))}
                                 </div>
                                 {!claim.manual && (isApproved ? (
-                                  <span
-                                    title="Bu iade zaten onaylanmış — tekrar onaylanamaz"
-                                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-600 border border-green-200 rounded-lg text-xs font-bold cursor-not-allowed opacity-70 select-none">
-                                    <Check size={13} /> İade Onaylandı
-                                  </span>
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <span
+                                      title="Bu iade zaten onaylanmış — tekrar onaylanamaz"
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-600 border border-green-200 rounded-lg text-xs font-bold cursor-not-allowed opacity-90 select-none">
+                                      <Check size={13} /> İade Onaylandı
+                                    </span>
+                                    <span className="text-[11px] text-gray-500">
+                                      Onaylanan: {selIds.size}/{(claim.items || []).length} kalem
+                                      {claim.return_approved_at ? ` · ${new Date(claim.return_approved_at).toLocaleDateString("tr-TR")}` : ""}
+                                    </span>
+                                    {canEditApproval() ? (
+                                      editRows[claim.claim_id] ? (
+                                        <button onClick={() => setEditRows(s => { const n = { ...s }; delete n[claim.claim_id]; return n; })}
+                                          className="px-3 py-1 rounded-lg bg-gray-800 text-white text-xs font-bold hover:bg-black">Kilitle</button>
+                                      ) : (
+                                        <button onClick={() => setEditRows(s => ({ ...s, [claim.claim_id]: true }))}
+                                          className="px-3 py-1 rounded-lg bg-white text-gray-700 border border-gray-300 text-xs font-bold hover:bg-gray-100">✏️ Düzenle</button>
+                                      )
+                                    ) : (
+                                      <span className="text-[10px] text-gray-400 italic" title="Onay geçmişini değiştirme yetkisi yalnız muhasebe ve admin kullanıcılarındadır.">🔒 muhasebe/admin</span>
+                                    )}
+                                  </div>
                                 ) : !isActioned && (
                                   <button onClick={() => handleApprove(claim, Array.from(selIds))}
                                     data-testid={`approve-items-${claim.claim_id}`}
@@ -1024,7 +1064,13 @@ export default function Returns() {
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        {claim.manual ? (
+                        {claim.is_efatura ? (
+                          <span
+                            title="Bu sipariş e-Fatura / kurumsal siparişidir — gider pusulası düzenlenemez. Müşteriden iade faturası alınmalıdır."
+                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-red-50 text-red-600 border border-red-200 text-[10px] font-bold cursor-not-allowed select-none">
+                            <FileText size={13} /> e-Fatura
+                          </span>
+                        ) : claim.manual ? (
                           <>
                             {renderGpNo(claim)}
                             <button onClick={() => handleManualGiderPusulasi(claim)}

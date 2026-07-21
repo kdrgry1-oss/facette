@@ -19,7 +19,7 @@ from typing import Optional
 import re
 
 from .deps import db, logger, require_admin, generate_id
-from .orders import _order_vade_farki
+from .orders import _order_vade_farki, _order_is_efatura
 
 router = APIRouter(prefix="/admin/rooftr", tags=["rooftr-returns"])
 
@@ -111,6 +111,7 @@ async def list_rooftr_return_orders(
         "return_approved_at": 1, "refund_paid_at": 1, "return_request": 1,
         "cargo_tracking_number": 1, "cargo_tracking_url": 1, "cargo_provider_name": 1,
         "iyzico_retrieve_response": 1, "installment": 1, "admin_notes": 1,
+        "invoice_type": 1, "billing_info": 1,
     }
 
     cursor = (
@@ -193,6 +194,7 @@ async def list_rooftr_return_orders(
                 for i in items
             ],
             "invoice_number": o.get("invoice_number") or "",
+            "is_efatura": _order_is_efatura(o),
             "created_at": o.get("created_at") or "",
             "updated_at": o.get("updated_at") or "",
             "return_approved_at": o.get("return_approved_at") or "",
@@ -211,7 +213,9 @@ async def list_rooftr_return_orders(
             {"_id": 0, "order_id": 1, "return_code": 1, "barcode_url": 1, "cargo_provider_name": 1,
              "iade_no": 1, "gonderi_no": 1, "mng_ref": 1, "contract_no": 1,
              "reship_code": 1, "reshipped_at": 1, "refund_payment": 1, "reason": 1,
-             "has_gider_pusulasi": 1, "gider_pusulasi_no": 1},
+             "has_gider_pusulasi": 1, "gider_pusulasi_no": 1,
+             "status": 1, "approval": 1, "approved_item_indexes": 1, "approved_items": 1,
+             "refund_breakdown": 1, "items": 1},
         ):
             _cr_map[cr.get("order_id")] = cr
     for r in rows:
@@ -228,6 +232,32 @@ async def list_rooftr_return_orders(
         r["reshipped_at"] = cr.get("reshipped_at") or ""
         r["has_gider_pusulasi"] = bool(cr.get("has_gider_pusulasi"))
         r["gider_pusulasi_no"] = cr.get("gider_pusulasi_no") or ""
+        # ONAY GEÇMİŞİ: hangi kalemler onaylanmış + kargo mahsubu — approved satırlarda
+        # kutucuklar bu seçimle ÖNİŞARETLİ ve READ-ONLY gösterilir (yalnız muhasebe/admin
+        # "Düzenle" ile açar). approved_item_indexes yoksa (tam onay) tüm kalemler onaylı sayılır.
+        _cr_status = str(cr.get("status") or "")
+        _appr = cr.get("approval") or {}
+        _is_approved = bool(_appr) or _cr_status in ("approved", "return_approved", "refunded", "partial_refunded") \
+            or r.get("status") in ("return_approved", "refunded", "partial_refunded")
+        r["return_is_approved"] = _is_approved
+        _ap_idx = cr.get("approved_item_indexes")
+        if _is_approved:
+            if isinstance(_ap_idx, list) and _ap_idx:
+                r["approved_item_indexes"] = _ap_idx
+                r["approved_full"] = False
+            else:
+                # tam onay → tüm kalemler
+                r["approved_item_indexes"] = list(range(len(r.get("items") or [])))
+                r["approved_full"] = True
+        else:
+            r["approved_item_indexes"] = []
+            r["approved_full"] = False
+        # Kargo mahsubu onayda uygulandı mı? refund_breakdown.cargo.mode=="deducted"
+        _rb_cargo = (cr.get("refund_breakdown") or {}).get("cargo") or {}
+        r["approved_cargo_deducted"] = bool(_is_approved and _rb_cargo.get("mode") == "deducted")
+        r["approval_by"] = _appr.get("by") or ""
+        r["approval_at"] = _appr.get("at") or r.get("return_approved_at") or ""
+        r["approval_note"] = _appr.get("note") or ""
         # İade ödeme tarihi: sipariş damgası > köprü ödeme zamanı > (refunded ise) updated_at
         if not r.get("refund_paid_at"):
             _rp = (cr.get("refund_payment") or {}).get("at")

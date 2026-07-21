@@ -4398,6 +4398,39 @@ async def get_trendyol_claims(
         for c in claims:
             c["staff_notes"] = _notes_map.get(str(c.get("order_number")), [])
 
+    # e-FATURA BAYRAĞI: bu sayfadaki claim'lerin siparişlerini invoice_type/billing ile
+    # tek sorguda çek → e-Fatura/kurumsal siparişlere kırmızı uyarı + GP butonu kilidi.
+    if _onums:
+        from .orders import _order_is_efatura
+        _ef_map = {}
+        async for _o in db.orders.find(
+            {"order_number": {"$in": _onums}},
+            {"_id": 0, "order_number": 1, "invoice_type": 1, "billing_info": 1, "billing_address": 1},
+        ):
+            _ef_map[str(_o.get("order_number"))] = _order_is_efatura(_o)
+        for c in claims:
+            c["is_efatura"] = bool(_ef_map.get(str(c.get("order_number")), False))
+
+    # KALEM BEDENİ: iade kalemlerinde beden görünsün (kullanıcı isteği). productName/barcode
+    # var ama size çoğu kayıtta boş → barkodu ürün kataloğundaki varyanttan zenginleştir.
+    _bcs = list({str(it.get("barcode") or "").strip()
+                 for c in claims for it in (c.get("items") or [])
+                 if str(it.get("barcode") or "").strip() and not str(it.get("size") or "").strip()})
+    if _bcs:
+        _size_map = {}
+        async for _p in db.products.find(
+                {"variants.barcode": {"$in": _bcs}}, {"_id": 0, "variants": 1}):
+            for _v in (_p.get("variants") or []):
+                _vbc = str(_v.get("barcode") or "").strip()
+                if _vbc and _vbc not in _size_map:
+                    _size_map[_vbc] = _v.get("size") or _v.get("beden") or ""
+        for c in claims:
+            for it in (c.get("items") or []):
+                if not str(it.get("size") or "").strip():
+                    _sz = _size_map.get(str(it.get("barcode") or "").strip())
+                    if _sz:
+                        it["size"] = _sz
+
     # Sekme adetleri (#11) — Trendyol "aksiyon bekleyen ÜRÜN sayısı" ile birebir tutması için
     # ÜRÜN (kalem) bazında sayılır. KRİTİK: bir claim KARIŞIK statülü olabilir (ör. 2 kalem;
     # 1'i WaitingInAction, 1'i Accepted). Bu yüzden claim'in tüm kalemlerini tek kovaya atmak
@@ -5001,11 +5034,15 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
             claim["items"] = _m_items
             claim["refund_amount"] = round(_m_refund, 2)
 
-    # Kurumsal/e-Fatura siparişinde gider pusulası DÜZENLENEMEZ — iade faturası gerekir.
+    # KATI KURAL: Kurumsal/e-Fatura siparişinde gider pusulası KESİNLİKLE düzenlenemez —
+    # iade faturası gerekir (kullanıcı isteği; tek doğruluk kaynağı orders._order_is_efatura).
     _onum = claim.get("order_number", "")
     if _onum:
-        _ord = await db.orders.find_one({"order_number": _onum}, {"_id": 0, "invoice_type": 1, "billing_info": 1})
-        if _ord and ((_ord.get("invoice_type") == "e-fatura") or bool((_ord.get("billing_info") or {}).get("is_corporate"))):
+        from .orders import _order_is_efatura
+        _ord = await db.orders.find_one(
+            {"order_number": _onum},
+            {"_id": 0, "invoice_type": 1, "billing_info": 1, "billing_address": 1})
+        if _order_is_efatura(_ord or {}):
             raise HTTPException(status_code=400, detail="Bu sipariş kurumsal/e-Fatura siparişi — gider pusulası düzenlenemez. Müşteriden iade faturası gerekir (Doğan'dan panele düşecek, onaylayınca stok +1).")
 
     # İade onayımız = gider pusulası oluşturmak. Stoğu BİR KEZ geri ekle (idempotent) —
@@ -5231,11 +5268,26 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
                           "musteri": "", "tarih": str(r.get("created_at") or "")[:10],
                           "tutar": round(float(r.get("refund_amount") or 0), 2)})
 
+    # KATI KURAL: e-Fatura/kurumsal siparişler toplu kesim HAVUZUNDAN tamamen çıkarılır
+    # (kullanıcı isteği) — bu siparişlere gider pusulası KESİLMEZ, iade faturası gerekir.
+    from .orders import _order_is_efatura
+    _onums = list({c.get("siparis") for c in cands if c.get("siparis")})
+    _efatura_onums = set()
+    if _onums:
+        async for _o in db.orders.find(
+                {"order_number": {"$in": _onums}},
+                {"_id": 0, "order_number": 1, "invoice_type": 1,
+                 "billing_info": 1, "billing_address": 1}):
+            if _order_is_efatura(_o):
+                _efatura_onums.add(str(_o.get("order_number")))
+    _elenen_efatura = len([c for c in cands if str(c.get("siparis")) in _efatura_onums])
+    cands = [c for c in cands if str(c.get("siparis")) not in _efatura_onums]
+
     cands.sort(key=lambda x: x["tarih"])  # iade talep tarihine göre eskiden yeniye
     batch = cands[:limit]
     if dry:
         return {"dry_run": True, "toplam_aday": len(cands), "bu_partide": len(batch),
-                "adaylar": batch}
+                "elenen_efatura": _elenen_efatura, "adaylar": batch}
 
     from .orders import site_return_gider_pusulasi
     kesilen, hatalar = [], []

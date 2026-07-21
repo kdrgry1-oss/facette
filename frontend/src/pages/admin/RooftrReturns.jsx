@@ -120,6 +120,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
   const [selItems, setSelItems] = useState({}); // açılır detayda tiklenen kalemler: { "orderId::index": true }
   const [editGpNo, setEditGpNo] = useState(null); // gider pusulası no inline düzenleme: { id, value }
   const [cargoSel, setCargoSel] = useState({}); // kargo satırı tiklendi mi: { orderId: true }
+  const [editRows, setEditRows] = useState({}); // onaylanmış iadede kalem seçimini düzenleme kilidi açık mı: { orderId: true }
+  const [seededRows, setSeededRows] = useState({}); // onay geçmişi kutucukları bir kez önişaretlendi mi (tekrar ezmesin)
   const [freeShipFee, setFreeShipFee] = useState(0); // ücretsiz-kargo mahsup tutarı (ayarlardan)
   // Tek kaynak: durum listesi Ayarlar → Sipariş Durumları'ndan beslenir (görünürlük + özel durumlar dahil).
   const [statusOpts, setStatusOpts] = useState(STATUS_OPTS);        // dropdown (yalnız "görünür" olanlar)
@@ -302,6 +304,24 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       .catch(() => {});
   }, []);
   const can = (k) => perms.includes("*") || perms.includes(k);
+  // Onay geçmişini DÜZENLEME yetkisi: yalnız muhasebe (returns.expense_note) veya admin (*).
+  const canEditApproval = () => perms.includes("*") || perms.includes("returns.expense_note");
+
+  // ONAY GEÇMİŞİ ÖNİŞARETLEME: onaylanmış bir iade detayı AÇILDIĞINDA, geçmişte
+  // hangi kalemler/kargo onaylanmışsa kutucukları o seçimle önişaretle (bir kez).
+  // Kullanıcı isteği: "neyi onaylamışız geçmişte görebilelim, bir daha tiklenemesin."
+  useEffect(() => {
+    if (!expandedId) return;
+    const r = rows.find((x) => x.id === expandedId);
+    if (!r || !r.return_is_approved || seededRows[expandedId]) return;
+    setSelItems((s) => {
+      const n = { ...s };
+      (r.approved_item_indexes || []).forEach((i) => { n[`${expandedId}::${i}`] = true; });
+      return n;
+    });
+    if (r.approved_cargo_deducted) setCargoSel((s) => ({ ...s, [expandedId]: true }));
+    setSeededRows((s) => ({ ...s, [expandedId]: true }));
+  }, [expandedId, rows, seededRows]);
 
   // İade işlem akışı: Rooftr siparişini köprüle (customer_returns üret) → tutar önizleme → modal
   const openWorkflow = async (row, mode = "approve") => {
@@ -548,6 +568,12 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                   <tr className="hover:bg-gray-50">
                     <td className="px-3 py-2.5">
                       <div className="font-mono text-sm font-bold text-blue-600">{r.order_number}</div>
+                      {r.is_efatura && (
+                        <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold border border-red-700 animate-pulse"
+                             title="Bu sipariş e-Fatura / kurumsal siparişidir. Gider pusulası düzenlenemez — müşteriden iade faturası alınmalıdır.">
+                          ⚠️ BU SİPARİŞ E-FATURADIR
+                        </div>
+                      )}
                       {r.item_count > 0 && <div className="text-xs text-gray-400">{r.item_count} ürün</div>}
                       {Array.isArray(r.staff_notes) && r.staff_notes.length > 0 && (
                         <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[10px] font-semibold border border-indigo-200 cursor-help"
@@ -619,8 +645,15 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           )
                         )}
                         {/* Gider pusulası YALNIZCA onaylanan iadelerde oluşturulur (talep/kargoda
-                            aşamasında gösterilmez). Zaten pusulası olanlarda yeniden yazdırmak için kalır. */}
-                        {can("returns.expense_note") &&
+                            aşamasında gösterilmez). Zaten pusulası olanlarda yeniden yazdırmak için kalır.
+                            KATI KURAL: e-Fatura siparişinde gider pusulası düzenlenemez. */}
+                        {r.is_efatura ? (
+                          <span
+                            title="Bu sipariş e-Fatura / kurumsal siparişidir — gider pusulası düzenlenemez. Müşteriden iade faturası alınmalıdır."
+                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-red-50 text-red-600 border border-red-200 text-[10px] font-bold cursor-not-allowed select-none">
+                            <FileText size={13} /> e-Fatura
+                          </span>
+                        ) : can("returns.expense_note") &&
                           (["return_approved", "refunded", "partial_refunded"].includes(r.status) || r.has_gider_pusulasi) && (
                           <button onClick={() => handleSiteGider(r)} disabled={busyId === r.id}
                             className={`p-1.5 rounded-lg disabled:opacity-50 ${r.has_gider_pusulasi ? "bg-purple-100 text-purple-700 hover:bg-purple-200" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`} title="Gider Pusulası">
@@ -659,9 +692,13 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           <div className="space-y-1">
                             {r.items.map((it, i) => {
                               const sel = !!selItems[`${r.id}::${i}`];
+                              // Onaylanmış iadede kutucuklar KİLİTLİ (yalnız muhasebe/admin "Düzenle" ile açar).
+                              const locked = r.return_is_approved && !editRows[r.id];
                               return (
-                                <label key={i} className={`flex items-center gap-3 text-xs text-gray-900 border rounded-md px-2.5 py-1.5 cursor-pointer ${sel ? "bg-orange-50 border-orange-300" : "bg-white"}`}>
-                                  <input type="checkbox" checked={sel} onChange={() => toggleItem(r.id, i)} className="shrink-0" />
+                                <label key={i} className={`flex items-center gap-3 text-xs text-gray-900 border rounded-md px-2.5 py-1.5 ${locked ? "cursor-default" : "cursor-pointer"} ${sel ? "bg-orange-50 border-orange-300" : "bg-white"}`}>
+                                  <input type="checkbox" checked={sel} disabled={locked}
+                                    onChange={() => !locked && toggleItem(r.id, i)} className="shrink-0" />
+                                  {sel && r.return_is_approved && <span className="text-green-600 text-[10px] font-bold shrink-0" title="Bu kalem geçmişte onaylanmış">✓ onaylı</span>}
                                   <span className="truncate max-w-[260px]">{it.name || "—"}</span>
                                   <span className="whitespace-nowrap text-gray-500">{it.qty} ad. × {fmtTL(it.price)}</span>
                                   {(() => {
@@ -736,14 +773,48 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           const amt = paid ? Number(r.shipping_cost) : 0;
                           if (amt <= 0) return null;
                           const sel = !!cargoSel[r.id];
+                          const locked = r.return_is_approved && !editRows[r.id];
                           return (
-                            <label className={`mt-1 inline-flex items-center gap-2 text-xs border rounded-md px-2.5 py-1.5 cursor-pointer ${sel ? "bg-amber-50 border-amber-300 text-gray-900" : "bg-white text-gray-900"}`}>
-                              <input type="checkbox" checked={sel} onChange={() => toggleCargo(r.id)} className="shrink-0" />
+                            <label className={`mt-1 inline-flex items-center gap-2 text-xs border rounded-md px-2.5 py-1.5 ${locked ? "cursor-default" : "cursor-pointer"} ${sel ? "bg-amber-50 border-amber-300 text-gray-900" : "bg-white text-gray-900"}`}>
+                              <input type="checkbox" checked={sel} disabled={locked}
+                                onChange={() => !locked && toggleCargo(r.id)} className="shrink-0" />
                               <span className="font-medium whitespace-nowrap">Kargoyu müşteriden kes</span>
                               <span className={`font-semibold whitespace-nowrap ${sel ? "text-amber-700" : "text-gray-400"}`}>−{fmtTL(amt)}</span>
                             </label>
                           );
                         })()}
+
+                        {/* ONAY GEÇMİŞİ + DÜZENLE — onaylanmış iadelerde geçmiş seçimi göster;
+                            değiştirme yalnız muhasebe/admin (returns.expense_note veya *). */}
+                        {r.return_is_approved && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 border-t pt-2">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-green-100 text-green-700 text-[10px] font-bold border border-green-200">
+                              ✓ Onaylanmış İade
+                            </span>
+                            <span className="text-[11px] text-gray-500">
+                              {r.approved_full ? "Tüm kalemler onaylandı" : `${(r.approved_item_indexes || []).length} kalem onaylandı`}
+                              {r.approved_cargo_deducted ? " · kargo müşteriden kesildi" : ""}
+                              {r.approval_by ? ` · ${r.approval_by}` : ""}
+                              {r.approval_at ? ` · ${fmtDate(r.approval_at)}` : ""}
+                            </span>
+                            <span className="flex-1" />
+                            {canEditApproval() ? (
+                              editRows[r.id] ? (
+                                <button onClick={() => setEditRows((s) => { const n = { ...s }; delete n[r.id]; return n; })}
+                                  className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-gray-800 text-white text-xs font-bold hover:bg-black">
+                                  Kilitle
+                                </button>
+                              ) : (
+                                <button onClick={() => setEditRows((s) => ({ ...s, [r.id]: true }))}
+                                  className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-white text-gray-700 border border-gray-300 text-xs font-bold hover:bg-gray-100">
+                                  ✏️ Düzenle
+                                </button>
+                              )
+                            ) : (
+                              <span className="text-[10px] text-gray-400 italic" title="Onay geçmişini değiştirme yetkisi yalnız muhasebe ve admin kullanıcılarındadır.">🔒 Değiştirme yetkisi: muhasebe/admin</span>
+                            )}
+                          </div>
+                        )}
 
                         {/* İade kargo süreci: gelen iade barkodu/kodu + reddedilenlerde geri gönderim */}
                         {(r.return_code || r.return_barcode_url || r.cargo_tracking_number || r.reship_code || r.return_cargo_provider) && (

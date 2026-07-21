@@ -5985,6 +5985,26 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
     return await _build_return_for_order(order, payload, current_user)
 
 
+def _order_is_efatura(order: dict) -> bool:
+    """Sipariş e-Fatura / kurumsal mı? (KATI GP yasağının tek doğruluk kaynağı.)
+    invoice_type='e-fatura' VEYA billing_info/billing_address kurumsal işaretliyse
+    (is_corporate) YA DA VKN/vergi no doluysa e-Fatura kabul edilir."""
+    if not order:
+        return False
+    if str(order.get("invoice_type") or "").strip().lower() in ("e-fatura", "efatura"):
+        return True
+    for _b in (order.get("billing_info") or {}, order.get("billing_address") or {}):
+        if not isinstance(_b, dict):
+            continue
+        if bool(_b.get("is_corporate")):
+            return True
+        # VKN (10 hane) dolu → kurumsal e-Fatura mükellefi
+        _vkn = str(_b.get("tax_number") or _b.get("vkn") or _b.get("tax_id") or "").strip()
+        if len(_vkn) == 10 and _vkn.isdigit():
+            return True
+    return False
+
+
 def _order_contact_matches(order: dict, email: str, phone: str) -> bool:
     """Misafir doğrulaması: verilen e-posta VEYA telefon siparişteki ile eşleşiyor mu?
     Siparişteki e-posta/telefon birden çok yerde tutulabilir (kök, shipping/billing)."""
@@ -6183,16 +6203,36 @@ async def list_returns_admin(
     if status:
         q["status"] = status
     rows = await db.customer_returns.find(q, {"_id": 0, "barcode_png_b64": 0}).sort("created_at", -1).to_list(length=limit)
+    # Kalem bedenlerini toplu zenginleştir (barkod → varyant beden) — iade satırında beden görünsün.
+    _bcs = list({str(it.get("barcode") or "").strip()
+                 for r in rows for it in (r.get("items") or [])
+                 if str(it.get("barcode") or "").strip() and not str(it.get("size") or "").strip()})
+    _size_map = {}
+    if _bcs:
+        async for _p in db.products.find({"variants.barcode": {"$in": _bcs}}, {"_id": 0, "variants": 1}):
+            for _v in (_p.get("variants") or []):
+                _vbc = str(_v.get("barcode") or "").strip()
+                if _vbc and _vbc not in _size_map:
+                    _size_map[_vbc] = _v.get("size") or _v.get("beden") or ""
     out = []
     for r in rows:
-        o = await db.orders.find_one({"id": r.get("order_id")}, {"_id": 0, "shipping_address": 1, "status": 1}) or {}
+        o = await db.orders.find_one(
+            {"id": r.get("order_id")},
+            {"_id": 0, "shipping_address": 1, "status": 1,
+             "invoice_type": 1, "billing_info": 1, "billing_address": 1}) or {}
         addr = o.get("shipping_address") or {}
+        for it in (r.get("items") or []):
+            if not str(it.get("size") or "").strip():
+                _sz = _size_map.get(str(it.get("barcode") or "").strip())
+                if _sz:
+                    it["size"] = _sz
         out.append({
             **r,
             "customer_name": addr.get("full_name") or f"{addr.get('first_name','')} {addr.get('last_name','')}".strip(),
             "customer_email": addr.get("email", ""),
             "customer_phone": addr.get("phone", ""),
             "order_status": o.get("status", ""),
+            "is_efatura": _order_is_efatura(o),
             "barcode_url": f"/api/orders/returns/{r.get('id')}/barcode.png",
         })
     return {"returns": out}
@@ -6771,6 +6811,10 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     if not rec:
         raise HTTPException(status_code=404, detail="İade bulunamadı")
     order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
+    # KATI KURAL: e-Fatura / kurumsal siparişe gider pusulası KESİNLİKLE düzenlenemez —
+    # iade faturası gerekir (kullanıcı isteği). Hiçbir yol (tekil/toplu) bunu aşamaz.
+    if _order_is_efatura(order):
+        raise HTTPException(status_code=400, detail="Bu sipariş e-Fatura/kurumsal siparişidir — gider pusulası düzenlenemez. Müşteriden iade faturası alınmalıdır.")
     settings = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
     company = settings.get("company_info", {}) if settings else {}
 
