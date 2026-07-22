@@ -528,15 +528,22 @@ async def flatten_order_financials(
         ni["discount_amount"] = 0
         ni["discount"] = 0
         new_items.append(ni)
+    _now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
     _set = {
         "items": new_items,
         "subtotal": target, "total": target, "total_amount": target,
         "discount": 0, "discount_amount": 0, "payment_discount": 0,
         "shipping_cost": 0,
+        # Tahsilat/charged tabanını da hedefe çek → gider pusulası charged>total farkından
+        # eski tutarı (985,63) kullanmasın; düz 'amount' baz alsın.
+        "paid_amount": target,
         "financials_flattened_by": current_user.get("email") or current_user.get("id"),
-        "financials_flattened_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
-        "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "financials_flattened_at": _now,
+        "updated_at": _now,
     }
+    _iyz = order.get("iyzico_retrieve_response")
+    if isinstance(_iyz, dict) and _iyz.get("paidPrice") is not None:
+        _set["iyzico_retrieve_response.paidPrice"] = target
     await db.orders.update_one({"id": order_id}, {"$set": _set})
     # customer_returns köprü kalemlerini de eşle (iade/gp aynı görünsün)
     _cr_items = [{
