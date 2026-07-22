@@ -18,7 +18,7 @@ from fastapi import APIRouter, Query, Depends, HTTPException
 from typing import Optional
 import re
 
-from .deps import db, logger, require_admin, generate_id
+from .deps import db, logger, require_admin, generate_id, _search_tr_regex
 from .orders import _order_vade_farki, _order_is_efatura
 
 router = APIRouter(prefix="/admin/rooftr", tags=["rooftr-returns"])
@@ -85,19 +85,25 @@ async def list_rooftr_return_orders(
         _pm = [x.strip() for x in str(payment).split(",") if x.strip()]
         base_filter["payment_method"] = {"$in": _pm} if len(_pm) > 1 else (_pm[0] if _pm else payment)
 
-    if search:
-        s = re.escape(search.strip())
-        rx = {"$regex": s, "$options": "i"}
-        base_filter["$and"] = [{
-            "$or": [
-                {"order_number": rx},
-                {"order_code": rx},
-                {"shipping_address.first_name": rx},
-                {"shipping_address.last_name": rx},
-                {"shipping_address.phone": rx},
-                {"shipping_address.email": rx},
+    if search and search.strip():
+        _fields = ["order_number", "order_code",
+                   "shipping_address.first_name", "shipping_address.last_name",
+                   "shipping_address.full_name", "shipping_address.name",
+                   "shipping_address.phone", "shipping_address.email",
+                   "customer_name", "full_name"]
+        _words = [w for w in search.strip().split() if w]
+        if len(_words) <= 1:
+            rx = {"$regex": _search_tr_regex(search.strip()), "$options": "i"}
+            base_filter["$and"] = [{"$or": [{f: rx} for f in _fields]}]
+        else:
+            # ÇOK KELİMELİ AD-SOYAD: her kelime herhangi bir alanda geçmeli (sıra önemsiz).
+            # 'büşra çe' → 'büşra' first_name'de, 'çe' last_name'de eşleşir → bulunur.
+            # (Eskiden tüm ifade tek regex'ti; ad ile soyad AYRI alanlarda olduğundan hiç
+            #  eşleşmiyordu → arama bozuluyordu.) Türkçe İ/ı duyarsız (_search_tr_regex).
+            base_filter["$and"] = [
+                {"$or": [{f: {"$regex": _search_tr_regex(w), "$options": "i"}} for f in _fields]}
+                for w in _words
             ]
-        }]
 
     total = await db.orders.count_documents(base_filter)
 
