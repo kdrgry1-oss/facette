@@ -740,7 +740,7 @@ export default function Returns() {
               <select value={gpBulkCount} onChange={(e) => setGpBulkCount(parseInt(e.target.value, 10))}
                 data-testid="gp-bulk-count"
                 className="border border-emerald-300 rounded-lg px-2 py-1.5 text-sm bg-white">
-                {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                {[10, 20, 50, 100, 200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
               </select>
             </div>
             <button onClick={() => runGpBulk(true)} disabled={gpBulkBusy}
@@ -766,6 +766,11 @@ export default function Returns() {
                 {gpBulkPreview.toplam_aday > gpBulkPreview.bu_partide &&
                   ` (kalan ${gpBulkPreview.toplam_aday - gpBulkPreview.bu_partide} sonraki partilerde)`}
               </p>
+              {gpBulkPreview.kaynak_dagilim && (
+                <p className="text-[11px] text-gray-600 mb-1.5">
+                  Kaynak dağılımı — Site: <b>{gpBulkPreview.kaynak_dagilim.site}</b> · Trendyol: <b>{gpBulkPreview.kaynak_dagilim.trendyol}</b> · Hepsiburada: <b>{gpBulkPreview.kaynak_dagilim.hepsiburada}</b>
+                </p>
+              )}
               <div className="max-h-56 overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead>

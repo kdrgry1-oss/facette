@@ -5394,7 +5394,7 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
     date_from = str(payload.get("date_from") or "").strip()
     date_to = str(payload.get("date_to") or "").strip()
     sources = payload.get("sources") or ["site", "trendyol", "hepsiburada"]
-    limit = max(1, min(int(payload.get("limit") or 50), 200))
+    limit = max(1, min(int(payload.get("limit") or 50), 2000))
     dry = bool(payload.get("dry_run"))
     start_no = str(payload.get("start_no") or "").strip()
     try:
@@ -5480,9 +5480,15 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
 
     cands.sort(key=lambda x: x["tarih"])  # İADE ONAY tarihine göre eskiden yeniye (3 kaynak tek havuz)
     batch = cands[:limit]
+    # Kaynak dağılımı (kullanıcı: 'site/HB önizlemeye gelmiyor' — havuzda var mı doğrula).
+    from collections import Counter
+    _dag = Counter(c["kaynak"] for c in cands)
     if dry:
         return {"dry_run": True, "toplam_aday": len(cands), "bu_partide": len(batch),
-                "elenen_efatura": _elenen_efatura, "adaylar": batch}
+                "elenen_efatura": _elenen_efatura,
+                "kaynak_dagilim": {"site": _dag.get("site", 0), "trendyol": _dag.get("trendyol", 0),
+                                   "hepsiburada": _dag.get("hepsiburada", 0)},
+                "adaylar": batch}
 
     from .orders import site_return_gider_pusulasi
     kesilen, hatalar = [], []
