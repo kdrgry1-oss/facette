@@ -1299,6 +1299,20 @@ export default function AdminOrders({ unpaidView = false }) {
                           <span className="text-xs text-gray-500">Puan -{Number(order.points_used).toFixed(2)} TL</span>
                         )}
                         <span className="text-sm font-semibold text-gray-900">{order.total?.toFixed(2)} TL</span>
+                        {(() => {
+                          // Taksitli siparişte müşteriden GERÇEKTE çekilen tutar (vade farkı dahil):
+                          // panel peşin `total` gösteriyordu; çekileni de belirt (fatura bu tutarı yansıtır).
+                          const iyz = order.iyzico_retrieve_response || {};
+                          const charged = Number(iyz.paidPrice) || 0;
+                          const inst = parseInt(iyz.installment || order.installment || 1, 10) || 1;
+                          const vf = charged > 0 ? Math.round((charged - (order.total || 0)) * 100) / 100 : 0;
+                          if (inst > 1 && vf > 0.01) return (
+                            <span className="text-[11px] text-amber-600" title={`Müşteri ${inst} taksit seçti; iyzico peşin tutarın üzerine ${vf.toFixed(2)} TL vade farkı ekledi. Fatura bu çekilen tutarı yansıtır.`}>
+                              💳 Çekilen: {charged.toFixed(2)} TL ({inst} taksit · vade farkı +{vf.toFixed(2)})
+                            </span>
+                          );
+                          return null;
+                        })()}
                         {isUnpaidHavale && (
                           <span className="text-xs text-gray-500">Ödeme bekliyor</span>
                         )}
@@ -2022,9 +2036,27 @@ export default function AdminOrders({ unpaidView = false }) {
                       </div>
                     )}
                     <div className="flex justify-between font-medium text-lg pt-2 border-t">
-                      <span>Toplam</span>
+                      <span>Toplam{(() => {
+                        const iyz = selectedOrder.iyzico_retrieve_response || {};
+                        const inst = parseInt(iyz.installment || selectedOrder.installment || 1, 10) || 1;
+                        return inst > 1 ? <span className="text-xs font-normal text-gray-400"> (peşin)</span> : null;
+                      })()}</span>
                       <span>{selectedOrder.total?.toFixed(2)} TL</span>
                     </div>
+                    {(() => {
+                      // Taksitli: müşteriden çekilen (vade farkı dahil) tutar — fatura bunu yansıtır.
+                      const iyz = selectedOrder.iyzico_retrieve_response || {};
+                      const charged = Number(iyz.paidPrice) || 0;
+                      const inst = parseInt(iyz.installment || selectedOrder.installment || 1, 10) || 1;
+                      const vf = charged > 0 ? Math.round((charged - (selectedOrder.total || 0)) * 100) / 100 : 0;
+                      if (inst > 1 && vf > 0.01) return (
+                        <div className="mt-1 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">
+                          <div className="flex justify-between text-amber-700"><span>Taksit vade farkı ({inst} taksit)</span><span>+{vf.toFixed(2)} TL</span></div>
+                          <div className="flex justify-between font-semibold text-amber-900 mt-0.5"><span>💳 Müşteriden çekilen (fatura tutarı)</span><span>{charged.toFixed(2)} TL</span></div>
+                        </div>
+                      );
+                      return null;
+                    })()}
                   </>
                 )}
               </div>
