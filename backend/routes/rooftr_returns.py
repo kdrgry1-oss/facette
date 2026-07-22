@@ -497,6 +497,64 @@ async def bulk_approve_site_returns(
             "items": approved[:60]}
 
 
+@router.post("/flatten-order/{order_id}")
+async def flatten_order_financials(
+    order_id: str,
+    amount: Optional[float] = Query(None, description="Hedef düz tutar (TL). Verilmezse Σ kalem fiyatı."),
+    current_user: dict = Depends(require_admin),
+):
+    """TEK SİPARİŞİ 'DÜMDÜZ' TUTARA NORMALLE (Kadir: Senem Birdal — Ticimax import'undan gelen
+    hayalet indirim/kargo düzeltmesi). İndirim (discount+payment_discount) ve kargoyu SIFIRLAR,
+    subtotal=total=amount yapar, kalem fiyatlarını amount'a ölçekler, kalem indirimlerini sıfırlar.
+    Böylece panel/iade/gider pusulası hepsi 'amount' (ör. 985,15) olarak düz görünür.
+    NOT: yalnız veri-kalitesi düzeltmesi; ödeme durumuna DOKUNMAZ. Loglanır."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    items = order.get("items") or []
+    _cur_sum = sum(round(float(i.get("price") or 0), 2) * int(i.get("quantity") or 1) for i in items)
+    target = round(float(amount), 2) if amount is not None else round(_cur_sum, 2)
+    if target <= 0:
+        raise HTTPException(status_code=400, detail="Geçersiz hedef tutar")
+    # Kalem fiyatlarını hedefe ölçekle (tek kalemse doğrudan; çok kalemde mevcut orana göre).
+    _scale = (target / _cur_sum) if _cur_sum > 0.5 else 1.0
+    new_items = []
+    for it in items:
+        _q = int(it.get("quantity") or 1)
+        _np = round(float(it.get("price") or 0) * _scale, 2)
+        ni = dict(it)
+        ni["price"] = _np
+        ni["unit_price"] = _np
+        ni["discount_amount"] = 0
+        ni["discount"] = 0
+        new_items.append(ni)
+    _set = {
+        "items": new_items,
+        "subtotal": target, "total": target, "total_amount": target,
+        "discount": 0, "discount_amount": 0, "payment_discount": 0,
+        "shipping_cost": 0,
+        "financials_flattened_by": current_user.get("email") or current_user.get("id"),
+        "financials_flattened_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+    }
+    await db.orders.update_one({"id": order_id}, {"$set": _set})
+    # customer_returns köprü kalemlerini de eşle (iade/gp aynı görünsün)
+    _cr_items = [{
+        "name": it.get("product_name") or it.get("name") or "Ürün",
+        "size": it.get("size", "") or "", "color": it.get("color", "") or "",
+        "quantity": int(it.get("quantity", 1) or 1),
+        "price": float(it.get("price") or 0), "unit_price": float(it.get("unit_price") or 0),
+        "product_id": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+    } for it in new_items]
+    await db.customer_returns.update_many(
+        {"order_id": order_id}, {"$set": {"items": _cr_items}})
+    # Bu iadeye ait gider pusulası varsa yeni tutarla yeniden hesaplansın (idempotent).
+    _cr = await db.customer_returns.find_one({"order_id": order_id}, {"_id": 0, "id": 1})
+    logger.warning(f"[flatten-order] order={order_id} → {target} TL, admin={current_user.get('email')}")
+    return {"success": True, "order_id": order_id, "flat_amount": target,
+            "items": len(new_items), "return_id": (_cr or {}).get("id")}
+
+
 @router.post("/orders/refresh-dates")
 async def refresh_order_dates(
     page: int = Query(1, ge=1),
