@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck, Package, Download, CheckCircle, XCircle, FileText } from "lucide-react";
+import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck, Package, Download, CheckCircle, XCircle, FileText, Trash2 } from "lucide-react";
 import MultiSelect from "../../components/admin/MultiSelect";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -512,8 +512,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
     (r.return_is_approved || ["return_approved", "returned", "refunded", "partial_refunded"].includes(r.status) || r.has_gider_pusulasi);
   const toggleRowSel = (id) => setSelRows((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleSelAll = () => {
-    const eligible = (pageRows || []).filter(bulkGpEligible).map((r) => r.id);
-    setSelRows((prev) => (eligible.length && eligible.every((id) => prev.has(id))) ? new Set() : new Set(eligible));
+    const ids = (pageRows || []).map((r) => r.id);
+    setSelRows((prev) => (ids.length && ids.every((id) => prev.has(id))) ? new Set() : new Set(ids));
   };
   const handleBulkGider = async () => {
     const targets = (rows || []).filter((r) => selRows.has(r.id) && bulkGpEligible(r));
@@ -541,6 +541,31 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       load();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Toplu gider pusulası hatası");
+    } finally { setBulkBusy(false); }
+  };
+
+  // ── TOPLU SİL ────────────────────────────────────────────────────────────
+  // Seçili iadeleri (siparişleri) sil. DELETE /orders/{id} fiziksel silmeden
+  // ÖNCE orders_deleted arşivine taşır → 'Silinen Siparişler'den geri alınabilir.
+  const handleBulkDelete = async () => {
+    const targets = (rows || []).filter((r) => selRows.has(r.id));
+    if (!targets.length) { toast.error("Seçili iade yok."); return; }
+    if (!window.confirm(
+      `${targets.length} iade siparişi SİLİNECEK.\n\n` +
+      `• Siparişler arşive taşınır (orders_deleted) — 'Silinen Siparişler' sayfasından geri alınabilir.\n` +
+      `• Stok otomatik geri EKLENMEZ (silme ≠ iptal/iade onayı).\n\nDevam edilsin mi?`
+    )) return;
+    setBulkBusy(true);
+    let ok = 0, fail = 0;
+    try {
+      for (const r of targets) {
+        try { await axios.delete(`${API}/orders/${r.id}`, auth()); ok++; }
+        catch (e) { fail++; }
+      }
+      if (ok) toast.success(`${ok} iade silindi (arşive taşındı)${fail ? ` · ${fail} başarısız` : ""}`);
+      else toast.error("Silme başarısız (yetki?).");
+      setSelRows(new Set());
+      load();
     } finally { setBulkBusy(false); }
   };
 
@@ -636,6 +661,12 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-bold hover:bg-purple-700 disabled:opacity-50">
                 <FileText size={14} /> {bulkBusy ? "Oluşturuluyor…" : "Toplu Gider Pusulası Oluştur"}
               </button>
+              {can("orders.delete") && (
+                <button onClick={handleBulkDelete} disabled={bulkBusy}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 disabled:opacity-50">
+                  <Trash2 size={14} /> Seçili İadeleri Sil
+                </button>
+              )}
               <button onClick={() => setSelRows(new Set())}
                 className="text-xs text-gray-500 hover:text-gray-800 font-medium">Seçimi temizle</button>
               <span className="text-[10px] text-gray-500">Numaralar {String(gpStart)}'dan sıralı atanır · e-Fatura/onaysız hariç</span>
@@ -645,8 +676,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
             <thead className="bg-gray-50 border-b text-gray-500 text-left text-xs uppercase">
               <tr>
                 <th className="px-2 py-2.5 w-8">
-                  <input type="checkbox" title="Sayfadaki uygun iadeleri seç"
-                    checked={(pageRows || []).filter(bulkGpEligible).length > 0 && (pageRows || []).filter(bulkGpEligible).every((r) => selRows.has(r.id))}
+                  <input type="checkbox" title="Sayfadaki tüm iadeleri seç"
+                    checked={(pageRows || []).length > 0 && (pageRows || []).every((r) => selRows.has(r.id))}
                     onChange={toggleSelAll} />
                 </th>
                 <th className="px-3 py-2.5 font-bold">Sipariş No</th>
@@ -668,13 +699,9 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                 <Fragment key={r.id}>
                   <tr className="hover:bg-gray-50">
                     <td className="px-2 py-2.5 align-top">
-                      {bulkGpEligible(r) ? (
-                        <input type="checkbox" checked={selRows.has(r.id)}
-                          onChange={() => toggleRowSel(r.id)}
-                          title="Toplu gider pusulası için seç" />
-                      ) : (
-                        <span className="inline-block w-3" title={r.is_efatura ? "e-Fatura — GP düzenlenemez" : "GP yalnız onaylı iadelerde"} />
-                      )}
+                      <input type="checkbox" checked={selRows.has(r.id)}
+                        onChange={() => toggleRowSel(r.id)}
+                        title={bulkGpEligible(r) ? "Toplu gider pusulası / silme için seç" : "Silme için seç (GP: yalnız onaylı/e-Fatura hariç)"} />
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="font-mono text-sm font-bold text-blue-600">{r.order_number}</div>
