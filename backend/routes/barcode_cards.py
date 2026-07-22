@@ -79,7 +79,7 @@ def _barcode_svg_inline(code: str) -> str:
     try:
         clean = "".join(ch for ch in str(code) if ch.isalnum())
         # Barkod çubukları büyütüldü (etiketi doldursun) — genişlik CSS'te %100'e ölçeklenir.
-        opts = {"write_text": False, "module_height": 19.0, "module_width": 0.46, "quiet_zone": 1.0}
+        opts = {"write_text": False, "module_height": 13.0, "module_width": 0.46, "quiet_zone": 1.0}
         if len(clean) == 13 and clean.isdigit():
             bc = barcode.get("ean13", clean[:12], writer=SVGWriter())
         else:
@@ -111,11 +111,12 @@ def _card_html_for_variant(product: dict, variant: dict) -> str:
 
     barcode_svg = _barcode_svg_inline(bar_code)  # bar_code yalnız barkod çizimine gider
 
+    # RENK satırı KALDIRILDI (ürün adı zaten rengi içeriyor). Beden, ürün kart no ile
+    # aynı satıra sola alındı → yer açıldı; fontlar büyütüldü (kullanıcı isteği).
     return f"""
     <div class="card">
       <div class="name">{name}</div>
-      {f'<div class="cardno">{card_no}</div>' if card_no else ''}
-      <div class="row"><span class="color">{color}</span><span class="size">{size}</span></div>
+      <div class="row">{f'<span class="cardno">{card_no}</span>' if card_no else ''}{f'<span class="size">{size}</span>' if size else ''}</div>
       {barcode_svg}
       <div class="barcode-text">{_hb(bar_code or '')}</div>
     </div>
@@ -162,15 +163,16 @@ def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
   }
   /* İçerik 5x4cm etiketi NEREDEYSE TAMAMEN kaplar (kullanıcı isteği):
      yazılar büyütüldü, barkod etiket genişliğine ölçeklenir. */
-  .name { font-size: 13px; font-weight: 800; line-height: 1.12; width: 100%;
+  .name { font-size: 15px; font-weight: 800; line-height: 1.1; width: 100%;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .cardno { font-size: 11.5px; font-weight: 700; color: #000; line-height: 1.2; }
-  .row { display: flex; justify-content: space-between; align-items: baseline; width: 100%;
-    font-size: 13px; font-weight: 700; margin: 1px 0; }
-  .row .size { font-weight: 800; font-size: 14px; }
-  .barcode-svg { display: block; width: 100%; height: auto; margin: 2px 0 0 0; }
+  .cardno { font-size: 13px; font-weight: 700; color: #000; line-height: 1.2; }
+  /* Beden ürün kart no'nun YANINDA (sola), aralarında boşluk. Renk satırı yok. */
+  .row { display: flex; justify-content: flex-start; align-items: baseline; gap: 10px; width: 100%;
+    font-weight: 700; margin: 1px 0; }
+  .row .size { font-weight: 800; font-size: 18px; }
+  .barcode-svg { display: block; width: 100%; height: auto; margin: 7px 0 0 0; }
   .barcode-text { font-family: "Mulish", Arial, sans-serif; font-weight: 800;
-    font-size: 14px; letter-spacing: 0.14em; line-height: 1; margin-top: 2px; }
+    font-size: 18px; letter-spacing: 0.03em; line-height: 1; margin-top: 4px; }
   @media print { .no-print { display: none; } .sheet { margin: 0; } }
 """
     css = (css.replace("__SHEET_W__", SHEET_W).replace("__LABEL_W__", LABEL_W)

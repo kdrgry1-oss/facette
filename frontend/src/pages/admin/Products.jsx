@@ -1315,10 +1315,20 @@ export default function AdminProducts() {
       for (const [slug, item] of Object.entries(technicalDetails || {})) {
         if (item && item.value) {
           const lbl = item.label || slug;
-          // Aynı label varsa overwrite et
+          // ÇAKIŞMA DÜZELTMESİ: technicalDetails state'i kullanıcı tarafından DÜZENLENMEZ
+          // (yalnız açılışta üründen yeniden kurulur = kaydın ESKİ hali). Özellikler
+          // sekmesinde girilen değer ASILDIR. Eskiden burada technicalDetails koşulsuz
+          // ÜZERİNE YAZIYORDU → kullanıcı 'Kalıp/Kumaş/Materyal' gibi teknik-etiketli bir
+          // özelliği düzenleyip kaydedince eski değer geri geliyordu. Artık yalnız
+          // Özellikler'de o etiket BOŞSA teknik detaydan doldurulur.
           const existing = attributesArray.findIndex(a => (a.type || a.name) === lbl);
-          if (existing >= 0) attributesArray[existing] = { type: lbl, name: lbl, value: item.value };
-          else attributesArray.push({ type: lbl, name: lbl, value: item.value });
+          if (existing >= 0) {
+            if (!String(attributesArray[existing].value ?? "").trim()) {
+              attributesArray[existing] = { type: lbl, name: lbl, value: item.value };
+            }
+          } else {
+            attributesArray.push({ type: lbl, name: lbl, value: item.value });
+          }
         }
       }
 
