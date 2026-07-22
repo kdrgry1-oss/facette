@@ -5468,15 +5468,25 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
     from .orders import _order_is_efatura
     _onums = list({c.get("siparis") for c in cands if c.get("siparis")})
     _efatura_onums = set()
+    _name_by_num = {}  # site adayının müşteri adı sipariş shipping_address'ten (Kadir: 'adı yok').
     if _onums:
         async for _o in db.orders.find(
                 {"order_number": {"$in": _onums}},
                 {"_id": 0, "order_number": 1, "invoice_type": 1,
-                 "billing_info": 1, "billing_address": 1}):
+                 "billing_info": 1, "billing_address": 1, "shipping_address": 1, "customer_name": 1}):
             if _order_is_efatura(_o):
                 _efatura_onums.add(str(_o.get("order_number")))
+            _sh = _o.get("shipping_address") or {}
+            _nm = (f"{_sh.get('first_name','')} {_sh.get('last_name','')}".strip()
+                   or _sh.get("full_name") or _sh.get("name") or _o.get("customer_name") or "")
+            if _nm:
+                _name_by_num[str(_o.get("order_number"))] = _nm
     _elenen_efatura = len([c for c in cands if str(c.get("siparis")) in _efatura_onums])
     cands = [c for c in cands if str(c.get("siparis")) not in _efatura_onums]
+    # Site adaylarına müşteri adını doldur (TY/HB'de zaten var).
+    for c in cands:
+        if c.get("kaynak") == "site" and not c.get("musteri"):
+            c["musteri"] = _name_by_num.get(str(c.get("siparis")), "")
 
     cands.sort(key=lambda x: x["tarih"])  # İADE ONAY tarihine göre eskiden yeniye (3 kaynak tek havuz)
     batch = cands[:limit]
