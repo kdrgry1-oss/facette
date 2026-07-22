@@ -19,7 +19,7 @@ from typing import Optional
 import re
 
 from .deps import db, logger, require_admin, generate_id, _search_tr_regex
-from .orders import _order_vade_farki, _order_is_efatura
+from .orders import _order_vade_farki, _order_is_efatura, _compute_refund_breakdown
 
 router = APIRouter(prefix="/admin/rooftr", tags=["rooftr-returns"])
 
@@ -402,6 +402,87 @@ async def list_rooftr_return_orders(
         "payment_counts": payment_counts,
         "total_returns": sum(status_counts.values()),
     }
+
+
+@router.post("/bulk-approve-returns")
+async def bulk_approve_site_returns(
+    until: str = Query(..., description="Bu tarihe (dahil) kadar oluşan iadeler — ISO YYYY-MM-DD"),
+    confirm: bool = Query(False, description="true → gerçekten onayla; false → dry-run"),
+    current_user: dict = Depends(require_admin),
+):
+    """SESSİZ TOPLU ONAY (Kadir talebi: '1 Temmuz'a kadar site iadelerinin hepsi onaylansın').
+    'İade Talebi Oluşturuldu' (return_requested) durumundaki SİTE (pazaryeri-dışı) iadelerini,
+    `until` tarihine kadar oluşanları TAM onaylar → durum return_approved olur, GP ikonu (mevcut
+    kural gereği) gelir. HİSTORİK backfill olduğundan: müşteriye BİLDİRİM GÖNDERİLMEZ ve STOK
+    HAREKETİ YAPILMAZ (goods zaten geçmişte işlendi; restock çift-sayım yaratırdı). Yalnız onay
+    kaydı + tutar dökümü yazılır. İDEMPOTENT: zaten onaylı olan atlanır."""
+    from datetime import datetime, timezone
+    _cut = str(until).strip()[:10] + "T23:59:59"  # gün sonuna kadar dahil
+    base_filter = {
+        "platform": {"$nin": ["trendyol", "hepsiburada"]},
+        "status": "return_requested",
+    }
+    now_iso = datetime.now(timezone.utc).isoformat()
+    scanned = 0
+    approved = []
+    skipped_late = 0
+    async for order in db.orders.find(base_filter, {"_id": 0}):
+        _ca = str(order.get("created_at") or "")
+        # created_at boşsa yine de dahil et (eski Ticimax kayıtları tarihi eksik olabilir);
+        # doluysa cutoff ile karşılaştır.
+        if _ca and _ca[:19] > _cut:
+            skipped_late += 1
+            continue
+        scanned += 1
+        if not confirm:
+            approved.append({"order_number": order.get("order_number"), "created_at": _ca})
+            continue
+        oid = order.get("id")
+        # Köprü kaydını garanti et (idempotent open mantığı)
+        rec = await db.customer_returns.find_one({"order_id": oid, "status": {"$ne": "expired"}}, {"_id": 0})
+        if not rec:
+            _src = order.get("items") or []
+            _items = [{
+                "name": it.get("product_name") or it.get("name") or "Ürün",
+                "size": it.get("size", "") or "", "color": it.get("color", "") or "",
+                "quantity": int(it.get("quantity", 1) or 1),
+                "price": float(it.get("price") or it.get("unit_price") or 0),
+                "unit_price": float(it.get("unit_price") or it.get("price") or 0),
+                "product_id": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+            } for it in _src]
+            rid = generate_id()
+            rec = {"id": rid, "order_id": oid, "order_number": order.get("order_number", ""),
+                   "user_id": order.get("user_id"), "items": _items, "reason": "",
+                   "return_code": (order.get("return_request") or {}).get("return_code", "") or "",
+                   "status": "created", "source": "bulk_approve_backfill",
+                   "created_at": order.get("created_at") or now_iso}
+            await db.customer_returns.insert_one({**rec})
+            await db.orders.update_one({"id": oid}, {"$set": {"return_request.return_id": rid}})
+        rid = rec.get("id")
+        if rec.get("status") in ("approved", "refunded", "partial_refunded"):
+            continue  # zaten onaylı/kapalı
+        # TAM onay, mağaza kusuru (kargo düşülmez) — tutar dökümü hesaplanır.
+        try:
+            bd = await _compute_refund_breakdown(rec, order, "store")
+            final_amount = bd.get("auto_refund")
+        except Exception as _e:
+            logger.warning(f"[bulk-approve] breakdown hata {oid}: {_e}")
+            bd, final_amount = {}, None
+        approval = {"by": current_user.get("email") or current_user.get("id"), "at": now_iso,
+                    "fault": "store", "auto_refund": final_amount, "final_refund": final_amount,
+                    "manual_override": False, "note": "Toplu geriye dönük onay (1 Temmuz'a kadar)"}
+        await db.customer_returns.update_one({"id": rid}, {"$set": {
+            "status": "approved", "fault": "store", "refund_breakdown": bd,
+            "refund_amount": final_amount, "approval": approval, "updated_at": now_iso,
+        }, "$unset": {"approved_item_indexes": "", "approved_items": ""}})
+        await db.orders.update_one({"id": oid}, {"$set": {
+            "status": "return_approved", "return_request.status": "approved",
+            "return_approved_at": now_iso, "updated_at": now_iso,
+        }})
+        approved.append({"order_number": order.get("order_number"), "return_id": rid, "amount": final_amount})
+    return {"success": True, "confirmed": confirm, "cutoff": _cut,
+            "count": len(approved), "scanned": scanned, "skipped_after_cutoff": skipped_late,
+            "items": approved[:60]}
 
 
 @router.post("/orders/refresh-dates")

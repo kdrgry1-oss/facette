@@ -791,7 +791,6 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           return (
                             <div className="mt-2 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-1.5 inline-flex flex-wrap items-center gap-x-3 gap-y-0.5">
                               <span>{isFullSel ? "İade net tutarı (kargo dahil)" : "İade net tutarı (kargo hariç)"}: <b>{fmtTL(total)}</b></span>
-                              <span className="text-[10px] font-normal text-gray-500">gider pusulası neti · iyzico'da ilgili ürün kalemini iade et (kargo kalemini seçme)</span>
                               {Number(r.vade_farki) > 0 && (
                                 <span className="text-[10px] font-normal text-amber-600">taksitli: vade farkı payı gider pusulasında eklenir</span>
                               )}
