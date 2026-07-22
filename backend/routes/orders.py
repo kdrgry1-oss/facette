@@ -6937,11 +6937,25 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
                           for i in _order_items))
     _sub_h = _round2(order.get("subtotal") or 0)
     _disc_h = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
+    # İKİ aday faktör (panel rooftr_returns ile AYNI mantık): (a) subtotal−indirim, (b) total−kargo−vade
+    # farkı — hangisi KDV oranı penceresine (1.06–1.24) düşerse o kullanılır. subtotal boş olan
+    # (mükerrer/eksik) Ticimax kayıtlarında bile GP doğru hesaplansın diye total-tabanlı aday eklendi.
     _paid_factor = 1.0
-    if _all_net > 0.5 and _sub_h > 0.5:
-        _f = (_sub_h - _disc_h) / _all_net
-        if 1.06 <= _f <= 1.24:
-            _paid_factor = _f
+    if _all_net > 0.5:
+        try:
+            _vf_f, _charged_f, _inst_f = _order_vade_farki(order)
+        except Exception:
+            _vf_f = 0.0
+        _tot_h = _round2(order.get("total") or 0) - _round2(order.get("shipping_cost") or 0) - (round(_vf_f, 2) if _vf_f and _vf_f > 0 else 0.0)
+        _cands = []
+        if _sub_h > 0.5:
+            _cands.append((_sub_h - _disc_h) / _all_net)
+        if _tot_h > 0.5:
+            _cands.append(_tot_h / _all_net)
+        for _f in _cands:
+            if 1.06 <= _f <= 1.24:
+                _paid_factor = _f
+                break
 
     prod_gross = _round2(sum(_round2(it.get("unit_price", it.get("price", 0))) * _q(it) for it in items) * _paid_factor)
     prod_net = _round2(sum(_round2(it.get("price", 0)) * _q(it) for it in items) * _paid_factor)

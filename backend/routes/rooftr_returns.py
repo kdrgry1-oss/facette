@@ -148,21 +148,41 @@ async def list_rooftr_return_orders(
         _r_total = _o_total if _o_total > 0 else round(_calc_net, 2)
         _r_subtotal = _o_sub if _o_sub > 0 else round(_calc_gross, 2)
         _r_discount = _o_disc if _o_disc > 0 else (round(_calc_idisc, 2) if _calc_idisc > 0 else round(max(0.0, _r_subtotal - _r_total), 2))
-        # KDV-DAHİL TABAN DÜZELTMESİ (Ali Al 398MD4734D): bazı içe-aktarılan siparişlerde
-        # item.price KDV-HARİÇ, subtotal KDV-DAHİL → panelde kalem 1159,09 görünüp ara toplam
-        # 2550 ile tutmuyordu. Siparişin kendi verisinden faktör: (subtotal−indirim)/Σ(item.price×adet);
-        # bir KDV oranına yakınsa (1.06–1.24) kalem fiyatları KDV-dahile ölçeklenir (backend GP
-        # calc ile AYNI mantık). Normal siparişler etkilenmez.
-        _paid_factor = 1.0
-        if _calc_net > 0.5 and _r_subtotal > 0.5:
-            _pf = (_r_subtotal - _r_discount) / _calc_net
-            if 1.06 <= _pf <= 1.24:
-                _paid_factor = _pf
         # Taksitli ödemede iyzico'ya gerçekte tahsil edilen tutar (vade farkı DAHİL) `total`'dan
         # yüksek olabilir — iade onayında baz alınan budur (bkz. orders.py _compute_refund_breakdown).
         # Burada da gösterip admin'in panelde önceden göreceği rakamla onay sırasında hesaplanan
         # rakam tutarlı olsun diye sunuyoruz (Kadir talebi: taksitli siparişte tüm tahsilat iade edilmeli).
         _vf, _charged, _inst = _order_vade_farki(o)
+        # KDV-DAHİL TABAN DÜZELTMESİ (Ali Al 398MD4734D → tüm iadelere uygulanır): bazı içe-aktarılan
+        # (Ticimax) siparişlerde item.price KDV-HARİÇ ama subtotal/total KDV-DAHİL → panelde kalem
+        # KDV-hariç görünüp ara toplamla tutmuyordu. Siparişin KENDİ order-seviyesi KDV-dahil verisinden
+        # faktör türet ve bir KDV oranına yakınsa (1.06–1.24) TÜM kalem fiyatlarını + ara toplamı
+        # KDV-dahile ölçekle. İKİ aday: (a) subtotal−indirim, (b) total−kargo−vade farkı — hangisi
+        # KDV oranı penceresine düşerse o kullanılır (subtotal boş olan mükerrer kayıtlarda bile çalışır).
+        # Normal (zaten KDV-dahil item.price) siparişler etkilenmez; faktör 1.0 kalır.
+        _paid_factor = 1.0
+        if _calc_net > 0.5:
+            _cands = []
+            _sub_h = (_r_subtotal - _r_discount)
+            if _sub_h > 0.5:
+                _cands.append(_sub_h / _calc_net)
+            _tot_h = _r_total - float(o.get("shipping_cost") or 0) - (round(_vf, 2) if _vf > 0 else 0.0)
+            if _tot_h > 0.5:
+                _cands.append(_tot_h / _calc_net)
+            for _pf in _cands:
+                if 1.06 <= _pf <= 1.24:
+                    _paid_factor = _pf
+                    break
+        # Ara toplam/indirim order-seviyesinde YOKSA kalemlerden türetilmişti (KDV-hariç);
+        # faktör tetiklendiyse bunları da KDV-dahile ölçekle ki panelde "Ara toplam" kalem
+        # fiyatlarıyla tutsun. order.subtotal MEVCUTSA (zaten KDV-dahil) dokunma.
+        if _paid_factor != 1.0:
+            if _o_sub <= 0.5:
+                _r_subtotal = round(_calc_gross * _paid_factor, 2)
+            if _o_disc <= 0.5 and _calc_idisc > 0.5:
+                _r_discount = round(_calc_idisc * _paid_factor, 2)
+            if _o_total <= 0.5:
+                _r_total = round(_calc_net * _paid_factor, 2)
         _charged_total = round(_charged, 2) if _charged > _r_total + 0.01 else _r_total
         rows.append({
             "id": o.get("id"),
