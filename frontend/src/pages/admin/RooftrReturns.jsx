@@ -787,16 +787,29 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           });
                           const totalItems = (r.items || []).length;
                           const isFullSel = totalItems > 0 && selN >= totalItems;
-                          // TAM iade → ürün neti (BRÜT−İSKONTO), KARGO HARİÇ + varsa vade farkı. Kargo
-                          // iade tutarına katılmaz (Kadir: '985,15−98,52=886,63 görünmeli'). Vade farkı
-                          // varsa korunur (charged−kargo). KISMİ → yalnız seçili ürün netleri (kargo hariç).
+                          // ÜRÜN NETİ (kargo HARİÇ): tam iadede charged−kargo (vade farkı korunur),
+                          // kısmi iadede seçili ürün netleri. KARGO AYRI gösterilir (Kadir: 'kargoyu
+                          // ayrı göster'). Ödenmiş kargo (shipping_cost>0) tam iadede iade edilir; kargo
+                          // müşteriden kesiliyse (cargoSel) DÜŞÜLÜR. Kısmi iadede kargo otomatik iade
+                          // edilmez (yalnız 'kargoyu müşteriden kes' ile mahsup).
                           const _ship = Number(r.shipping_cost) || 0;
-                          const total = isFullSel
+                          const productNet = isFullSel
                             ? Math.max(0, (Number(r.charged_total) || Number(r.total) || selNet) - _ship)
                             : selNet;
+                          const _cargoDeduct = !!cargoSel[r.id];
+                          const cargoRefund = (isFullSel && _ship > 0 && !_cargoDeduct) ? _ship : 0;
+                          const cargoDeducted = _cargoDeduct ? _ship : 0;
+                          const total = Math.max(0, productNet + cargoRefund - cargoDeducted);
                           return (
                             <div className="mt-2 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-1.5 inline-flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                              <span>İade net tutarı (kargo hariç): <b>{fmtTL(total)}</b></span>
+                              <span>İade net tutarı: <b>{fmtTL(total)}</b></span>
+                              {(cargoRefund > 0 || cargoDeducted > 0) && (
+                                <span className="text-[10px] font-normal text-gray-600">
+                                  ürün {fmtTL(productNet)}
+                                  {cargoRefund > 0 ? ` + kargo ${fmtTL(cargoRefund)}` : ""}
+                                  {cargoDeducted > 0 ? ` − kargo ${fmtTL(cargoDeducted)} (müşteriden kesildi)` : ""}
+                                </span>
+                              )}
                               {Number(r.vade_farki) > 0 && (
                                 <span className="text-[10px] font-normal text-amber-600">taksitli: vade farkı payı gider pusulasında eklenir</span>
                               )}
