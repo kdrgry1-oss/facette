@@ -6648,6 +6648,16 @@ async def update_return_approval(return_id: str, payload: dict,
     cargo_override = None if cargo_override in (None, "") else cargo_override
     returned_net_in = payload.get("returned_net")
     returned_net_in = None if returned_net_in in (None, "") else returned_net_in
+    # GÜVENLİK AĞI: kısmi seçim var ama returned_net gönderilmediyse, hesabın YANLIŞLIKLA
+    # TAM İADE'ye düşmesini önle — iade tutarını SEÇİLİ kalemlerin net toplamından türet
+    # (Kadir talebi: "hesap yalnız tiklediklerime göre"). Sipariş indirim oranını uygula.
+    if _ap_partial and returned_net_in is None:
+        _o_sub = _round2(order.get("subtotal") or 0)
+        _o_disc = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
+        _dr = min(1.0, _o_disc / _o_sub) if _o_sub > 0 and _o_disc > 0 else 0.0
+        returned_net_in = _round2(sum(
+            _round2(_all_items[i].get("price", 0)) * int(_all_items[i].get("quantity", 1) or 1) * (1 - _dr)
+            for i in _ap_sel))
 
     bd = await _compute_refund_breakdown(rec, order, fault, return_cargo_fee_override=cargo_override,
                                          returned_net_override=returned_net_in)

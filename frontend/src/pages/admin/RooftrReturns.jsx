@@ -436,9 +436,23 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       const br = await axios.post(`${API}/admin/rooftr/returns/${r.id}/open`, {}, auth());
       const returnId = br.data?.return_id;
       if (!returnId) throw new Error("bridge");
+      const itemCount = (r.items || []).length;
       const selIdx = (r.items || []).map((_, i) => i).filter((i) => selItems[`${r.id}::${i}`]);
-      const res = await axios.post(`${API}/orders/returns/${returnId}/update-approval`,
-        { item_indexes: selIdx, include_cargo: !!cargoSel[r.id] }, auth());
+      if (!selIdx.length) { toast.error("En az bir kalem seçin (hesap yalnız seçili kalemlere göre yapılır)."); setBusyId(""); return; }
+      const isPartialSelection = selIdx.length > 0 && selIdx.length < itemCount;
+      // Panel "İade net tutarı" ile BİREBİR aynı formül: seçili kalem net × (1 − indirim oranı).
+      // KDV-dahil kalem fiyatı (r.items[i].price zaten KDV-dahile ölçekli) kullanılır →
+      // hesap SADECE tiklenen kalemlere göre olur (Kadir talebi).
+      const _base = Number(r.subtotal) || 0;
+      const _dr = (_base > 0 && Number(r.discount) > 0) ? Math.min(1, Number(r.discount) / _base) : 0;
+      const selAmount = isPartialSelection ? Math.round(selIdx.reduce(
+        (a, i) => a + (Number(r.items[i].qty) || 1) * (Number(r.items[i].price) || 0) * (1 - _dr), 0
+      ) * 100) / 100 : null;
+      const selIdents = selIdx.map((i) => r.items[i]).filter(Boolean)
+        .map((it) => ({ barcode: it.barcode || "", name: it.name || "", size: it.size || "", color: it.color || "" }));
+      const body = { item_indexes: selIdx, selected_items: selIdents, include_cargo: !!cargoSel[r.id] };
+      if (selAmount != null) body.returned_net = selAmount;
+      const res = await axios.post(`${API}/orders/returns/${returnId}/update-approval`, body, auth());
       toast.success(`Düzenleme onaylandı · iade net ${fmtTL(res.data?.refund_amount || 0)}`);
       setEditRows((s) => { const n = { ...s }; delete n[r.id]; return n; });
       setSeededRows((s) => { const n = { ...s }; delete n[r.id]; return n; });
@@ -852,7 +866,20 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                   </button>
                                 </>
                               ) : (
-                                <button onClick={() => setEditRows((s) => ({ ...s, [r.id]: true }))}
+                                <button onClick={() => {
+                                    // DÜZENLEME: seçimi SIFIRLA → kullanıcı yalnız istediği kalemi
+                                    // (ve kargoyu) tiklesin; hesap YALNIZ tiklenenlere göre olur.
+                                    // Aksi halde onaylı-tüm seed kutuları dolu kalıp "hepsi seçili"
+                                    // sanılıyor, tek kalem seçilemiyordu (Kadir bug).
+                                    setSelItems((s) => {
+                                      const n = { ...s };
+                                      Object.keys(n).forEach((k) => { if (k.startsWith(`${r.id}::`)) delete n[k]; });
+                                      return n;
+                                    });
+                                    setCargoSel((s) => ({ ...s, [r.id]: false }));
+                                    setSeededRows((s) => ({ ...s, [r.id]: true })); // yeniden seed etme
+                                    setEditRows((s) => ({ ...s, [r.id]: true }));
+                                  }}
                                   className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-white text-gray-700 border border-gray-300 text-xs font-bold hover:bg-gray-100">
                                   ✏️ Düzenle
                                 </button>
