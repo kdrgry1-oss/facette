@@ -855,6 +855,12 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                 <span className="font-medium whitespace-nowrap">Kargoyu müşteriden kes</span>
                                 {amt > 0 && <span className={`font-semibold whitespace-nowrap ${sel ? "text-amber-700" : "text-gray-400"}`}>−{fmtTL(amt)}</span>}
                               </label>
+                              {/* Kargo müşteriden kesildiğinde iade edilecek NET tutar: seçili ürün neti − kargo. */}
+                              {sel && amt > 0 && anySel && (
+                                <div className="block text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-md px-2.5 py-1.5 font-bold max-w-2xl">
+                                  İade edilecek: {fmtTL(Math.max(0, retNet - amt))} <span className="font-normal text-gray-600">({fmtTL(retNet)} − kargo {fmtTL(amt)})</span>
+                                </div>
+                              )}
                               {belowThreshold && !sel && (
                                 <div className="block text-xs bg-red-50 border border-red-300 text-red-700 rounded-md px-2.5 py-1.5 font-semibold max-w-2xl">
                                   ⚠️ İade sonrası kalan tutar {fmtTL(keptNet)} — ücretsiz kargo eşiğinin ({fmtTL(threshold)}) ALTINDA. Müşteri ücretsiz kargo hakkını kaybetti; <b>kargoyu müşteriden kesmelisiniz</b> (yukarıdaki kutuyu işaretleyin).
