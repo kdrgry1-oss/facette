@@ -5384,8 +5384,8 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
     return {"success": True, "gider_pusulasi": gider_pusulasi}
 @router.post("/trendyol/claims/gp-bulk-range")
 async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_admin)):
-    """Tarih aralığındaki YALNIZ ONAYLANMIŞ ve pusulası HENÜZ OLMAYAN iadeler için
-    (site + Trendyol + Hepsiburada tek havuz, iade talep tarihine göre sıralı)
+    """İADE ONAY TARİHİ aralığındaki YALNIZ ONAYLANMIŞ ve pusulası HENÜZ OLMAYAN iadeler için
+    (site + Trendyol + Hepsiburada tek havuz, İADE ONAY tarihine göre sıralı)
     toplu gider pusulası keser (kullanıcı isteği).
 
     payload: {date_from, date_to, sources:["site","trendyol","hepsiburada"],
@@ -5425,12 +5425,15 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
         {"return_id": {"$exists": True, "$ne": ""}, **_has_no},
         {"_id": 0, "return_id": 1}).to_list(None)}
 
+    # TARİH ÖLÇÜTÜ = İADE ONAY TARİHİ (Kadir isteği: 'iade onay tarihine göre filtrele+sırala').
+    # TY/HB: return_approved_at (yoksa created_date); site: customer_returns.approval.at (yoksa created_at).
     cands = []
     if "trendyol" in sources or "hepsiburada" in sources:
         async for c in db.trendyol_claims.find(
                 {"claim_status": "Accepted"},
                 {"_id": 0, "claim_id": 1, "order_number": 1, "customer_name": 1,
-                 "created_date": 1, "refund_amount": 1, "platform": 1, "has_gider_pusulasi": 1}):
+                 "created_date": 1, "return_approved_at": 1, "refund_amount": 1,
+                 "platform": 1, "has_gider_pusulasi": 1}):
             plat = "hepsiburada" if str(c.get("platform") or "").lower() == "hepsiburada" else "trendyol"
             if plat not in sources:
                 continue
@@ -5439,23 +5442,25 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
                 continue
             if c.get("has_gider_pusulasi") or cid in gp_claims:
                 continue
-            if not _in_range(c.get("created_date")):
+            _appr = str(c.get("return_approved_at") or c.get("created_date") or "")
+            if not _in_range(_appr):
                 continue
             cands.append({"kaynak": plat, "key": cid, "siparis": c.get("order_number") or "",
                           "musteri": c.get("customer_name") or "",
-                          "tarih": str(c.get("created_date") or "")[:10],
+                          "tarih": _appr[:10],
                           "tutar": round(float(c.get("refund_amount") or 0), 2)})
     if "site" in sources:
         async for r in db.customer_returns.find(
                 {"status": {"$in": ["approved", "refunded", "partial_refunded"]}},
-                {"_id": 0, "id": 1, "order_number": 1, "created_at": 1, "refund_amount": 1}):
+                {"_id": 0, "id": 1, "order_number": 1, "created_at": 1, "approval": 1, "refund_amount": 1}):
             rid = str(r.get("id") or "")
             if not rid or rid in gp_returns:
                 continue
-            if not _in_range(r.get("created_at")):
+            _appr = str((r.get("approval") or {}).get("at") or r.get("created_at") or "")
+            if not _in_range(_appr):
                 continue
             cands.append({"kaynak": "site", "key": rid, "siparis": r.get("order_number") or "",
-                          "musteri": "", "tarih": str(r.get("created_at") or "")[:10],
+                          "musteri": "", "tarih": _appr[:10],
                           "tutar": round(float(r.get("refund_amount") or 0), 2)})
 
     # KATI KURAL: e-Fatura/kurumsal siparişler toplu kesim HAVUZUNDAN tamamen çıkarılır
@@ -5473,7 +5478,7 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
     _elenen_efatura = len([c for c in cands if str(c.get("siparis")) in _efatura_onums])
     cands = [c for c in cands if str(c.get("siparis")) not in _efatura_onums]
 
-    cands.sort(key=lambda x: x["tarih"])  # iade talep tarihine göre eskiden yeniye
+    cands.sort(key=lambda x: x["tarih"])  # İADE ONAY tarihine göre eskiden yeniye (3 kaynak tek havuz)
     batch = cands[:limit]
     if dry:
         return {"dry_run": True, "toplam_aday": len(cands), "bu_partide": len(batch),

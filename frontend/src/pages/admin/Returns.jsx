@@ -632,12 +632,12 @@ export default function Returns() {
                 Excel butonları KALDIRILDI. */}
             <div className="flex items-end gap-2 flex-wrap">
               <div className="flex flex-col">
-                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5" title="İade talep tarihi (müşterinin iadeyi açtığı tarih) — iadeler tablosundaki 'İade Talep Tarihi' ile aynı">İade Talep Baş.</label>
+                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5" title="İade ONAY tarihi (muhasebe/admin iadeyi onayladığı tarih) — toplu gider pusulası bu tarihe göre sıralanır">İade Onay Baş.</label>
                 <input type="date" value={gpFrom} onChange={(e) => setGpFrom(e.target.value)}
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
               </div>
               <div className="flex flex-col">
-                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5" title="İade talep tarihi (müşterinin iadeyi açtığı tarih) — iadeler tablosundaki 'İade Talep Tarihi' ile aynı">İade Talep Bit.</label>
+                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5" title="İade ONAY tarihi (muhasebe/admin iadeyi onayladığı tarih) — toplu gider pusulası bu tarihe göre sıralanır">İade Onay Bit.</label>
                 <input type="date" value={gpTo} onChange={(e) => setGpTo(e.target.value)}
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
               </div>
@@ -666,7 +666,7 @@ export default function Returns() {
                 <Download size={16} />
                 {gpExporting ? "Hazırlanıyor..." : "Gider Pusulası Excel"}
               </button>
-              {/* Hazır aralık: elle tarih yazmadan tek tık. "Son 30 gün" iade talep tarihine göre. */}
+              {/* Hazır aralık: elle tarih yazmadan tek tık. "Son 30 gün" İADE ONAY tarihine göre. */}
               <div className="flex items-center gap-1 flex-wrap">
                 {[["today", "Bugün"], ["7", "Son 7 gün"], ["30", "Son 30 gün"], ["month", "Bu ay"], ["prevmonth", "Geçen ay"]].map(([k, lbl]) => (
                   <button key={k} type="button" onClick={() => applyGpPreset(k)}
@@ -731,7 +731,7 @@ export default function Returns() {
               <p className="text-[11px] text-emerald-700 max-w-md">
                 Yukarıda seçili tarih aralığı ({gpFrom || "—"} → {gpTo || "—"}) ve kaynak
                 ({gpSource === "all" ? "site + Trendyol + Hepsiburada" : gpSource}) içindeki
-                <b> yalnız iadesi ONAYLANMIŞ ve pusulası henüz olmayan</b> iadeler, iade talep
+                <b> yalnız iadesi ONAYLANMIŞ ve pusulası henüz olmayan</b> iadeler, İADE ONAY
                 tarihine göre sıralanır; {pad6(gpStart)} numarasından itibaren sıralı koçanla kesilir.
               </p>
             </div>

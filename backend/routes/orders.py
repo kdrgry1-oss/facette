@@ -7333,34 +7333,40 @@ async def export_gider_pusulasi_excel(
     # return_id / order_number ile bağla). Talep tarihi = iade talep edilen tarih (created_at).
     ret_status_by_id, ret_status_by_num = {}, {}
     ret_reqdate_by_id, ret_reqdate_by_num = {}, {}
+    ret_apprdate_by_id, ret_apprdate_by_num = {}, {}  # İADE ONAY tarihi (approval.at → yoksa created_at)
     async for _r in db.customer_returns.find(
-            {}, {"_id": 0, "id": 1, "status": 1, "order_number": 1, "created_at": 1, "date": 1}):
+            {}, {"_id": 0, "id": 1, "status": 1, "order_number": 1, "created_at": 1, "date": 1, "approval": 1}):
         _st = _r.get("status") or ""
         _rqd = _r.get("created_at") or _r.get("date") or ""
+        _apd = (_r.get("approval") or {}).get("at") or _rqd
         if _r.get("id"):
             ret_status_by_id[str(_r["id"])] = _st
             ret_reqdate_by_id[str(_r["id"])] = _rqd
+            ret_apprdate_by_id[str(_r["id"])] = _apd
         if _r.get("order_number"):
             ret_status_by_num.setdefault(str(_r["order_number"]), _st)
             ret_reqdate_by_num.setdefault(str(_r["order_number"]), _rqd)
+            ret_apprdate_by_num.setdefault(str(_r["order_number"]), _apd)
 
     # ── TARİH ESASI: TÜM satırlar İADE TALEP TARİHİ'ne göre süzülür (Trendyol claimDate /
     #    site created_at). Böylece "son 30 gün" export'u iadeler sayfasındaki "Tarih" sütunu
     #    (claim.created_date) ile BİREBİR aynı olur → tutarsızlık biter. Kesilmiş pusulalar da
     #    kendi kesim tarihine göre DEĞİL, bağlı iadenin TALEP tarihine göre süzülür.
-    def _req_date_for(gp):
+    # İADE ONAY TARİHİ çözücü (Kadir: 'iade onay tarihine göre filtrele'): TY/HB → claim
+    # return_approved_at (yoksa created_date); site → customer_returns approval.at (yoksa created_at).
+    def _appr_date_for(gp):
         cid = str(gp.get("claim_id") or "")
         if cid and claim_by_id.get(cid):
-            _d = claim_by_id[cid].get("created_date")
+            _c = claim_by_id[cid]
+            _d = _c.get("return_approved_at") or _c.get("created_date")
             if _d:
                 return _d
         rid = str(gp.get("return_id") or "")
-        if rid and ret_reqdate_by_id.get(rid):
-            return ret_reqdate_by_id[rid]
+        if rid and ret_apprdate_by_id.get(rid):
+            return ret_apprdate_by_id[rid]
         onum = str(gp.get("order_number") or "")
-        if onum and ret_reqdate_by_num.get(onum):
-            return ret_reqdate_by_num[onum]
-        # Talep tarihi çözülemezse pusulanın kendi tarihine düş (eski davranış — hiç düşürme).
+        if onum and ret_apprdate_by_num.get(onum):
+            return ret_apprdate_by_num[onum]
         return gp.get("date") or gp.get("created_at")
 
     # ── 1) Var olan gider pusulaları (kesilmiş) — doğru seri + düzeltilmiş tutar ──
@@ -7368,10 +7374,9 @@ async def export_gider_pusulasi_excel(
     seen_claim, seen_return = set(), set()
     records = []
     for gp in all_vouchers:
-        # KESİLMİŞ pusulada süzgeç KESİM tarihine göre (muhasebe mutabakatı: fiziki
-        # pusula destesi ve Excel'deki 'Fatura Tarihi' kolonu kesim tarihidir — aynı
-        # tarihle süzülmezse aylık sayım fiziki desteyle tutmuyordu: 1217 vs 1074).
-        if not _in_range(gp.get("date") or gp.get("created_at") or _req_date_for(gp)):
+        # SÜZGEÇ = İADE ONAY TARİHİ (Kadir isteği). (Eskiden kesilmiş pusulada kesim tarihi
+        # kullanılıyordu; artık tüm satırlar iade onay tarihine göre süzülür.)
+        if not _in_range(_appr_date_for(gp)):
             continue
         # kaynak süzgeci: site pusulası source=site; TY/HB pusulasında claim_id var → platform claim'den
         cid = str(gp.get("claim_id") or "")
@@ -7428,7 +7433,7 @@ async def export_gider_pusulasi_excel(
                 continue
             if plat == "trendyol" and not want_ty:
                 continue
-            cdate = c.get("created_date") or c.get("created_at") or ""
+            cdate = c.get("return_approved_at") or c.get("created_date") or c.get("created_at") or ""
             if not _in_range(cdate):
                 continue
             syn_items = []
@@ -7461,7 +7466,7 @@ async def export_gider_pusulasi_excel(
                 {"status": {"$ne": "expired"}}, {"_id": 0}).to_list(None)
             site_rets = [r for r in site_rets
                          if str(r.get("id")) not in seen_return and _in_range(
-                             r.get("created_at") or r.get("date"))]
+                             (r.get("approval") or {}).get("at") or r.get("created_at") or r.get("date"))]
             # müşteri adını sipariş shipping_address'ten toplu çek
             _oids = list({r.get("order_id") for r in site_rets if r.get("order_id")})
             _oname = {}
@@ -7484,7 +7489,7 @@ async def export_gider_pusulasi_excel(
                         "reason": it.get("reason", ""),
                     })
                 records.append({
-                    "date": r.get("created_at") or r.get("date") or "",
+                    "date": (r.get("approval") or {}).get("at") or r.get("created_at") or r.get("date") or "",
                     # Site sentez satırı: pusula henüz kesilmemiş → seri no BOŞ kalır
                     # (order_number/return id gibi başka bir numara koçan alanına ÇEKİLMEZ).
                     "display_number": "",
