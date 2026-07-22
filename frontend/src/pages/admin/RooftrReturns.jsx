@@ -799,14 +799,23 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           );
                         })()}
 
-                        {/* Kargo bedeli — "kargoyu müşteriden KES (mahsup)". Kutu ARTIK TÜM
-                            siparişlerde görünür (kullanıcı isteği). Ücretsiz kargo ile alınan
-                            siparişte kısmi iade sonrası KALAN tutar eşiğin altına düşerse
-                            (müşteri ücretsiz kargo hakkını kaybeder) KIRMIZI uyarı çıkar. */}
+                        {/* Kargo bedeli — "kargoyu müşteriden KES (mahsup)". Kutu YALNIZ
+                            ücretsiz-kargo limitini AŞAN (free shipping'den faydalanmış) siparişlerin
+                            iadesinde görünür (Kadir isteği): kargo ödenmemiş (shipping_cost=0) VE
+                            sipariş tutarı eşiği (ör. 4000 TL) aşmış olmalı. Kargosunu ödemiş / eşiğin
+                            altındaki siparişlerde kutu HİÇ gösterilmez. Kısmi iade sonrası KALAN
+                            tutar eşiğin altına düşerse KIRMIZI uyarı çıkar. */}
                         {(() => {
                           const paid = Number(r.shipping_cost) > 0;
-                          // Ödenmiş kargo varsa onu, yoksa standart kargo ücretini (ayarlardan) kes.
-                          const amt = paid ? Number(r.shipping_cost) : (Number(freeShipFee) || 0);
+                          const threshold = Number(r.free_shipping_threshold) || Number(freeShipThreshold) || 0;
+                          // Siparişin verildiği (ücretsiz kargoyu tetikleyen) sepet tutarı: KDV-dahil ara toplam
+                          // (yoksa toplam). Ücretsiz kargo checkout'ta sepet tutarına göre uygulanır.
+                          const orderAmount = Number(r.subtotal) || Number(r.total) || 0;
+                          // KUTUYU GÖSTERME KOŞULU: kargo ödenmemiş + eşik tanımlı + sipariş tutarı eşiği aşmış.
+                          const qualifiedFreeShip = !paid && threshold > 0 && orderAmount >= threshold;
+                          if (!qualifiedFreeShip) return null;
+                          // Kargo ödenmemiş (free shipping) → standart kargo ücretini (ayarlardan) kes.
+                          const amt = Number(freeShipFee) || 0;
                           const sel = !!cargoSel[r.id];
                           const locked = r.return_is_approved && !editRows[r.id];
                           // Kalan (iade sonrası tutulan) net tutar
@@ -818,10 +827,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           });
                           const orderNet = Number(r.total) || 0;
                           const keptNet = Math.max(0, orderNet - retNet);
-                          const threshold = Number(r.free_shipping_threshold) || Number(freeShipThreshold) || 0;
-                          // Uyarı: sipariş ücretsiz kargo ile alınmış (kargo ödenmemiş) + kısmi iade
-                          // (kalan > 0) + kalan tutar eşiğin ALTINA düşmüş.
-                          const belowThreshold = !paid && threshold > 0 && anySel && keptNet > 0.01 && keptNet < threshold;
+                          // Uyarı: kısmi iade (kalan > 0) + kalan tutar eşiğin ALTINA düşmüş.
+                          const belowThreshold = anySel && keptNet > 0.01 && keptNet < threshold;
                           return (
                             <div className="mt-1 space-y-1">
                               <label className={`inline-flex items-center gap-2 text-xs border rounded-md px-2.5 py-1.5 ${locked ? "cursor-default" : "cursor-pointer"} ${sel ? "bg-amber-50 border-amber-300 text-gray-900" : "bg-white text-gray-900"}`}>
