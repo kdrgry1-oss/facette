@@ -445,8 +445,10 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       // hesap SADECE tiklenen kalemlere göre olur (Kadir talebi).
       const _base = Number(r.subtotal) || 0;
       const _dr = (_base > 0 && Number(r.discount) > 0) ? Math.min(1, Number(r.discount) / _base) : 0;
+      // TAKSİT vade farkı payı da eklenir (net/total) → refund = gider pusulası neti (İrem Kılıç 2488,67).
+      const _vadeRatio = (Number(r.vade_farki) > 0 && Number(r.total) > 0) ? Number(r.vade_farki) / Number(r.total) : 0;
       const selAmount = isPartialSelection ? Math.round(selIdx.reduce(
-        (a, i) => a + (Number(r.items[i].qty) || 1) * (Number(r.items[i].price) || 0) * (1 - _dr), 0
+        (a, i) => a + (Number(r.items[i].qty) || 1) * (Number(r.items[i].price) || 0) * (1 - _dr) * (1 + _vadeRatio), 0
       ) * 100) / 100 : null;
       const selIdents = selIdx.map((i) => r.items[i]).filter(Boolean)
         .map((it) => ({ barcode: it.barcode || "", name: it.name || "", size: it.size || "", color: it.color || "" }));
@@ -648,11 +650,12 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                       ) : <span className="text-gray-400">—</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">
-                      {/* Net = GENEL TOPLAM (müşterinin ödediği: ürün − iskonto + kargo). Kübra 1.884,
-                          Senem düzlendikten sonra 985,15. Brüt/iskonto satırları yalnız gerçek indirimde. */}
+                      {/* Net = müşterinin GERÇEKTE ödediği: taksitliyse vade farkı DAHİL (charged_total),
+                          değilse Genel toplam. İrem Kılıç 4.977,33 (taksitli); Kübra 1.884; Senem 985,15. */}
                       {Number(r.discount) > 0 && <div className="text-gray-500 line-through text-xs leading-tight">{fmtTL(r.subtotal || r.total)}</div>}
                       {Number(r.discount) > 0 && <div className="text-orange-600 text-xs font-bold leading-tight">-{fmtTL(r.discount)}</div>}
-                      <div className="font-bold text-gray-900 leading-tight">{fmtTL(r.total)}</div>
+                      <div className="font-bold text-gray-900 leading-tight">{fmtTL(Number(r.charged_total) || Number(r.total))}</div>
+                      {Number(r.vade_farki) > 0 && <div className="text-[9px] text-amber-600 leading-tight whitespace-nowrap">taksit · vade +{fmtTL(r.vade_farki)}</div>}
                     </td>
                     <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(r.created_at)}</td>
                     <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{r.return_approved_at ? fmtDate(r.return_approved_at) : "—"}</td>
@@ -745,22 +748,28 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                   <span className="truncate max-w-[260px]">{it.name || "—"}</span>
                                   <span className="whitespace-nowrap text-gray-500">{it.qty} ad. × {fmtTL(it.price)}</span>
                                   {(() => {
-                                    // Sipariş-seviyesi indirim (kupon vb.) kalemlere ORANSAL dağıtılır —
-                                    // gider pusulasındaki kalem neti ile birebir aynı mantık. Satırda göster.
+                                    // Sipariş-seviyesi indirim (kupon) kalemlere ORANSAL dağıtılır. TAKSİT
+                                    // VADE FARKI da kaleme ORANSAL (net/total) yansıtılır (Kadir: 'kalemlere
+                                    // vade farkını oran orantı göster') → gider pusulasıyla birebir.
                                     const g = (Number(it.qty) || 1) * (Number(it.price) || 0);
                                     const dr = (Number(r.subtotal) > 0 && Number(r.discount) > 0)
                                       ? Math.min(1, Number(r.discount) / Number(r.subtotal)) : 0;
                                     const dShare = g * dr;
-                                    const net = g - dShare;
-                                    return dr > 0.0001 ? (
+                                    const netAfterDisc = g - dShare;
+                                    const vadeRatio = (Number(r.vade_farki) > 0 && Number(r.total) > 0)
+                                      ? Number(r.vade_farki) / Number(r.total) : 0;
+                                    const vadeShare = netAfterDisc * vadeRatio;
+                                    const net = netAfterDisc + vadeShare;
+                                    const hasDisc = dr > 0.0001, hasVade = vadeShare > 0.005;
+                                    if (!hasDisc && !hasVade) return <span className="font-semibold whitespace-nowrap">{fmtTL(g)}</span>;
+                                    return (
                                       <span className="whitespace-nowrap inline-flex items-center gap-2"
-                                        title={`Brüt ${fmtTL(g)} · indirim payı %${(dr * 100).toFixed(0)} (−${fmtTL(dShare)}) · net ${fmtTL(net)}`}>
-                                        <span className="text-gray-400 line-through">{fmtTL(g)}</span>
-                                        <span className="text-orange-600">−{fmtTL(dShare)} <span className="text-[10px]">(%{(dr * 100).toFixed(0)})</span></span>
+                                        title={`Brüt ${fmtTL(g)}${hasDisc ? ` · indirim −${fmtTL(dShare)}` : ""}${hasVade ? ` · vade farkı +${fmtTL(vadeShare)}` : ""} · net ${fmtTL(net)}`}>
+                                        {hasDisc && <span className="text-gray-400 line-through">{fmtTL(g)}</span>}
+                                        {hasDisc && <span className="text-orange-600">−{fmtTL(dShare)} <span className="text-[10px]">(%{(dr * 100).toFixed(0)})</span></span>}
+                                        {hasVade && <span className="text-amber-600">+{fmtTL(vadeShare)} <span className="text-[10px]">vade</span></span>}
                                         <span className="font-semibold text-gray-900">{fmtTL(net)}</span>
                                       </span>
-                                    ) : (
-                                      <span className="font-semibold whitespace-nowrap">{fmtTL(g)}</span>
                                     );
                                   })()}
                                   {it.barcode && <span className="text-gray-700">#{it.barcode}</span>}
@@ -784,11 +793,14 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           const _base = Number(r.subtotal);
                           const dr = (_base > 0 && Number(r.discount) > 0)
                             ? Math.min(1, Number(r.discount) / _base) : 0;
+                          // TAKSİT vade farkı payı seçili kaleme ORANSAL eklenir (net/total).
+                          const vadeRatio = (Number(r.vade_farki) > 0 && Number(r.total) > 0)
+                            ? Number(r.vade_farki) / Number(r.total) : 0;
                           let selNet = 0, selN = 0;
                           (r.items || []).forEach((it, i) => {
                             if (!selItems[`${r.id}::${i}`]) return;
                             selN += 1;
-                            selNet += ((Number(it.qty) || 1) * (Number(it.price) || 0)) * (1 - dr);
+                            selNet += ((Number(it.qty) || 1) * (Number(it.price) || 0)) * (1 - dr) * (1 + vadeRatio);
                           });
                           const totalItems = (r.items || []).length;
                           const isFullSel = totalItems > 0 && selN >= totalItems;
@@ -841,12 +853,15 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           const amt = Number(freeShipFee) || 0;
                           const sel = !!cargoSel[r.id];
                           const locked = r.return_is_approved && !editRows[r.id];
-                          // Kalan (iade sonrası tutulan) net tutar
+                          // Kalan (iade sonrası tutulan) net tutar — seçili kalem netleri (indirim + taksit
+                          // vade farkı payı DAHİL) → 'İade edilecek' kargo düşülünce doğru çıksın.
                           const _base = Number(r.subtotal);
                           const dr = (_base > 0 && Number(r.discount) > 0) ? Math.min(1, Number(r.discount) / _base) : 0;
+                          const vadeRatio = (Number(r.vade_farki) > 0 && Number(r.total) > 0)
+                            ? Number(r.vade_farki) / Number(r.total) : 0;
                           let retNet = 0, anySel = false;
                           (r.items || []).forEach((it, i) => {
-                            if (selItems[`${r.id}::${i}`]) { anySel = true; retNet += ((Number(it.qty) || 1) * (Number(it.price) || 0)) * (1 - dr); }
+                            if (selItems[`${r.id}::${i}`]) { anySel = true; retNet += ((Number(it.qty) || 1) * (Number(it.price) || 0)) * (1 - dr) * (1 + vadeRatio); }
                           });
                           const orderNet = Number(r.total) || 0;
                           const keptNet = Math.max(0, orderNet - retNet);
