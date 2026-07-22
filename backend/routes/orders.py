@@ -6866,8 +6866,26 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
 
     def _q(it):
         return int(it.get("quantity", 1) or 1)
-    prod_gross = _round2(sum(_round2(it.get("unit_price", it.get("price", 0))) * _q(it) for it in items))
-    prod_net = _round2(sum(_round2(it.get("price", 0)) * _q(it) for it in items))
+
+    # KDV-DAHİL TABAN DÜZELTMESİ (Ali Al 398MD4734D): bazı içe-aktarılan (Ticimax) siparişlerde
+    # item.price KDV-HARİÇ saklanmış, oysa subtotal/total KDV-DAHİL. Bu durumda pusula tutarı
+    # düşük çıkıyordu (1 ürün + kargo kes → 1060 yerine 1176 olmalıydı). Siparişin KENDİ
+    # verisinden faktör türet: (subtotal − indirim) / Σ(item.price×adet). Faktör bir KDV
+    # oranına yakınsa (1.06–1.24) item.price KDV-hariç kabul edilip KDV-dahile ölçeklenir;
+    # aksi halde 1.0 (normal siparişler ETKİLENMEZ — canlı veride 522+193 sipariş dokunulmaz,
+    # yalnız tam 1.10 çıkan 14 sipariş düzelir).
+    _all_net = _round2(sum(_round2((i or {}).get("price", 0)) * int((i or {}).get("quantity", 1) or 1)
+                          for i in _order_items))
+    _sub_h = _round2(order.get("subtotal") or 0)
+    _disc_h = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
+    _paid_factor = 1.0
+    if _all_net > 0.5 and _sub_h > 0.5:
+        _f = (_sub_h - _disc_h) / _all_net
+        if 1.06 <= _f <= 1.24:
+            _paid_factor = _f
+
+    prod_gross = _round2(sum(_round2(it.get("unit_price", it.get("price", 0))) * _q(it) for it in items) * _paid_factor)
+    prod_net = _round2(sum(_round2(it.get("price", 0)) * _q(it) for it in items) * _paid_factor)
 
     # Kargo bedeli kaynağı — FATURA NE İSE O:
     #   faturada ücret VARSA (shipping_cost>0) → ödenmiş kargodur, iadeye + olarak EKLENİR.
@@ -6904,8 +6922,8 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         _disc_ratio = 1.0
 
     def _eff_net_unit(it):
-        """Kalemin GERÇEK ödenen birim neti = item.price × (1 − sipariş-seviyesi indirim oranı)."""
-        return _round2(_round2(it.get("price", 0)) * (1 - _disc_ratio))
+        """Kalemin GERÇEK ödenen birim neti = item.price × KDV-dahil faktörü × (1 − indirim oranı)."""
+        return _round2(_round2(it.get("price", 0)) * _paid_factor * (1 - _disc_ratio))
 
     cargo_line = None
     cargo_mode = "none"
