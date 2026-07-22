@@ -271,6 +271,9 @@ export default function Returns() {
   const [gpExporting, setGpExporting] = useState(false);
   const [gpFrom, setGpFrom] = useState("");
   const [gpTo, setGpTo] = useState("");
+  const [prFrom, setPrFrom] = useState(""); // koçan no aralığı yazdırma — başlangıç
+  const [prTo, setPrTo] = useState("");     // koçan no aralığı yazdırma — bitiş
+  const [prBusy, setPrBusy] = useState(false);
   const [gpSource, setGpSource] = useState("all"); // Excel iade kaynağı filtresi
   // Excel'e YALNIZ pusulası kesilmiş (seri no almış) iadeler girsin (kullanıcı isteği).
   // Varsayılan AÇIK: "gider pusulası oluşmayan hiçbir siparişi indirmesin".
@@ -540,6 +543,27 @@ export default function Returns() {
     );
   };
 
+  // KOÇAN NO ARALIĞI YAZDIR: kesilmiş pusulaları verilen aralıkta (087312–087608) tekrar bas
+  // (Kadir: yazıcıda kağıt sıkıştı, o aralığı baştan değil tam o aralıktan yazdır).
+  const printGpRange = async () => {
+    const f = String(prFrom || "").trim(), t = String(prTo || "").trim();
+    if (!f || !t) { toast.error("Başlangıç ve bitiş koçan no girin"); return; }
+    setPrBusy(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.get(
+        `${API}/orders/returns/gider-pusulasi/print-range?from_no=${encodeURIComponent(pad6(f))}&to_no=${encodeURIComponent(pad6(t))}`,
+        { headers: { Authorization: `Bearer ${token}` } });
+      const list = res.data?.pusulalar || [];
+      if (!list.length) { toast.error(`Bu aralıkta (${pad6(f)}–${pad6(t)}) pusula bulunamadı`); return; }
+      setBulkPrintData(list);
+      toast.success(`${list.length} pusula yazdırılıyor (${pad6(f)}–${pad6(t)})`);
+      setTimeout(() => window.print(), 500);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Aralık yazdırma hatası");
+    } finally { setPrBusy(false); }
+  };
+
   // Modaldan tek pusula yazdır: aynı 4'lü A4 mekanizmasını kullanır.
   // ÖNİZLEME (site iadesi) ise: numara YAZDIR anında atanır + kalıcılaşır (Kadir: 'numara
   // yazdırınca atansın'). TY/manuel akışta numara zaten açılışta atandığından finalize yok.
@@ -724,6 +748,34 @@ export default function Returns() {
           <p className="text-[11px] text-purple-600 ml-auto max-w-xs pb-1">
             A4 yatay, aynı pusula 4 kopya. Numara kağıda basılmaz (matbuda var); takip için satırda/önizlemede görünür. Her iade çıktısı no'yu 1 ilerletir.
           </p>
+        </div>
+
+        {/* KOÇAN NO ARALIĞI YAZDIR — kesilmiş pusulaları verilen aralıkta TEKRAR bas
+            (yazıcı sıkışması vb. → baştan değil, tam istenen aralıktan yazdır). */}
+        <div className="mb-4 p-3 bg-sky-50 border border-sky-200 rounded-xl">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <p className="text-[11px] font-bold text-sky-800 uppercase mb-1">Koçan No Aralığı Yazdır</p>
+              <p className="text-[11px] text-sky-700 max-w-md">
+                Kesilmiş gider pusulalarını verilen <b>koçan no aralığında</b> tekrar yazdırır
+                (yeni pusula oluşturmaz). Kağıt sıkışması vb. durumda kaldığınız yerden devam edin.
+              </p>
+            </div>
+            <div className="flex flex-col">
+              <label className="text-[10px] text-sky-700 uppercase tracking-wider mb-0.5">Başlangıç No</label>
+              <input value={prFrom} onChange={(e) => setPrFrom(e.target.value)} placeholder="087312"
+                className="border border-sky-300 rounded-lg px-2 py-1.5 text-sm bg-white w-28 font-mono" />
+            </div>
+            <div className="flex flex-col">
+              <label className="text-[10px] text-sky-700 uppercase tracking-wider mb-0.5">Bitiş No</label>
+              <input value={prTo} onChange={(e) => setPrTo(e.target.value)} placeholder="087608"
+                className="border border-sky-300 rounded-lg px-2 py-1.5 text-sm bg-white w-28 font-mono" />
+            </div>
+            <button onClick={printGpRange} disabled={prBusy}
+              className="px-4 py-2 bg-sky-600 text-white rounded-lg text-sm font-bold hover:bg-sky-700 transition-colors disabled:opacity-50">
+              {prBusy ? "..." : "Aralığı Yazdır"}
+            </button>
+          </div>
         </div>
 
         {/* Toplu Gider Pusulası — YALNIZ ONAYLANAN iadeler. Yukarıdaki tarih aralığı +

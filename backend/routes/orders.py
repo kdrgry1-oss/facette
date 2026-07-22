@@ -7776,6 +7776,35 @@ async def clear_gider_pusulasi_numbers(payload: dict = Body(default={}),
             "siparis_temizlenen": r3.modified_count}
 
 
+@router.get("/returns/gider-pusulasi/print-range")
+async def gider_pusulasi_print_range(
+    from_no: str, to_no: str,
+    current_user: dict = Depends(require_permission("returns.expense_note")),
+):
+    """Verilen KOÇAN NUMARASI ARALIĞINDAKİ (display_number) KESİLMİŞ gider pusulalarını
+    yazdırma için döndürür (Kadir: yazıcıda kağıt sıkıştı — 087312–087608 arasını tekrar
+    yazdır). Aralık DAHİL; numaraya göre artan sıralı. Yeni pusula OLUŞTURMAZ, mevcutları
+    getirir → istenen aralık baştan değil tam o aralıktan basılır."""
+    _f = str(from_no or "").strip()
+    _t = str(to_no or "").strip()
+    if not _f or not _t:
+        raise HTTPException(status_code=400, detail="from_no ve to_no gerekli")
+    # 6 haneye pad (kullanıcı 87312 veya 087312 girse de aynı çalışsın); string aralığı 6-haneli
+    # sıfır-dolgulu numaralarda leksikografik = sayısal.
+    if _f.isdigit():
+        _f = _f.zfill(6)
+    if _t.isdigit():
+        _t = _t.zfill(6)
+    if _f > _t:
+        _f, _t = _t, _f
+    docs = []
+    async for gp in db.gider_pusulasi.find(
+            {"display_number": {"$gte": _f, "$lte": _t, "$nin": ["", None]}},
+            {"_id": 0}).sort("display_number", 1):
+        docs.append({**gp, "assigned_no": gp.get("display_number")})
+    return {"success": True, "count": len(docs), "from_no": _f, "to_no": _t, "pusulalar": docs}
+
+
 # ============================================================================
 # Madde 3 — İade Ödemesi (refunded) — SADECE returns.refund_pay yetkisi (P6)
 # ============================================================================

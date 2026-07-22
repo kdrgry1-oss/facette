@@ -86,15 +86,37 @@ async def list_rooftr_return_orders(
         base_filter["payment_method"] = {"$in": _pm} if len(_pm) > 1 else (_pm[0] if _pm else payment)
 
     if search and search.strip():
-        _fields = ["order_number", "order_code",
+        _fields = ["order_number", "order_code", "gider_pusulasi_no",
                    "shipping_address.first_name", "shipping_address.last_name",
                    "shipping_address.full_name", "shipping_address.name",
                    "shipping_address.phone", "shipping_address.email",
                    "customer_name", "full_name"]
+        # GİDER PUSULASI NO ile arama (Kadir): girilen no display_number/no ile eşleşen
+        # gider_pusulasi kayıtlarından order_number/return_id topla → aramaya OR olarak ekle.
+        _gp_onums = set()
+        _gp_rids = set()
+        try:
+            _gp_rx = {"$regex": re.escape(search.strip()), "$options": "i"}
+            async for _g in db.gider_pusulasi.find(
+                    {"$or": [{"display_number": _gp_rx}, {"number": _gp_rx}]},
+                    {"_id": 0, "order_number": 1, "return_id": 1}):
+                if _g.get("order_number"):
+                    _gp_onums.add(str(_g["order_number"]))
+                if _g.get("return_id"):
+                    _gp_rids.add(str(_g["return_id"]))
+        except Exception:
+            pass
+        # return_id → order_id (customer_returns köprüsü) → order_number havuzuna ekle.
+        if _gp_rids:
+            async for _cr in db.customer_returns.find(
+                    {"id": {"$in": list(_gp_rids)}}, {"_id": 0, "order_number": 1}):
+                if _cr.get("order_number"):
+                    _gp_onums.add(str(_cr["order_number"]))
+        _gp_clause = [{"order_number": {"$in": list(_gp_onums)}}] if _gp_onums else []
         _words = [w for w in search.strip().split() if w]
         if len(_words) <= 1:
             rx = {"$regex": _search_tr_regex(search.strip()), "$options": "i"}
-            base_filter["$and"] = [{"$or": [{f: rx} for f in _fields]}]
+            base_filter["$and"] = [{"$or": [{f: rx} for f in _fields] + _gp_clause}]
         else:
             # ÇOK KELİMELİ AD-SOYAD: her kelime herhangi bir alanda geçmeli (sıra önemsiz).
             # 'büşra çe' → 'büşra' first_name'de, 'çe' last_name'de eşleşir → bulunur.

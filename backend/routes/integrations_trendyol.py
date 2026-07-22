@@ -4413,6 +4413,7 @@ async def get_trendyol_claims(
             {"customer_name": _rx},
             {"claim_id": _rx},
             {"invoice_number": _rx},
+            {"gider_pusulasi_no": _rx},
             {"cargo_tracking_number": _rx},
             {"cargo_provider_name": _rx},
             {"claim_reason": _rx},
@@ -4421,6 +4422,16 @@ async def get_trendyol_claims(
             {"items.barcode": _rx},
             {"items.merchantSku": _rx},
         ]
+        # GİDER PUSULASI NO ile arama (Kadir): display_number eşleşen pusulalardan claim_id topla.
+        try:
+            _gp_rx = {"$regex": re.escape(_s), "$options": "i"}
+            _gp_cids = [str(_g.get("claim_id")) async for _g in db.gider_pusulasi.find(
+                {"claim_id": {"$exists": True, "$ne": ""}, "display_number": _gp_rx},
+                {"_id": 0, "claim_id": 1}) if _g.get("claim_id")]
+            if _gp_cids:
+                _ors.append({"claim_id": {"$in": _gp_cids}})
+        except Exception:
+            pass
         # Telefon: sadece rakam → son 10 hane (kayıtta varsa)
         _digits = re.sub(r"\D", "", _s)
         if len(_digits) >= 7:
