@@ -497,6 +497,39 @@ async def bulk_approve_site_returns(
             "items": approved[:60]}
 
 
+@router.post("/set-return-status")
+async def set_return_status_silent(
+    payload: dict,
+    current_user: dict = Depends(require_admin),
+):
+    """SESSİZ durum düzeltme (Kadir: 'iade edilmiş ama iade sayfasında yoklar'). Verilen sipariş
+    no'larının durumunu bir İADE durumuna çeker → iade sayfasında görünürler. Historik düzeltme
+    olduğundan MÜŞTERİ BİLDİRİMİ ve STOK HAREKETİ YAPILMAZ. Ödeme durumuna dokunmaz.
+    payload: {order_numbers: [..], status: 'returned'|'refunded'|...}"""
+    onums = payload.get("order_numbers") or []
+    status = str(payload.get("status") or "").strip()
+    if not onums or not status:
+        raise HTTPException(status_code=400, detail="order_numbers ve status gerekli")
+    if status not in RETURN_STATUSES:
+        raise HTTPException(status_code=400, detail=f"status bir iade durumu olmalı: {sorted(RETURN_STATUSES)}")
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    updated = []
+    for onum in onums:
+        o = await db.orders.find_one({"order_number": str(onum).strip(),
+                                      "platform": {"$nin": ["trendyol", "hepsiburada"]}},
+                                     {"_id": 0, "id": 1, "status": 1})
+        if not o:
+            continue
+        _set = {"status": status, "updated_at": now_iso}
+        if status in ("return_approved", "returned", "refunded", "partial_refunded"):
+            _set["return_request.status"] = "approved"
+            _set.setdefault("return_approved_at", now_iso)
+        await db.orders.update_one({"id": o["id"]}, {"$set": _set})
+        updated.append({"order_number": onum, "old": o.get("status"), "new": status})
+    return {"success": True, "count": len(updated), "updated": updated}
+
+
 @router.post("/flatten-order/{order_id}")
 async def flatten_order_financials(
     order_id: str,
