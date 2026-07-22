@@ -530,6 +530,73 @@ async def scan_duplicate_returns(
     }
 
 
+@router.post("/duplicate-returns/merge-ambiguous")
+async def merge_ambiguous_duplicate_returns(
+    confirm: bool = Query(False, description="true → köprüyü taşı + twin'i sil"),
+    current_user: dict = Depends(require_admin),
+):
+    """BELİRSİZ mükerrer gruplar: aynı order_number'da iki kayıt da iade köprüsü (customer_returns)
+    taşıyor. GERÇEK kayıt telefonlu facette kaydıdır; twin (telefonsuz ticimax backfill) silinmeden
+    ÖNCE köprü (customer_returns) + varsa gider_pusulası order_id/return_id'si KEEP kaydına
+    TAŞINIR (order_id ile çözülen panel köprüsü kopmasın). Sonra twin arşivlenip silinir."""
+    base_filter = {
+        "platform": {"$nin": ["trendyol", "hepsiburada"]},
+        "status": {"$in": RETURN_STATUSES},
+    }
+    proj = {"_id": 0, "id": 1, "order_number": 1, "platform": 1, "source": 1, "status": 1,
+            "shipping_address": 1, "return_request": 1, "gider_pusulasi_no": 1,
+            "items": 1, "subtotal": 1, "total": 1, "created_at": 1, "updated_at": 1}
+    by_num = {}
+    async for o in db.orders.find(base_filter, proj):
+        onum = str(o.get("order_number") or "").strip()
+        if onum:
+            by_num.setdefault(onum, []).append(o)
+
+    actions = []
+    import datetime as _dt
+    for onum, recs in by_num.items():
+        if len(recs) < 2:
+            continue
+        sigs = [await _return_record_signals(o) for o in recs]
+        sigs.sort(key=lambda s: (s["score"], s["updated_at"], s["created_at"]), reverse=True)
+        keep = sigs[0]
+        twins = [s for s in sigs[1:]
+                 if not s["has_phone"] and (s["platform"] == "ticimax" or "backfill" in (s["source"] or ""))]
+        # Yalnız GERÇEKTEN belirsiz olanlar: bare-junk taramasında SİLİNMEMİŞ (yani köprü/pusula taşıyan) twin.
+        twins = [s for s in twins
+                 if s["has_customer_returns"] or s["has_gider_pusulasi"] or s["has_return_request"]]
+        if not keep.get("has_phone") or not twins:
+            continue
+        keep_id = keep["id"]
+        for t in twins:
+            tid = t["id"]
+            moved_cr = moved_gp = 0
+            if confirm:
+                # KEEP zaten köprü taşımıyorsa twin'in köprüsünü KEEP'e taşı (order_id).
+                if not await db.customer_returns.find_one({"order_id": keep_id}, {"_id": 1}):
+                    _r = await db.customer_returns.update_many({"order_id": tid}, {"$set": {"order_id": keep_id}})
+                    moved_cr = _r.modified_count
+                _r2 = await db.gider_pusulasi.update_many({"return_id": tid}, {"$set": {"return_id": keep_id}})
+                moved_gp = _r2.modified_count
+                # twin'i arşivle + sil
+                o = await db.orders.find_one({"id": tid}, {"_id": 0})
+                if o:
+                    o["deleted_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+                    o["deleted_by"] = current_user.get("email", "")
+                    o["deleted_reason"] = "mükerrer iade (belirsiz) — köprü KEEP'e taşındı"
+                    try:
+                        await db.orders_deleted.replace_one({"id": tid}, o, upsert=True)
+                    except Exception as _e:
+                        logger.warning(f"[dup-merge] archive fail {tid}: {_e}")
+                    await db.orders.delete_one({"id": tid})
+            actions.append({
+                "order_number": onum, "keep_id": keep_id, "twin_id": tid,
+                "moved_customer_returns": moved_cr, "moved_gider_pusulasi": moved_gp,
+                "keep_name": None,
+            })
+    return {"success": True, "confirmed": confirm, "action_count": len(actions), "actions": actions}
+
+
 # ============================================================================
 # EXPORT — İade siparişlerini Excel (.xlsx) indir (görseldeki kolon düzeni)
 # ============================================================================
