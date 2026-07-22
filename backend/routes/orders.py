@@ -304,7 +304,10 @@ def _order_vade_farki(order: dict):
     vf = round(charged - base, 2) if (charged > 0 and base > 0) else 0.0
     if inst > 1 and vf >= 0.01:
         return vf, charged, inst
-    return 0.0, charged, inst
+    # PEŞİN / 1-TAKSİT → vade farkı YOK. 'charged' olarak BOZUK paid_amount'ı DEĞİL, order.total'ı
+    # döndür (Doğa Altaş/Gözde Erdoğan: peşin ama paid_amount=2×total → gider pusulası/iade tutarı
+    # 2 katına çıkıyordu). Böylece TÜM tüketiciler (panel, GP, refund) doğru tutarı alır.
+    return 0.0, (base if base > 0 else charged), inst
 
 
 async def _product_vat_map(order: dict) -> dict:
