@@ -6657,8 +6657,9 @@ async def update_return_approval(return_id: str, payload: dict,
         _o_sub = _round2(order.get("subtotal") or 0)
         _o_disc = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
         _dr = min(1.0, _o_disc / _o_sub) if _o_sub > 0 and _o_disc > 0 else 0.0
-        # KDV-dahil faktör (rooftr_returns/GP ile AYNI çift-aday mantığı): (a) subtotal−indirim,
-        # (b) total−kargo−vade farkı; hangisi KDV oranına (1.06–1.24) düşerse o.
+        # KDV-dahil faktör (rooftr_returns/GP ile AYNI mantık): KDV-dahil LİSTE (indirim öncesi
+        # subtotal) / KDV-hariç LİSTE. İndirim ÇIKARILMAZ (ayrı _dr ile uygulanır) — indirimli
+        # siparişte faktörü bozmasın (Senem Birdal).
         _oi = order.get("items") or []
         _all_net_ord = _round2(sum(_round2((i or {}).get("price", 0)) * int((i or {}).get("quantity", 1) or 1) for i in _oi))
         _pf = 1.0
@@ -6667,8 +6668,8 @@ async def update_return_approval(return_id: str, payload: dict,
                 _vf_g, _cg, _ig = _order_vade_farki(order)
             except Exception:
                 _vf_g = 0.0
-            _tot_h = _round2(order.get("total") or 0) - _round2(order.get("shipping_cost") or 0) - (round(_vf_g, 2) if _vf_g and _vf_g > 0 else 0.0)
-            for _c in [((_o_sub - _o_disc) / _all_net_ord) if _o_sub > 0.5 else None,
+            _tot_h = _round2(order.get("total") or 0) - _round2(order.get("shipping_cost") or 0) - (round(_vf_g, 2) if _vf_g and _vf_g > 0 else 0.0) + _o_disc
+            for _c in [(_o_sub / _all_net_ord) if _o_sub > 0.5 else None,
                        (_tot_h / _all_net_ord) if _tot_h > 0.5 else None]:
                 if _c is not None and 1.06 <= _c <= 1.24:
                     _pf = _c
@@ -6976,29 +6977,27 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         return int(it.get("quantity", 1) or 1)
 
     # KDV-DAHİL TABAN DÜZELTMESİ (Ali Al 398MD4734D): bazı içe-aktarılan (Ticimax) siparişlerde
-    # item.price KDV-HARİÇ saklanmış, oysa subtotal/total KDV-DAHİL. Bu durumda pusula tutarı
-    # düşük çıkıyordu (1 ürün + kargo kes → 1060 yerine 1176 olmalıydı). Siparişin KENDİ
-    # verisinden faktör türet: (subtotal − indirim) / Σ(item.price×adet). Faktör bir KDV
-    # oranına yakınsa (1.06–1.24) item.price KDV-hariç kabul edilip KDV-dahile ölçeklenir;
-    # aksi halde 1.0 (normal siparişler ETKİLENMEZ — canlı veride 522+193 sipariş dokunulmaz,
-    # yalnız tam 1.10 çıkan 14 sipariş düzelir).
+    # item.price KDV-HARİÇ saklanmış, oysa subtotal/total KDV-DAHİL. Faktör = KDV-DAHİL LİSTE
+    # (indirim ÖNCESİ subtotal) / KDV-HARİÇ LİSTE (Σ item.price). İNDİRİM ÇIKARILMAZ: indirim
+    # ayrı order-seviyesi kalemdir, item.price'a yansımaz ve aşağıda _disc_ratio ile AYRICA
+    # uygulanır. (Eski hata: (subtotal−indirim)/Σ → indirimli siparişte faktör 0.99 çıkıp grossing
+    # yapılmıyor, sonra bir de _disc_ratio uygulanıp ÇİFT indirim oluyordu — Senem Birdal 952IF2376A.)
+    # Faktör bir KDV oranına yakınsa (1.06–1.24) uygulanır; değilse 1.0 (normal siparişler etkilenmez).
     _all_net = _round2(sum(_round2((i or {}).get("price", 0)) * int((i or {}).get("quantity", 1) or 1)
                           for i in _order_items))
     _sub_h = _round2(order.get("subtotal") or 0)
     _disc_h = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
-    # İKİ aday faktör (panel rooftr_returns ile AYNI mantık): (a) subtotal−indirim, (b) total−kargo−vade
-    # farkı — hangisi KDV oranı penceresine (1.06–1.24) düşerse o kullanılır. subtotal boş olan
-    # (mükerrer/eksik) Ticimax kayıtlarında bile GP doğru hesaplansın diye total-tabanlı aday eklendi.
     _paid_factor = 1.0
     if _all_net > 0.5:
         try:
             _vf_f, _charged_f, _inst_f = _order_vade_farki(order)
         except Exception:
             _vf_f = 0.0
-        _tot_h = _round2(order.get("total") or 0) - _round2(order.get("shipping_cost") or 0) - (round(_vf_f, 2) if _vf_f and _vf_f > 0 else 0.0)
+        # total-tabanlı yedek: indirimi GERİ ekle → indirim-öncesi KDV-dahil taban.
+        _tot_h = _round2(order.get("total") or 0) - _round2(order.get("shipping_cost") or 0) - (round(_vf_f, 2) if _vf_f and _vf_f > 0 else 0.0) + _disc_h
         _cands = []
         if _sub_h > 0.5:
-            _cands.append((_sub_h - _disc_h) / _all_net)
+            _cands.append(_sub_h / _all_net)
         if _tot_h > 0.5:
             _cands.append(_tot_h / _all_net)
         for _f in _cands:

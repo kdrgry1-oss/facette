@@ -160,13 +160,17 @@ async def list_rooftr_return_orders(
         # KDV-dahile ölçekle. İKİ aday: (a) subtotal−indirim, (b) total−kargo−vade farkı — hangisi
         # KDV oranı penceresine düşerse o kullanılır (subtotal boş olan mükerrer kayıtlarda bile çalışır).
         # Normal (zaten KDV-dahil item.price) siparişler etkilenmez; faktör 1.0 kalır.
+        # KDV faktörü = KDV-DAHİL LİSTE (indirim ÖNCESİ) / KDV-HARİÇ LİSTE. İndirim AYRI bir
+        # order-seviyesi kalemdir (item.price'a yansımaz) → faktörden ÇIKARILMAZ. Aksi halde
+        # indirimli siparişte faktör bozuluyordu (Senem Birdal 952IF2376A: (985.15−98.52)/895.59
+        # = 0.99 → grossing yapılmıyor, kalem 895.59 KDV-hariç kalıyordu; doğrusu 985.15/895.59=1.10).
         _paid_factor = 1.0
         if _calc_net > 0.5:
             _cands = []
-            _sub_h = (_r_subtotal - _r_discount)
-            if _sub_h > 0.5:
-                _cands.append(_sub_h / _calc_net)
-            _tot_h = _r_total - float(o.get("shipping_cost") or 0) - (round(_vf, 2) if _vf > 0 else 0.0)
+            if _r_subtotal > 0.5:
+                _cands.append(_r_subtotal / _calc_net)
+            # total-tabanlı yedek: indirimi GERİ ekle → indirim-öncesi KDV-dahil taban.
+            _tot_h = _r_total - float(o.get("shipping_cost") or 0) - (round(_vf, 2) if _vf > 0 else 0.0) + _r_discount
             if _tot_h > 0.5:
                 _cands.append(_tot_h / _calc_net)
             for _pf in _cands:
@@ -323,8 +327,9 @@ async def list_rooftr_return_orders(
 
         _ap_idx = cr.get("approved_item_indexes")
         if _is_approved:
+            _partial_recorded = isinstance(_ap_idx, list) and bool(_ap_idx)
             # Onaylanan İADE kalemleri (kısmi onayda alt küme; yoksa iadenin tümü)
-            if isinstance(_ap_idx, list) and _ap_idx:
+            if _partial_recorded:
                 _appr_ret = [_ret_items[i] for i in _ap_idx if 0 <= i < len(_ret_items)]
             else:
                 _appr_ret = _ret_items
@@ -333,6 +338,13 @@ async def list_rooftr_return_orders(
                 _mi = _match_order_idx(_ri)
                 if _mi is not None and _mi not in _idxs:
                     _idxs.append(_mi)
+            # DÜŞ: iade kaydı boş (cr.items yok) ya da eşlenemedi AMA iade ONAYLI ve KISMİ kaydı YOK
+            # → TAM onay say, TÜM sipariş kalemlerini onaylı işaretle. Böylece geçmişte onaylanmış
+            # (fakat köprü kalemleri boş) iadelerde "0 kalem onaylandı" yerine tikler görünür
+            # (Senem Birdal 952IF2376A). Kısmi kaydı OLAN ama eşleşmeyen iadede yanlışlıkla
+            # hepsini işaretlemeyiz (boş bırakılır).
+            if not _idxs and not _partial_recorded and _order_items:
+                _idxs = list(range(len(_order_items)))
             r["approved_item_indexes"] = _idxs
             r["approved_full"] = bool(_idxs) and len(_idxs) == len(_order_items)
         else:
