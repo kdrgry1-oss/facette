@@ -646,11 +646,11 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                       ) : <span className="text-gray-400">—</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">
-                      {/* Net = BRÜT − İSKONTO (ürün neti, KARGO HARİÇ). Kargo ayrı satırdır; net'e
-                          katılmaz → 985,15 − 98,52 = 886,63 görünür (total 985,63 DEĞİL, o kargo dahildir). */}
+                      {/* Net = GENEL TOPLAM (müşterinin ödediği: ürün − iskonto + kargo). Kübra 1.884,
+                          Senem düzlendikten sonra 985,15. Brüt/iskonto satırları yalnız gerçek indirimde. */}
                       {Number(r.discount) > 0 && <div className="text-gray-500 line-through text-xs leading-tight">{fmtTL(r.subtotal || r.total)}</div>}
                       {Number(r.discount) > 0 && <div className="text-orange-600 text-xs font-bold leading-tight">-{fmtTL(r.discount)}</div>}
-                      <div className="font-bold text-gray-900 leading-tight">{fmtTL((Number(r.subtotal) || Number(r.total) || 0) - (Number(r.discount) || 0))}</div>
+                      <div className="font-bold text-gray-900 leading-tight">{fmtTL(r.total)}</div>
                     </td>
                     <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(r.created_at)}</td>
                     <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{r.return_approved_at ? fmtDate(r.return_approved_at) : "—"}</td>
