@@ -489,11 +489,13 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
           .map((it) => ({ barcode: it.barcode || "", name: it.name || "", size: it.size || "", color: it.color || "" }));
       }
       if (includeCargo) body.include_cargo = true;
-      const res = await axios.post(`${API}/orders/returns/${returnId}/gider-pusulasi`, body, auth());
+      // ÖNİZLEME: numara YAKMADAN hesapla + göster. Numara YAZDIR'a basınca atanır (Kadir).
+      const res = await axios.post(`${API}/orders/returns/${returnId}/gider-pusulasi?preview=true`, body, auth());
       const gp = res.data?.gider_pusulasi;
-      toast.success(`Gider pusulası: ${gp?.display_number || trackingNo}`);
-      if (gp && onGiderCreated) onGiderCreated({ ...gp, assigned_no: trackingNo });
-      load();
+      toast.success("Gider pusulası önizleme — numara YAZDIR'a basınca atanacak");
+      // Yazdırınca kalıcılaştırmak için return_id + body'yi taşı.
+      if (gp && onGiderCreated) onGiderCreated({ ...gp, assigned_no: trackingNo, preview: true, _returnId: returnId, _gpBody: body });
+      // load() YAPMA — DB değişmedi (önizleme); numara atanmadı. Yazdırınca güncellenir.
     } catch (e) {
       toast.error(e.response?.data?.detail || "Gider pusulası oluşturulamadı");
     } finally { setBusyId(""); }

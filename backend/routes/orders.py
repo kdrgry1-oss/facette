@@ -6914,9 +6914,14 @@ async def reject_return(return_id: str, payload: dict,
 
 @router.post("/returns/{return_id}/gider-pusulasi")
 async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = Body(default=None),
+                                     preview: bool = Query(False),
                                      current_user: dict = Depends(require_permission("returns.expense_note"))):
     """Site iadesi için gider pusulası verisi üretir. Trendyol tarafıyla AYNI koleksiyonu
-    (db.gider_pusulasi) ve AYNI numara serisini kullanır (numaralar sürekli)."""
+    (db.gider_pusulasi) ve AYNI numara serisini kullanır (numaralar sürekli).
+
+    preview=True: veriyi HESAPLAR ama NUMARA ATAMAZ / KAYDETMEZ (ekranda önizleme). Numara
+    yalnız YAZDIR'a basınca (preview=False) atanır ve kalıcılaşır → açıp yazdırmadan kapatınca
+    numara yanmaz (Kadir: 'numara yazdırınca atansın')."""
     rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
     if not rec:
         raise HTTPException(status_code=404, detail="İade bulunamadı")
@@ -7232,11 +7237,13 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    await db.gider_pusulasi.update_one({"return_id": return_id}, {"$set": gider_pusulasi}, upsert=True)
-    await db.customer_returns.update_one({"id": return_id},
-        {"$set": {"has_gider_pusulasi": True, "gider_pusulasi_no": display_number}})
-
-    return {"success": True, "gider_pusulasi": gider_pusulasi}
+    # ÖNİZLEME'de KAYDETME/NUMARA YAKMA — yalnız yazdırınca (preview=False) kalıcılaşır.
+    if not preview:
+        await db.gider_pusulasi.update_one({"return_id": return_id}, {"$set": gider_pusulasi}, upsert=True)
+        await db.customer_returns.update_one({"id": return_id},
+            {"$set": {"has_gider_pusulasi": True, "gider_pusulasi_no": display_number}})
+    gider_pusulasi["preview"] = bool(preview)
+    return {"success": True, "gider_pusulasi": gider_pusulasi, "preview": bool(preview)}
 
 
 @router.get("/returns/gider-pusulasi/export")

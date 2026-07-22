@@ -535,12 +535,27 @@ export default function Returns() {
     );
   };
 
-  // Modaldan tek pusula yazdır: aynı 4'lü A4 mekanizmasını kullanır
-  const printSingleGp = () => {
+  // Modaldan tek pusula yazdır: aynı 4'lü A4 mekanizmasını kullanır.
+  // ÖNİZLEME (site iadesi) ise: numara YAZDIR anında atanır + kalıcılaşır (Kadir: 'numara
+  // yazdırınca atansın'). TY/manuel akışta numara zaten açılışta atandığından finalize yok.
+  const printSingleGp = async () => {
     if (!gpData) return;
-    setBulkPrintData([gpData]);
-    // Numara, pusula OLUŞTURULURKEN (onGiderCreated / handleGiderPusulasi) zaten 1 ilerledi.
-    // Yazdırırken TEKRAR ilerletmek 2'şer atlamaya yol açıyordu → burada advance YOK.
+    let finalGp = gpData;
+    if (gpData.preview && gpData._returnId) {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await axios.post(`${API}/orders/returns/${gpData._returnId}/gider-pusulasi`,
+          gpData._gpBody || {}, { headers: { Authorization: `Bearer ${token}` } });
+        finalGp = { ...res.data.gider_pusulasi, assigned_no: gpData.assigned_no || res.data.gider_pusulasi?.display_number };
+        setGpData(finalGp);
+        advanceGpNo(1);
+        toast.success(`Gider pusulası atandı: ${finalGp.display_number}`);
+      } catch (e) {
+        toast.error(e.response?.data?.detail || "Numara atanamadı — yazdırma iptal");
+        return;
+      }
+    }
+    setBulkPrintData([finalGp]);
     setTimeout(() => { window.print(); }, 300);
   };
 
@@ -797,7 +812,7 @@ export default function Returns() {
         </div>
 
         {/* Web Sitesi sekmesi: doğrudan sipariş bazlı iade akışı (alt-sekme yok — üstte zaten "Web Sitesi" yazıyor) */}
-        {platform === "facette" && <RooftrReturns embedded gpStart={gpStart} onGiderCreated={(gp) => { setGpData(gp); setGpModalOpen(true); advanceGpNo(1); }} />}
+        {platform === "facette" && <RooftrReturns embedded gpStart={gpStart} onGiderCreated={(gp) => { setGpData(gp); setGpModalOpen(true); /* önizleme: numara YAZDIR'da atanır, burada advance YOK */ }} />}
 
         {/* Trendyol (pazaryeri) sekmesi gövdesi */}
         {(platform === "trendyol" || platform === "hepsiburada") && (<>
@@ -1138,7 +1153,9 @@ export default function Returns() {
                 </div>
               )}
               <p className="text-xs text-gray-500 mb-2">
-                Bu pusula <span className="font-mono font-bold text-purple-700">#{gpData.assigned_no || gpData.display_number}</span> numaralı matbu forma basılacak. Numara kağıda yazılmaz; yalnız veriler basılır.
+                {gpData.preview
+                  ? <>Önizleme — gider pusulası numarası <b className="text-amber-700">YAZDIR'a basınca atanır</b>. Yazdırmadan kapatırsanız numara yanmaz.</>
+                  : <>Bu pusula <span className="font-mono font-bold text-purple-700">#{gpData.assigned_no || gpData.display_number}</span> numaralı matbu forma basılacak. Numara kağıda yazılmaz; yalnız veriler basılır.</>}
               </p>
               <div className="border rounded-lg overflow-hidden bg-white mx-auto" style={{ width: `${GP_SLIP_W_MM}mm`, maxWidth: "100%" }}>
                 <GiderPusulasiSlip data={gpData} overlay={false} offX={0} offY={0} guides preview />
