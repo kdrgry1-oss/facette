@@ -6940,6 +6940,23 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     cust_name = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
                  or ship.get("full_name", "") or "Müşteri")
 
+    # ONARIM: iade köprüsü kalemleri BOŞ ise (mükerrer birleştirme / eski kayıt) sipariş
+    # kalemlerinden doldur → GP net'i 0 çıkmaz (Kadir: toplu önizlemede bazı site tutarları 0).
+    # (Tekil akışta /open bunu yapıyordu; toplu akış /open'ı atladığından burada da yapılır.)
+    if not (rec.get("items") or []):
+        _src = order.get("items") or []
+        _fix = [{
+            "name": it.get("product_name") or it.get("name") or "Ürün",
+            "size": it.get("size", "") or "", "color": it.get("color", "") or "",
+            "quantity": int(it.get("quantity", 1) or 1),
+            "price": float(it.get("price") or it.get("unit_price") or 0),
+            "unit_price": float(it.get("unit_price") or it.get("price") or 0),
+            "product_id": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+        } for it in _src]
+        if _fix:
+            rec["items"] = _fix
+            await db.customer_returns.update_one({"id": return_id}, {"$set": {"items": _fix}})
+
     all_items = rec.get("items", []) or []
     # Seçili kalemler (kısmi iade). Öncelik sırası:
     #   1) payload.selected_items: kalem KİMLİKLERİ [{barcode, name, size, color}] — index
