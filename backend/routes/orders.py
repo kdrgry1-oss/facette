@@ -7019,6 +7019,7 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     #   (Operatör yine de kesmek isterse payload.cargo_override ile tutar geçebilir.)
     shipping_cost = _round2(order.get("shipping_cost") or 0)
     paid_shipping = shipping_cost > 0.009
+    include_cargo = bool((payload or {}).get("include_cargo"))
     if paid_shipping:
         cargo_amount = shipping_cost
     else:
@@ -7026,7 +7027,15 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
             cargo_amount = _round2(float((payload or {}).get("cargo_override") or 0))
         except Exception:
             cargo_amount = 0.0
-    include_cargo = bool((payload or {}).get("include_cargo"))
+        # ÜCRETSİZ KARGO + 'kargoyu müşteriden kes': sipariş eşiği aşıp ücretsiz kargodan
+        # faydalanmıştı; iade sonrası bu hak kalkıyorsa standart kargo ücreti (ayarlardan, ör. 99)
+        # iade tutarından + gider pusulasından düşülür (Kadir: '2300−99'). Override yoksa çöz.
+        if cargo_amount <= 0 and include_cargo:
+            try:
+                _thr_gp, _fee_gp = await _storefront_free_shipping()
+                cargo_amount = _round2(_fee_gp or 0)
+            except Exception:
+                cargo_amount = 0.0
 
     order_total = _round2(order.get("total") or 0)
     order_sub = _round2(order.get("subtotal") or 0)
