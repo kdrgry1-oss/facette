@@ -6650,13 +6650,31 @@ async def update_return_approval(return_id: str, payload: dict,
     returned_net_in = None if returned_net_in in (None, "") else returned_net_in
     # GÜVENLİK AĞI: kısmi seçim var ama returned_net gönderilmediyse, hesabın YANLIŞLIKLA
     # TAM İADE'ye düşmesini önle — iade tutarını SEÇİLİ kalemlerin net toplamından türet
-    # (Kadir talebi: "hesap yalnız tiklediklerime göre"). Sipariş indirim oranını uygula.
+    # (Kadir talebi: "hesap yalnız tiklediklerime göre"). KDV-dahil faktörü + sipariş indirim
+    # oranını uygula ki tutar panel/gider pusulası ile BİREBİR aynı olsun (Ali Al: item.price
+    # KDV-hariç 1159.09 saklı → faktör 1.10 ile 1275'e ölçeklenmeli, ham 1159.09 DEĞİL).
     if _ap_partial and returned_net_in is None:
         _o_sub = _round2(order.get("subtotal") or 0)
         _o_disc = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
         _dr = min(1.0, _o_disc / _o_sub) if _o_sub > 0 and _o_disc > 0 else 0.0
+        # KDV-dahil faktör (rooftr_returns/GP ile AYNI çift-aday mantığı): (a) subtotal−indirim,
+        # (b) total−kargo−vade farkı; hangisi KDV oranına (1.06–1.24) düşerse o.
+        _oi = order.get("items") or []
+        _all_net_ord = _round2(sum(_round2((i or {}).get("price", 0)) * int((i or {}).get("quantity", 1) or 1) for i in _oi))
+        _pf = 1.0
+        if _all_net_ord > 0.5:
+            try:
+                _vf_g, _cg, _ig = _order_vade_farki(order)
+            except Exception:
+                _vf_g = 0.0
+            _tot_h = _round2(order.get("total") or 0) - _round2(order.get("shipping_cost") or 0) - (round(_vf_g, 2) if _vf_g and _vf_g > 0 else 0.0)
+            for _c in [((_o_sub - _o_disc) / _all_net_ord) if _o_sub > 0.5 else None,
+                       (_tot_h / _all_net_ord) if _tot_h > 0.5 else None]:
+                if _c is not None and 1.06 <= _c <= 1.24:
+                    _pf = _c
+                    break
         returned_net_in = _round2(sum(
-            _round2(_all_items[i].get("price", 0)) * int(_all_items[i].get("quantity", 1) or 1) * (1 - _dr)
+            _round2(_all_items[i].get("price", 0)) * _pf * int(_all_items[i].get("quantity", 1) or 1) * (1 - _dr)
             for i in _ap_sel))
 
     bd = await _compute_refund_breakdown(rec, order, fault, return_cargo_fee_override=cargo_override,
