@@ -187,7 +187,12 @@ async def list_rooftr_return_orders(
                 _r_discount = round(_calc_idisc * _paid_factor, 2)
             if _o_total <= 0.5:
                 _r_total = round(_calc_net * _paid_factor, 2)
-        _charged_total = round(_charged, 2) if _charged > _r_total + 0.01 else _r_total
+        # VADE FARKI YALNIZ GERÇEK TAKSİTTE (installment>1 VE _vf>0). Peşin/1-taksitte vade farkı
+        # OLMAZ. Bozuk paid_amount (Doğa Altaş 754DL4121K: peşin ama paid_amount=7084=2×total) yüzünden
+        # charged−total hayalet vade farkı üretmesin → inst<=1 ise charged=total (fark 0).
+        _real_vade = (int(_inst or 1) > 1 and _vf > 0.01)
+        _charged_total = round(_charged, 2) if (_real_vade and _charged > _r_total + 0.01) else _r_total
+        _vade_farki_out = round(_vf, 2) if _real_vade else 0.0
         rows.append({
             "id": o.get("id"),
             "order_number": o.get("order_number"),
@@ -206,7 +211,7 @@ async def list_rooftr_return_orders(
             "total": _r_total,
             "paid_amount": o.get("paid_amount") or 0,
             "charged_total": _charged_total,
-            "vade_farki": round(max(0.0, _charged_total - _r_total), 2),
+            "vade_farki": _vade_farki_out,
             "installment": int(_inst or 1),
             "subtotal": _r_subtotal,
             "shipping_cost": o.get("shipping_cost") or 0,
