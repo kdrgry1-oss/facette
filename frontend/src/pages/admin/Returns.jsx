@@ -358,6 +358,11 @@ export default function Returns() {
         if (d.hata > 0 && Array.isArray(d.hatalar) && d.hatalar.length) {
           toast.error(`İlk hata: ${d.hatalar[0].siparis || d.hatalar[0].key} — ${d.hatalar[0].hata}`);
         }
+        // KESİLEN pusulaları HEMEN yazdır (aynı 4'lü A4 şablonu / matbu form) — Kadir: 'yazdırması lazımdı'.
+        if (Array.isArray(d.pusulalar) && d.pusulalar.length) {
+          setBulkPrintData(d.pusulalar);
+          setTimeout(() => window.print(), 600);
+        }
         fetchClaims();
       }
     } catch (e) {

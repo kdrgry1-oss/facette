@@ -5521,6 +5521,7 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
     from .orders import site_return_gider_pusulasi
     kesilen, hatalar = [], []
     n = 0
+    pusulalar = []  # YAZDIRMA için tam gider pusulası belgeleri (frontend 4'lü A4'e basar)
     for c in batch:
         tno = f"{base + n:06d}"
         try:
@@ -5533,6 +5534,8 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
             gp = (res or {}).get("gider_pusulasi") or {}
             kesilen.append({**c, "gp_no": gp.get("display_number") or tno,
                             "net": (gp.get("totals") or {}).get("net")})
+            if gp:
+                pusulalar.append({**gp, "assigned_no": tno})
             n += 1
         except HTTPException as he:
             hatalar.append({**c, "hata": str(he.detail)[:140]})
@@ -5541,7 +5544,7 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
     next_no = f"{base + n:06d}"
     return {"success": True, "kesilen": len(kesilen), "hata": len(hatalar),
             "kalan_aday": max(0, len(cands) - len(batch)), "next_no": next_no,
-            "detay": kesilen, "hatalar": hatalar[:20]}
+            "detay": kesilen, "hatalar": hatalar[:20], "pusulalar": pusulalar}
 
 
 @router.post("/trendyol/claims/bulk-gider-pusulasi")
