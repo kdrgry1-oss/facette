@@ -812,7 +812,9 @@ export default function Returns() {
         </div>
 
         {/* Web Sitesi sekmesi: doğrudan sipariş bazlı iade akışı (alt-sekme yok — üstte zaten "Web Sitesi" yazıyor) */}
-        {platform === "facette" && <RooftrReturns embedded gpStart={gpStart} onGiderCreated={(gp) => { setGpData(gp); setGpModalOpen(true); /* önizleme: numara YAZDIR'da atanır, burada advance YOK */ }} />}
+        {platform === "facette" && <RooftrReturns embedded gpStart={gpStart}
+          onGiderCreated={(gp) => { setGpData(gp); setGpModalOpen(true); /* önizleme: numara YAZDIR'da atanır, burada advance YOK */ }}
+          onBulkGider={(gps, nextNo) => { setBulkPrintData(gps); const nn = pad6(nextNo); setGpStart(nn); localStorage.setItem("gp_next_no", nn); setTimeout(() => window.print(), 500); }} />}
 
         {/* Trendyol (pazaryeri) sekmesi gövdesi */}
         {(platform === "trendyol" || platform === "hepsiburada") && (<>

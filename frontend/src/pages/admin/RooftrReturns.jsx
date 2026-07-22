@@ -63,7 +63,7 @@ const fmtDate = (s) => {
   catch { return String(s).slice(0, 10); }
 };
 
-export default function RooftrReturns({ embedded = false, gpStart = "085490", onGiderCreated }) {
+export default function RooftrReturns({ embedded = false, gpStart = "085490", onGiderCreated, onBulkGider }) {
   const [rows, setRows] = useState([]);
   // Tarih kolonuna göre sıralama: Sipariş Tarihi / İade Onay-Ret / İade Ödeme.
   // dir "desc" = en yeni üstte. Aynı başlığa tekrar tıklayınca yön değişir.
@@ -124,6 +124,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
   const [seededRows, setSeededRows] = useState({}); // onay geçmişi kutucukları bir kez önişaretlendi mi (tekrar ezmesin)
   const [freeShipFee, setFreeShipFee] = useState(0); // ücretsiz-kargo mahsup tutarı (ayarlardan)
   const [freeShipThreshold, setFreeShipThreshold] = useState(0); // ücretsiz kargo eşiği (ayarlardan)
+  const [selRows, setSelRows] = useState(new Set()); // TOPLU GP: seçili iade satırları (order id)
+  const [bulkBusy, setBulkBusy] = useState(false);
   // Tek kaynak: durum listesi Ayarlar → Sipariş Durumları'ndan beslenir (görünürlük + özel durumlar dahil).
   const [statusOpts, setStatusOpts] = useState(STATUS_OPTS);        // dropdown (yalnız "görünür" olanlar)
   const [statusLabelMap, setStatusLabelMap] = useState(STATUS_LABEL); // tüm etiketler (pasif olanlar da)
@@ -503,6 +505,45 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
     } finally { setBusyId(""); }
   };
 
+  // ── TOPLU GİDER PUSULASI ─────────────────────────────────────────────────
+  const _pad6 = (n) => String(n).padStart(6, "0");
+  // Bir iade toplu GP'ye uygun mu? Onaylı + e-Fatura DEĞİL + yetki (GP kuralıyla aynı).
+  const bulkGpEligible = (r) => !r.is_efatura && can("returns.expense_note") &&
+    (r.return_is_approved || ["return_approved", "returned", "refunded", "partial_refunded"].includes(r.status) || r.has_gider_pusulasi);
+  const toggleRowSel = (id) => setSelRows((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleSelAll = () => {
+    const eligible = (pageRows || []).filter(bulkGpEligible).map((r) => r.id);
+    setSelRows((prev) => (eligible.length && eligible.every((id) => prev.has(id))) ? new Set() : new Set(eligible));
+  };
+  const handleBulkGider = async () => {
+    const targets = (rows || []).filter((r) => selRows.has(r.id) && bulkGpEligible(r));
+    if (!targets.length) { toast.error("Seçili uygun iade yok (e-Fatura/onaysız hariç)."); return; }
+    setBulkBusy(true);
+    const base = parseInt(String(gpStart || "0").replace(/\D/g, ""), 10) || 0;
+    const gps = [];
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        const r = targets[i];
+        const trackingNo = _pad6(base + i);
+        const br = await axios.post(`${API}/admin/rooftr/returns/${r.id}/open`, {}, auth());
+        const returnId = br.data?.return_id;
+        if (!returnId) continue;
+        // Onaydaki seçim (approved_items) + kargo kararı (approved_cargo_deducted) baz alınır;
+        // numara ATANIR (finalize). Kalem seçimi payload'sız → backend onaylı kalemleri kullanır.
+        const res = await axios.post(`${API}/orders/returns/${returnId}/gider-pusulasi`,
+          { tracking_no: trackingNo, include_cargo: !!r.approved_cargo_deducted }, auth());
+        if (res.data?.gider_pusulasi) gps.push({ ...res.data.gider_pusulasi, assigned_no: trackingNo });
+      }
+      if (!gps.length) { toast.error("Gider pusulası oluşturulamadı."); return; }
+      toast.success(`${gps.length} gider pusulası oluşturuldu (${_pad6(base)}–${_pad6(base + gps.length - 1)})`);
+      setSelRows(new Set());
+      if (onBulkGider) onBulkGider(gps, base + gps.length);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Toplu gider pusulası hatası");
+    } finally { setBulkBusy(false); }
+  };
+
   // Gider pusulası numarasını elle değiştir (satırdaki #no'ya tıklayınca inline düzenlenir).
   const saveGpNo = async (r) => {
     const val = String(editGpNo?.value || "").trim();
@@ -588,9 +629,26 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
         </div>
       ) : (
         <div className="border rounded-xl overflow-hidden">
+          {selRows.size > 0 && (
+            <div className="flex items-center gap-3 bg-purple-50 border-b border-purple-200 px-3 py-2">
+              <span className="text-xs font-semibold text-purple-800">{selRows.size} iade seçili</span>
+              <button onClick={handleBulkGider} disabled={bulkBusy}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-bold hover:bg-purple-700 disabled:opacity-50">
+                <FileText size={14} /> {bulkBusy ? "Oluşturuluyor…" : "Toplu Gider Pusulası Oluştur"}
+              </button>
+              <button onClick={() => setSelRows(new Set())}
+                className="text-xs text-gray-500 hover:text-gray-800 font-medium">Seçimi temizle</button>
+              <span className="text-[10px] text-gray-500">Numaralar {String(gpStart)}'dan sıralı atanır · e-Fatura/onaysız hariç</span>
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b text-gray-500 text-left text-xs uppercase">
               <tr>
+                <th className="px-2 py-2.5 w-8">
+                  <input type="checkbox" title="Sayfadaki uygun iadeleri seç"
+                    checked={(pageRows || []).filter(bulkGpEligible).length > 0 && (pageRows || []).filter(bulkGpEligible).every((r) => selRows.has(r.id))}
+                    onChange={toggleSelAll} />
+                </th>
                 <th className="px-3 py-2.5 font-bold">Sipariş No</th>
                 <th className="px-3 py-2.5 font-bold">İade No</th>
                 <th className="px-3 py-2.5 font-bold">Müşteri</th>
@@ -609,6 +667,15 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
               {pageRows.map((r) => (
                 <Fragment key={r.id}>
                   <tr className="hover:bg-gray-50">
+                    <td className="px-2 py-2.5 align-top">
+                      {bulkGpEligible(r) ? (
+                        <input type="checkbox" checked={selRows.has(r.id)}
+                          onChange={() => toggleRowSel(r.id)}
+                          title="Toplu gider pusulası için seç" />
+                      ) : (
+                        <span className="inline-block w-3" title={r.is_efatura ? "e-Fatura — GP düzenlenemez" : "GP yalnız onaylı iadelerde"} />
+                      )}
+                    </td>
                     <td className="px-3 py-2.5">
                       <div className="font-mono text-sm font-bold text-blue-600">{r.order_number}</div>
                       {r.is_efatura && (
@@ -714,7 +781,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                   </tr>
                   {expandedId === r.id && (
                     <tr className="bg-gray-50/60">
-                      <td colSpan={12} className="px-4 py-3">
+                      <td colSpan={13} className="px-4 py-3">
                         {/* Müşteri + sipariş özeti */}
                         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-900 mb-3">
                           <span>Müşteri: <b className="text-gray-900">{r.customer_name}</b></span>
