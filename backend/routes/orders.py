@@ -6429,9 +6429,14 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
         kept_cart = _round2(max(0.0, orig_cart - returned_net))
         is_partial = kept_cart > 0.01
     else:
-        # TAM İADE → müşteriye ödediği tutar iade edilir (kusur müşterideyse kargo düşülür).
-        returned_net = paid_total if paid_total > 0 else _round2(
+        # TAM İADE → ürün neti iade edilir, KARGO HARİÇ (Kadir kuralı: '985,15−98,52=886,63';
+        # kargo iade tutarına katılmaz). Vade farkı (taksit) KORUNUR: paid_total = charged
+        # (vade farkı dahil), ondan yalnız kargo bedeli düşülür. Kusur müşterideyse ayrıca
+        # kargo mahsubu aşağıda uygulanır (deduct_cargo).
+        _ship_paid = _round2(order.get("shipping_cost") or 0)
+        _base_paid = paid_total if paid_total > 0 else _round2(
             sum(_round2(it.get("price", 0)) * int(it.get("quantity", 1) or 1) for it in items))
+        returned_net = _round2(max(0.0, _base_paid - _ship_paid))
         orig_cart = returned_net
         kept_cart = 0.0
         is_partial = False  # tam iadede kalan 0 → kampanya (ücretsiz-kargo) mahsubu uygulanmaz
@@ -7060,15 +7065,16 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         _paid = _charged_r if (_charged_r > order_total + 0.01) else order_total
         if _paid <= 0:
             _paid = _round2(max(0.0, prod_net - order_disc + (shipping_cost if paid_shipping else 0)))
-        net_total = _round2(_paid - (cargo_amount if deduct_cargo else 0.0))
+        # KARGO HARİÇ ürün neti (Kadir kuralı: '985,15−98,52=886,63'): ödenen kargoyu tabandan
+        # ÇIKAR → gider pusulası GOODS değeridir, kargo (hizmet) GP'ye yazılmaz. Vade farkı KORUNUR.
+        _paid_goods = _round2(max(0.0, _paid - (shipping_cost if paid_shipping else 0.0)))
+        # Ek kargo mahsubu (ücretsiz-kargo kaybı) YALNIZ paid_shipping DEĞİLKEN uygulanır; ödenen
+        # kargoda zaten hariç tutulduğu için çifte düşme yapılmaz.
+        _extra_deduct = cargo_amount if (deduct_cargo and not paid_shipping) else 0.0
+        net_total = _round2(max(0.0, _paid_goods - _extra_deduct))
+        total_gross = _round2(prod_gross + (_vf_r if _vf_r >= 0.01 else 0))
         if deduct_cargo:
-            total_gross = _round2(prod_gross + (_vf_r if _vf_r >= 0.01 else 0))
             cargo_mode = "deducted"
-        else:
-            total_gross = _round2(prod_gross + (cargo_amount if paid_shipping else 0) + (_vf_r if _vf_r >= 0.01 else 0))
-            if paid_shipping and shipping_cost > 0:
-                cargo_line = {"name": "Kargo Bedeli", "net_price": cargo_amount, "qty": 1}
-                cargo_mode = "refund"
         total_discount = _round2(max(0.0, total_gross - net_total))
         if _vf_r >= 0.01:
             vade_line = {"name": f"Vade Farkı (Taksit x{_inst_r})", "net_price": _vf_r, "qty": 1}

@@ -643,9 +643,11 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                       ) : <span className="text-gray-400">—</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">
+                      {/* Net = BRÜT − İSKONTO (ürün neti, KARGO HARİÇ). Kargo ayrı satırdır; net'e
+                          katılmaz → 985,15 − 98,52 = 886,63 görünür (total 985,63 DEĞİL, o kargo dahildir). */}
                       {Number(r.discount) > 0 && <div className="text-gray-500 line-through text-xs leading-tight">{fmtTL(r.subtotal || r.total)}</div>}
                       {Number(r.discount) > 0 && <div className="text-orange-600 text-xs font-bold leading-tight">-{fmtTL(r.discount)}</div>}
-                      <div className="font-bold text-gray-900 leading-tight">{fmtTL(r.total)}</div>
+                      <div className="font-bold text-gray-900 leading-tight">{fmtTL((Number(r.subtotal) || Number(r.total) || 0) - (Number(r.discount) || 0))}</div>
                     </td>
                     <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(r.created_at)}</td>
                     <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{r.return_approved_at ? fmtDate(r.return_approved_at) : "—"}</td>
@@ -785,12 +787,16 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           });
                           const totalItems = (r.items || []).length;
                           const isFullSel = totalItems > 0 && selN >= totalItems;
-                          // TAM iade → müşterinin gerçekte ödediği tutar (kargo + varsa vade farkı dahil).
-                          // KISMİ → yalnız seçili ürün netleri (kargo hariç). Backend ile aynı.
-                          const total = isFullSel ? (Number(r.charged_total) || Number(r.total) || selNet) : selNet;
+                          // TAM iade → ürün neti (BRÜT−İSKONTO), KARGO HARİÇ + varsa vade farkı. Kargo
+                          // iade tutarına katılmaz (Kadir: '985,15−98,52=886,63 görünmeli'). Vade farkı
+                          // varsa korunur (charged−kargo). KISMİ → yalnız seçili ürün netleri (kargo hariç).
+                          const _ship = Number(r.shipping_cost) || 0;
+                          const total = isFullSel
+                            ? Math.max(0, (Number(r.charged_total) || Number(r.total) || selNet) - _ship)
+                            : selNet;
                           return (
                             <div className="mt-2 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-1.5 inline-flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                              <span>{isFullSel ? "İade net tutarı (kargo dahil)" : "İade net tutarı (kargo hariç)"}: <b>{fmtTL(total)}</b></span>
+                              <span>İade net tutarı (kargo hariç): <b>{fmtTL(total)}</b></span>
                               {Number(r.vade_farki) > 0 && (
                                 <span className="text-[10px] font-normal text-amber-600">taksitli: vade farkı payı gider pusulasında eklenir</span>
                               )}
