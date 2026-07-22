@@ -5452,15 +5452,18 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
     if "site" in sources:
         async for r in db.customer_returns.find(
                 {"status": {"$in": ["approved", "refunded", "partial_refunded"]}},
-                {"_id": 0, "id": 1, "order_number": 1, "created_at": 1, "approval": 1, "refund_amount": 1}):
+                {"_id": 0, "id": 1, "order_number": 1, "created_at": 1, "approval": 1,
+                 "refund_amount": 1, "refund_breakdown": 1}):
             rid = str(r.get("id") or "")
             if not rid or rid in gp_returns:
                 continue
             _appr = str((r.get("approval") or {}).get("at") or r.get("created_at") or "")
             if not _in_range(_appr):
                 continue
+            # Onaydaki kargo kararı (deducted → kargoyu müşteriden kes) — GP hesabında baz alınır.
+            _inc_cargo = bool((r.get("refund_breakdown") or {}).get("cargo", {}).get("mode") == "deducted")
             cands.append({"kaynak": "site", "key": rid, "siparis": r.get("order_number") or "",
-                          "musteri": "", "tarih": _appr[:10],
+                          "musteri": "", "tarih": _appr[:10], "_inc_cargo": _inc_cargo,
                           "tutar": round(float(r.get("refund_amount") or 0), 2)})
 
     # KATI KURAL: e-Fatura/kurumsal siparişler toplu kesim HAVUZUNDAN tamamen çıkarılır
@@ -5494,6 +5497,21 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
     from collections import Counter
     _dag = Counter(c["kaynak"] for c in cands)
     if dry:
+        # SİTE adaylarının TUTAR'ını GERÇEK gider pusulası hesabıyla (kesimle AYNI, preview=persist YOK)
+        # doldur — raw refund_amount çoğu 0/yanlış (Kadir). Kargo kararı onaydan (_inc_cargo) taşınır.
+        from .orders import site_return_gider_pusulasi
+        for c in batch:
+            if c.get("kaynak") != "site":
+                continue
+            try:
+                _res = await site_return_gider_pusulasi(
+                    c["key"], payload={"include_cargo": bool(c.get("_inc_cargo"))},
+                    preview=True, current_user=current_user)
+                _net = ((_res or {}).get("gider_pusulasi") or {}).get("totals", {}).get("net")
+                if _net is not None:
+                    c["tutar"] = round(float(_net), 2)
+            except Exception:
+                pass
         return {"dry_run": True, "toplam_aday": len(cands), "bu_partide": len(batch),
                 "elenen_efatura": _elenen_efatura,
                 "kaynak_dagilim": {"site": _dag.get("site", 0), "trendyol": _dag.get("trendyol", 0),
@@ -5507,7 +5525,9 @@ async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_a
         tno = f"{base + n:06d}"
         try:
             if c["kaynak"] == "site":
-                res = await site_return_gider_pusulasi(c["key"], {"tracking_no": tno}, current_user)
+                res = await site_return_gider_pusulasi(
+                    c["key"], payload={"tracking_no": tno, "include_cargo": bool(c.get("_inc_cargo"))},
+                    preview=False, current_user=current_user)
             else:
                 res = await generate_gider_pusulasi(c["key"], {"tracking_no": tno}, current_user)
             gp = (res or {}).get("gider_pusulasi") or {}
