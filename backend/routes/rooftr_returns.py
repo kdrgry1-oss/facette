@@ -415,6 +415,122 @@ async def refresh_order_dates(
 
 
 # ============================================================================
+# MÜKERRER İADE TEMİZLİĞİ — sistem geneli (Kadir talebi: "site siparişlerinde
+# başka çift olan iade varsa sil sistem genelinde")
+# ----------------------------------------------------------------------------
+# Ticimax import'u bazı siparişleri hem BARE ticimax kaydı (telefon YOK, iade
+# köprüsü/pusula YOK) hem de gerçek facette kaydı (telefon + return_request +
+# customer_returns + gider_pusulası VAR) olarak iki kez oluşturdu → iade
+# panelinde AYNI sipariş no iki satır. Bu uç aynı order_number'lı iade
+# kayıtlarını gruplar, hangisi BARE-junk hangisi GERÇEK tespit eder; confirm=false
+# yalnız rapor (dry-run), confirm=true junk olanı arşivleyip siler (geri
+# alınabilir: orders_deleted).
+# ============================================================================
+async def _return_record_signals(o: dict) -> dict:
+    """Bir iade kaydının 'zenginlik' sinyalleri — hangisini tutup hangisini sileceğimize karar için."""
+    oid = o.get("id")
+    onum = o.get("order_number")
+    addr = o.get("shipping_address") or {}
+    has_phone = bool(str(addr.get("phone") or "").strip())
+    rr = o.get("return_request") or {}
+    has_return_request = bool(rr.get("items") or rr.get("reason") or rr.get("requested_at"))
+    has_cr = False
+    if oid:
+        has_cr = bool(await db.customer_returns.find_one(
+            {"$or": [{"order_id": oid}, {"order_number": onum}]}, {"_id": 1}))
+    has_gp = False
+    if onum:
+        has_gp = bool(await db.gider_pusulasi.find_one({"order_number": onum}, {"_id": 1})) \
+                 or bool(o.get("gider_pusulasi_no"))
+    items = o.get("items") or []
+    score = (10 if has_phone else 0) + (8 if has_cr else 0) + (6 if has_gp else 0) \
+            + (5 if has_return_request else 0) + (1 if (o.get("subtotal") or 0) > 0 else 0) \
+            + (2 if items else 0)
+    return {
+        "id": oid, "order_number": onum,
+        "platform": o.get("platform") or "", "source": o.get("source") or "",
+        "status": o.get("status") or "",
+        "has_phone": has_phone, "has_return_request": has_return_request,
+        "has_customer_returns": has_cr, "has_gider_pusulasi": has_gp,
+        "item_count": sum(int(i.get("quantity") or 1) for i in items),
+        "subtotal": float(o.get("subtotal") or 0), "total": float(o.get("total") or 0),
+        "created_at": o.get("created_at") or "", "updated_at": o.get("updated_at") or "",
+        "score": score,
+    }
+
+
+@router.get("/duplicate-returns")
+async def scan_duplicate_returns(
+    confirm: bool = Query(False, description="true → junk mükerrer kayıtları arşivle+sil"),
+    current_user: dict = Depends(require_admin),
+):
+    """Aynı order_number'a sahip birden fazla İADE kaydını (site/pazaryeri-dışı) bul.
+    Her grupta EN ZENGİN kayıt tutulur; yalnız telefon+iade köprüsü+pusula+iade-talebi
+    HİÇBİRİ olmayan BARE-junk kayıt(lar) silinmeye aday gösterilir. confirm=true olunca
+    silinir (orders_deleted'e arşivlenir; geri alınabilir)."""
+    base_filter = {
+        "platform": {"$nin": ["trendyol", "hepsiburada"]},
+        "status": {"$in": RETURN_STATUSES},
+    }
+    proj = {"_id": 0, "id": 1, "order_number": 1, "platform": 1, "source": 1, "status": 1,
+            "shipping_address": 1, "return_request": 1, "gider_pusulasi_no": 1,
+            "items": 1, "subtotal": 1, "total": 1, "created_at": 1, "updated_at": 1}
+    by_num = {}
+    async for o in db.orders.find(base_filter, proj):
+        onum = str(o.get("order_number") or "").strip()
+        if not onum:
+            continue
+        by_num.setdefault(onum, []).append(o)
+
+    groups, delete_ids = [], []
+    for onum, recs in by_num.items():
+        if len(recs) < 2:
+            continue
+        sigs = [await _return_record_signals(o) for o in recs]
+        sigs.sort(key=lambda s: (s["score"], s["updated_at"], s["created_at"]), reverse=True)
+        keep = sigs[0]
+        # Silme adayları: yalnız GERÇEKTEN bare (telefon+CR+GP+iade-talebi hiçbiri yok) olanlar.
+        # Belirsiz (birden fazla zengin kayıt) grupları SİLME — raporla, elle bakılsın.
+        cand = [s for s in sigs[1:]
+                if not (s["has_phone"] or s["has_customer_returns"]
+                        or s["has_gider_pusulasi"] or s["has_return_request"])]
+        ambiguous = [s for s in sigs[1:] if s not in cand]
+        for s in cand:
+            delete_ids.append(s["id"])
+        groups.append({
+            "order_number": onum, "count": len(recs),
+            "keep": keep, "delete_candidates": cand, "ambiguous": ambiguous,
+        })
+
+    deleted = []
+    if confirm and delete_ids:
+        for did in delete_ids:
+            o = await db.orders.find_one({"id": did}, {"_id": 0})
+            if not o:
+                continue
+            import datetime as _dt
+            o["deleted_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+            o["deleted_by"] = current_user.get("email", "")
+            o["deleted_reason"] = "mükerrer iade temizliği"
+            try:
+                await db.orders_deleted.replace_one({"id": did}, o, upsert=True)
+            except Exception as _e:
+                logger.warning(f"[dup-returns] archive fail {did}: {_e}")
+            await db.orders.delete_one({"id": did})
+            deleted.append(did)
+
+    return {
+        "success": True,
+        "duplicate_group_count": len(groups),
+        "delete_candidate_count": len(delete_ids),
+        "deleted_count": len(deleted),
+        "confirmed": confirm,
+        "groups": groups,
+        "deleted_ids": deleted,
+    }
+
+
+# ============================================================================
 # EXPORT — İade siparişlerini Excel (.xlsx) indir (görseldeki kolon düzeni)
 # ============================================================================
 @router.get("/return-orders/export")
