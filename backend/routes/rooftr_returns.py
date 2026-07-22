@@ -148,6 +148,16 @@ async def list_rooftr_return_orders(
         _r_total = _o_total if _o_total > 0 else round(_calc_net, 2)
         _r_subtotal = _o_sub if _o_sub > 0 else round(_calc_gross, 2)
         _r_discount = _o_disc if _o_disc > 0 else (round(_calc_idisc, 2) if _calc_idisc > 0 else round(max(0.0, _r_subtotal - _r_total), 2))
+        # KDV-DAHİL TABAN DÜZELTMESİ (Ali Al 398MD4734D): bazı içe-aktarılan siparişlerde
+        # item.price KDV-HARİÇ, subtotal KDV-DAHİL → panelde kalem 1159,09 görünüp ara toplam
+        # 2550 ile tutmuyordu. Siparişin kendi verisinden faktör: (subtotal−indirim)/Σ(item.price×adet);
+        # bir KDV oranına yakınsa (1.06–1.24) kalem fiyatları KDV-dahile ölçeklenir (backend GP
+        # calc ile AYNI mantık). Normal siparişler etkilenmez.
+        _paid_factor = 1.0
+        if _calc_net > 0.5 and _r_subtotal > 0.5:
+            _pf = (_r_subtotal - _r_discount) / _calc_net
+            if 1.06 <= _pf <= 1.24:
+                _paid_factor = _pf
         # Taksitli ödemede iyzico'ya gerçekte tahsil edilen tutar (vade farkı DAHİL) `total`'dan
         # yüksek olabilir — iade onayında baz alınan budur (bkz. orders.py _compute_refund_breakdown).
         # Burada da gösterip admin'in panelde önceden göreceği rakamla onay sırasında hesaplanan
@@ -193,9 +203,10 @@ async def list_rooftr_return_orders(
                     "size": i.get("size") or "",
                     "color": i.get("color") or "",
                     "barcode": i.get("barcode") or "",
-                    "price": i.get("price") or 0,
-                    "unit_price": i.get("unit_price") or i.get("list_price") or i.get("price") or 0,
-                    "discount": i.get("discount_amount") or i.get("discount") or 0,
+                    # KDV-dahil faktörüyle ölçekle → panel kalem fiyatları ara toplamla tutar.
+                    "price": round(float(i.get("price") or 0) * _paid_factor, 2),
+                    "unit_price": round(float(i.get("unit_price") or i.get("list_price") or i.get("price") or 0) * _paid_factor, 2),
+                    "discount": round(float(i.get("discount_amount") or i.get("discount") or 0) * _paid_factor, 2),
                 }
                 for i in items
             ],
