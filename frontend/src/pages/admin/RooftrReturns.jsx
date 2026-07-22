@@ -455,7 +455,10 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       const res = await axios.post(`${API}/orders/returns/${returnId}/update-approval`, body, auth());
       toast.success(`Düzenleme onaylandı · iade net ${fmtTL(res.data?.refund_amount || 0)}`);
       setEditRows((s) => { const n = { ...s }; delete n[r.id]; return n; });
-      setSeededRows((s) => { const n = { ...s }; delete n[r.id]; return n; });
+      // seededRows'u TEMİZLEME: temizlersek load() tamamlanmadan useEffect ESKİ satırlardan
+      // yeniden seed edip kendini 'tohumlandı' işaretliyor; yeni (kaydedilen) satırlar gelince
+      // bir daha seed etmiyor → kaydedilen seçim yerine ESKİsi görünüyordu (1 tik kalıyordu).
+      // Kullanıcının selItems seçimi (yeni tikler) zaten ekranda; olduğu gibi korunur.
       load();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Düzenleme onayı başarısız");
