@@ -428,6 +428,26 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
 
   // Satır-içi gider pusulası (Trendyol ile ORTAK seri): siparişi köprüle → gider pusulası
   // (tracking_no = ortak başlangıç no gpStart) → parent yazdırma modalını aç + sayacı +1 ilerlet.
+  // Onaylanmış iadenin DÜZENLENMİŞ seçimini (kalemler + kargo) muhasebe/admin olarak
+  // onayla ve kilitle. Statü/stok/bildirim değişmez; yenileyince yeni seçim korunur.
+  const saveApprovalEdit = async (r) => {
+    setBusyId(r.id);
+    try {
+      const br = await axios.post(`${API}/admin/rooftr/returns/${r.id}/open`, {}, auth());
+      const returnId = br.data?.return_id;
+      if (!returnId) throw new Error("bridge");
+      const selIdx = (r.items || []).map((_, i) => i).filter((i) => selItems[`${r.id}::${i}`]);
+      const res = await axios.post(`${API}/orders/returns/${returnId}/update-approval`,
+        { item_indexes: selIdx, include_cargo: !!cargoSel[r.id] }, auth());
+      toast.success(`Düzenleme onaylandı · iade net ${fmtTL(res.data?.refund_amount || 0)}`);
+      setEditRows((s) => { const n = { ...s }; delete n[r.id]; return n; });
+      setSeededRows((s) => { const n = { ...s }; delete n[r.id]; return n; });
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Düzenleme onayı başarısız");
+    } finally { setBusyId(""); }
+  };
+
   const handleSiteGider = async (r) => {
     try {
       setBusyId(r.id);
@@ -821,10 +841,16 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                             <span className="flex-1" />
                             {canEditApproval() ? (
                               editRows[r.id] ? (
-                                <button onClick={() => setEditRows((s) => { const n = { ...s }; delete n[r.id]; return n; })}
-                                  className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-gray-800 text-white text-xs font-bold hover:bg-black">
-                                  Kilitle
-                                </button>
+                                <>
+                                  <button onClick={() => saveApprovalEdit(r)} disabled={busyId === r.id}
+                                    className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-bold hover:bg-green-700 disabled:opacity-50">
+                                    ✔ Düzenlemeyi Onayla
+                                  </button>
+                                  <button onClick={() => setEditRows((s) => { const n = { ...s }; delete n[r.id]; return n; })}
+                                    className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-white text-gray-600 border border-gray-300 text-xs font-bold hover:bg-gray-100">
+                                    Vazgeç
+                                  </button>
+                                </>
                               ) : (
                                 <button onClick={() => setEditRows((s) => ({ ...s, [r.id]: true }))}
                                   className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-white text-gray-700 border border-gray-300 text-xs font-bold hover:bg-gray-100">

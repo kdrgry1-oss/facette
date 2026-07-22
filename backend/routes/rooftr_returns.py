@@ -222,6 +222,25 @@ async def list_rooftr_return_orders(
             "cargo_provider_name": o.get("cargo_provider_name") or "",
         })
 
+    # KALEM BEDENİ: bazı site siparişlerinde item.size boş → barkodu ürün kataloğundaki
+    # varyant bedeniyle zenginleştir (kullanıcı isteği: 'bedenleri gelmemiş, getir').
+    _need_bc = list({str(it.get("barcode") or "").strip()
+                     for r in rows for it in (r.get("items") or [])
+                     if str(it.get("barcode") or "").strip() and not str(it.get("size") or "").strip()})
+    if _need_bc:
+        _bsize = {}
+        async for _p in db.products.find({"variants.barcode": {"$in": _need_bc}}, {"_id": 0, "variants": 1}):
+            for _v in (_p.get("variants") or []):
+                _vbc = str(_v.get("barcode") or "").strip()
+                if _vbc and _vbc not in _bsize:
+                    _bsize[_vbc] = _v.get("size") or _v.get("beden") or ""
+        for r in rows:
+            for it in (r.get("items") or []):
+                if not str(it.get("size") or "").strip():
+                    _sz = _bsize.get(str(it.get("barcode") or "").strip())
+                    if _sz:
+                        it["size"] = _sz
+
     # İlgili customer_returns köprü kayıtları (kargo barkodu / iade kodu / reship / ödeme zamanı) — tek sorgu
     _oids = [r["id"] for r in rows if r.get("id")]
     _cr_map = {}

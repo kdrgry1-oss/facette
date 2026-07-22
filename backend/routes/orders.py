@@ -6622,6 +6622,65 @@ async def approve_return(return_id: str, payload: dict,
             "manual_override": manual_override, "breakdown": bd}
 
 
+@router.post("/returns/{return_id}/update-approval")
+async def update_return_approval(return_id: str, payload: dict,
+                                 current_user: dict = Depends(require_permission("returns.expense_note"))):
+    """ONAYLANMIŞ bir iadenin ONAY SEÇİMİNİ (hangi kalemler + kargo müşteriden kesildi mi)
+    muhasebe/admin olarak DÜZENLE ve yeniden kilitle. Kullanıcı isteği: 'düzenle → yeni
+    seçimi onayla → kilitle; yenileyince eski haline dönmesin'.
+
+    STATÜ/STOK/BİLDİRİM DEĞİŞMEZ (iade zaten kapanmış olabilir). Yalnız approved_items,
+    approved_item_indexes, refund_breakdown, refund_amount ve fault güncellenir → panel
+    yenilenince yeni seçim korunur ve gider pusulası bu seçime göre hesaplanır."""
+    rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="İade bulunamadı")
+    order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
+    _all_items = rec.get("items") or []
+    try:
+        _ap_sel = _resolve_return_selection(_all_items, payload.get("selected_items"), payload.get("item_indexes"))
+    except ValueError as _e:
+        raise HTTPException(status_code=400, detail=str(_e))
+    _ap_partial = bool(_ap_sel) and len(_ap_sel) < len(_all_items)
+    include_cargo = bool(payload.get("include_cargo"))
+    fault = "customer" if include_cargo else "store"
+    cargo_override = payload.get("return_cargo_fee")
+    cargo_override = None if cargo_override in (None, "") else cargo_override
+    returned_net_in = payload.get("returned_net")
+    returned_net_in = None if returned_net_in in (None, "") else returned_net_in
+
+    bd = await _compute_refund_breakdown(rec, order, fault, return_cargo_fee_override=cargo_override,
+                                         returned_net_override=returned_net_in)
+    # Kargo müşteriden kesildiyse breakdown'da işaretle (panel önişaretlemesi bunu okur).
+    if include_cargo:
+        _c = dict(bd.get("cargo") or {}); _c["mode"] = "deducted"; bd["cargo"] = _c
+    final_amount = bd.get("auto_refund")
+    if payload.get("refund_amount") not in (None, ""):
+        try:
+            final_amount = _round2(payload.get("refund_amount"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Geçersiz iade tutarı.")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    _set = {"refund_breakdown": bd, "refund_amount": final_amount, "fault": fault,
+            "approval_edited_by": current_user.get("email") or current_user.get("id"),
+            "approval_edited_at": now_iso, "updated_at": now_iso}
+    _upd = {"$set": _set}
+    if _ap_partial:
+        _set["approved_item_indexes"] = _ap_sel
+        _set["approved_items"] = [{
+            "barcode": (_all_items[i].get("barcode") or _all_items[i].get("product_id") or ""),
+            "name": _all_items[i].get("name") or "",
+            "size": _all_items[i].get("size") or "",
+            "color": _all_items[i].get("color") or "",
+        } for i in _ap_sel]
+    else:
+        _upd["$unset"] = {"approved_item_indexes": "", "approved_items": ""}
+    await db.customer_returns.update_one({"id": return_id}, _upd)
+    return {"success": True, "refund_amount": final_amount, "breakdown": bd,
+            "cargo_deducted": bool(include_cargo)}
+
+
 # ============================================================================
 # Madde 3 — Ret (sebep + bildirim) + Barkod yeniden üretimi (P4)
 # ============================================================================
