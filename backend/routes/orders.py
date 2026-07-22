@@ -6687,8 +6687,29 @@ async def update_return_approval(return_id: str, payload: dict,
     else:
         _upd["$unset"] = {"approved_item_indexes": "", "approved_items": ""}
     await db.customer_returns.update_one({"id": return_id}, _upd)
+
+    # GP DİNAMİK GÜNCELLEME: bu iadeye ait gider pusulası ZATEN kesildiyse, yeni seçime
+    # (kalem + kargo) göre YENİDEN hesapla (idempotent: numara/koçan KORUNUR). Kullanıcı
+    # isteği: "düzenle'de bir değişiklik yapınca gider pusulası da DİNAMİK güncellensin —
+    # tüm iadelerde." Böylece onay seçimini değiştirince pusula tutarı otomatik düzelir.
+    gp_regenerated = False
+    _gp = await db.gider_pusulasi.find_one({"return_id": return_id},
+                                           {"_id": 0, "display_number": 1})
+    if _gp:
+        try:
+            await site_return_gider_pusulasi(return_id, payload={
+                "include_cargo": include_cargo,
+                "tracking_no": _gp.get("display_number") or "",
+            }, current_user=current_user)
+            gp_regenerated = True
+        except HTTPException:
+            # e-Fatura/kurumsal vb. → pusula düzenlenemez; sessiz geç (onay yine güncellendi).
+            pass
+        except Exception as _e:
+            logger.warning(f"[update-approval] GP yeniden hesaplama hatası {return_id}: {_e}")
+
     return {"success": True, "refund_amount": final_amount, "breakdown": bd,
-            "cargo_deducted": bool(include_cargo)}
+            "cargo_deducted": bool(include_cargo), "gp_regenerated": gp_regenerated}
 
 
 # ============================================================================

@@ -690,7 +690,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                             <FileText size={13} /> e-Fatura
                           </span>
                         ) : can("returns.expense_note") &&
-                          (["return_approved", "refunded", "partial_refunded"].includes(r.status) || r.has_gider_pusulasi) && (
+                          (r.return_is_approved || ["return_approved", "returned", "refunded", "partial_refunded"].includes(r.status) || r.has_gider_pusulasi) && (
                           <button onClick={() => handleSiteGider(r)} disabled={busyId === r.id}
                             className={`p-1.5 rounded-lg disabled:opacity-50 ${r.has_gider_pusulasi ? "bg-purple-100 text-purple-700 hover:bg-purple-200" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`} title="Gider Pusulası">
                             <FileText size={14} />
