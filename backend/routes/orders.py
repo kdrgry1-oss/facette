@@ -1538,6 +1538,18 @@ async def create_order(
     except Exception as stock_err:
         logger.error(f"Stock decrement on order create failed: {stock_err}")
 
+    # Site satışı stoğu düşürdü → etkilenen ürünlerin güncel stoğunu pazaryerlerine ANINDA bas
+    # (Trendyol + HB). Periyodik senkronu beklemeden oversell penceresini kapatır. Yalnız site
+    # siparişinde (pazaryeri siparişi zaten dışarıdan geldi, geri push gereksiz). Arka planda,
+    # bloklamaz.
+    try:
+        if not _is_marketplace:
+            _push_pids = [it.get("product_id") for it in (order.get("items") or []) if it.get("product_id")]
+            if _push_pids:
+                _spawn(_push_stock_to_marketplaces(_push_pids))
+    except Exception as _push_err:
+        logger.warning(f"[stok-push] tetikleme hatası: {_push_err}")
+
     return {
         "order_id": order["id"],
         "order_number": order["order_number"],
@@ -2101,6 +2113,48 @@ async def restore_deleted_order(
 
 
 # ==================== FAZ 1: STOCK AUTO-FLOW + AUTO-CANCEL + NOTES ====================
+
+async def _push_stock_to_marketplaces(product_ids: list) -> None:
+    """Site satışı stoğu düşürünce ETKİLENEN ürünlerin GÜNCEL stoğunu Trendyol + Hepsiburada'ya
+    ANINDA (hedefli) bas. Periyodik senkronu (~dk) beklemeden pazaryeri oversell penceresini
+    saniyelere indirir. Best-effort: konfig yok/hata → sessiz atlanır, sipariş akışını bloklamaz.
+    YALNIZ stok gönderilir (fiyata dokunulmaz)."""
+    pids = [p for p in dict.fromkeys(product_ids or []) if p]
+    if not pids:
+        return
+    try:
+        prods = await db.products.find({"id": {"$in": pids}}, {"_id": 0}).to_list(length=None)
+    except Exception:
+        return
+    if not prods:
+        return
+    # --- Trendyol ---
+    try:
+        from routes.integrations import _sync_inventory_to_trendyol, get_trendyol_config
+        cfg = await get_trendyol_config()
+        if cfg and cfg.get("is_active"):
+            await _sync_inventory_to_trendyol(prods)
+    except Exception as e:
+        logger.warning(f"[stok-push] Trendyol anlık stok push hatası: {e}")
+    # --- Hepsiburada (yalnız stok) ---
+    try:
+        from .category_mapping import _get_hb_client
+        from .integrations_hepsiburada import (
+            _hb_push_stock_price, _hb_listing_items_from_product,
+            _hb_markup, _hb_price_source, _hb_sku_source)
+        client, err = await _get_hb_client()
+        if client and not err:
+            markup = await _hb_markup()
+            psrc = await _hb_price_source()
+            ssrc = await _hb_sku_source()
+            items = []
+            for p in prods:
+                items.extend(_hb_listing_items_from_product(p, markup, psrc, ssrc) or [])
+            if items:
+                await _hb_push_stock_price(client, items, do_price=False, do_stock=True)
+    except Exception as e:
+        logger.warning(f"[stok-push] Hepsiburada anlık stok push hatası: {e}")
+
 
 async def _reverse_stock_moves(moves: list) -> None:
     """A2.5b geri-alma: verilen düşüm hareketlerini (delta<0) simetrik +qty ile geri ekler.

@@ -460,9 +460,10 @@ export default function ProductDetail() {
       return;
     }
     
-    // Check stock for selected variant
-    if (selectedVariant && selectedVariant.stock < quantity) {
-      toast.error(`Yetersiz stok! Mevcut stok: ${selectedVariant.stock}`);
+    // Check stock for selected variant (string/null/negatif stoğa karşı sağlam)
+    const _selStock = Number(selectedVariant?.stock);
+    if (selectedVariant && (!Number.isFinite(_selStock) || _selStock < quantity)) {
+      toast.error(_selStock > 0 ? `Yetersiz stok! Mevcut stok: ${_selStock}` : "Bu beden tükendi");
       return;
     }
     
@@ -868,7 +869,7 @@ export default function ProductDetail() {
                     if (_fit === "dar") return "Müşteriler bir beden büyük almanızı tavsiye ediyor.";
                     return "Beden Seçiniz";
                   })()}
-                  {selectedVariant && selectedVariant.stock === 0 && (
+                  {selectedVariant && Number(selectedVariant.stock) <= 0 && (
                     <span className="text-red-600 ml-2">Tükendi</span>
                   )}
                 </span>
@@ -877,7 +878,7 @@ export default function ProductDetail() {
                 <div className="flex flex-wrap gap-2">
                 {sizes.map((variant, index) => {
                   const isSelected = selectedSize === variant.size;
-                  const isOOS = variant.stock === 0;
+                  const isOOS = Number(variant.stock) <= 0;
                   const isRec = recLetter && isRecommendedSize(variant.size, user?.height_cm, user?.weight_kg);
                   return (
                     <button
@@ -941,7 +942,7 @@ export default function ProductDetail() {
             {(() => {
               const _hasVariants = (product.variants?.length || 0) > 0;
               const _productOOS = !_hasVariants && (Number(product.stock) || 0) <= 0;
-              const oosSelected = (selectedVariant && selectedVariant.stock === 0) || _productOOS;
+              const oosSelected = (selectedVariant && Number(selectedVariant.stock) <= 0) || _productOOS;
               return (
                 <div className="mb-6">
                   <div className="flex gap-2">
