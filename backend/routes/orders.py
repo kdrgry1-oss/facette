@@ -2110,13 +2110,31 @@ async def _reverse_stock_moves(moves: list) -> None:
         bc = mv.get("barcode")
         delta = int(mv.get("delta") or 0)
         pid = mv.get("product_id")
-        if not bc or delta == 0:
+        vid = mv.get("variant_id")
+        level = mv.get("level")
+        if delta == 0:
             continue
         back = -delta  # düşüm delta<0 → back>0 (geri ekle)
-        if mv.get("level") == "product":
+        # Barkodsuz varyant: variant_id ile geri al (barcode boş olabilir).
+        if level == "variant_by_id" and vid and pid:
+            await db.products.update_one(
+                {"id": pid, "variants.id": vid},
+                {"$inc": {"variants.$[v].stock": back}, "$set": {"updated_at": now}},
+                array_filters=[{"v.id": vid}])
+            await db.products.update_one(
+                {"id": pid},
+                [{"$set": {"stock": {"$sum": {"$map": {
+                    "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                    "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}])
+            continue
+        if level == "product":
+            if not (pid or bc):
+                continue
             await db.products.update_one({"id": pid} if pid else {"barcode": bc},
                                          {"$inc": {"stock": back}, "$set": {"updated_at": now}})
         else:
+            if not bc:
+                continue
             await db.products.update_one(
                 {"variants.barcode": bc},
                 {"$inc": {"variants.$[v].stock": back}, "$set": {"updated_at": now}},
@@ -2142,42 +2160,99 @@ async def _decrement_stock_atomic(order: dict) -> dict:
     for it in items:
         barcode = it.get("barcode") or it.get("sku") or ""
         qty = int(it.get("quantity", 1) or 1)
-        if not barcode or qty < 1:
+        if qty < 1:
             continue
-        # 1) Varyant düzeyinde KOŞULLU düşüm: yalnız stock>=qty ise eşleşir ve düşer.
-        res = await db.products.update_one(
-            {"variants": {"$elemMatch": {"barcode": barcode, "stock": {"$gte": qty}}}},
-            {"$inc": {"variants.$[v].stock": -qty}, "$set": {"updated_at": now}},
-            array_filters=[{"v.barcode": barcode}])
-        if res.modified_count > 0:
-            prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1})
-            pid = prod["id"] if prod else None
-            if pid:
+        if barcode:
+            # 1) Varyant düzeyinde KOŞULLU düşüm: yalnız stock>=qty ise eşleşir ve düşer.
+            res = await db.products.update_one(
+                {"variants": {"$elemMatch": {"barcode": barcode, "stock": {"$gte": qty}}}},
+                {"$inc": {"variants.$[v].stock": -qty}, "$set": {"updated_at": now}},
+                array_filters=[{"v.barcode": barcode}])
+            if res.modified_count > 0:
+                prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1})
+                pid = prod["id"] if prod else None
+                if pid:
+                    await db.products.update_one(
+                        {"id": pid},
+                        [{"$set": {"stock": {"$sum": {"$map": {
+                            "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                            "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}])
+                mv = {"barcode": barcode, "delta": -qty, "product_id": pid, "level": "variant"}
+                applied.append(mv)
+                continue
+            # Varyant var ama stok yetmedi mi? (yoksa hiç varyant yok mu?) — ayırt et.
+            if await db.products.find_one({"variants.barcode": barcode}, {"_id": 1}):
+                await _reverse_stock_moves(applied)  # oversell → geri al + reddet
+                return {"success": False, "barcode": barcode, "name": it.get("name", "")}
+            # 2) Varyantsız ürün düzeyinde barkod: aynı koşullu düşüm.
+            res2 = await db.products.update_one(
+                {"barcode": barcode, "stock": {"$gte": qty}},
+                {"$inc": {"stock": -qty}, "$set": {"updated_at": now}})
+            if res2.modified_count > 0:
+                p2 = await db.products.find_one({"barcode": barcode}, {"_id": 0, "id": 1})
+                applied.append({"barcode": barcode, "delta": -qty,
+                                "product_id": (p2["id"] if p2 else None), "level": "product"})
+                continue
+            if await db.products.find_one({"barcode": barcode}, {"_id": 1}):
+                await _reverse_stock_moves(applied)  # ürün var, stok yetmedi → oversell
+                return {"success": False, "barcode": barcode, "name": it.get("name", "")}
+        # 3) BARKODSUZ / barkodu eşleşmeyen kalem — product_id + variant_id (veya beden/renk) ile
+        #    stok anahtarını çöz. Barkodu boş varyantlar da oversell'e karşı korunur (aksi halde
+        #    kalem sessizce geçip stok düşmeden sipariş açılıyordu → stoğu 0 ürüne sipariş).
+        pid = it.get("product_id")
+        prod = await db.products.find_one({"id": pid}, {"_id": 0}) if pid else None
+        if not prod:
+            # Ürün gerçekten yok/çözülemez → kontrol edilemez, stok düşülmez (mevcut davranış).
+            continue
+        variants = prod.get("variants") or []
+        vid = it.get("variant_id")
+        if variants:
+            # Varyantı id ile, yoksa beden(+renk) ile tekil eşle.
+            match_v = None
+            if vid:
+                match_v = next((v for v in variants if v.get("id") == vid), None)
+            if not match_v:
+                _sz = str(it.get("size") or "").strip().lower()
+                _cl = str(it.get("color") or "").strip().lower()
+                if _sz:
+                    cand = [v for v in variants if str(v.get("size") or "").strip().lower() == _sz]
+                    if len(cand) > 1 and _cl:
+                        cand = [v for v in cand if str(v.get("color") or "").strip().lower() == _cl] or cand
+                    if len(cand) == 1:
+                        match_v = cand[0]
+            if not match_v:
+                # Varyant tekil çözülemedi → yanlış varyantı düşürmemek için geçir (mevcut davranış).
+                continue
+            _mvid = match_v.get("id")
+            res3 = await db.products.update_one(
+                {"id": pid, "variants": {"$elemMatch": {"id": _mvid, "stock": {"$gte": qty}}}},
+                {"$inc": {"variants.$[v].stock": -qty}, "$set": {"updated_at": now}},
+                array_filters=[{"v.id": _mvid}])
+            if res3.modified_count > 0:
                 await db.products.update_one(
                     {"id": pid},
                     [{"$set": {"stock": {"$sum": {"$map": {
                         "input": {"$ifNull": ["$variants", []]}, "as": "vv",
                         "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}])
-            mv = {"barcode": barcode, "delta": -qty, "product_id": pid, "level": "variant"}
-            applied.append(mv)
-            continue
-        # Varyant var ama stok yetmedi mi? (yoksa hiç varyant yok mu?) — ayırt et.
-        if await db.products.find_one({"variants.barcode": barcode}, {"_id": 1}):
-            await _reverse_stock_moves(applied)  # oversell → geri al + reddet
-            return {"success": False, "barcode": barcode, "name": it.get("name", "")}
-        # 2) Varyantsız ürün düzeyinde barkod: aynı koşullu düşüm.
-        res2 = await db.products.update_one(
-            {"barcode": barcode, "stock": {"$gte": qty}},
-            {"$inc": {"stock": -qty}, "$set": {"updated_at": now}})
-        if res2.modified_count > 0:
-            p2 = await db.products.find_one({"barcode": barcode}, {"_id": 0, "id": 1})
-            applied.append({"barcode": barcode, "delta": -qty,
-                            "product_id": (p2["id"] if p2 else None), "level": "product"})
-            continue
-        if await db.products.find_one({"barcode": barcode}, {"_id": 1}):
+                applied.append({"barcode": match_v.get("barcode") or "", "variant_id": _mvid,
+                                "delta": -qty, "product_id": pid, "level": "variant_by_id"})
+                continue
+            # Varyant var, stok yetmedi → oversell reddi.
+            await _reverse_stock_moves(applied)
+            return {"success": False, "barcode": match_v.get("barcode") or "",
+                    "name": it.get("name", "") or prod.get("name", "")}
+        else:
+            # Varyantsız ürün: id ile koşullu düşüm.
+            res4 = await db.products.update_one(
+                {"id": pid, "stock": {"$gte": qty}},
+                {"$inc": {"stock": -qty}, "$set": {"updated_at": now}})
+            if res4.modified_count > 0:
+                applied.append({"barcode": prod.get("barcode") or "", "delta": -qty,
+                                "product_id": pid, "level": "product"})
+                continue
             await _reverse_stock_moves(applied)  # ürün var, stok yetmedi → oversell
-            return {"success": False, "barcode": barcode, "name": it.get("name", "")}
-        # Barkod hiçbir yerde yok → kontrol edilemez, stok düşülmez (mevcut davranış).
+            return {"success": False, "barcode": prod.get("barcode") or "",
+                    "name": it.get("name", "") or prod.get("name", "")}
     return {"success": True, "movements": applied}
 
 
