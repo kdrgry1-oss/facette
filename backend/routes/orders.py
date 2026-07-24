@@ -719,6 +719,16 @@ async def get_order_by_number(order_number: str):
     for _pk in ("customer_name", "user_email", "user_phone", "cargo_tracking",
                 "cargo_tracking_number", "tracking_number", "billing_info", "customer_ip"):
         order.pop(_pk, None)
+    # İade uygunluğu delivered_at'e bağlı; kargo senkronu teslimatı raporlamadıysa (MNG status 0'da
+    # takılı) müşteri iade açamıyordu → varsayılan-teslim fallback ile delivered_at'i doldur.
+    try:
+        if not order.get("delivered_at"):
+            _eff, _presumed = await _effective_delivered_at(order)
+            if _eff:
+                order["delivered_at"] = _eff
+                order["delivered_presumed"] = bool(_presumed)
+    except Exception:
+        pass
     return order
 
 
@@ -5981,12 +5991,52 @@ async def _notify_return(order: dict, code: str, valid_until: str, barcode_img: 
         logger.warning(f"return notif failed: {e}")
 
 
+async def _effective_delivered_at(order: dict):
+    """Gerçek teslim tarihi varsa onu döndür. YOKSA fallback: MNG/DHL kargo durum senkronu bazen
+    teslimatı HİÇ raporlamıyor (kargo_statu 0 / "İşlem Yapılmadı"da takılı) → sipariş 'preparing'de
+    kalıp `delivered_at` boş kalıyor ve müşteri teslim aldığı hâlde İADE AÇAMIYOR. Bu durumda:
+    ödenmiş + yeterince eski (kargoya verilme/sipariş tarihinden İşletme-Kuralı eşiği kadar gün geçmiş)
+    siparişleri VARSAYILAN TESLİM say → iade başlatılabilsin (admin yine onaylar/reddeder).
+    İptal/ödeme-bekleyen/başarısız/zaten-iade durumları hariç. Döner: (iso_str|None, presumed:bool)."""
+    real = order.get("delivered_at")
+    if real:
+        return real, False
+    st = str(order.get("status") or "").lower()
+    pay = str(order.get("payment_status") or "").lower()
+    _blocked = {"awaiting_payment", "pending", "cancelled", "canceled", "failed",
+                "returned", "refunded", "partial_refunded", "return_requested"}
+    if st in _blocked:
+        return None, False
+    if pay and pay != "paid":
+        return None, False
+    try:
+        import business_rules as _BR
+        _pd = int(await _BR.get_rule(db, "return.presume_delivered_after_days", 5) or 5)
+    except Exception:
+        _pd = 5
+    if _pd < 1:
+        return None, False
+    anchor = order.get("shipped_at") or order.get("created_at")
+    if not anchor:
+        return None, False
+    try:
+        a = datetime.fromisoformat(str(anchor).replace("Z", "+00:00"))
+        if a.tzinfo is None:
+            a = a.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None, False
+    if datetime.now(timezone.utc) >= (a + timedelta(days=_pd)):
+        return (a + timedelta(days=_pd)).isoformat(), True
+    return None, False
+
+
 async def _build_return_for_order(order: dict, payload: dict, actor: dict) -> dict:
     """İade talebi ÇEKİRDEĞİ — üye ve misafir uçları aynı mantığı kullanır.
     14 gün penceresi (teslimden) + 3 gün kod geçerliliği + DHL/MNG iade kodu/barkod + kayıt + bildirim.
     actor: log için {email,id,...} (üye current_user ya da misafir için sentetik)."""
     # --- 14 gün penceresi (teslim anından itibaren, 1 sn bile geçse engelle) ---
-    delivered_at = order.get("delivered_at")
+    # delivered_at boşsa: kargo senkronu teslimatı raporlamamış olabilir → varsayılan-teslim fallback.
+    delivered_at, _presumed = await _effective_delivered_at(order)
     if not delivered_at:
         raise HTTPException(status_code=400, detail="Sipariş henüz teslim edilmedi; iade başlatılamaz.")
     try:

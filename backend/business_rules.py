@@ -78,6 +78,11 @@ RULE_CATALOG = [
     {"group": "İade & Değişim", "key": "return.window_days", "label": "İade/değişim süresi",
      "type": "number", "default": 14, "unit": "gün", "options": [7, 14, 15, 30],
      "help": "Teslimattan sonra müşterinin iade/değişim talebi açabileceği gün sayısı."},
+    {"group": "İade & Değişim", "key": "return.presume_delivered_after_days", "label": "Varsayılan teslim (kargo durumu gelmezse)",
+     "type": "number", "default": 5, "unit": "gün", "options": [3, 4, 5, 7, 10],
+     "help": "Kargo firması teslimat durumunu raporlamazsa (MNG/DHL statü takılırsa), kargoya "
+             "verilme/sipariş tarihinden bu kadar gün geçmiş ÖDENMİŞ siparişler teslim edilmiş "
+             "sayılır → müşteri iade başlatabilir (admin yine onaylar). 0 = kapalı."},
 
     # ---- Ürün & Vitrin ----
     {"group": "Ürün & Vitrin", "key": "product.max_combine", "label": "Azami 'Stilini Tamamla' ürün sayısı",
