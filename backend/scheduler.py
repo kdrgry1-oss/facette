@@ -773,6 +773,18 @@ async def _run_hepsiburada_auto_stock_sync():
             pass
 
 
+async def _run_hb_invoice_autoheal():
+    """KALICI ÇÖZÜM: HB'ye yüklenmemiş faturaları periyodik yeniden gönder (kendi-kendini
+    iyileştirme). Anlık gönderim başarısız olsa bile bu döngü kurtarır. İdempotent, hafif."""
+    try:
+        from routes.orders import autoheal_hb_invoices
+        res = await autoheal_hb_invoices(hours=96, limit=200)
+        if res.get("uploaded"):
+            logger.info(f"[scheduler][hb-invoice] {res.get('uploaded')}/{res.get('checked')} yüklendi")
+    except Exception as e:
+        logger.warning(f"[scheduler][hb-invoice] autoheal hatası: {e}")
+
+
 # Y21: Fire-and-forget senkron task'ları için kilit + referans havuzu.
 # Önceden create_task referanssız çağrılıyordu → (a) 2 dk aralıkta >2 dk süren pull ardılıyla
 # ÇAKIŞIP çift sipariş insert + çift stok düşümü yapabiliyor, (b) referans tutulmadığı için GC
@@ -1991,6 +2003,17 @@ def start_scheduler():
         minutes=5,
         id="trendyol_cancel_pass_5m",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Hepsiburada fatura KALICI oto-yükleme — her 15 DK. Faturası kesilmiş ama HB'ye gitmemiş
+    # siparişleri yeniden gönderir (anlık gönderim başarısız olsa bile kurtarır). İdempotent.
+    _add(
+        _run_hb_invoice_autoheal,
+        "interval",
+        minutes=15,
+        id="hb_invoice_autoheal_15m",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
         max_instances=1,
         coalesce=True,
     )

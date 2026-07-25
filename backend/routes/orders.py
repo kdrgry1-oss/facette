@@ -4029,30 +4029,18 @@ async def create_invoice_for_order(
     hb_upload = None
     try:
         if order.get("platform") == "hepsiburada":
-            _hweb = ((dogan_result or {}).get("web_key") or order.get("invoice_pdf_url") or "").strip()
-            _htmpl = (dogan_settings.get("earsiv_link_template") or "").strip()
-            if _hweb.startswith("http"):
-                _hlink = _hweb
-            elif _htmpl and _hweb:
-                _hlink = _htmpl.replace("{web_key}", _hweb)
-            else:
-                _hlink = ""
-            # e-Fatura link (e-Arşiv yolu değişmeden) — Trendyol bloğuyla aynı şablon mantığı.
-            if (not _hlink) and invoice_type == "e-fatura":
-                _heftmpl = (dogan_settings.get("einvoice_link_template") or "").strip()
-                if _heftmpl:
-                    _hef_uuid = str((dogan_result or {}).get("uuid") or invoice_uuid or "")
-                    _hlink = (_heftmpl
-                              .replace("{uuid}", _hef_uuid)
-                              .replace("{ettn}", _hef_uuid)
-                              .replace("{invoice_id}", str((dogan_result or {}).get("invoice_id") or ""))
-                              .replace("{invoice_number}", invoice_number)
-                              .replace("{intl_txn_id}", str((dogan_result or {}).get("intl_txn_id") or ""))).strip()
-                if not _hlink:
-                    _hlink = _einvoice_pdf_link(order_id)
+            # Ortak link çözücü — e-Arşiv (http web_key / earsiv şablonu) + e-fatura (self-served).
+            # dogan_result.web_key'i order alanı gibi kullanabilmek için order kopyasına enjekte et.
+            _oview = dict(order)
+            _rwk = ((dogan_result or {}).get("web_key") or order.get("invoice_pdf_url") or "").strip()
+            if _rwk:
+                _oview["invoice_pdf_url"] = _rwk
+            _oview.setdefault("invoice_uuid", (dogan_result or {}).get("uuid") or invoice_uuid or "")
+            _oview.setdefault("invoice_dogan_id", (dogan_result or {}).get("invoice_id") or "")
+            _oview.setdefault("invoice_number", invoice_number)
+            _hlink = _resolve_marketplace_invoice_link(_oview, dogan_settings, order_id, invoice_type, _rwk)
             if _hlink:
                 import asyncio as _aio_hb
-                from hepsiburada_client import HepsiburadaError as _HBErr
                 from routes.category_mapping import _get_hb_client
                 _hcli, _hcerr = await _get_hb_client()
                 if _hcerr:
@@ -4060,20 +4048,7 @@ async def create_invoice_for_order(
                     await db.orders.update_one({"id": order_id}, {"$set": {
                         "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _hcerr[:1000]}})
                 else:
-                    # HB fatura API'si PAKET numarası ister (sipariş no DEĞİL → 404 verir).
-                    # Order'da saklı değilse OMS detayından items[].packageNumber ile çöz + sakla.
-                    _hpkg = str(order.get("hepsiburada_package_number") or "").strip()
-                    if not _hpkg:
-                        _hraw = str(order.get("hepsiburada_order_number") or "").strip()
-                        try:
-                            _det = await _aio_hb.to_thread(_hcli.get_order_detail, _hraw)
-                            for _it in ((_det or {}).get("items") or []):
-                                if _it.get("packageNumber"):
-                                    _hpkg = str(_it["packageNumber"]); break
-                            if _hpkg:
-                                await db.orders.update_one({"id": order_id}, {"$set": {"hepsiburada_package_number": _hpkg}})
-                        except Exception as _pe:
-                            logger.warning(f"[hb invoice] paket no cozulemedi {order.get('order_number')}: {_pe}")
+                    _hpkg = await _resolve_hb_package_number(order, _hcli)
                     if not _hpkg:
                         _herr = "HB paket numarası çözülemedi (OMS detayında packageNumber yok)."
                         hb_upload = {"ok": False, "error": _herr}
@@ -4087,12 +4062,18 @@ async def create_invoice_for_order(
                                 "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
                         except Exception as _hbe:
                             _herr = str(_hbe)
-                            hb_upload = {"ok": False, "error": _herr}
-                            await db.orders.update_one({"id": order_id}, {"$set": {
-                                "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr[:1000]}})
-                            logger.error(f"[hb invoice auto-upload] {order.get('order_number')}: {_herr}")
+                            # 409 / zaten mevcut → başarı say (idempotent).
+                            if any(k in _herr.lower() for k in ("already", "zaten mevcut", "409")):
+                                hb_upload = {"ok": True, "link": _hlink, "package": _hpkg, "note": "zaten mevcut"}
+                                await db.orders.update_one({"id": order_id}, {"$set": {
+                                    "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
+                            else:
+                                hb_upload = {"ok": False, "error": _herr}
+                                await db.orders.update_one({"id": order_id}, {"$set": {
+                                    "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr[:1000]}})
+                                logger.error(f"[hb invoice auto-upload] {order.get('order_number')}: {_herr}")
             else:
-                _herr = "HB fatura linki veya paket no üretilemedi (Dogan web_key/earsiv_link_template kontrol edin)."
+                _herr = "HB fatura linki üretilemedi (e-Arşiv: earsiv_link_template ayarlı mı? / uuid-dogan_id boş)."
                 hb_upload = {"ok": False, "error": _herr}
                 await db.orders.update_one({"id": order_id}, {"$set": {
                     "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr}})
@@ -4218,6 +4199,65 @@ def _einvoice_pdf_link(order_id: str) -> str:
     return f"{base}/api/orders/{order_id}/einvoice-pdf?sig={_einvoice_pdf_sig(order_id)}"
 
 
+def _resolve_marketplace_invoice_link(order: dict, dogan_settings: dict, order_id: str,
+                                      invoice_type: str = "", web_key: str = "") -> str:
+    """Pazaryerine (Trendyol/Hepsiburada) gönderilecek fatura linkini GÜVENLE çöz — HİÇ boş
+    kalmasın. Sıra:
+      1) web_key / invoice_pdf_url zaten http URL ise onu kullan (e-Arşiv WEB_KEY URL'i).
+      2) bare web_key + earsiv_link_template → şablonla tam URL kur (e-Arşiv).
+      3) e-fatura + einvoice_link_template → uuid/id ile şablonla.
+      4) Son çare: kendi imzalı self-served PDF linki (order'da uuid/dogan_id varsa; e-fatura'da
+         Doğan'dan PDF çeker). Böylece 'link üretilemedi' ile yükleme atlanması ORTADAN KALKAR.
+    Not: e-Arşiv'de web_key/şablon yoksa çözülemez → dönen boş string config eksiğine işaret eder
+    (earsiv_link_template ayarlanmalı)."""
+    _it = (invoice_type or order.get("invoice_type") or "").strip()
+    wk = (web_key or order.get("invoice_pdf_url") or "").strip()
+    if wk.startswith("http"):
+        return wk
+    _earsiv_tmpl = (dogan_settings.get("earsiv_link_template") or "").strip()
+    if wk and _earsiv_tmpl:
+        return _earsiv_tmpl.replace("{web_key}", wk)
+    if _it == "e-fatura":
+        _ef_tmpl = (dogan_settings.get("einvoice_link_template") or "").strip()
+        if _ef_tmpl:
+            _uuid = str(order.get("invoice_uuid") or "")
+            _link = (_ef_tmpl.replace("{uuid}", _uuid).replace("{ettn}", _uuid)
+                     .replace("{invoice_id}", str(order.get("invoice_dogan_id") or ""))
+                     .replace("{invoice_number}", str(order.get("invoice_number") or ""))
+                     .replace("{intl_txn_id}", str(order.get("invoice_intl_txn_id") or ""))).strip()
+            if _link:
+                return _link
+    # Son çare: self-served (e-fatura kesin; e-Arşiv'de uuid/id varsa da denenir)
+    if order.get("invoice_uuid") or order.get("invoice_dogan_id"):
+        return _einvoice_pdf_link(order_id)
+    return ""
+
+
+async def _resolve_hb_package_number(order: dict, hb_client) -> str:
+    """HB fatura API'si PAKET numarası ister (sipariş no DEĞİL). Sırayla: order.hepsiburada_package_number
+    → OMS detayından items[].packageNumber → order'daki diğer paket alanları. Bulursa order'a kaydeder."""
+    import asyncio as _aio
+    _pkg = str(order.get("hepsiburada_package_number") or order.get("package_number")
+               or order.get("shipment_package_id") or "").strip()
+    if _pkg:
+        return _pkg
+    _raw = str(order.get("hepsiburada_order_number") or order.get("marketplace_order_id")
+               or order.get("order_number") or "").strip()
+    if not _raw:
+        return ""
+    try:
+        _det = await _aio.to_thread(hb_client.get_order_detail, _raw)
+        for _it in ((_det or {}).get("items") or []):
+            if _it.get("packageNumber"):
+                _pkg = str(_it["packageNumber"]); break
+        if _pkg:
+            await db.orders.update_one({"id": order.get("id")},
+                                       {"$set": {"hepsiburada_package_number": _pkg}})
+    except Exception as _pe:
+        logger.warning(f"[hb pkg] paket no cozulemedi {order.get('order_number')}: {_pe}")
+    return _pkg
+
+
 @router.post("/repush-invoice-links")
 async def repush_invoice_links(payload: dict = None, current_user: dict = Depends(require_admin)):
     """Faturası kesilmiş ama pazaryerine LİNKİ gitmemiş siparişlerin fatura linkini yeniden gönderir.
@@ -4237,20 +4277,18 @@ async def repush_invoice_links(payload: dict = None, current_user: dict = Depend
         q = {"platform": ("hepsiburada" if plat in ("hepsiburada", "hb") else plat), "invoice_issued": True,
              _uploaded_field: {"$ne": True},
              "invoice_issued_at": {"$gte": _since}}
+    _dogan_settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
     orders = await db.orders.find(q, {"_id": 0}).to_list(500)
     results = []
     for order in orders:
         _order_id = order.get("id")
         _itype = order.get("invoice_type")
-        _web = (order.get("invoice_pdf_url") or "").strip()
-        if _web.startswith("http"):
-            _link = _web
-        elif _itype == "e-fatura":
-            _link = _einvoice_pdf_link(_order_id)
-        else:
-            _link = ""  # e-arşiv web_key yoksa (nadir) atla
+        # Ortak çözücü: e-Arşiv (http web_key / earsiv şablonu) + e-fatura (self-served) — boş kalmaz.
+        _link = _resolve_marketplace_invoice_link(order, _dogan_settings, _order_id, _itype)
         if not _link:
-            results.append({"order": order.get("order_number"), "ok": False, "error": "link üretilemedi"})
+            _le = "link üretilemedi (e-Arşiv: earsiv_link_template ayarlı mı? / uuid-dogan_id boş)"
+            await db.orders.update_one({"id": _order_id}, {"$set": {_uploaded_field.replace("uploaded", "error"): _le}})
+            results.append({"order": order.get("order_number"), "ok": False, "error": _le})
             continue
         _plat = order.get("platform")
         try:
@@ -4265,7 +4303,7 @@ async def repush_invoice_links(payload: dict = None, current_user: dict = Depend
                                            {"$set": {"trendyol_invoice_uploaded": True, "trendyol_invoice_error": ""}})
                 results.append({"order": order.get("order_number"), "ok": True, "link": _link})
             elif _plat == "hepsiburada":
-                # HB fatura API'si PAKET numarası ister; order'da yoksa OMS detayından çöz + sakla.
+                # HB fatura API'si PAKET numarası ister; ortak çözücü order + OMS detayından bulur.
                 import asyncio as _aio_hb
                 from routes.category_mapping import _get_hb_client
                 _hcli, _hcerr = await _get_hb_client()
@@ -4274,18 +4312,7 @@ async def repush_invoice_links(payload: dict = None, current_user: dict = Depend
                         "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _hcerr[:500]}})
                     results.append({"order": order.get("order_number"), "ok": False, "error": _hcerr[:200], "link": _link})
                     continue
-                _hpkg = str(order.get("hepsiburada_package_number") or "").strip()
-                if not _hpkg:
-                    _hraw = str(order.get("hepsiburada_order_number") or "").strip()
-                    try:
-                        _det = await _aio_hb.to_thread(_hcli.get_order_detail, _hraw)
-                        for _it in ((_det or {}).get("items") or []):
-                            if _it.get("packageNumber"):
-                                _hpkg = str(_it["packageNumber"]); break
-                        if _hpkg:
-                            await db.orders.update_one({"id": _order_id}, {"$set": {"hepsiburada_package_number": _hpkg}})
-                    except Exception as _pe:
-                        logger.warning(f"[hb repush] paket no cozulemedi {order.get('order_number')}: {_pe}")
+                _hpkg = await _resolve_hb_package_number(order, _hcli)
                 if not _hpkg:
                     _herr = "HB paket numarası çözülemedi (OMS detayında packageNumber yok)."
                     await db.orders.update_one({"id": _order_id}, {"$set": {
@@ -4313,6 +4340,58 @@ async def repush_invoice_links(payload: dict = None, current_user: dict = Depend
             results.append({"order": order.get("order_number"), "ok": False, "error": _err[:200], "link": _link})
     ok_n = sum(1 for r in results if r.get("ok"))
     return {"success": True, "total": len(results), "uploaded": ok_n, "results": results}
+
+
+async def autoheal_hb_invoices(hours: int = 96, limit: int = 200) -> dict:
+    """KALICI ÇÖZÜM: faturası kesilmiş ama Hepsiburada'ya YÜKLENMEMİŞ siparişleri periyodik
+    olarak (scheduler) yeniden gönderir. Anlık gönderim ağ/paket/link nedeniyle başarısız olsa
+    bile bu kendi-kendini-iyileştiren döngü kurtarır → 'HB'ye fatura gitmiyor' kalıcı kapanır.
+    İdempotent (409/zaten mevcut = başarı). current_user gerektirmez (sistem işi)."""
+    _since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    q = {"platform": "hepsiburada", "invoice_issued": True,
+         "hepsiburada_invoice_uploaded": {"$ne": True},
+         "invoice_issued_at": {"$gte": _since}}
+    orders = await db.orders.find(q, {"_id": 0}).sort("invoice_issued_at", -1).to_list(limit)
+    if not orders:
+        return {"checked": 0, "uploaded": 0}
+    ds = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+    try:
+        from routes.category_mapping import _get_hb_client
+        _hcli, _hcerr = await _get_hb_client()
+    except Exception as e:
+        _hcli, _hcerr = None, str(e)
+    if _hcerr or not _hcli:
+        return {"checked": len(orders), "uploaded": 0, "error": _hcerr or "HB client yok"}
+    import asyncio as _aio
+    up = 0
+    for order in orders:
+        _oid = order.get("id")
+        _link = _resolve_marketplace_invoice_link(order, ds, _oid, order.get("invoice_type"))
+        if not _link:
+            await db.orders.update_one({"id": _oid}, {"$set": {
+                "hepsiburada_invoice_error": "link üretilemedi (earsiv_link_template / uuid-dogan_id)"}})
+            continue
+        _pkg = await _resolve_hb_package_number(order, _hcli)
+        if not _pkg:
+            await db.orders.update_one({"id": _oid}, {"$set": {
+                "hepsiburada_invoice_error": "paket no çözülemedi"}})
+            continue
+        try:
+            await _aio.to_thread(_hcli.send_invoice, _pkg, _link)
+            await db.orders.update_one({"id": _oid}, {"$set": {
+                "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
+            up += 1
+        except Exception as e:
+            _err = str(e)
+            if any(k in _err.lower() for k in ("already", "zaten mevcut", "409")):
+                await db.orders.update_one({"id": _oid}, {"$set": {
+                    "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
+                up += 1
+            else:
+                await db.orders.update_one({"id": _oid}, {"$set": {
+                    "hepsiburada_invoice_error": _err[:500]}})
+    logger.info(f"[hb invoice autoheal] {up}/{len(orders)} HB faturası yüklendi")
+    return {"checked": len(orders), "uploaded": up}
 
 
 @router.get("/{order_id}/einvoice-pdf-debug")
