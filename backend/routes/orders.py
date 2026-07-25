@@ -1930,6 +1930,12 @@ async def update_order_status(
                 "date_of_birth": (order_doc.get("customer") or {}).get("date_of_birth"),
                 "gender": (order_doc.get("customer") or {}).get("gender"),
                 "external_id": order_doc.get("customer_id") or order_doc.get("user_id"),
+                # Purchase yolundaki eşleşme alanlarını buraya da geçir (refund/status eventinde
+                # IP/UA/fbp/fbc eksikti → EMQ düşüktü). order.click_ids + customer_ip/user_agent.
+                "client_ip": order_doc.get("customer_ip"),
+                "user_agent": order_doc.get("user_agent"),
+                "fbp": (order_doc.get("click_ids") or {}).get("fbp"),
+                "fbc": (order_doc.get("click_ids") or {}).get("fbc"),
             }
             from services.capi.hash_utils import build_user_data
             user_data = build_user_data(**user_data_kwargs)

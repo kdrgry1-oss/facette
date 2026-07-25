@@ -20,11 +20,23 @@ def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
+_HEX64_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _already_hashed(s: Optional[str]) -> bool:
+    """Değer zaten 64 karakter hex SHA-256 hash'i mi? (Meta best-practice: PII önceden
+    hash'lenmiş gelebilir → İKİNCİ kez hashleme eşleşmeyi bozar.) Bugün storefront ham PII
+    gönderiyor (bu koruma tetiklenmez); ileride hashli gönderilirse eşleşme korunur."""
+    return bool(_HEX64_RE.match((s or "").strip()))
+
+
 # ============================================================================
 #  Bireysel hash fonksiyonları
 # ============================================================================
 
 def hash_email(email: Optional[str]) -> Optional[str]:
+    if _already_hashed(email):
+        return (email or "").strip().lower()
     e = _norm(email)
     if not e or "@" not in e:
         return None
@@ -35,6 +47,8 @@ def hash_phone(phone: Optional[str], default_country: str = "90") -> Optional[st
     """E.164 format. Türkiye için default 90 prefix'i kullanılır."""
     if not phone:
         return None
+    if _already_hashed(phone):
+        return str(phone).strip().lower()
     digits = re.sub(r"\D+", "", str(phone))
     if not digits:
         return None
@@ -212,7 +226,8 @@ def build_user_data(
         "dobm": hash_dob_month(date_of_birth),
         "dobd": hash_dob_day(date_of_birth),
         "ge": hash_gender(gender),
-        "external_id": _sha256(external_id) if external_id else None,
+        "external_id": (external_id.strip().lower() if _already_hashed(external_id)
+                        else (_sha256(_norm(external_id)) if external_id else None)),
         "subscription_id": subscription_id,       # raw allowed for Meta
         "fb_login_id": fb_login_id,
         "lead_id": lead_id,
