@@ -171,6 +171,24 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
           add_payment_info: "AddPaymentInfo", purchase: "CompletePayment",
         };
         const ttEv = ttEventMap[eventName] || eventName;
+        // TikTok Advanced Matching — kullanıcı checkout'ta email/telefon GİRDİYSE ttq.identify ile
+        // eşleştir (ttq değerleri client-side SHA-256 hashler). SAHTE veri üretmeyiz: yalnız gerçek,
+        // mevcut değerler. Consent gate bu bloğu zaten kapatıyor (KVKK). Boş değerle çağırma.
+        try {
+          const _id = {};
+          if (userInfo && userInfo.email) _id.email = String(userInfo.email).trim().toLowerCase();
+          if (userInfo && userInfo.phone) {
+            // Server ile AYNI E.164 normalize (90XXXXXXXXXX) → tarayıcı↔server hash eşleşsin.
+            let d = String(userInfo.phone).replace(/\D+/g, "");
+            if (d.startsWith("0") && !d.startsWith("00")) d = d.slice(1);
+            if (d.length === 10 && !d.startsWith("90")) d = "90" + d;
+            if (d) _id.phone_number = d;
+          }
+          if (userInfo && userInfo.external_id) _id.external_id = String(userInfo.external_id).trim();
+          if ((_id.email || _id.phone_number) && typeof window.ttq.identify === "function") {
+            window.ttq.identify(_id);
+          }
+        } catch (_) { /* silent */ }
         window.ttq.track(ttEv, {
           contents: (eventData.items || []).map((i) => ({
             content_id: String(i.item_id || i.id || ""),

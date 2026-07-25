@@ -1016,6 +1016,9 @@ async def create_order(
         # Reklam tıklama kimlikleri (ttclid/fbc/gclid …) — CAPI purchase'ta
         # webhook/tarayıcısız akışta atıf için kullanılır.
         "click_ids": _sanitize_click_ids(order_data.get("click_ids")),
+        # KVKK: ziyaretçinin çerez bildiriminde 'pazarlama' onayı (tarayıcıdan taşınır). Consent
+        # gate açıkken tarayıcısız server Purchase CAPI'si bu değere göre gönderilir/atlanır.
+        "ad_tracking_consent": bool(order_data.get("ad_tracking_consent")),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
@@ -1641,6 +1644,19 @@ async def dispatch_purchase_capi(order_id: str, source: str = "") -> bool:
     tek event çıkar. Kullanıcı verisi (email/telefon hash'i, IP, UA, ttclid)
     sipariş kaydından okunur — tarayıcı gerekmez."""
     try:
+        # KVKK: consent gate AÇIKSA ve sipariş 'ad_tracking_consent' taşımıyorsa server Purchase'ı
+        # da GÖNDERME (D'nin server-tarafı tamamlanması). Atlanınca capi_purchase_sent İŞARETLENMEZ
+        # → izin sonradan tanımlanırsa yeniden tetiklenebilir. Gate KAPALIYKEN (varsayılan) etkisiz.
+        try:
+            from business_rules import get_rule as _get_rule
+            _consent_gate = bool(await _get_rule(db, "marketing.capi_consent_gate", False))
+        except Exception:
+            _consent_gate = False
+        if _consent_gate:
+            _co = await db.orders.find_one({"id": order_id}, {"_id": 0, "ad_tracking_consent": 1})
+            if _co and _co.get("ad_tracking_consent") is not True:
+                logger.info(f"[CAPI] consent gate: order {order_id} reklam izni yok → server Purchase atlandı")
+                return False
         prev = await db.orders.find_one_and_update(
             {"id": order_id, "capi_purchase_sent": {"$ne": True}},
             {"$set": {"capi_purchase_sent": True,

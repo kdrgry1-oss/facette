@@ -744,6 +744,12 @@ export default function Checkout() {
         click_ids: (typeof window !== "undefined" ? collectClickIds() : {}),
         // İYS — ticari ileti izni (kutu işaretliyse). SMS izni OTP doğrulaması ister.
         marketing_consent: { email: mktEmail, sms: mktSms, otp_verified: otpVerified },
+        // KVKK: çerez bildirimindeki 'pazarlama' onayı — consent gate açıkken tarayıcısız
+        // (webhook) server Purchase CAPI'si buna göre gönderilir/atlanır.
+        ad_tracking_consent: (() => {
+          try { return !!JSON.parse(localStorage.getItem("facette_cookie_consent") || "{}").marketing; }
+          catch (_) { return false; }
+        })(),
         // Çift sipariş koruması: aynı sepetin tekrar gönderimi yeni sipariş açmaz.
         idempotency_key: idemKeyRef.current,
       };
