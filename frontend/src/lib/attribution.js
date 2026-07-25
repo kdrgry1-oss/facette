@@ -75,8 +75,10 @@ function readFbIds() {
       const fbclid = new URLSearchParams(window.location.search).get("fbclid") || "";
       if (fbclid) fbc = `fb.1.${Date.now()}.${fbclid}`;
     }
-    return { fbp: (fbp || "").trim(), fbc: (fbc || "").trim() };
-  } catch (_) { return { fbp: "", fbc: "" }; }
+    // TikTok first-party cookie (_ttp) — tarayıcısız (webhook) Purchase'ta da eşleşme için sakla.
+    const ttp = getCookie("_ttp") || "";
+    return { fbp: (fbp || "").trim(), fbc: (fbc || "").trim(), ttp: (ttp || "").trim() };
+  } catch (_) { return { fbp: "", fbc: "", ttp: "" }; }
 }
 
 export async function trackVisit() {
@@ -92,6 +94,7 @@ export async function trackVisit() {
       // Boş göndermeyip mevcut dolu değeri backend'de ezmemek için yalnız doluysa ekle.
       ...(fbIds.fbp ? { fbp: fbIds.fbp } : {}),
       ...(fbIds.fbc ? { fbc: fbIds.fbc } : {}),
+      ...(fbIds.ttp ? { ttp: fbIds.ttp } : {}),
       aff_id: aff_id || utm.aff_id || "",
       referrer: document.referrer || "",
       landing_page: window.location.pathname + window.location.search,

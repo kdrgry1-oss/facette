@@ -76,8 +76,8 @@ async def _send_one(db, px: dict, *, event_name: str, event_id: str,
         return {"provider": provider_key, "ok": False, "skipped": True,
                 "reason": "missing pixel_id or access_token"}
 
-    # Meta'ya alan-bazlı feature flag geçir (rollback); diğer sağlayıcılar etkilenmez.
-    _extra = {"field_flags": px.get("field_flags")} if provider_key == "meta" else {}
+    # Meta + TikTok alan-bazlı feature flag geçir (rollback); diğer sağlayıcılar etkilenmez.
+    _extra = {"field_flags": px.get("field_flags")} if provider_key in ("meta", "tiktok") else {}
     res = await mod.send(
         pixel_id=pixel_id,
         access_token=access_token,
@@ -224,7 +224,7 @@ async def retry_queue_once(db, batch_size: int = 100) -> dict:
                               "updated_at": now.isoformat()}},
                 )
             continue
-        _extra = {"field_flags": px.get("field_flags")} if provider_key == "meta" else {}
+        _extra = {"field_flags": px.get("field_flags")} if provider_key in ("meta", "tiktok") else {}
         res = await mod.send(
             pixel_id=(px.get("tag_id") or "").strip(),
             access_token=access_token,

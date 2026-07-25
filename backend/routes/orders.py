@@ -1655,19 +1655,25 @@ async def dispatch_purchase_capi(order_id: str, source: str = "") -> bool:
         from services.capi.hash_utils import build_user_data
         addr = order_doc.get("shipping_address") or {}
         cids = dict(order_doc.get("click_ids") or {})
-        # fbp/fbc checkout click_ids'te yoksa (tarayıcısız/webhook Purchase) attribution
-        # session'dan doldur — Meta eşleşme kalitesi için. Boş değerle mevcudu EZME.
-        if not (cids.get("fbp") and cids.get("fbc")):
+        # fbp/fbc/ttclid/ttp checkout click_ids'te yoksa (tarayıcısız/webhook Purchase) attribution
+        # session'dan doldur — Meta + TikTok eşleşme kalitesi için. Boş değerle mevcudu EZME.
+        if not all(cids.get(k) for k in ("fbp", "fbc", "ttclid", "ttp")):
             _sid = order_doc.get("attribution_session_id") or (order_doc.get("attribution") or {}).get("session_id")
             if _sid:
                 try:
                     _asess = await db.attribution_sessions.find_one(
-                        {"session_id": _sid}, {"_id": 0, "fbp": 1, "fbc": 1})
+                        {"session_id": _sid}, {"_id": 0, "fbp": 1, "fbc": 1, "ttp": 1,
+                                               "last_touch": 1, "first_touch": 1})
                     if _asess:
-                        if not cids.get("fbp") and _asess.get("fbp"):
-                            cids["fbp"] = _asess["fbp"]
-                        if not cids.get("fbc") and _asess.get("fbc"):
-                            cids["fbc"] = _asess["fbc"]
+                        for _k in ("fbp", "fbc", "ttp"):
+                            if not cids.get(_k) and _asess.get(_k):
+                                cids[_k] = _asess[_k]
+                        # ttclid touch içinde tutulur (last_touch öncelikli, yoksa first_touch)
+                        if not cids.get("ttclid"):
+                            _tt = ((_asess.get("last_touch") or {}).get("ttclid")
+                                   or (_asess.get("first_touch") or {}).get("ttclid"))
+                            if _tt:
+                                cids["ttclid"] = _tt
                 except Exception:
                     pass
         user_data = build_user_data(

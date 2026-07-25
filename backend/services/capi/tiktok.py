@@ -30,9 +30,27 @@ EVENT_MAP = {
 }
 
 
-def _build_user(ud: dict) -> dict:
+# Feature flag adı → gate'lenen TikTok user alanı (rollback). Flag AÇIKÇA False ise gönderilmez.
+# None/eksik → mevcut davranış (gönderilir).
+_FLAG_TO_TT_FIELD = {
+    "email": "email", "phone": "phone_number", "external_id": "external_id",
+    "ttclid": "ttclid", "ttp": "ttp",
+}
+
+
+def _tt_flag_off(field_flags: Optional[dict], tt_field: str) -> bool:
+    if not field_flags:
+        return False
+    for flag, fld in _FLAG_TO_TT_FIELD.items():
+        if fld == tt_field and field_flags.get(flag) is False:
+            return True
+    return False
+
+
+def _build_user(ud: dict, field_flags: Optional[dict] = None) -> dict:
     """TikTok Events API v1.3 'user' fields (advanced matching).
     Doc: https://business-api.tiktok.com/portal/docs?id=1771101303285761
+    field_flags: yalnız AÇIKÇA False olan alanlar gönderilmez (rollback). None → mevcut davranış.
     """
     out = {}
     # Hashed identifiers
@@ -45,11 +63,13 @@ def _build_user(ud: dict) -> dict:
         ("idfa", "idfa"), ("idfv", "idfv"),
         ("ge", "gender"), ("db", "date_of_birth"),
     ]:
+        if _tt_flag_off(field_flags, k_out):
+            continue
         v = ud.get(k_in)
         if v: out[k_out] = v
     # Raw context
-    if ud.get("ttclid"):       out["ttclid"] = ud["ttclid"]
-    if ud.get("ttp"):          out["ttp"] = ud["ttp"]
+    if ud.get("ttclid") and not _tt_flag_off(field_flags, "ttclid"):  out["ttclid"] = ud["ttclid"]
+    if ud.get("ttp") and not _tt_flag_off(field_flags, "ttp"):        out["ttp"] = ud["ttp"]
     if ud.get("client_ip_address"): out["ip"] = ud["client_ip_address"]
     if ud.get("client_user_agent"): out["user_agent"] = ud["client_user_agent"]
     if ud.get("locale"):       out["locale"] = ud["locale"]
@@ -107,6 +127,7 @@ async def send(
     event_source_url: Optional[str] = None,
     test_event_code: Optional[str] = None,
     timeout: float = 8.0,
+    field_flags: Optional[dict] = None,
 ) -> dict:
     tt_event = EVENT_MAP.get(event_name, event_name)
     if not event_time:
@@ -119,7 +140,7 @@ async def send(
             "event": tt_event,
             "event_time": int(event_time),
             "event_id": event_id,
-            "user": _build_user(user_data),
+            "user": _build_user(user_data, field_flags),
             "properties": _build_properties(event_payload),
             "page": {"url": event_source_url or "https://www.facette.com.tr"},
         }],

@@ -163,7 +163,7 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
     }
 
     // 3) TikTok Pixel
-    if (!isGa4Only && typeof window.ttq === "object" && typeof window.ttq.track === "function") {
+    if (!isGa4Only && !_adTrackingBlocked() && typeof window.ttq === "object" && typeof window.ttq.track === "function") {
       try {
         const ttEventMap = {
           view_item: "ViewContent", view_item_list: "ViewContent",
@@ -186,7 +186,7 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
     }
 
     // 4) Pinterest
-    if (!isGa4Only && typeof window.pintrk === "function") {
+    if (!isGa4Only && !_adTrackingBlocked() && typeof window.pintrk === "function") {
       try {
         const pinMap = {
           view_item: "pagevisit", add_to_cart: "addtocart",
@@ -209,7 +209,7 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
     }
 
     // 5) Snapchat
-    if (!isGa4Only && typeof window.snaptr === "function") {
+    if (!isGa4Only && !_adTrackingBlocked() && typeof window.snaptr === "function") {
       try {
         const snapMap = {
           view_item: "VIEW_CONTENT", add_to_cart: "ADD_CART",
