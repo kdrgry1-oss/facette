@@ -571,7 +571,7 @@ async def change_password(
         raise HTTPException(status_code=400, detail="Mevcut ve yeni şifre zorunlu")
     # Personel/admin hesapları için güçlü şifre politikası (Amazon DPP); müşteri min 6
     if current_user.get("is_admin"):
-        validate_strong_password(new)
+        validate_strong_password(new, identifiers=[current_user.get("email"), current_user.get("name")])
     elif len(new) < 6:
         raise HTTPException(status_code=400, detail="Yeni şifre en az 6 karakter olmalı")
     user = await db.users.find_one({"id": current_user["id"]})

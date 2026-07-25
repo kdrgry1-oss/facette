@@ -56,6 +56,19 @@ def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+async def _log_spapi_call(action: str, status: int = None, ok: bool = None, actor: str = "") -> None:
+    """SP-API çağrı denetim logu (Amazon DPP: SP-API çağrıları merkezi loglanır).
+    PII İÇERMEZ — yalnız işlem tipi/path, HTTP durum, zaman, (varsa) admin e-postası.
+    İstek parametreleri/gövdesi ve alıcı bilgisi LOGLANMAZ."""
+    try:
+        await db.spapi_call_logs.insert_one({
+            "action": action, "status": status, "ok": ok,
+            "actor": actor or "", "at": _now_iso(),
+        })
+    except Exception:
+        pass
+
+
 async def _get_config(include_secrets: bool = False) -> Optional[dict]:
     doc = await db.integration_settings.find_one({"key": CONFIG_KEY}, {"_id": 0})
     if not doc:
@@ -146,7 +159,10 @@ async def _spapi_get(path: str, params: dict = None) -> dict:
             data = r.json()
         except Exception:
             data = {"raw": r.text[:500]}
-        return {"status": r.status_code, "ok": 200 <= r.status_code < 300, "data": data}
+        _ok = 200 <= r.status_code < 300
+        # PII'siz çağrı logu (yalnız path + durum) — parametreler/gövde loglanmaz.
+        await _log_spapi_call(f"GET {path}", r.status_code, _ok)
+        return {"status": r.status_code, "ok": _ok, "data": data}
 
 
 # ============================== ENDPOINTS ==============================
@@ -196,6 +212,10 @@ async def spapi_save_config(payload: dict, current_user: dict = Depends(require_
         {"key": CONFIG_KEY},
         {"$set": update, "$setOnInsert": {"created_at": _now_iso()}},
         upsert=True,
+    )
+    # Denetim: kimlik bilgisi değişikliği loglanır (secret DEĞERİ loglanmaz).
+    await _log_spapi_call(
+        "config_save", ok=True, actor=current_user.get("email", ""),
     )
     return {"success": True}
 

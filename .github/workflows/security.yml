@@ -1,0 +1,83 @@
+name: Security Scan
+
+# Amazon SP-API Restricted Role / DPP gereklilikleri: her push + PR'da otomatik
+# güvenlik taraması (SAST + bağımlılık açığı + secret sızıntısı). Raporlar GitHub
+# Security sekmesine (CodeQL) ve iş loglarına düşer. Deploy'u sert bloklamaz
+# (Railway/Cloudflare git push ile ayrı deploy eder); "critical bloklar" istenirse
+# branch protection + required check ile açılır.
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Aylık zorunluluğu karşılamak için haftalık tekrarlı tarama (Pazartesi 03:00 UTC).
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write   # CodeQL sonuçlarını Security sekmesine yaz
+
+jobs:
+  # 1) SAST — CodeQL (Python backend + JavaScript frontend)
+  codeql:
+    name: CodeQL SAST (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          language: ${{ matrix.language }}
+          queries: security-extended
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+
+  # 2) Secret scanning — gitleaks (commit geçmişi + çalışma ağacı)
+  gitleaks:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+
+  # 3) Dependency vulnerability scan — backend (pip-audit) + frontend (yarn audit)
+  dependencies:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit (backend)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          if [ -f backend/requirements.txt ]; then
+            pip-audit -r backend/requirements.txt --strict || echo "::warning::pip-audit backend'de açık(lar) buldu — raporu inceleyin"
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: yarn audit (frontend)
+        working-directory: frontend
+        run: |
+          if [ -f yarn.lock ]; then
+            yarn audit --groups dependencies --level high || echo "::warning::yarn audit frontend'de high+ açık(lar) buldu — raporu inceleyin"
+          fi

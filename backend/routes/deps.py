@@ -688,8 +688,10 @@ def next_urun_id(used_set) -> str:
 import re as _re_pw
 
 
-def validate_strong_password(password: str) -> None:
-    """Personel/admin şifresi için güç doğrulaması. Zayıfsa HTTPException(400) atar."""
+def validate_strong_password(password: str, identifiers=None) -> None:
+    """Personel/admin şifresi için güç doğrulaması. Zayıfsa HTTPException(400) atar.
+    identifiers: ad/soyad/username/e-posta gibi değerler → şifre bunların bir parçasını
+    İÇEREMEZ (Amazon DPP). Geriye-uyumlu: verilmezse yalnız karmaşıklık kontrol edilir."""
     pw = password or ""
     errors = []
     if len(pw) < 12:
@@ -702,6 +704,23 @@ def validate_strong_password(password: str) -> None:
         errors.append("en az 1 rakam")
     if not _re_pw.search(r"[^A-Za-z0-9]", pw):
         errors.append("en az 1 özel karakter")
+    # Ad/soyad/username/e-posta parçası içerememe (≥4 karakterlik parçalar).
+    _pw_low = pw.lower()
+    for ident in (identifiers or []):
+        s = str(ident or "").strip().lower()
+        if not s:
+            continue
+        # e-posta ise yerel kısmı da ayrı kontrol et
+        parts = [s] + ([s.split("@", 1)[0]] if "@" in s else [])
+        # ad-soyad boşlukla ayrılırsa her kelimeyi de kontrol et
+        parts += [w for w in s.replace(".", " ").split() if len(w) >= 4]
+        for p in parts:
+            if len(p) >= 4 and p in _pw_low:
+                errors.append("ad/soyad/e-posta bilginizin bir parçasını içeremez")
+                break
+        else:
+            continue
+        break
     if errors:
         raise HTTPException(
             status_code=400,

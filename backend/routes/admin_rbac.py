@@ -154,7 +154,8 @@ async def create_panel_user(payload: dict, current_user: dict = Depends(require_
     password = payload.get("password", "")
     if not email or not password:
         raise HTTPException(status_code=400, detail="E-posta ve parola zorunlu")
-    validate_strong_password(password)
+    validate_strong_password(password, identifiers=[
+        email, payload.get("first_name"), payload.get("last_name")])
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Bu e-posta zaten kayıtlı")
     doc = {
@@ -185,7 +186,9 @@ async def update_panel_user(user_id: str, payload: dict, current_user: dict = De
         if f in payload:
             update[f] = payload[f]
     if payload.get("password"):
-        validate_strong_password(payload["password"])
+        validate_strong_password(payload["password"], identifiers=[
+            user.get("email"), payload.get("first_name") or user.get("first_name"),
+            payload.get("last_name") or user.get("last_name")])
         update["password"] = hash_password(payload["password"])
         update["password_changed_at"] = datetime.now(timezone.utc).isoformat()
     await db.users.update_one({"id": user_id}, {"$set": update})
