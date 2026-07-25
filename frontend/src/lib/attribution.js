@@ -64,15 +64,34 @@ function readUTM() {
   } catch (_) { return {}; }
 }
 
+// Meta Browser ID / Click ID — attribution session'da da SAKLA ki tarayıcısız (webhook/kurtarma)
+// Purchase eventinde de fbp/fbc bulunabilsin (eşleşme kalitesi). _fbc yoksa URL'deki fbclid'den
+// Meta'nın beklediği formatta (fb.1.<ts>.<fbclid>) türet — SAHTE üretim değil, gerçek click id.
+function readFbIds() {
+  try {
+    const fbp = getCookie("_fbp") || "";
+    let fbc = getCookie("_fbc") || "";
+    if (!fbc) {
+      const fbclid = new URLSearchParams(window.location.search).get("fbclid") || "";
+      if (fbclid) fbc = `fb.1.${Date.now()}.${fbclid}`;
+    }
+    return { fbp: (fbp || "").trim(), fbc: (fbc || "").trim() };
+  } catch (_) { return { fbp: "", fbc: "" }; }
+}
+
 export async function trackVisit() {
   try {
     if (typeof window === "undefined") return;
     const existingSid = localStorage.getItem(SID_KEY) || null;
     const aff_id = captureAffId();
     const utm = readUTM();
+    const fbIds = readFbIds();
     const hasNewUtm = !!(utm.utm_source || utm.utm_campaign || utm.gclid || utm.fbclid || utm.ttclid || aff_id);
     const payload = {
       ...utm,
+      // Boş göndermeyip mevcut dolu değeri backend'de ezmemek için yalnız doluysa ekle.
+      ...(fbIds.fbp ? { fbp: fbIds.fbp } : {}),
+      ...(fbIds.fbc ? { fbc: fbIds.fbc } : {}),
       aff_id: aff_id || utm.aff_id || "",
       referrer: document.referrer || "",
       landing_page: window.location.pathname + window.location.search,

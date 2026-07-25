@@ -177,6 +177,8 @@ async def track_visit(payload: dict, request: Request):
     fbclid = (payload.get("fbclid") or "").strip()
     ttclid = (payload.get("ttclid") or "").strip()  # TikTok tıklama kimliği
     aff_id = (payload.get("aff_id") or "").strip()
+    fbp = (payload.get("fbp") or "").strip()  # Meta Browser ID (_fbp)
+    fbc = (payload.get("fbc") or "").strip()  # Meta Click ID (_fbc / fbclid türevi)
     ua = request.headers.get("user-agent", "")
     ip = request.client.host if request.client else ""
     device = detect_device(ua)
@@ -212,6 +214,9 @@ async def track_visit(payload: dict, request: Request):
                     "ip": ip,
                     # aff_id ilk yakalandığında sabitlenir (override etme)
                     **({"aff_id": aff_id} if (aff_id and not existing.get("aff_id")) else {}),
+                    # fbp/fbc: yalnız DOLU değerle güncelle (boş değerle mevcudu EZME)
+                    **({"fbp": fbp} if fbp else {}),
+                    **({"fbc": fbc} if fbc else {}),
                 },
                 "$push": {"touches": {"$each": [touch], "$slice": -20}},
             },
@@ -225,6 +230,8 @@ async def track_visit(payload: dict, request: Request):
                 "touches": [touch],
                 "visit_count": 1,
                 "aff_id": aff_id,
+                "fbp": fbp,
+                "fbc": fbc,
                 "user_agent": ua,
                 "ip": ip,
                 "device": device,

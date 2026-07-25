@@ -1649,7 +1649,22 @@ async def dispatch_purchase_capi(order_id: str, source: str = "") -> bool:
         from services.capi.orchestrator import dispatch_event
         from services.capi.hash_utils import build_user_data
         addr = order_doc.get("shipping_address") or {}
-        cids = order_doc.get("click_ids") or {}
+        cids = dict(order_doc.get("click_ids") or {})
+        # fbp/fbc checkout click_ids'te yoksa (tarayıcısız/webhook Purchase) attribution
+        # session'dan doldur — Meta eşleşme kalitesi için. Boş değerle mevcudu EZME.
+        if not (cids.get("fbp") and cids.get("fbc")):
+            _sid = order_doc.get("attribution_session_id") or (order_doc.get("attribution") or {}).get("session_id")
+            if _sid:
+                try:
+                    _asess = await db.attribution_sessions.find_one(
+                        {"session_id": _sid}, {"_id": 0, "fbp": 1, "fbc": 1})
+                    if _asess:
+                        if not cids.get("fbp") and _asess.get("fbp"):
+                            cids["fbp"] = _asess["fbp"]
+                        if not cids.get("fbc") and _asess.get("fbc"):
+                            cids["fbc"] = _asess["fbc"]
+                except Exception:
+                    pass
         user_data = build_user_data(
             email=addr.get("email") or order_doc.get("email"),
             phone=addr.get("phone") or order_doc.get("phone"),
