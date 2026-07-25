@@ -78,6 +78,11 @@ RULE_CATALOG = [
     {"group": "İade & Değişim", "key": "return.window_days", "label": "İade/değişim süresi",
      "type": "number", "default": 14, "unit": "gün", "options": [7, 14, 15, 30],
      "help": "Teslimattan sonra müşterinin iade/değişim talebi açabileceği gün sayısı."},
+    {"group": "Güvenlik", "key": "security.admin_mfa_required", "label": "Admin için MFA (2FA) zorunlu",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "AÇIK: MFA kurmamış admin girişte MFA kurulumuna (SMS veya Authenticator) yönlendirilir; "
+             "kurmadan panele geçemez (Amazon DPP). Kilitlenmez — kurulum akışı zorunludur, oturum "
+             "verilir. ACİL KAPATMA: Railway env ADMIN_MFA_ENFORCE=off (panel gerekmez)."},
     {"group": "Pazarlama & İzleme", "key": "marketing.capi_consent_gate", "label": "KVKK: Pazarlama onayı olmadan Meta/CAPI'ye gönderme",
      "type": "toggle", "default": False, "options": [True, False],
      "help": "AÇIK olduğunda; ziyaretçi çerez bildiriminde 'pazarlama' onayı vermedikçe Meta Pixel "

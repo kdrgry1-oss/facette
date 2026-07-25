@@ -31,14 +31,16 @@ export function AuthProvider({ children }) {
     // O19: Şifreyi URL query yerine istek GÖVDESİNDE gönder (log/geçmiş/Referer sızıntısı olmasın).
     const res = await axios.post(`${API}/auth/login`, { email, password });
     if (res.data?.mfa_required) {
-      return { mfaRequired: true, mfaToken: res.data.mfa_token };
+      return { mfaRequired: true, mfaToken: res.data.mfa_token,
+               mfaMethod: res.data.mfa_method || "totp", phoneMasked: res.data.phone_masked || "" };
     }
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem("token", newToken);
     axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
-    return userData;
+    // ZORUNLU MFA: kurulmamışsa frontend kurulum ekranına yönlendirir (mfa_setup_required).
+    return { ...userData, mfaSetupRequired: !!res.data?.mfa_setup_required };
   };
 
   // Sosyal giriş (Google) sonrası: backend'den dönen JWT token + user'ı tam olarak yerleştir.
