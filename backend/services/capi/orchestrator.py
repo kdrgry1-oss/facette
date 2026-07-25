@@ -93,7 +93,9 @@ async def _send_one(db, px: dict, *, event_name: str, event_id: str,
     res["provider"] = provider_key
     res["pixel_doc_id"] = px.get("id")
 
-    # Persist log
+    # Persist log — PII'siz eşleşme sinyalleri (brief §13 observability): hangi Purchase/event'te
+    # email/telefon/ttclid/fbc vb. GİTTİ, panelden/loglardan görülebilsin (EMQ teşhisi).
+    _ud = user_data or {}
     await db.capi_event_logs.insert_one({
         "id": str(uuid4()),
         "provider": provider_key,
@@ -105,6 +107,13 @@ async def _send_one(db, px: dict, *, event_name: str, event_id: str,
         "status": res.get("status"),
         "response": (res.get("response") or {}),
         "error": res.get("error"),
+        "match_signals": {
+            "email": bool(_ud.get("em")), "phone": bool(_ud.get("ph")),
+            "external_id": bool(_ud.get("external_id")),
+            "fbp": bool(_ud.get("fbp")), "fbc": bool(_ud.get("fbc")),
+            "ttclid": bool(_ud.get("ttclid")), "ttp": bool(_ud.get("ttp")),
+            "ip": bool(_ud.get("client_ip_address")), "ua": bool(_ud.get("client_user_agent")),
+        },
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 
