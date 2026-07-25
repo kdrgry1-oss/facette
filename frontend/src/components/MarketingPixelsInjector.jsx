@@ -39,19 +39,13 @@ export default function MarketingPixelsInjector() {
       })
       .catch(() => { /* sessiz */ });
     };
-    // Pikselleri ilk boyama/LCP'yi bloklamasın diye sayfa hazır olunca + boşta
-    // zamanında çalıştır (PageSpeed: TBT/LCP iyileşir; pikseller yine yüklenir).
-    const schedule = () => {
-      if (cancelled) return;
-      if ("requestIdleCallback" in window) {
-        window.requestIdleCallback(run, { timeout: 3000 });
-      } else {
-        setTimeout(run, 1500);
-      }
-    };
-    if (document.readyState === "complete") schedule();
-    else window.addEventListener("load", schedule, { once: true });
-    return () => { cancelled = true; };
+    // Meta Pixel taban kodu erken yüklenmezse `_fbp` cookie'si ilk event'ten (ViewContent)
+    // SONRA yazılıyor → CAPI ViewContent'te fbp boş gidiyordu (EMQ düşük). Bu yüzden pikselleri
+    // ARTIK mount'ta bir sonraki tick'te (load+idle beklemeden) yüklüyoruz: _fbp ~1.5-3sn erken
+    // set olur, ViewContent fbp kapsaması yükselir. TAVİZ: pikseller erken yüklendiği için
+    // LCP/TBT'de küçük bir artış olabilir (ilk senkron boyama yine bloklanmaz — setTimeout 0).
+    const t = setTimeout(run, 0);
+    return () => { cancelled = true; clearTimeout(t); };
   }, []);
   return null;
 }
