@@ -222,11 +222,18 @@ async def list_active_public(response: Response):
     rows = await db.marketing_pixels.find(
         {"is_active": True}, {"_id": 0, "provider": 1, "name": 1, "head_snippet": 1, "body_snippet": 1}
     ).to_list(length=50)
+    # KVKK gate bayrağı (varsayılan KAPALI) — frontend bu değere göre Meta/CAPI'yi onaya bağlar.
+    try:
+        from business_rules import get_rule as _get_rule
+        consent_gate = bool(await _get_rule(db, "marketing.capi_consent_gate", False))
+    except Exception:
+        consent_gate = False
     response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
     return {
         "head": "\n".join([r.get("head_snippet") or "" for r in rows if r.get("head_snippet")]),
         "body": "\n".join([r.get("body_snippet") or "" for r in rows if r.get("body_snippet")]),
         "count": len(rows),
+        "consent_gate": consent_gate,
     }
 
 

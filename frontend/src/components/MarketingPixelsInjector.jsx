@@ -17,6 +17,9 @@ export default function MarketingPixelsInjector() {
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (cancelled || !data) return;
+        // KVKK gate bayrağı — dataLayer.js bu değere göre Meta/CAPI'yi pazarlama onayına bağlar
+        // (varsayılan KAPALI = mevcut davranış). İşletme Kuralları'ndan yönetilir.
+        try { window.__FACETTE_CONSENT_GATE__ = data.consent_gate === true; } catch (_) { /* noop */ }
         if (data.head) {
           const wrap = document.createElement("div");
           wrap.innerHTML = data.head;

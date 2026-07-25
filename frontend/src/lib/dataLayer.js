@@ -82,6 +82,25 @@ export function collectClickIds() {
   return ids;
 }
 
+// ── KVKK/Consent gate (VARSAYILAN KAPALI) ────────────────────────────────────
+// Flag backend'ten gelir (MarketingPixelsInjector → window.__FACETTE_CONSENT_GATE__).
+// Gate KAPALIYKEN hiçbir şey değişmez (mevcut davranış). Gate AÇIKKEN yalnız kullanıcı
+// pazarlama çerezlerine AÇIK onay ("marketing":true) verdiyse Meta/CAPI'ye gönderilir.
+// GA4 dataLayer push'u ayrıca Google Consent Mode ile yönetildiği için burada gate edilmez.
+const _CONSENT_LS_KEY = "facette_cookie_consent";
+function _marketingConsentGranted() {
+  try {
+    const s = localStorage.getItem(_CONSENT_LS_KEY);
+    if (!s) return null;              // henüz karar verilmedi
+    return !!JSON.parse(s).marketing;
+  } catch (_) { return null; }
+}
+function _adTrackingBlocked() {
+  if (typeof window === "undefined") return false;
+  if (window.__FACETTE_CONSENT_GATE__ !== true) return false;  // gate kapalı → engel yok
+  return _marketingConsentGranted() !== true;                  // gate açık → yalnız açık onayda gönder
+}
+
 /** Push to GA4 dataLayer + dispatch native pixels + POST to backend CAPI. */
 async function pushEvent(eventName, eventData, userInfo = {}) {
   const event_id = eventData.event_id || generateEventId();
@@ -123,7 +142,7 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
     });
 
     // 2) Meta Pixel (fbq) — eventID parameter for dedup with CAPI
-    if (!isGa4Only && typeof window.fbq === "function") {
+    if (!isGa4Only && !_adTrackingBlocked() && typeof window.fbq === "function") {
       try {
         const fbEventMap = {
           view_item: "ViewContent", view_item_list: "ViewCategory",
@@ -211,6 +230,9 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
 
   // GA4-only event'ler native pixel + CAPI'ye gitmez; burada biter.
   if (isGa4Only) return event_id;
+
+  // KVKK gate: gate AÇIK ve pazarlama onayı yoksa server-side CAPI'ye de gönderme.
+  if (_adTrackingBlocked()) return event_id;
 
   // 6) Server-side CAPI mirror (non-blocking) — TÜM ENHANCED E-COMMERCE PARAMETRELERİYLE
   try {
