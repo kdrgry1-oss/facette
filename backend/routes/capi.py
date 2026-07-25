@@ -122,11 +122,16 @@ async def capi_event(req: CapiEventReq, request: Request,
     For checkout/purchase flows we want the response to be NON-BLOCKING so the
     user UX is unaffected. We schedule the dispatch via BackgroundTasks.
     """
-    client_ip = (request.client.host if request.client else None)
-    # If behind proxy / CF, prefer X-Forwarded-For
-    fwd = request.headers.get("x-forwarded-for") or ""
-    if fwd:
-        client_ip = fwd.split(",")[0].strip()
+    # Gerçek son-kullanıcı IP'si — cf-connecting-ip (spoof-korumalı, edge doğrulanırsa) → XFF → peer.
+    # Ham XFF[0] yerine ortak güvenli helper (deps.client_ip_from_request) kullanılır.
+    try:
+        from .deps import client_ip_from_request
+        client_ip = client_ip_from_request(request) or (request.client.host if request.client else None)
+    except Exception:
+        client_ip = (request.client.host if request.client else None)
+        fwd = request.headers.get("x-forwarded-for") or ""
+        if fwd:
+            client_ip = fwd.split(",")[0].strip()
     user_agent = request.headers.get("user-agent")
 
     user_data = build_user_data(

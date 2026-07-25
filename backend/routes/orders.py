@@ -906,9 +906,14 @@ async def create_order(
     current_user: dict = Depends(get_current_user)
 ):
     """Create new order (rate-limited: bot/enumeration + kaynak tüketimi koruması)"""
-    # FAZ 6 — Kullanıcı IP'sini kayda al (X-Forwarded-For → gerçek IP)
-    forwarded = request.headers.get("x-forwarded-for", "")
-    client_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "")
+    # FAZ 6 — Kullanıcı IP'sini kayda al. cf-connecting-ip (spoof-korumalı) → XFF → peer
+    # (ortak helper; CAPI Purchase eşleşmesi + blok kontrolü doğru IP kullansın).
+    try:
+        from .deps import client_ip_from_request
+        client_ip = client_ip_from_request(request) or ""
+    except Exception:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        client_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "")
 
     # FAZ 6 — Blok kontrolü: kullanıcı veya IP bloklu mu?
     uid = (current_user.get("id") if current_user else None)
