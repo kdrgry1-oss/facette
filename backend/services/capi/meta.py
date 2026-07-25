@@ -39,9 +39,33 @@ EVENT_MAP = {
 }
 
 
-def _build_user_data(ud: dict) -> dict:
+# Feature flag adı → gate'lenen Meta user_data alanları. Flag AÇIKÇA False ise o alan(lar)
+# payload'dan çıkarılır (brief P0: tek config'le eski payload'a rollback). Flag yoksa/True ise
+# alan gönderilir (VARSAYILAN = mevcut davranış, hiçbir şey değişmez).
+_FLAG_TO_FIELDS = {
+    "email": ("em",),
+    "phone": ("ph",),
+    "external_id": ("external_id",),
+    "fbp": ("fbp",),
+    "fbc": ("fbc",),
+}
+
+
+def _flag_off(field_flags: Optional[dict], field: str) -> bool:
+    """field, herhangi bir kapalı (False) flag'e mi bağlı?"""
+    if not field_flags:
+        return False
+    for flag, fields in _FLAG_TO_FIELDS.items():
+        if field in fields and field_flags.get(flag) is False:
+            return True
+    return False
+
+
+def _build_user_data(ud: dict, field_flags: Optional[dict] = None) -> dict:
     """Meta CAPI'nin desteklediği TÜM Advanced Matching parametreleri.
     Doc: https://developers.facebook.com/docs/marketing-api/conversions-api/parameters/customer-information-parameters
+    field_flags: {"email":bool,"phone":bool,"external_id":bool,"fbp":bool,"fbc":bool} — yalnız
+    AÇIKÇA False olan alanlar gönderilmez (rollback). None/eksik → hepsi gönderilir (mevcut davranış).
     """
     HASHED_ARRAY_FIELDS = (
         "em", "ph", "fn", "ln", "f5first", "f5last", "fi",
@@ -57,10 +81,14 @@ def _build_user_data(ud: dict) -> dict:
     )
     out = {}
     for k in HASHED_ARRAY_FIELDS:
+        if _flag_off(field_flags, k):
+            continue
         v = ud.get(k)
         if v:
             out[k] = [v] if not isinstance(v, list) else v
     for k in RAW_SCALAR_FIELDS:
+        if _flag_off(field_flags, k):
+            continue
         v = ud.get(k)
         if v:
             out[k] = v
@@ -142,9 +170,11 @@ async def send(
     test_event_code: Optional[str] = None,
     action_source: str = "website",
     timeout: float = 8.0,
+    field_flags: Optional[dict] = None,
 ) -> dict:
     """Send a single server-side event to Meta CAPI.
 
+    field_flags: alan-bazlı gönderim bayrakları (rollback). None → mevcut davranış.
     Returns dict { ok, status, response, error }.
     """
     meta_event = EVENT_MAP.get(event_name, event_name)
@@ -158,7 +188,7 @@ async def send(
             "event_id": event_id,
             "action_source": action_source,
             "event_source_url": event_source_url or "https://www.facette.com.tr",
-            "user_data": _build_user_data(user_data),
+            "user_data": _build_user_data(user_data, field_flags),
             "custom_data": _build_custom_data(event_payload),
         }],
     }

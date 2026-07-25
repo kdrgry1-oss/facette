@@ -203,6 +203,9 @@ class PixelReq(BaseModel):
     env_token_key: Optional[str] = ""       # env override (örn META_CAPI_TOKEN)
     test_event_code: Optional[str] = ""     # Meta TEST00001, GA4 debug, …
     tenant_id: Optional[str] = None         # multi-tenant (SaaS)
+    # Meta CAPI alan-bazlı gönderim bayrakları (rollback). None/eksik → hepsi açık (mevcut davranış).
+    # Örn: {"fbp": true, "fbc": true, "email": true, "phone": true, "external_id": false}
+    field_flags: Optional[dict] = None
     # Provider'a özel ekstra (Pinterest ad_account_id, Snapchat conversion_event vs)
     extra: Optional[dict] = None
 
@@ -284,6 +287,7 @@ async def upsert_pixel(req: PixelReq, current_user: dict = Depends(require_admin
         "env_token_key": (req.env_token_key or "").strip() or None,
         "test_event_code": (req.test_event_code or "").strip() or None,
         "tenant_id": req.tenant_id,
+        "field_flags": req.field_flags if isinstance(req.field_flags, dict) else None,
         "extra": req.extra or {},
         "updated_at": now_iso,
         "updated_by": current_user.get("email", ""),

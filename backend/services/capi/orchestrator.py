@@ -76,6 +76,8 @@ async def _send_one(db, px: dict, *, event_name: str, event_id: str,
         return {"provider": provider_key, "ok": False, "skipped": True,
                 "reason": "missing pixel_id or access_token"}
 
+    # Meta'ya alan-bazlı feature flag geçir (rollback); diğer sağlayıcılar etkilenmez.
+    _extra = {"field_flags": px.get("field_flags")} if provider_key == "meta" else {}
     res = await mod.send(
         pixel_id=pixel_id,
         access_token=access_token,
@@ -86,6 +88,7 @@ async def _send_one(db, px: dict, *, event_name: str, event_id: str,
         event_payload=event_payload,
         event_source_url=event_source_url,
         test_event_code=test_event_code,
+        **_extra,
     )
     res["provider"] = provider_key
     res["pixel_doc_id"] = px.get("id")
@@ -221,6 +224,7 @@ async def retry_queue_once(db, batch_size: int = 100) -> dict:
                               "updated_at": now.isoformat()}},
                 )
             continue
+        _extra = {"field_flags": px.get("field_flags")} if provider_key == "meta" else {}
         res = await mod.send(
             pixel_id=(px.get("tag_id") or "").strip(),
             access_token=access_token,
@@ -231,6 +235,7 @@ async def retry_queue_once(db, batch_size: int = 100) -> dict:
             event_payload=it.get("event_payload") or {},
             event_source_url=it.get("event_source_url"),
             test_event_code=(px.get("test_event_code") or "").strip() or None,
+            **_extra,
         )
         if res.get("ok"):
             ok_count += 1
