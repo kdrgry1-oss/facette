@@ -2008,13 +2008,14 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Hepsiburada fatura KALICI oto-yükleme — her 15 DK. Faturası kesilmiş ama HB'ye gitmemiş
-    # siparişleri yeniden gönderir (anlık gönderim başarısız olsa bile kurtarır). İdempotent.
+    # Hepsiburada fatura KALICI oto-yükleme — her 2 DK. Faturası kesilmiş ama HB'ye gitmemiş
+    # siparişleri (tüm paketlere) yeniden gönderir → fatura kesildikten en geç ~2 dk sonra gider.
+    # İdempotent + hafif (uploaded!=True kümesi sürekli küçülür).
     _add(
         _run_hb_invoice_autoheal,
         "interval",
-        minutes=15,
-        id="hb_invoice_autoheal_15m",
+        minutes=2,
+        id="hb_invoice_autoheal_2m",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
         max_instances=1,
         coalesce=True,
