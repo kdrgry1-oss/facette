@@ -4399,6 +4399,67 @@ async def autoheal_hb_invoices(hours: int = None, limit: int = 500) -> dict:
     return {"checked": len(orders), "uploaded": up}
 
 
+@router.get("/hepsiburada/invoice-diag")
+async def hb_invoice_diag(q: str = Query(...), key: str = Query(""),
+                          do_upload: bool = Query(False)):
+    """TEŞHİS + hedefli yükleme (gizli anahtar korumalı — admin login gerektirmez, PII döndürmez).
+    q: HB sipariş no / paket no / bizim order_number / id. key: env HB_DIAG_KEY ile eşleşmeli.
+    do_upload=true → bu siparişin faturasını HB'ye HEMEN (yeniden) gönderir ve sonucu döner."""
+    import os as _os, hmac as _hmac
+    _sk = (_os.environ.get("HB_DIAG_KEY") or "").strip()
+    if not _sk or not _hmac.compare_digest(str(key or ""), _sk):
+        raise HTTPException(status_code=403, detail="forbidden")
+    order = await db.orders.find_one({"$or": [
+        {"hepsiburada_order_number": q}, {"order_number": q},
+        {"hepsiburada_package_number": q}, {"marketplace_order_id": q},
+        {"package_number": q}, {"id": q}]}, {"_id": 0})
+    if not order:
+        return {"found": False, "q": q, "hint": "Bu HB siparişi sistemde bulunamadı (henüz çekilmemiş olabilir)."}
+    res = {
+        "found": True, "order_number": order.get("order_number"),
+        "platform": order.get("platform"),
+        "invoice_issued": order.get("invoice_issued"),
+        "invoice_number": order.get("invoice_number"),
+        "invoice_type": order.get("invoice_type"),
+        "has_web_key_http": str(order.get("invoice_pdf_url") or "").startswith("http"),
+        "has_uuid_or_doganid": bool(order.get("invoice_uuid") or order.get("invoice_dogan_id")),
+        "hepsiburada_package_number": order.get("hepsiburada_package_number"),
+        "hepsiburada_invoice_uploaded": order.get("hepsiburada_invoice_uploaded"),
+        "hepsiburada_invoice_error": str(order.get("hepsiburada_invoice_error") or "")[:300],
+    }
+    if do_upload and order.get("platform") == "hepsiburada":
+        ds = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+        from routes.category_mapping import _get_hb_client
+        _hcli, _hcerr = await _get_hb_client()
+        if _hcerr:
+            res["upload"] = {"ok": False, "error": _hcerr[:200]}
+        else:
+            _link = _resolve_marketplace_invoice_link(order, ds, order["id"], order.get("invoice_type"))
+            _pkg = await _resolve_hb_package_number(order, _hcli)
+            res["resolved_link"] = bool(_link)
+            res["resolved_package"] = _pkg
+            if not _link:
+                res["upload"] = {"ok": False, "error": "fatura linki üretilemedi (fatura kesilmemiş / earsiv_link_template / uuid-dogan_id boş)"}
+            elif not _pkg:
+                res["upload"] = {"ok": False, "error": "HB paket no çözülemedi"}
+            else:
+                import asyncio as _aio
+                try:
+                    await _aio.to_thread(_hcli.send_invoice, _pkg, _link)
+                    await db.orders.update_one({"id": order["id"]}, {"$set": {
+                        "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
+                    res["upload"] = {"ok": True}
+                except Exception as e:
+                    _err = str(e)
+                    if any(k in _err.lower() for k in ("already", "zaten mevcut", "409")):
+                        await db.orders.update_one({"id": order["id"]}, {"$set": {
+                            "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
+                        res["upload"] = {"ok": True, "note": "HB'de zaten mevcut"}
+                    else:
+                        res["upload"] = {"ok": False, "error": _err[:300]}
+    return res
+
+
 @router.get("/{order_id}/einvoice-pdf-debug")
 async def debug_einvoice_pdf(order_id: str, current_user: dict = Depends(require_admin)):
     """TEŞHİS (admin): Doğan e-Fatura PDF çekimini dener; PDF baytını DÖNDÜRMEZ, yalnızca
