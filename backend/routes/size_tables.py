@@ -260,9 +260,11 @@ async def save_size_table(product_id: str, payload: dict, current_user: dict = D
     }
     await db.size_tables.update_one({"product_id": product_id}, {"$set": doc}, upsert=True)
 
-    # RENK KARDEŞİ SENKRONU (kullanıcı isteği): ölçüler model düzeyindedir — aynı stok
-    # kodlu diğer renk kartlarına da aynı tablo yazılır. (Tablosu olmayan kardeş zaten
-    # kalıtımla okuyordu; artık ESKİ tablosu olan kardeş de bayat kalmaz.)
+    # RENK KARDEŞİ SENKRONU: ÖLÇÜ TABLOSU (beden×ölçü) ürün düzeyindedir → aynı stok kodlu diğer
+    # renk kartlarına yansıtılır. ANCAK manken (model_info) + ürün bedeni (product_size) RENK/MANKEN
+    # ÖZELDİR (her rengin farklı mankeni olabilir) → kardeşlere KOPYALANMAZ; her renk kendi manken
+    # bilgisini korur/manuel girer. (Kullanıcı isteği: aynı manken bilgisinin tüm renklere yansıması
+    # bugını giderildi.)
     synced = 0
     try:
         p = await db.products.find_one({"id": product_id}, {"_id": 0, "stock_code": 1})
@@ -271,10 +273,18 @@ async def save_size_table(product_id: str, payload: dict, current_user: dict = D
             async for s in db.products.find(
                     {"stock_code": sc, "id": {"$ne": product_id}, "is_deleted": {"$ne": True}},
                     {"_id": 0, "id": 1}):
-                sib_doc = dict(doc)
-                sib_doc["product_id"] = s["id"]
-                sib_doc["synced_from"] = product_id
-                await db.size_tables.update_one({"product_id": s["id"]}, {"$set": sib_doc}, upsert=True)
+                # YALNIZ paylaşılan ölçü tablosu alanları $set edilir; model_info/product_size
+                # kardeşte OLDUĞU GİBİ kalır (dokunulmaz).
+                sib_set = {
+                    "product_id": s["id"],
+                    "sizes": sizes,
+                    "columns": columns,
+                    "values": values,
+                    "synced_from": product_id,
+                    "updated_at": doc["updated_at"],
+                    "updated_by": doc["updated_by"],
+                }
+                await db.size_tables.update_one({"product_id": s["id"]}, {"$set": sib_set}, upsert=True)
                 synced += 1
     except Exception as e:
         logger.error(f"[ölçü tablosu kardeş senkron {product_id}] {e}")
@@ -436,16 +446,19 @@ public_router = APIRouter(prefix="/size-tables-public", tags=["size-tables-publi
 @public_router.get("/{product_id}")
 async def get_public_size_table(product_id: str):
     """Storefront reads the HTML-renderable data (NOT the image)."""
-    st = await db.size_tables.find_one({"product_id": product_id}, {"_id": 0})
-    if not st or not st.get("sizes"):
-        st = await _inherited_size_table(product_id)  # aynı stok kodundan kalıtım
+    own = await db.size_tables.find_one({"product_id": product_id}, {"_id": 0})
+    st = own if (own and own.get("sizes")) else await _inherited_size_table(product_id)  # tablo kalıtımı
     if not st or not st.get("sizes"):
         return {"exists": False}
+    # model_info + product_size RENK/MANKEN özeldir → YALNIZ ürünün KENDİ tablosundan gösterilir.
+    # Tablo başka renkten kalıtımla geldiyse manken bilgisi BOŞ döner (yanlış manken sızmasın).
+    _mi = (own.get("model_info") or {}) if own else {}
+    _ps = (own.get("product_size") or "") if own else ""
     return {
         "exists": True,
         "sizes": st.get("sizes") or [],
         "columns": st.get("columns") or [],
         "values": st.get("values") or {},
-        "product_size": st.get("product_size") or "",
-        "model_info": st.get("model_info") or {},
+        "product_size": _ps,
+        "model_info": _mi,
     }
