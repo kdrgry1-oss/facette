@@ -778,9 +778,11 @@ async def _run_hb_invoice_autoheal():
     iyileştirme). Anlık gönderim başarısız olsa bile bu döngü kurtarır. İdempotent, hafif."""
     try:
         from routes.orders import autoheal_hb_invoices
-        res = await autoheal_hb_invoices(hours=96, limit=200)
-        if res.get("uploaded"):
-            logger.info(f"[scheduler][hb-invoice] {res.get('uploaded')}/{res.get('checked')} yüklendi")
+        # hours=None → TÜM eski yüklenmemiş HB faturaları taranır (uploaded!=True olduğu için
+        # yüklenenler her turda kümeden düşer; 'eskileri yükle' kalıcı kapanır).
+        res = await autoheal_hb_invoices(hours=None, limit=500)
+        logger.info(f"[scheduler][hb-invoice] tarandı={res.get('checked')} yüklendi={res.get('uploaded')} "
+                    f"{('hata=' + str(res.get('error'))) if res.get('error') else ''}")
     except Exception as e:
         logger.warning(f"[scheduler][hb-invoice] autoheal hatası: {e}")
 
@@ -2013,7 +2015,7 @@ def start_scheduler():
         "interval",
         minutes=15,
         id="hb_invoice_autoheal_15m",
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
         max_instances=1,
         coalesce=True,
     )

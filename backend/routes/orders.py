@@ -4342,16 +4342,21 @@ async def repush_invoice_links(payload: dict = None, current_user: dict = Depend
     return {"success": True, "total": len(results), "uploaded": ok_n, "results": results}
 
 
-async def autoheal_hb_invoices(hours: int = 96, limit: int = 200) -> dict:
-    """KALICI ÇÖZÜM: faturası kesilmiş ama Hepsiburada'ya YÜKLENMEMİŞ siparişleri periyodik
-    olarak (scheduler) yeniden gönderir. Anlık gönderim ağ/paket/link nedeniyle başarısız olsa
-    bile bu kendi-kendini-iyileştiren döngü kurtarır → 'HB'ye fatura gitmiyor' kalıcı kapanır.
-    İdempotent (409/zaten mevcut = başarı). current_user gerektirmez (sistem işi)."""
-    _since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    q = {"platform": "hepsiburada", "invoice_issued": True,
+async def autoheal_hb_invoices(hours: int = None, limit: int = 500) -> dict:
+    """KALICI ÇÖZÜM: faturası kesilmiş ama Hepsiburada'ya YÜKLENMEMİŞ siparişleri yeniden gönderir.
+    hours=None → TÜM eski yüklenmemiş HB faturaları (zaman filtresi yok — 'eskileri yükle').
+    hours=N → yalnız son N saat (periyodik hafif tarama). İdempotent (409/zaten mevcut = başarı).
+    current_user gerektirmez (sistem işi). Faturası kesilmiş sayılma koşulu geniş tutuldu:
+    invoice_issued=True VEYA invoice_number/invoice_uuid dolu."""
+    q = {"platform": "hepsiburada",
          "hepsiburada_invoice_uploaded": {"$ne": True},
-         "invoice_issued_at": {"$gte": _since}}
-    orders = await db.orders.find(q, {"_id": 0}).sort("invoice_issued_at", -1).to_list(limit)
+         "$or": [{"invoice_issued": True},
+                 {"invoice_number": {"$nin": [None, ""]}},
+                 {"invoice_uuid": {"$nin": [None, ""]}}]}
+    if hours:
+        _since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        q["invoice_issued_at"] = {"$gte": _since}
+    orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
     if not orders:
         return {"checked": 0, "uploaded": 0}
     ds = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
