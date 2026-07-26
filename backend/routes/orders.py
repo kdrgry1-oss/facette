@@ -4048,30 +4048,19 @@ async def create_invoice_for_order(
                     await db.orders.update_one({"id": order_id}, {"$set": {
                         "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _hcerr[:1000]}})
                 else:
-                    _hpkg = await _resolve_hb_package_number(order, _hcli)
-                    if not _hpkg:
-                        _herr = "HB paket numarası çözülemedi (OMS detayında packageNumber yok)."
-                        hb_upload = {"ok": False, "error": _herr}
+                    # ÇOK-PAKETLİ: faturayı siparişin TÜM HB paketlerine yükle (tek pakete yüklenip
+                    # diğerleri 'yüklenmemiş' kalmasın).
+                    _hres = await _hb_upload_invoice_all_packages(order, _hlink, _hcli)
+                    hb_upload = {**_hres, "link": _hlink}
+                    if _hres.get("ok"):
                         await db.orders.update_one({"id": order_id}, {"$set": {
-                            "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr}})
+                            "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
                     else:
-                        try:
-                            await _aio_hb.to_thread(_hcli.send_invoice, _hpkg, _hlink)
-                            hb_upload = {"ok": True, "link": _hlink, "package": _hpkg}
-                            await db.orders.update_one({"id": order_id}, {"$set": {
-                                "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
-                        except Exception as _hbe:
-                            _herr = str(_hbe)
-                            # 409 / zaten mevcut → başarı say (idempotent).
-                            if any(k in _herr.lower() for k in ("already", "zaten mevcut", "409")):
-                                hb_upload = {"ok": True, "link": _hlink, "package": _hpkg, "note": "zaten mevcut"}
-                                await db.orders.update_one({"id": order_id}, {"$set": {
-                                    "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
-                            else:
-                                hb_upload = {"ok": False, "error": _herr}
-                                await db.orders.update_one({"id": order_id}, {"$set": {
-                                    "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr[:1000]}})
-                                logger.error(f"[hb invoice auto-upload] {order.get('order_number')}: {_herr}")
+                        _herr = _hres.get("error") or "; ".join(
+                            f"{p.get('pkg')}:{p.get('error')}" for p in _hres.get("packages", []) if not p.get("ok"))
+                        await db.orders.update_one({"id": order_id}, {"$set": {
+                            "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": str(_herr)[:1000]}})
+                        logger.error(f"[hb invoice auto-upload] {order.get('order_number')}: {_herr}")
             else:
                 _herr = "HB fatura linki üretilemedi (e-Arşiv: earsiv_link_template ayarlı mı? / uuid-dogan_id boş)."
                 hb_upload = {"ok": False, "error": _herr}
@@ -4258,6 +4247,54 @@ async def _resolve_hb_package_number(order: dict, hb_client) -> str:
     return _pkg
 
 
+async def _resolve_hb_package_numbers(order: dict, hb_client) -> list:
+    """ÇOK-PAKETLİ HB siparişleri: HB faturayı PAKET BAŞINA ister. Bir sipariş birden çok kargo
+    paketine bölünmüş olabilir → OMS detayındaki items[].packageNumber'ların TÜMÜ (tekilleştirilmiş)
+    + order'da saklı paket no. Böylece faturayı her pakete ayrı yükleriz (tek pakete yüklenip
+    diğerleri 'yüklenmemiş' kalmaz)."""
+    import asyncio as _aio
+    pkgs = []
+    for _f in ("hepsiburada_package_number", "package_number", "shipment_package_id"):
+        _v = str(order.get(_f) or "").strip()
+        if _v and _v not in pkgs:
+            pkgs.append(_v)
+    _raw = str(order.get("hepsiburada_order_number") or order.get("marketplace_order_id")
+               or order.get("order_number") or "").strip()
+    if _raw:
+        try:
+            _det = await _aio.to_thread(hb_client.get_order_detail, _raw)
+            for _it in ((_det or {}).get("items") or []):
+                _pn = str(_it.get("packageNumber") or "").strip()
+                if _pn and _pn not in pkgs:
+                    pkgs.append(_pn)
+        except Exception as _pe:
+            logger.warning(f"[hb pkgs] OMS detay okunamadı {order.get('order_number')}: {_pe}")
+    return pkgs
+
+
+async def _hb_upload_invoice_all_packages(order: dict, link: str, hb_client) -> dict:
+    """Faturayı siparişin TÜM HB paketlerine yükler. Döner: {ok, packages:[{pkg,ok,error}], any_fail}.
+    409/'zaten mevcut' = başarı (idempotent). Hepsi başarılıysa ok=True."""
+    import asyncio as _aio
+    pkgs = await _resolve_hb_package_numbers(order, hb_client)
+    if not pkgs:
+        return {"ok": False, "error": "HB paket no çözülemedi", "packages": []}
+    out = []
+    all_ok = True
+    for _pkg in pkgs:
+        try:
+            await _aio.to_thread(hb_client.send_invoice, _pkg, link)
+            out.append({"pkg": _pkg, "ok": True})
+        except Exception as e:
+            _err = str(e)
+            if any(k in _err.lower() for k in ("already", "zaten mevcut", "409")):
+                out.append({"pkg": _pkg, "ok": True, "note": "zaten mevcut"})
+            else:
+                out.append({"pkg": _pkg, "ok": False, "error": _err[:200]})
+                all_ok = False
+    return {"ok": all_ok, "packages": out}
+
+
 @router.post("/repush-invoice-links")
 async def repush_invoice_links(payload: dict = None, current_user: dict = Depends(require_admin)):
     """Faturası kesilmiş ama pazaryerine LİNKİ gitmemiş siparişlerin fatura linkini yeniden gönderir.
@@ -4312,17 +4349,20 @@ async def repush_invoice_links(payload: dict = None, current_user: dict = Depend
                         "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _hcerr[:500]}})
                     results.append({"order": order.get("order_number"), "ok": False, "error": _hcerr[:200], "link": _link})
                     continue
-                _hpkg = await _resolve_hb_package_number(order, _hcli)
-                if not _hpkg:
-                    _herr = "HB paket numarası çözülemedi (OMS detayında packageNumber yok)."
+                _hres = await _hb_upload_invoice_all_packages(order, _link, _hcli)
+                if _hres.get("ok"):
                     await db.orders.update_one({"id": _order_id}, {"$set": {
-                        "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr}})
-                    results.append({"order": order.get("order_number"), "ok": False, "error": _herr, "link": _link})
-                    continue
-                await _aio_hb.to_thread(_hcli.send_invoice, _hpkg, _link)
-                await db.orders.update_one({"id": _order_id}, {"$set": {
-                    "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
-                results.append({"order": order.get("order_number"), "ok": True, "link": _link, "package": _hpkg})
+                        "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
+                    results.append({"order": order.get("order_number"), "ok": True, "link": _link,
+                                    "packages": _hres.get("packages")})
+                else:
+                    _herr = _hres.get("error") or "; ".join(
+                        f"{p.get('pkg')}:{p.get('error')}" for p in _hres.get("packages", []) if not p.get("ok"))
+                    await db.orders.update_one({"id": _order_id}, {"$set": {
+                        "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": str(_herr)[:500]}})
+                    results.append({"order": order.get("order_number"), "ok": False,
+                                    "error": str(_herr)[:200], "link": _link, "packages": _hres.get("packages")})
+                continue
             else:
                 results.append({"order": order.get("order_number"), "ok": False, "error": "yalnız trendyol/hepsiburada destekli"})
                 continue
@@ -4376,25 +4416,16 @@ async def autoheal_hb_invoices(hours: int = None, limit: int = 500) -> dict:
             await db.orders.update_one({"id": _oid}, {"$set": {
                 "hepsiburada_invoice_error": "link üretilemedi (earsiv_link_template / uuid-dogan_id)"}})
             continue
-        _pkg = await _resolve_hb_package_number(order, _hcli)
-        if not _pkg:
-            await db.orders.update_one({"id": _oid}, {"$set": {
-                "hepsiburada_invoice_error": "paket no çözülemedi"}})
-            continue
-        try:
-            await _aio.to_thread(_hcli.send_invoice, _pkg, _link)
+        _res = await _hb_upload_invoice_all_packages(order, _link, _hcli)
+        if _res.get("ok"):
             await db.orders.update_one({"id": _oid}, {"$set": {
                 "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
             up += 1
-        except Exception as e:
-            _err = str(e)
-            if any(k in _err.lower() for k in ("already", "zaten mevcut", "409")):
-                await db.orders.update_one({"id": _oid}, {"$set": {
-                    "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
-                up += 1
-            else:
-                await db.orders.update_one({"id": _oid}, {"$set": {
-                    "hepsiburada_invoice_error": _err[:500]}})
+        else:
+            _emsg = _res.get("error") or "; ".join(
+                f"{p.get('pkg')}:{p.get('error')}" for p in _res.get("packages", []) if not p.get("ok"))
+            await db.orders.update_one({"id": _oid}, {"$set": {
+                "hepsiburada_invoice_error": str(_emsg)[:500]}})
     logger.info(f"[hb invoice autoheal] {up}/{len(orders)} HB faturası yüklendi")
     return {"checked": len(orders), "uploaded": up}
 
@@ -4437,28 +4468,16 @@ async def hb_invoice_diag(q: str = Query(...), key: str = Query(""),
             res["upload"] = {"ok": False, "error": _hcerr[:200]}
         else:
             _link = _resolve_marketplace_invoice_link(order, ds, order["id"], order.get("invoice_type"))
-            _pkg = await _resolve_hb_package_number(order, _hcli)
             res["resolved_link"] = bool(_link)
-            res["resolved_package"] = _pkg
+            res["all_packages"] = await _resolve_hb_package_numbers(order, _hcli)
             if not _link:
                 res["upload"] = {"ok": False, "error": "fatura linki üretilemedi (fatura kesilmemiş / earsiv_link_template / uuid-dogan_id boş)"}
-            elif not _pkg:
-                res["upload"] = {"ok": False, "error": "HB paket no çözülemedi"}
             else:
-                import asyncio as _aio
-                try:
-                    await _aio.to_thread(_hcli.send_invoice, _pkg, _link)
+                _up = await _hb_upload_invoice_all_packages(order, _link, _hcli)
+                res["upload"] = _up
+                if _up.get("ok"):
                     await db.orders.update_one({"id": order["id"]}, {"$set": {
                         "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
-                    res["upload"] = {"ok": True}
-                except Exception as e:
-                    _err = str(e)
-                    if any(k in _err.lower() for k in ("already", "zaten mevcut", "409")):
-                        await db.orders.update_one({"id": order["id"]}, {"$set": {
-                            "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
-                        res["upload"] = {"ok": True, "note": "HB'de zaten mevcut"}
-                    else:
-                        res["upload"] = {"ok": False, "error": _err[:300]}
     return res
 
 
