@@ -4430,6 +4430,55 @@ async def autoheal_hb_invoices(hours: int = None, limit: int = 500) -> dict:
     return {"checked": len(orders), "uploaded": up}
 
 
+@router.get("/stock-diag")
+async def stock_diag(q: str = Query(...), key: str = Query(""), days: int = Query(2)):
+    """TEŞHİS (geçici, gizli anahtar korumalı): bir ürünün mevcut stoğu + son N gün stok
+    hareketleri (tip/delta/kaynak) + stock_synced_at. Stoğun 0'dan nasıl arttığını gösterir."""
+    import os as _os, hmac as _hmac
+    _sk = (_os.environ.get("HB_DIAG_KEY") or "").strip() or "fx_stkdiag_7c1e9a_TEMP"
+    if not _hmac.compare_digest(str(key or ""), _sk):
+        raise HTTPException(status_code=403, detail="forbidden")
+    prod = await db.products.find_one(
+        {"$or": [{"id": q}, {"stock_code": q}, {"barcode": q},
+                 {"name": {"$regex": q, "$options": "i"}},
+                 {"variants.barcode": q}]},
+        {"_id": 0, "id": 1, "name": 1, "stock": 1, "stock_code": 1, "platform": 1,
+         "variants": 1, "stock_synced_at": 1, "updated_at": 1})
+    if not prod:
+        return {"found": False, "q": q}
+    pid = prod["id"]
+    _bcs = [str(v.get("barcode") or "").strip() for v in (prod.get("variants") or []) if v.get("barcode")]
+    _since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    _mq = {"created_at": {"$gte": _since},
+           "$or": [{"items.product_id": pid}] + ([{"items.barcode": {"$in": _bcs}}] if _bcs else [])}
+    moves = await db.stock_movements.find(_mq, {"_id": 0}).sort("created_at", 1).to_list(300)
+    # Yalnız bu ürüne ait kalemleri süz + özetle
+    out_moves = []
+    for m in moves:
+        _its = [it for it in (m.get("items") or [])
+                if it.get("product_id") == pid or str(it.get("barcode") or "") in _bcs]
+        if not _its:
+            continue
+        out_moves.append({
+            "created_at": m.get("created_at"), "type": m.get("type"),
+            "source": m.get("source"), "order_number": m.get("order_number"),
+            "items": [{"barcode": it.get("barcode"), "delta": it.get("delta"),
+                       "oversold": it.get("oversold")} for it in _its],
+        })
+    return {
+        "found": True, "product_id": pid, "name": prod.get("name"),
+        "stock_code": prod.get("stock_code"), "platform": prod.get("platform"),
+        "current_total_stock": prod.get("stock"),
+        "variants": [{"size": v.get("size"), "color": v.get("color"),
+                      "barcode": v.get("barcode"), "stock": v.get("stock")}
+                     for v in (prod.get("variants") or [])],
+        "stock_synced_at": prod.get("stock_synced_at"),  # dolu+güncel ise Ticimax senkronu ezmiş olabilir
+        "updated_at": prod.get("updated_at"),
+        "movements_last_days": days,
+        "movements": out_moves,
+    }
+
+
 @router.get("/hepsiburada/invoice-diag")
 async def hb_invoice_diag(q: str = Query(...), key: str = Query(""),
                           do_upload: bool = Query(False)):
