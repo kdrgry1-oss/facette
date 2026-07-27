@@ -4430,7 +4430,7 @@ async def autoheal_hb_invoices(hours: int = None, limit: int = 500) -> dict:
     return {"checked": len(orders), "uploaded": up}
 
 
-@router.get("/stock-diag")
+@router.get("/diag/stock-movements")
 async def stock_diag(q: str = Query(...), key: str = Query(""), days: int = Query(2)):
     """TEŞHİS (geçici, gizli anahtar korumalı): bir ürünün mevcut stoğu + son N gün stok
     hareketleri (tip/delta/kaynak) + stock_synced_at. Stoğun 0'dan nasıl arttığını gösterir."""
