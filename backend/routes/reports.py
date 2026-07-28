@@ -10,7 +10,7 @@ Endpoints (all admin-protected):
   GET /api/admin/reports/cargo
   GET /api/admin/reports/payments
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -33,10 +33,15 @@ def _iso_range(start: Optional[str], end: Optional[str], days_default: int = 30)
 # örn. Temu siparişleri yalnız marketplace="temu" taşır, platform boş olabilir.)
 _MARKETPLACES = ["trendyol", "hepsiburada", "temu"]
 
-# Ciro/sipariş tutarlarına DAHİL EDİLMEYECEK durumlar: iptal + iade grubu.
+# Ciro/sipariş tutarlarına DAHİL EDİLMEYECEK durumlar: iptal + iade + ÖDENMEMİŞ grubu.
 # return_rejected (iade reddedildi) HARİÇ — satış geçerli sayıldığı için ciroda kalır.
+# ÖDENMEMİŞ (kritik-para): awaiting_payment (3DS/havale tamamlanmamış), payment_failed
+# (başarısız kart — kalıcı birikir), pending, payment_notified (havale bildirimi onaysız).
+# Pazaryeri siparişleri DAİMA confirmed+ geldiği için (integrations_trendyol.py:2875) bu
+# ekleme pazaryeri cirosunu düşürmez; yalnız gerçekten ödenmemiş site siparişlerini eler.
 _EXCLUDED_STATUSES = [
     "cancelled", "cancel_refunded",
+    "awaiting_payment", "payment_failed", "pending", "payment_notified",
     "return_requested", "return_approved", "return_in_transit",
     "returned", "refunded", "partial_refunded",
 ]
@@ -298,7 +303,7 @@ async def day_orders(
             "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
             "revenue": {"$sum": {"$multiply": [
                 {"$ifNull": ["$items.quantity", 1]},
-                {"$ifNull": ["$items.unit_price", {"$ifNull": ["$items.price", 0]}]}]}},
+                {"$ifNull": ["$items.price", {"$ifNull": ["$items.unit_price", 0]}]}]}},
         }},
         {"$sort": {"qty": -1}},
         {"$limit": 300},
@@ -1149,7 +1154,7 @@ async def cargo_report(
 async def members_report(current_user: dict = Depends(require_admin)):
     # Top 20 members by spend
     pipeline = [
-        {"$match": {"user_id": {"$ne": None}, "status": {"$ne": "cancelled"}}},
+        {"$match": {"user_id": {"$ne": None}, "status": {"$nin": _EXCLUDED_STATUSES}}},
         {"$group": {"_id": "$user_id", "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}, "last_order": {"$max": "$created_at"}}},
         {"$sort": {"revenue": -1}},
         {"$limit": 20},
@@ -1195,7 +1200,7 @@ async def returns_by_size(
         {"$limit": 30},
     ]
     out = []
-    async for r in db.returns.aggregate(pipeline):
+    async for r in db.customer_returns.aggregate(pipeline):
         out.append({"size": r["_id"]["size"], "count": r["count"], "order_count": r["orders"]})
     return {"by_size": out, "start": start, "end": end}
 
@@ -1221,14 +1226,14 @@ async def returns_by_product(
         {"$limit": limit},
     ]
     returns_map = {}
-    async for r in db.returns.aggregate(ret_pipe):
+    async for r in db.customer_returns.aggregate(ret_pipe):
         returns_map[r["_id"]] = r
 
     product_ids = list(returns_map.keys())
     sales_map = {}
     if product_ids:
         sales_pipe = [
-            {"$match": {"created_at": {"$gte": start, "$lte": end}, "status": {"$nin": ["cancelled", "pending"]}}},
+            {"$match": {"created_at": {"$gte": start, "$lte": end}, "status": {"$nin": _EXCLUDED_STATUSES}}},
             {"$unwind": "$items"},
             {"$match": {"items.product_id": {"$in": product_ids}}},
             {"$group": {
@@ -1267,7 +1272,7 @@ async def returns_by_reason(
         {"$sort": {"count": -1}},
     ]
     out = []
-    async for r in db.returns.aggregate(pipeline):
+    async for r in db.customer_returns.aggregate(pipeline):
         out.append({"reason": r["_id"], "count": r["count"]})
     return {"reasons": out, "start": start, "end": end}
 
@@ -1285,7 +1290,7 @@ async def fast_selling_products(
     now = datetime.now(timezone.utc)
     start_ts = (now - timedelta(days=window_days)).isoformat()
     pipeline = [
-        {"$match": {"created_at": {"$gte": start_ts}, "status": {"$nin": ["cancelled", "pending"]}}},
+        {"$match": {"created_at": {"$gte": start_ts}, "status": {"$nin": _EXCLUDED_STATUSES}}},
         {"$unwind": "$items"},
         {"$group": {
             "_id": "$items.product_id",

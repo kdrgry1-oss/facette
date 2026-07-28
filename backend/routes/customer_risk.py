@@ -51,9 +51,9 @@ async def _compute_risk(user_id: Optional[str] = None, email: Optional[str] = No
     # İade sayısı — `returns` koleksiyonu varsa oradan, yoksa orders.has_return bayrağı
     try:
         if user_id:
-            returned = await db.returns.count_documents({"user_id": user_id, "status": {"$ne": "rejected"}})
+            returned = await db.customer_returns.count_documents({"user_id": user_id, "status": {"$ne": "rejected"}})
         elif email:
-            returned = await db.returns.count_documents({"customer_email": email, "status": {"$ne": "rejected"}})
+            returned = await db.customer_returns.count_documents({"customer_email": email, "status": {"$ne": "rejected"}})
         else:
             returned = 0
     except Exception:

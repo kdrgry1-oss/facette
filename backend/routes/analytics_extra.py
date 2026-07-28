@@ -68,7 +68,11 @@ async def rfm_analysis(
     cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
     pipeline = [
         {"$match": {"created_at": {"$gte": cutoff},
-                    "status": {"$nin": ["cancelled", "failed"]}}},
+                    "status": {"$nin": [
+                        "cancelled", "cancel_refunded",
+                        "awaiting_payment", "payment_failed", "pending", "payment_notified",
+                        "return_requested", "return_approved", "return_in_transit",
+                        "returned", "refunded", "partial_refunded"]}}},
         {"$group": {
             "_id": {"$ifNull": ["$customer_email",
                                 {"$ifNull": ["$user_email",
@@ -165,17 +169,22 @@ async def marketplace_profit(
     # Komisyon ayarlarını çek
     accounts_cursor = db.marketplace_accounts.find({}, {"_id": 0, "key": 1, "transfer_rules": 1})
     accounts = await accounts_cursor.to_list(length=100)
+    # Anahtarı KÜÇÜK HARF sakla: gruplama _id = $toLower(platform) → aksi halde
+    # "Trendyol" anahtarı "trendyol" ile eşleşmez, komisyon sessizce 0 kalırdı.
     comm_map = {
-        a.get("key"): {
+        str(a.get("key") or "").strip().lower(): {
             "type": (a.get("transfer_rules") or {}).get("commission_type", "percent"),
             "value": float((a.get("transfer_rules") or {}).get("commission_value") or 0),
         } for a in accounts
     }
 
     pipeline = [
-        # Denetim: iptal/başarısız siparişler brüt/net kâra girmesin (yalnız gerçek satışlar).
+        # Denetim: iptal/ödenmemiş siparişler brüt/net kâra girmesin (yalnız gerçek satışlar).
+        # İade grubu brütte KALIR ve aşağıda 'refunded' olarak düşülür.
         {"$match": {"created_at": {"$gte": cutoff},
-                    "status": {"$nin": ["cancelled", "payment_failed"]}}},
+                    "status": {"$nin": ["cancelled", "cancel_refunded",
+                                        "awaiting_payment", "payment_failed",
+                                        "pending", "payment_notified"]}}},
         {"$group": {
             # Denetim: var olmayan 'channel' alanı yüzünden HER sipariş 'web'e düşüyordu.
             # Gerçek kaynak platform/marketplace'ten: trendyol/hepsiburada/temu/site.
@@ -184,12 +193,9 @@ async def marketplace_profit(
             "gross": {"$sum": {"$ifNull": ["$total", "$total_amount"]}},
             "shipping_cost": {"$sum": {"$ifNull": ["$shipping_cost", 0]}},
             "refunded": {"$sum": {"$cond": [
-                {"$eq": ["$status", "refunded"]},
+                {"$in": ["$status", ["returned", "refunded", "partial_refunded"]]},
                 {"$ifNull": ["$total", "$total_amount"]},
                 0
-            ]}},
-            "cancelled": {"$sum": {"$cond": [
-                {"$eq": ["$status", "cancelled"]}, 1, 0
             ]}},
         }},
         {"$sort": {"gross": -1}},
@@ -216,7 +222,6 @@ async def marketplace_profit(
             "commission_type": cfg["type"],
             "shipping_cost": round(r["shipping_cost"] or 0, 2),
             "refunded": round(r["refunded"] or 0, 2),
-            "cancelled": r["cancelled"],
             "net": round(net, 2),
             "net_margin_pct": round((net / r["gross"] * 100) if r["gross"] else 0, 2),
         })

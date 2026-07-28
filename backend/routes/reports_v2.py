@@ -41,6 +41,25 @@ def _days_ago(days: int) -> str:
     return (_now() - timedelta(days=days)).isoformat()
 
 
+# Ciro/hız/kâr uçları için GEÇERLİ SATIŞ dışı durumlar: iptal + ÖDENMEMİŞ + iade grubu
+# (reports.py:_EXCLUDED_STATUSES ile aynı disiplin). Pazaryeri siparişi daima confirmed+
+# geldiği için pazaryeri satışı düşmez; yalnız gerçekten ödenmemiş/iptal/iade elenir.
+_EXCLUDED = [
+    "cancelled", "cancel_refunded",
+    "awaiting_payment", "payment_failed", "pending", "payment_notified",
+    "return_requested", "return_approved", "return_in_transit",
+    "returned", "refunded", "partial_refunded",
+]
+# İADE ORANI paydası için: yalnız iptal + ödenmemiş elenir; iade edilen (returned/refunded/
+# partial) siparişler SATILDI sayılıp paydada KALIR (iade oranı = iade/satılan).
+_UNPAID_CANCEL = [
+    "cancelled", "cancel_refunded",
+    "awaiting_payment", "payment_failed", "pending", "payment_notified",
+]
+# İADE sayılan durumlar (return-rate pay'ı): order-seviyesi statü iade grubuna düştüyse.
+_RETURN_STATUSES = ["returned", "refunded", "partial_refunded"]
+
+
 async def _build_cost_map(product_ids: Optional[List[str]] = None) -> dict:
     """product_id → cost_price (manuel girilen). Eksik olanlar fallback olarak
     products.cost_price → products.price*0.5 olarak alınır."""
@@ -172,7 +191,7 @@ async def _velocity_smart_match(days: int, product_index: list) -> dict:
     since = _days_ago(days)
     # Tüm sipariş kalemlerini bir kere çek
     pipeline = [
-        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "returned"]}}},
+        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}}},
         {"$unwind": "$items"},
         {"$project": {"name": {"$ifNull": ["$items.product_name", "$items.name"]},
                        "qty": {"$ifNull": ["$items.quantity", 1]}}},
@@ -290,7 +309,7 @@ async def stockout_forecast(
 async def _velocity_aggregate(days: int):
     since = _days_ago(days)
     pipeline = [
-        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "returned"]}}},
+        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}}},
         {"$unwind": "$items"},
         {"$group": {
             "_id": "$items.product_id",
@@ -403,7 +422,9 @@ async def dead_stock(
     """N gündür HİÇ satılmamış stokta olan ürünler — likidasyon/kampanya adayları."""
     sold_ids = set()
     pipeline = [
-        {"$match": {"created_at": {"$gte": _days_ago(days)}}},
+        # İptal/ödenmemiş siparişte geçen ürün "satıldı" SAYILMAZ (aksi halde gerçek ölü
+        # stok gizlenirdi). İade edilenler hareket sayılır (paydada değil, sold-set'te kalır).
+        {"$match": {"created_at": {"$gte": _days_ago(days)}, "status": {"$nin": _UNPAID_CANCEL}}},
         {"$unwind": "$items"},
         {"$group": {"_id": "$items.product_id"}},
     ]
@@ -442,14 +463,17 @@ async def return_rate(
     """Belirli periyotta iade oranı `threshold`% üzerinde olan ürünleri listeler."""
     since = _days_ago(days)
     pipeline = [
-        {"$match": {"created_at": {"$gte": since}}},
+        # Payda (total_sold): iptal/ödenmemiş HARİÇ; iade edilenler SATILDI sayılır (paydada kalır).
+        # Pay (returned_qty): order-seviyesi statü iade grubuna düşenler (returned/refunded/partial).
+        # NOT: sitedeki KISMİ iadeler siparişi açık bırakabildiğinden bu order-statü tabanlı oran
+        # bir ALT SINIR'dır; ürün-bazlı ayrıntılı iade için /reports/returns/by-product kullanılır.
+        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": _UNPAID_CANCEL}}},
         {"$unwind": "$items"},
         {"$group": {
             "_id": "$items.product_id",
             "name": {"$first": "$items.name"},
-            "total_sold": {"$sum": {"$cond": [{"$ne": ["$status", "cancelled"]},
-                                                {"$ifNull": ["$items.quantity", 1]}, 0]}},
-            "returned_qty": {"$sum": {"$cond": [{"$eq": ["$status", "returned"]},
+            "total_sold": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            "returned_qty": {"$sum": {"$cond": [{"$in": ["$status", _RETURN_STATUSES]},
                                                   {"$ifNull": ["$items.quantity", 1]}, 0]}},
         }},
         {"$match": {"total_sold": {"$gte": min_orders}}},
@@ -495,7 +519,7 @@ async def profit_by_channel(
     cost_map = await _build_cost_map()
 
     pipeline = [
-        {"$match": {"created_at": {"$gte": since}, "status": {"$ne": "cancelled"}}},
+        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}}},
         {"$project": {
             # Y16: Kanal `platform` alanında tutulur (marketplace/source değil). Ayrıca 2-arg
             # $ifNull kullanılır (3-arg Mongo 5.0 gerektiriyordu, eski sürümde patlıyordu).
