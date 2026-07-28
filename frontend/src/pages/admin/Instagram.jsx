@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Save, RefreshCw, Trash2, Plus, Instagram as IgIcon, ExternalLink, Unplug } from "lucide-react";
+import { Save, RefreshCw, Trash2, Plus, Instagram as IgIcon, ExternalLink, Unplug, Search, Tag, ShoppingBag, X } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -135,15 +135,56 @@ export default function AdminInstagram() {
     try { await axios.put(`${API}/admin/instagram/posts/${p.id}`, { active: !(p.active !== false) }, auth); await loadPosts(); }
     catch { toast.error("Güncellenemedi"); }
   };
-  const setProductLink = async (p, val) => {
-    try { await axios.put(`${API}/admin/instagram/posts/${p.id}`, { product_link: val }, auth); }
-    catch { toast.error("Kaydedilemedi"); }
-  };
   const del = async (p) => {
     if (!window.confirm("Gönderi silinsin mi?")) return;
     try { await axios.delete(`${API}/admin/instagram/posts/${p.id}`, auth); await loadPosts(); }
     catch { toast.error("Silinemedi"); }
   };
+
+  // ---- InstaShop: kaynak filtresi + gönderiye ürün bağlama ----
+  const [filter, setFilter] = useState("all"); // all | media | tagged | manual
+  const [pickerFor, setPickerFor] = useState(null); // ürün seçici açık olan gönderi id'si
+  const [pQuery, setPQuery] = useState("");
+  const [pResults, setPResults] = useState([]);
+  const [pBusy, setPBusy] = useState(false);
+  const searchProducts = async (q) => {
+    setPQuery(q);
+    if (!q.trim() || q.trim().length < 2) { setPResults([]); return; }
+    setPBusy(true);
+    try {
+      const r = await axios.get(`${API}/products?search=${encodeURIComponent(q.trim())}&limit=10`, auth);
+      setPResults((r.data?.products || r.data || []).slice(0, 10));
+    } catch { setPResults([]); }
+    finally { setPBusy(false); }
+  };
+  const saveProducts = async (post, products) => {
+    setPosts((prev) => prev.map((x) => (x.id === post.id ? { ...x, products } : x)));
+    try { await axios.put(`${API}/admin/instagram/posts/${post.id}`, { products }, auth); }
+    catch { toast.error("Ürünler kaydedilemedi"); await loadPosts(); }
+  };
+  const addProductToPost = (post, prod) => {
+    const cur = post.products || [];
+    if (cur.some((c) => String(c.id) === String(prod.id))) { toast.info("Zaten ekli"); return; }
+    if (cur.length >= 8) { toast.error("En fazla 8 ürün"); return; }
+    const item = {
+      id: prod.id,
+      title: prod.name || prod.title || "",
+      image: (Array.isArray(prod.images) && prod.images[0]) || prod.image || "",
+      price: prod.price, old_price: prod.old_price,
+      url: `/${prod.slug || prod.id}`,
+    };
+    saveProducts(post, [...cur, item]);
+    setPQuery(""); setPResults([]);
+  };
+  const removeProductFromPost = (post, pid) =>
+    saveProducts(post, (post.products || []).filter((c) => String(c.id) !== String(pid)));
+
+  const kindLabel = (p) => (p.source === "manual" || p.kind === "manual") ? "elle"
+    : (p.kind === "tagged" || p.source === "tags") ? "etiketli" : "kendi";
+  const filteredPosts = posts.filter((p) => {
+    const k = kindLabel(p);
+    return filter === "all" ? true : filter === "manual" ? k === "elle" : filter === "tagged" ? k === "etiketli" : k === "kendi";
+  });
 
   if (!settings) return <div className="p-10 text-center text-gray-400">Yükleniyor...</div>;
 
@@ -303,41 +344,106 @@ export default function AdminInstagram() {
         </button>
       </div>
 
-      {/* Gönderiler */}
+      {/* Gönderiler + InstaShop ürün bağlama */}
       <div className="bg-white border rounded-xl p-4">
-        <h2 className="text-sm font-bold uppercase tracking-wider mb-3">Gönderiler ({posts.length})</h2>
-        {posts.length === 0 ? (
-          <p className="text-sm text-gray-400 py-6 text-center">Henüz gönderi yok. Token ile “Şimdi Çek” veya elle ekleyin.</p>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+          <h2 className="text-sm font-bold uppercase tracking-wider">InstaShop Gönderileri ({filteredPosts.length}/{posts.length})</h2>
+          <div className="flex items-center gap-1 text-xs">
+            {[["all", "Tümü"], ["media", "Kendi"], ["tagged", "Etiketli"], ["manual", "Elle"]].map(([k, lbl]) => (
+              <button key={k} onClick={() => setFilter(k)}
+                className={`px-2.5 py-1 rounded-full border ${filter === k ? "bg-black text-white border-black" : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="text-xs text-gray-500 mb-3">
+          <b>Göster</b> = anasayfa “#FACETTE × YOU” bölümünde çıkar. Her gönderiye <b>ürün bağla</b> → müşteri anasayfada
+          görselin üzerine gelince (mobilde dokununca) o ürünler şık kartlarla belirir.
+        </p>
+        {filteredPosts.length === 0 ? (
+          <p className="text-sm text-gray-400 py-6 text-center">Bu filtrede gönderi yok. Token ile “Şimdi Çek” veya elle ekleyin.</p>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-            {posts.map((p) => (
-              <div key={p.id} className={`border rounded-lg overflow-hidden ${p.active === false ? "opacity-40" : ""}`}>
-                <div className="relative aspect-square bg-gray-100">
-                  <img src={p.image} alt="" className="w-full h-full object-cover" loading="lazy" />
-                  {p.source === "manual" && <span className="absolute top-1 left-1 text-[9px] bg-black/60 text-white px-1.5 py-0.5 rounded">elle</span>}
-                </div>
-                <div className="p-2 space-y-1.5">
-                  <input
-                    defaultValue={p.product_link || ""}
-                    onBlur={(e) => setProductLink(p, e.target.value)}
-                    placeholder="/urun/... (ürün linki)"
-                    className="w-full border border-gray-200 rounded px-1.5 py-1 text-[11px]"
-                    title="Bu gönderiye ürün linki bağla"
-                  />
-                  <div className="flex items-center justify-between">
-                    {p.permalink ? (
-                      <a href={p.permalink} target="_blank" rel="noreferrer" className="text-gray-400 hover:text-black"><ExternalLink size={13} /></a>
-                    ) : <span />}
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => toggleActive(p)} title={p.active === false ? "Göster" : "Gizle"} className="text-[10px] text-gray-500 hover:text-black">
-                        {p.active === false ? "Göster" : "Gizle"}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {filteredPosts.map((p) => {
+              const prods = p.products || [];
+              const isOpen = pickerFor === p.id;
+              const kl = kindLabel(p);
+              return (
+                <div key={p.id} className={`border rounded-lg overflow-hidden flex flex-col ${p.active === false ? "opacity-50" : ""}`}>
+                  <div className="relative aspect-square bg-gray-100">
+                    <img src={p.image} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <span className={`absolute top-1 left-1 text-[9px] px-1.5 py-0.5 rounded text-white ${kl === "etiketli" ? "bg-fuchsia-600/80" : kl === "elle" ? "bg-gray-700/80" : "bg-black/60"}`}>
+                      {kl}
+                    </span>
+                    {prods.length > 0 && (
+                      <span className="absolute top-1 right-1 text-[9px] px-1.5 py-0.5 rounded bg-emerald-600 text-white flex items-center gap-0.5">
+                        <ShoppingBag size={9} /> {prods.length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-2 space-y-2 flex-1 flex flex-col">
+                    {/* Bağlı ürün çipleri */}
+                    {prods.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {prods.map((pr) => (
+                          <span key={pr.id} className="inline-flex items-center gap-1 bg-gray-100 rounded-full pl-1 pr-1.5 py-0.5 text-[10px] max-w-full">
+                            {pr.image && <img src={pr.image} alt="" className="w-4 h-4 rounded-full object-cover" />}
+                            <span className="truncate max-w-[90px]">{pr.title || pr.id}</span>
+                            <button onClick={() => removeProductFromPost(p, pr.id)} className="text-gray-400 hover:text-red-600"><X size={10} /></button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {/* Ürün ekle */}
+                    <div className="relative">
+                      <button onClick={() => { setPickerFor(isOpen ? null : p.id); setPQuery(""); setPResults([]); }}
+                        className="w-full flex items-center justify-center gap-1 border border-dashed border-gray-300 rounded px-2 py-1 text-[11px] text-gray-600 hover:border-black hover:text-black">
+                        <Tag size={11} /> {isOpen ? "Kapat" : "Ürün ekle"}
                       </button>
-                      <button onClick={() => del(p)} className="text-red-500 hover:text-red-700"><Trash2 size={13} /></button>
+                      {isOpen && (
+                        <div className="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg p-2">
+                          <div className="flex items-center gap-1 border rounded px-2 py-1 mb-1">
+                            <Search size={12} className="text-gray-400" />
+                            <input autoFocus value={pQuery} onChange={(e) => searchProducts(e.target.value)}
+                              placeholder="Ürün ara (min 2 harf)…" className="flex-1 text-[11px] outline-none" />
+                          </div>
+                          <div className="max-h-52 overflow-auto">
+                            {pBusy && <p className="text-[11px] text-gray-400 py-2 text-center">Aranıyor…</p>}
+                            {!pBusy && pQuery.length >= 2 && pResults.length === 0 && (
+                              <p className="text-[11px] text-gray-400 py-2 text-center">Sonuç yok</p>
+                            )}
+                            {pResults.map((pr) => (
+                              <button key={pr.id} onClick={() => addProductToPost(p, pr)}
+                                className="w-full flex items-center gap-2 p-1 hover:bg-gray-50 rounded text-left">
+                                <img src={(Array.isArray(pr.images) && pr.images[0]) || pr.image || ""} alt="" className="w-8 h-8 rounded object-cover bg-gray-100 shrink-0" />
+                                <span className="flex-1 min-w-0">
+                                  <span className="block text-[11px] truncate">{pr.name}</span>
+                                  <span className="block text-[10px] text-gray-500">{pr.price != null ? `${Number(pr.price).toLocaleString("tr-TR")} TL` : ""}</span>
+                                </span>
+                                <Plus size={12} className="text-emerald-600 shrink-0" />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between mt-auto pt-1">
+                      {p.permalink ? (
+                        <a href={p.permalink} target="_blank" rel="noreferrer" className="text-gray-400 hover:text-black" title="Instagram'da aç"><ExternalLink size={13} /></a>
+                      ) : <span />}
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => toggleActive(p)} title={p.active === false ? "Göster" : "Gizle"}
+                          className={`text-[10px] font-semibold ${p.active === false ? "text-gray-400 hover:text-black" : "text-emerald-600 hover:text-emerald-800"}`}>
+                          {p.active === false ? "Gizli" : "Göster ✓"}
+                        </button>
+                        <button onClick={() => del(p)} className="text-red-500 hover:text-red-700"><Trash2 size={13} /></button>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

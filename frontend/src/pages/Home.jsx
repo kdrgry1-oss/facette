@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Play, ArrowRight, Instagram } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, ArrowRight, Instagram, ShoppingBag } from "lucide-react";
 import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -519,6 +519,74 @@ function ProductSlider({ block, products }) {
   );
 }
 
+// Tek InstaShop karesi — ürün bağlıysa hover(masaüstü)/dokun(mobil) ile shop-the-look kartları.
+function ShopTile({ post }) {
+  const [open, setOpen] = useState(false);
+  const products = Array.isArray(post.products) ? post.products : [];
+  const hasProducts = products.length > 0;
+  const img = optimizeImg(post.image, 700);
+
+  // Ürün yoksa: eski davranış — ürün linki ya da Instagram gönderisine gider.
+  if (!hasProducts) {
+    const href = post.product_link || post.permalink || null;
+    const external = !post.product_link && !!post.permalink;
+    const inner = (
+      <>
+        <img src={img} alt="" className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
+        <span className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center">
+          <Instagram size={22} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={1.5} />
+        </span>
+      </>
+    );
+    if (!href) return <div className="relative block overflow-hidden group">{inner}</div>;
+    return external ? (
+      <a href={href} target="_blank" rel="noopener noreferrer" className="relative block overflow-hidden group">{inner}</a>
+    ) : (
+      <Link to={href} className="relative block overflow-hidden group">{inner}</Link>
+    );
+  }
+
+  // Ürün varsa: shoppable kare.
+  return (
+    <div className="relative block overflow-hidden group cursor-pointer select-none"
+      onClick={() => setOpen((v) => !v)} onMouseLeave={() => setOpen(false)}>
+      <img src={img} alt="" loading="lazy" decoding="async"
+        className={`w-full aspect-square object-cover transition-transform duration-500 ${open ? "scale-105" : "group-hover:scale-105"}`} />
+      {/* Shoppable rozeti */}
+      <span className={`absolute top-2 right-2 z-10 w-7 h-7 rounded-full bg-white/85 backdrop-blur flex items-center justify-center shadow-sm transition-transform ${open ? "scale-0" : "scale-100"}`}>
+        <ShoppingBag size={13} className="text-black" strokeWidth={1.75} />
+      </span>
+      {/* Karartma + ürün şeridi */}
+      <div className={`absolute inset-0 flex items-end bg-gradient-to-t from-black/75 via-black/15 to-transparent transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+        <div className="w-full p-1.5 sm:p-2">
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+            onClick={(e) => e.stopPropagation()}>
+            {products.map((pr) => (
+              <Link key={pr.id} to={pr.url || `/${pr.id}`}
+                className="shrink-0 w-[92px] sm:w-[104px] bg-white rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow"
+                title={pr.title}>
+                <img src={optimizeImg(pr.image, 240)} alt={pr.title || ""} loading="lazy"
+                  className="w-full aspect-[3/4] object-cover bg-gray-100" />
+                <div className="p-1.5">
+                  <p className="text-[10px] leading-tight text-gray-800 line-clamp-2 min-h-[24px]">{pr.title}</p>
+                  {pr.price != null && pr.price !== "" && (
+                    <div className="mt-0.5 flex items-baseline gap-1">
+                      <span className="text-[11px] font-semibold text-black">{Number(pr.price).toLocaleString("tr-TR")} TL</span>
+                      {pr.old_price != null && Number(pr.old_price) > Number(pr.price) && (
+                        <span className="text-[9px] text-gray-400 line-through">{Number(pr.old_price).toLocaleString("tr-TR")}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InstaShop({ block }) {
   // Gerçek @facette akışı: backend /instagram/feed (token'la çekilen ya da elle eklenen
   // gönderiler). Boşsa bloktaki elle görsellere / varsayılana düşer.
@@ -533,21 +601,12 @@ function InstaShop({ block }) {
 
   const blockImages = block?.images?.length > 0 ? block.images : DEFAULT_INSTASHOP.map(i => i.image);
   const blockLinks = block?.links?.length > 0 ? block.links : DEFAULT_INSTASHOP.map(i => i.link);
-
-  // feed doluysa gerçek gönderiler; değilse blok görselleri.
   const usingFeed = Array.isArray(feed) && feed.length > 0;
-  const items = usingFeed
-    ? feed.slice(0, 6).map((p) => ({
-        img: p.image,
-        href: p.product_link || p.permalink || "#",
-        external: !p.product_link && !!p.permalink,
-      }))
-    : blockImages.slice(0, 6).map((img, i) => ({ img, href: blockLinks[i] || "/", external: false }));
 
-  if (!usingFeed && (feed === null)) {
-    // İlk yükleme — flash olmasın diye başlığı gösterip grid'i boş bırakmak yerine blok
-    // görselleriyle devam eder (feed null iken items zaten blockImages'e düşüyor).
-  }
+  // feed doluysa gerçek gönderiler (ürünleriyle); değilse blok görselleri.
+  const posts = usingFeed
+    ? feed.slice(0, 12)
+    : blockImages.slice(0, 6).map((img, i) => ({ image: img, product_link: blockLinks[i] || "/", products: [] }));
 
   return (
     <section className="py-14 md:py-20 bg-gray-50" data-testid="instashop">
@@ -562,26 +621,8 @@ function InstaShop({ block }) {
             Tarzını <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer" className="text-black hover:underline">@facette</a> etiketiyle paylaş, koleksiyonun bir parçası ol.
           </p>
         </div>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
-          {items.map((it, index) => {
-            const inner = (
-              <>
-                <img src={optimizeImg(it.img, 600)} alt="" className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
-                <span className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center">
-                  <Instagram size={22} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={1.5} />
-                </span>
-              </>
-            );
-            return it.external ? (
-              <a key={index} href={it.href} target="_blank" rel="noopener noreferrer" className="relative block overflow-hidden group">
-                {inner}
-              </a>
-            ) : (
-              <Link key={index} to={it.href} className="relative block overflow-hidden group">
-                {inner}
-              </Link>
-            );
-          })}
+        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-1.5">
+          {posts.map((p, index) => <ShopTile key={p.id || index} post={p} />)}
         </div>
         <div className="text-center mt-8">
           <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer"
