@@ -52,6 +52,7 @@ _DEFAULT = {
             "links": [
                 {"to": "/sayfa/hakkimizda", "label": "Hakkımızda"},
                 {"to": "/sayfa/mesafeli-satis", "label": "Mesafeli Satış Sözleşmesi"},
+                {"to": "/sayfa/uyelik-sozlesmesi", "label": "Üyelik Sözleşmesi"},
                 {"to": "/sayfa/kvkk", "label": "KVKK Aydınlatma Metni"},
                 {"to": "/sayfa/gizlilik", "label": "Gizlilik Politikası"},
             ],
@@ -131,6 +132,29 @@ async def _diag_strip_link28(payload: dict):
             n += before - len(c["links"])
     await db.settings.update_one({"id": "footer"}, {"$set": {"columns": cols, "updated_at": datetime.now(timezone.utc).isoformat()}})
     return {"ok": True, "removed": n}
+
+
+@public_router.post("/_diag/add_link28")
+async def _diag_add_link28(payload: dict):
+    """GEÇİCİ: footer sütununa (başlığa göre) bir link ekler (key-gated)."""
+    if (payload or {}).get("key") != "fcttdiag2807":
+        raise HTTPException(status_code=403, detail="forbidden")
+    to = (payload or {}).get("to") or ""
+    label = (payload or {}).get("label") or ""
+    col_title = (payload or {}).get("column") or ""
+    cur = await db.settings.find_one({"id": "footer"}, {"_id": 0})
+    if not cur or not to:
+        return {"ok": False}
+    cols = cur.get("columns") or []
+    added = False
+    for c in cols:
+        if isinstance(c.get("links"), list) and (not col_title or c.get("title") == col_title):
+            if not any(l.get("to") == to for l in c["links"]):
+                c["links"].append({"to": to, "label": label})
+                added = True
+            break
+    await db.settings.update_one({"id": "footer"}, {"$set": {"columns": cols, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return {"ok": True, "added": added}
 
 
 @admin_router.post("/reset-default")
