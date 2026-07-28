@@ -348,7 +348,7 @@ async def mfa_verify(payload: dict):
 
 
 @router.get("/diag")
-async def mfa_diag(email: str, key: str, test_send: int = 0):
+async def mfa_diag(email: str, key: str, test_send: int = 0, fix: int = 0):
     """GEÇİCİ TANI (gizli anahtarlı): 'doğrulama kodu gitmiyor' sorununu canlıda kök-neden
     bulmak için. Telefon/kod SIZDIRMAZ (yalnız maskeli + bool). Sorun çözülünce KALDIR."""
     import re as _re
@@ -363,6 +363,10 @@ async def mfa_diag(email: str, key: str, test_send: int = 0):
     if not u:
         return {"found": False, "email_q": _em}
     _phone = _resolve_mfa_phone(u)
+    if fix:
+        # password_reset_otp SMS+e-posta şablonlarını tekrar AÇ (güvenlik kodu susmasın).
+        await db.notification_templates.update_many(
+            {"event": "password_reset_otp"}, {"$set": {"enabled": True}})
     prov = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
     tpl = await db.notification_templates.find_one(
         {"event": "password_reset_otp", "channel": "sms"}, {"_id": 0})

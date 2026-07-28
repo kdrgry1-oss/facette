@@ -340,11 +340,19 @@ async def send_notification(
 
     active_channels = channels or CHANNELS
 
+    # GÜVENLİK-KRİTİK event'ler (OTP / MFA / şifre sıfırlama kodu) admin'in bildirim
+    # AÇ/KAPA toggle'ından BAĞIMSIZ her zaman gönderilir. Aksi halde şablon yanlışlıkla
+    # pasif bırakılınca giriş doğrulama kodu / şifre sıfırlama kodu HİÇ gitmiyordu
+    # ("doğrulama kodu gitmiyor" kök nedeni). Şablon metni yine düzenlenebilir.
+    _CRITICAL_EVENTS = {"password_reset_otp"}
+    def _tpl_on(_tpl) -> bool:
+        return bool(_tpl) and (_tpl.get("enabled", True) or event in _CRITICAL_EVENTS)
+
     # --- SMS ---
     if "sms" in active_channels and to_phone:
         to = normalize_phone_tr(to_phone)
         tpl = await _get_template(db, event, "sms")
-        if tpl and tpl.get("enabled", True):
+        if _tpl_on(tpl):
             msg = render_template(tpl.get("body", ""), variables) or f"[{event}]"
             sms_active = cfg.get("sms_active")
             impl = SMS_IMPL.get(sms_active, _sms_generic)
@@ -370,7 +378,7 @@ async def send_notification(
     if "whatsapp" in active_channels and to_phone and cfg.get("whatsapp_active"):
         to = normalize_phone_tr(to_phone)
         tpl = await _get_template(db, event, "whatsapp")
-        if tpl and tpl.get("enabled", True):
+        if _tpl_on(tpl):
             msg = render_template(tpl.get("body", ""), variables)
             wa_cfg = providers.get("whatsapp_meta", {})
             try:
@@ -392,7 +400,7 @@ async def send_notification(
     # --- Email ---
     if "email" in active_channels and to_email and cfg.get("email_active", True):
         tpl = await _get_template(db, event, "email")
-        if tpl and tpl.get("enabled", True):
+        if _tpl_on(tpl):
             subj = render_template(tpl.get("subject", ""), variables) or f"Bildirim: {event}"
             html = render_template(tpl.get("body", ""), variables) or f"<p>{event}</p>"
             try:
