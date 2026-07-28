@@ -1314,6 +1314,103 @@ async def _diag_restore28(key: str = "", dry: bool = True):
     return {"dry": dry, "count": len(changes), "changes": changes}
 
 
+@router.post("/_diag/reopen_siyah28")
+async def _diag_reopen_siyah28(key: str = "", dry: bool = True):
+    """GEÇİCİ: renk-körü overwrite'ta TAMAMEN kaybolan 'Şal Detay Saten Mini Elbise Siyah'
+    (FCFW0600005) kaydını yeniden oluşturur. Aktif kardeşten (Bordo) yapıyı klonlar,
+    aileden EN UZUN açıklamayı alır, 4 Siyah barkodu (XS/S/M/L) kurar, görselleri BOŞ
+    bırakır (kullanıcı ekleyecek), stokları 0 açar (yanlış adetle satışa girmesin) ve
+    aktif kardeşlerle aynı csv_card_id'yi vererek renk-kardeşi bağını kurar.
+    dry=True yalnız önizler. İş bitince kaldırılacak."""
+    import uuid as _uuid
+    if key != "fcttdiag2807":
+        raise HTTPException(status_code=403, detail="forbidden")
+    SC = "FCFW0600005"
+    GROUP = "FCFW0600005"  # aktif renkler bu ortak csv_card_id ile bağlanır
+    NEW_VARIANTS = [("XS", "8684483520198"), ("S", "8684483520181"),
+                    ("M", "8684483520174"), ("L", "8684483520167")]
+    fam = await db.products.find({"stock_code": SC}).to_list(50)
+    if not fam:
+        raise HTTPException(status_code=404, detail=f"{SC} ailesi yok")
+    # Zaten Siyah var mı? (idempotent)
+    exists = next((p for p in fam if str(p.get("color") or "").strip().lower() == "siyah"), None)
+    if exists:
+        return {"created": False, "reason": "Siyah zaten mevcut", "id": exists.get("id"),
+                "active": exists.get("is_active"), "deleted": exists.get("is_deleted")}
+    # Yapı şablonu: aktif + silinmemiş kardeş (Bordo); yoksa en uzun açıklamalı
+    def _len(p): return len(p.get("description") or "")
+    active_sibs = [p for p in fam if p.get("is_active") is True and not p.get("is_deleted")]
+    template = (sorted(active_sibs, key=_len, reverse=True)[0] if active_sibs
+                else sorted(fam, key=_len, reverse=True)[0])
+    # Açıklama: TÜM aileden en uzun (silinmiş kardeşler orijinal 851 kar. metni tutuyor)
+    best_desc_doc = sorted(fam, key=_len, reverse=True)[0]
+    full_desc = best_desc_doc.get("description") or template.get("description") or ""
+    # Şablonu derin kopyala, taşınmaması gereken alanları temizle
+    import copy as _copy
+    doc = _copy.deepcopy({k: v for k, v in template.items() if k != "_id"})
+    _now = datetime.now(timezone.utc).isoformat()
+    new_id = str(_uuid.uuid4())
+    _strip = ["_id", "trendyol_attributes", "hepsiburada_attributes", "temu_attributes",
+              "ticimax_card_id", "ticimax_fields", "xml_id", "xml_label_0", "xml_label_1",
+              "product_url", "urun_id", "barcode", "reviews_synced_at", "rating",
+              "review_count", "attr_ticimax_synced_at", "attr_presync_backup",
+              "variation_code", "hepsiburada_category_id", "temu_category_id"]
+    for k in _strip:
+        doc.pop(k, None)
+    # Renk niteliğini Siyah'a çevir (varsa)
+    attrs = doc.get("attributes")
+    if isinstance(attrs, list):
+        for a in attrs:
+            if (a.get("name") or a.get("type") or "").strip().lower() in ("web color", "renk", "color", "web renk"):
+                a["value"] = "Siyah"
+    # Yeni Siyah varyantları
+    tvar = (template.get("variants") or [{}])[0]
+    vprice = tvar.get("price") or template.get("list_price") or template.get("price")
+    variants = [{
+        "color": "Siyah", "size": sz, "barcode": bc, "stock": 0,
+        "price": vprice, "sku": None,
+    } for (sz, bc) in NEW_VARIANTS]
+    doc.update({
+        "id": new_id,
+        "name": "Şal Detay Saten Mini Elbise Siyah",
+        "color": "Siyah",
+        "slug": slug_with_card_id("Şal Detay Saten Mini Elbise Siyah", new_id),
+        "stock_code": SC,
+        "csv_card_id": GROUP,
+        "urun_karti_id": str(_uuid.uuid4()),
+        "description": full_desc,
+        "variants": variants,
+        "images": [],
+        "thumbnail": None,
+        "is_active": True,
+        "is_deleted": False,
+        "status": None,
+        "stock": 0,
+        "created_at": _now,
+        "updated_at": _now,
+        "synced_from": None,
+        "source": "restore_siyah28",
+    })
+    # Aktif kardeşleri de aynı GROUP csv_card_id'ye çek (renk-kardeşi bağı)
+    link_targets = [p["id"] for p in active_sibs if str(p.get("csv_card_id") or "") != GROUP]
+    preview = {
+        "template_id": template.get("id"), "template_color": template.get("color"),
+        "desc_source_id": best_desc_doc.get("id"), "desc_len": len(full_desc),
+        "new_id": new_id, "slug": doc["slug"],
+        "price": doc.get("price"), "list_price": doc.get("list_price"),
+        "category_ids": doc.get("category_ids"), "breadcrumb": doc.get("breadcrumb"),
+        "variants": [{"size": v["size"], "barcode": v["barcode"], "stock": v["stock"], "price": v["price"]} for v in variants],
+        "link_siblings_to_group": link_targets,
+        "attributes_count": len(attrs) if isinstance(attrs, list) else 0,
+    }
+    if dry:
+        return {"dry": True, "would_create": True, "preview": preview}
+    await db.products.insert_one(doc)
+    for tid in link_targets:
+        await db.products.update_one({"id": tid}, {"$set": {"csv_card_id": GROUP, "updated_at": _now}})
+    return {"dry": False, "created": True, "id": new_id, "linked_siblings": link_targets, "preview": preview}
+
+
 @router.get("/{product_id}")
 async def get_product(product_id: str, request: Request):
     """Get single product by ID or slug"""
