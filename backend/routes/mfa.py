@@ -345,3 +345,55 @@ async def mfa_verify(payload: dict):
             "created_at": user.get("created_at"),
         },
     }
+
+
+@router.get("/diag")
+async def mfa_diag(email: str, key: str, test_send: int = 0):
+    """GEÇİCİ TANI (gizli anahtarlı): 'doğrulama kodu gitmiyor' sorununu canlıda kök-neden
+    bulmak için. Telefon/kod SIZDIRMAZ (yalnız maskeli + bool). Sorun çözülünce KALDIR."""
+    import re as _re
+    _expected = _os.environ.get("MFA_DIAG_KEY") or "fx_mfadiag_9x2b_TEMP"
+    if key != _expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+    _em = (email or "").strip()
+    u = await db.users.find_one({"email": _em.lower()}, {"_id": 0})
+    if not u:
+        u = await db.users.find_one(
+            {"email": {"$regex": f"^{_re.escape(_em)}$", "$options": "i"}}, {"_id": 0})
+    if not u:
+        return {"found": False, "email_q": _em}
+    _phone = _resolve_mfa_phone(u)
+    prov = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
+    tpl = await db.notification_templates.find_one(
+        {"event": "password_reset_otp", "channel": "sms"}, {"_id": 0})
+    out = {
+        "found": True,
+        "is_admin": bool(u.get("is_admin")),
+        "mfa_enabled": bool(u.get("mfa_enabled")),
+        "mfa_method": u.get("mfa_method"),
+        "has_mfa_phone_enc": bool(u.get("mfa_phone_enc")),
+        "has_mfa_secret_enc": bool(u.get("mfa_secret_enc")),
+        "user_phone_present": bool((u.get("phone") or "").strip()),
+        "resolved_phone_ok": bool(_phone),
+        "resolved_phone_masked": _mask_phone(_phone) if _phone else "",
+        "admin_mfa_enforced": await admin_mfa_enforced(),
+        "sms_active": prov.get("sms_active"),
+        "sms_template_exists": bool(tpl),
+        "sms_template_enabled": bool(tpl and tpl.get("enabled", True)),
+    }
+    if test_send:
+        try:
+            out["test_sent"] = await send_mfa_sms_code(u)
+        except Exception as e:
+            out["test_error"] = str(e)[:300]
+        try:
+            log = await db.notification_logs.find_one(
+                {"event": "password_reset_otp", "channel": "sms"},
+                {"_id": 0, "status": 1, "response": 1, "created_at": 1, "to": 1},
+                sort=[("created_at", -1)])
+            if log and log.get("to"):
+                log["to"] = _mask_phone(log["to"])
+            out["last_sms_log"] = log
+        except Exception as e:
+            out["log_error"] = str(e)[:200]
+    return out
