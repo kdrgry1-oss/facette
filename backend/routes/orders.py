@@ -3591,10 +3591,12 @@ async def create_invoice_for_order(
         # TÜM SİTE siparişleri için sağlam hesap: kayıtlı waived yoksa; kargo ÖDENMEMİŞ (bedava) +
         # eşik/kupon karşılanmışsa standart kargo ücretini ayardan türet. Pazaryeri siparişlerinde
         # kargo modeli farklı (bizim kampanya değil) → uygulanmaz. İşletme Kuralı ile anında kapatılır.
+        # Pazaryeri (Trendyol/HB/Temu) siparişi mi? Faturada kargoya dair HİÇBİR kalem olmaz
+        # (ne KARGO satırı ne iskonto) — kargo modeli pazaryerinde farklı.
+        _is_mp = (str(order.get("platform") or order.get("marketplace") or "").lower()
+                  in ("trendyol", "hepsiburada", "temu"))
         _fs_invoice_waived = 0.0
         try:
-            _is_mp = (str(order.get("platform") or order.get("marketplace") or "").lower()
-                      in ("trendyol", "hepsiburada", "temu"))
             from business_rules import get_rule as _gr_fs
             if (not _is_mp) and await _gr_fs(db, "invoice.free_shipping_as_discount", True):
                 _w = _fs_waived
@@ -3700,7 +3702,7 @@ async def create_invoice_for_order(
             currency="TRY",
             kdv_rate=10.0,
             line_items=line_items,
-            shipping_cost=float(order.get("shipping_cost") or 0),
+            shipping_cost=(0.0 if _is_mp else float(order.get("shipping_cost") or 0)),
             free_shipping_waived=_fs_invoice_waived,
             discount=0.0,
             order_number=order.get("order_number") or order_id,
@@ -3935,7 +3937,7 @@ async def create_invoice_for_order(
             currency="TRY",
             kdv_rate=10.0,
             line_items=line_items,
-            shipping_cost=float(order.get("shipping_cost") or 0),
+            shipping_cost=(0.0 if _is_mp else float(order.get("shipping_cost") or 0)),
             free_shipping_waived=_fs_invoice_waived,
             discount=0.0,
             order_number=order.get("order_number") or order_id,
