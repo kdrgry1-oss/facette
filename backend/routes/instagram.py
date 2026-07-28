@@ -182,10 +182,18 @@ async def _finalize_connect(app_id: str, app_secret: str, user_token: str) -> di
                 ig = {"id": iba["id"], "username": iba.get("username", ""), "page": p.get("name", "")}
                 break
         if not ig:
-            raise HTTPException(status_code=400, detail=(
-                "Bağlı Instagram Business hesabı bulunamadı. Instagram hesabınızın 'Profesyonel (İşletme)' "
-                "olduğundan ve bir Facebook Sayfasına bağlı olduğundan emin olun; token izinlerinde "
-                "instagram_basic + pages_show_list olmalı."))
+            # TEŞHİS: kaç sayfa görüldü + adları → "sayfa gelmiyor" mu yoksa "sayfa var IG boş" mu ayırt et.
+            if not pages:
+                _diag = ("Hiç Facebook Sayfası görülmedi → onay ekranında sayfa SEÇİLMEDİ veya "
+                         "'pages_show_list' izni verilmedi. Tekrar bağlanıp sayfayı işaretleyin ve tüm izinleri onaylayın.")
+            else:
+                _names = ", ".join((p.get("name") or "?") for p in pages[:6])
+                _diag = (f"{len(pages)} sayfa görüldü ({_names}) ama HİÇBİRİNDE bağlı Instagram İşletme hesabı yok. "
+                         "Yani Instagram bu sayfaya Graph API'nin gördüğü 'profesyonel bağ' ile bağlı değil. "
+                         "ÇÖZÜM: Meta Business Suite → Ayarlar → Instagram hesapları → Instagram'ı BU sayfaya bağlayın "
+                         "(veya Sayfa → Ayarlar → Bağlı hesaplar → Instagram → Bağlan). Sadece Instagram uygulamasındaki "
+                         "Accounts Center bağı YETMEZ; sayfa tarafından profesyonel bağlantı gerekir.")
+            raise HTTPException(status_code=400, detail="Bağlı Instagram Business hesabı bulunamadı. " + _diag)
 
     # 3) Kaydet (token şifreli) + otomatik senkron aç
     await db.settings.update_one(
