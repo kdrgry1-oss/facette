@@ -19,8 +19,15 @@ const SERIF = { fontFamily: 'Georgia, "Times New Roman", "Playfair Display", ser
  * NewsletterBand — footer'ın hemen üstünde "Facette Kulübü seni bekliyor" bandı.
  * Metinler admin footer ayarındaki `newsletter` alanından okunur.
  */
+// KVKK / ticari-ileti onay metni — kutucuk etiketiyle AYNI; abone kaydına ve İYS'ye
+// bu metin işlenir (ne onayladığının kanıtı).
+const CONSENT_TEXT =
+  "KVKK Aydınlatma Metni kapsamında kişisel verilerimin işlenmesini ve Facette'ten " +
+  "kampanya, indirim ve yeniliklerle ilgili ticari elektronik ileti (e-posta) gönderilmesini kabul ediyorum.";
+
 function NewsletterBand({ nl }) {
   const [email, setEmail] = useState("");
+  const [consent, setConsent] = useState(false);
   const [state, setState] = useState("idle"); // idle | loading | done | error
   const [msg, setMsg] = useState("");
 
@@ -38,12 +45,20 @@ function NewsletterBand({ nl }) {
       setMsg("Lütfen geçerli bir e-posta adresi girin.");
       return;
     }
+    if (!consent) {
+      setState("error");
+      setMsg("Devam etmek için KVKK / ticari ileti onayını işaretlemelisin.");
+      return;
+    }
     setState("loading");
     try {
-      const r = await axios.post(`${API}/newsletter/subscribe`, { email: v, source: "footer" });
+      const r = await axios.post(`${API}/newsletter/subscribe`, {
+        email: v, source: "footer", consent: true, consent_text: CONSENT_TEXT,
+      });
       setState("done");
       setMsg(r?.data?.message || "Aramıza hoş geldin!");
       setEmail("");
+      setConsent(false);
     } catch (err) {
       setState("error");
       setMsg(err?.response?.data?.detail || "Bir sorun oluştu, tekrar dene.");
@@ -54,11 +69,11 @@ function NewsletterBand({ nl }) {
     <section className="bg-neutral-100 border-t border-neutral-200" data-testid="newsletter-band">
       <div className="container-main py-14 md:py-20">
         <div className="max-w-2xl mx-auto text-center">
-          <p className="text-[11px] tracking-[0.35em] uppercase text-neutral-400 mb-4">Facette Kulübü</p>
-          <h3 className="text-3xl md:text-5xl font-light tracking-tight text-neutral-900 leading-tight" style={SERIF}>
+          <p className="text-[11px] tracking-[0.35em] uppercase text-neutral-700 mb-4">Facette Kulübü</p>
+          <h3 className="text-3xl md:text-5xl font-light tracking-tight text-black leading-none">
             {title}
           </h3>
-          <p className="text-sm md:text-base text-neutral-500 mt-4 leading-relaxed">{description}</p>
+          <p className="text-sm md:text-base text-neutral-900 mt-4 leading-relaxed">{description}</p>
 
           {state === "done" ? (
             <div className="mt-8 inline-flex items-center gap-2 text-sm text-neutral-900" data-testid="newsletter-done">
@@ -92,10 +107,23 @@ function NewsletterBand({ nl }) {
               {state === "error" && (
                 <p className="text-xs text-red-500 mt-3 text-left" data-testid="newsletter-error">{msg}</p>
               )}
-              <p className="text-[11px] text-neutral-400 mt-3 leading-relaxed">
-                Abone olarak Facette'ten e-posta ile ticari ileti almayı kabul edersin. Dilediğin zaman
-                aboneliğinden çıkabilirsin.
-              </p>
+              {/* KVKK / ticari-ileti onayı — ZORUNLU kutucuk (İYS'ye 'ONAY' olarak işlenir) */}
+              <label className="flex items-start gap-2 mt-4 text-left text-[12px] text-neutral-700 leading-relaxed cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  onChange={(e) => { setConsent(e.target.checked); if (state === "error") setState("idle"); }}
+                  className="mt-0.5 w-4 h-4 accent-black flex-shrink-0"
+                  aria-label="KVKK ve ticari ileti onayı"
+                  data-testid="newsletter-consent"
+                />
+                <span>
+                  <Link to="/sayfa/kvkk" className="underline hover:text-black">KVKK Aydınlatma Metni</Link> kapsamında
+                  kişisel verilerimin işlenmesini ve Facette'ten kampanya, indirim ve yeniliklerle ilgili
+                  ticari elektronik ileti (e-posta) gönderilmesini kabul ediyorum. Dilediğin zaman
+                  aboneliğinden çıkabilirsin.
+                </span>
+              </label>
             </form>
           )}
         </div>

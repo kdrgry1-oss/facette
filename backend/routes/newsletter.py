@@ -34,8 +34,15 @@ async def subscribe(payload: dict, request: Request):
     if len(email) > 254:
         raise HTTPException(status_code=400, detail="E-posta adresi çok uzun.")
 
+    # KVKK / ticari-ileti onayı ZORUNLU — açık rıza olmadan İYS'ye ONAY işlenmez (yasal).
+    consent = bool((payload or {}).get("consent"))
+    consent_text = str((payload or {}).get("consent_text") or "")[:1000]
+    if not consent:
+        raise HTTPException(status_code=400, detail="Ticari ileti / KVKK onayı gerekli.")
+
     now = datetime.now(timezone.utc).isoformat()
     ip = request.client.host if request and request.client else ""
+    ua = request.headers.get("user-agent", "")[:400] if request else ""
     source = (payload or {}).get("source") or "footer"
 
     existing = await db.newsletter_subscribers.find_one({"email": email})
@@ -50,6 +57,12 @@ async def subscribe(payload: dict, request: Request):
         "source": source,
         "ip": ip,
         "active": True,
+        # Açık rıza kanıtı (İYS/KVKK): onay verildi mi, hangi metinle, ne zaman, hangi IP/UA.
+        "consent": True,
+        "consent_text": consent_text,
+        "consent_at": now,
+        "consent_ip": ip,
+        "consent_ua": ua,
         "created_at": now,
     })
 
