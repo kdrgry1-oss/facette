@@ -467,12 +467,10 @@ function ProductSlider({ block, products }) {
       {/* Başlık bloğu — girildiyse: sol büyük başlık (site fontu) + alt yazı, sağda "Tümünü Gör →"
           (2. görsel tarzı). Standalone alt "Tümünü Gör" butonu kaldırıldı. */}
       {(title || subtitle) && (
-        <div className="max-w-screen-2xl mx-auto px-4 md:px-6 mb-6 md:mb-9 flex items-end justify-between gap-4">
-          <div className="min-w-0">
-            {title && <h2 className="text-3xl md:text-5xl font-light tracking-tight text-black leading-none">{title}</h2>}
-            {subtitle && <p className="mt-3 text-sm md:text-[15px] text-gray-500 font-light max-w-md leading-relaxed">{subtitle}</p>}
-          </div>
-          <Link to={ctaHref} className="shrink-0 inline-flex items-center gap-1.5 md:gap-2 text-[10px] md:text-[11px] tracking-[0.18em] md:tracking-[0.24em] uppercase text-gray-600 hover:text-black border-b border-gray-600 hover:border-black pb-1 md:pb-1.5 transition-colors whitespace-nowrap">
+        <div className="max-w-screen-2xl mx-auto px-4 md:px-6 mb-6 md:mb-9 text-center">
+          {title && <h2 className="text-3xl md:text-5xl font-light tracking-tight text-black leading-none">{title}</h2>}
+          {subtitle && <p className="mt-3 text-sm md:text-[15px] text-gray-500 font-light max-w-md mx-auto leading-relaxed">{subtitle}</p>}
+          <Link to={ctaHref} className="mt-4 inline-flex items-center gap-1.5 md:gap-2 text-[10px] md:text-[11px] tracking-[0.18em] md:tracking-[0.24em] uppercase text-gray-600 hover:text-black border-b border-gray-600 hover:border-black pb-1 md:pb-1.5 transition-colors whitespace-nowrap">
             {ctaLabel} <ArrowRight size={13} />
           </Link>
         </div>
@@ -737,7 +735,7 @@ function InstaShop({ block }) {
             className="flex gap-2 sm:gap-3 overflow-x-auto snap-x snap-mandatory px-4 pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             {posts.map((p, index) => (
               <div key={p.id || index}
-                className="snap-start shrink-0 w-[68vw] sm:w-[280px] lg:w-[300px] aspect-[3/4] rounded-lg overflow-hidden bg-gray-100">
+                className="snap-start shrink-0 w-[72vw] sm:w-[46%] lg:w-[23%] aspect-[3/4] rounded-lg overflow-hidden bg-gray-100">
                 <ShopTile post={p} onShop={setModalPost} />
               </div>
             ))}
