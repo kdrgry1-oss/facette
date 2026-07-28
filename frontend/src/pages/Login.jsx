@@ -49,6 +49,42 @@ export default function Login() {
     }
   };
 
+  // ---- Facebook ile giriş (sunucu-taraflı OAuth code akışı) ----
+  const FB_REDIRECT = typeof window !== "undefined" ? `${window.location.origin}/giris` : "";
+  const handleFacebookLogin = () => {
+    const appId = socialProviders.facebook_app_id;
+    if (!appId) { toast.error("Facebook girişi yapılandırılmamış"); return; }
+    try { sessionStorage.setItem("fb_redirect_to", _redirectTo); } catch {}
+    const url = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(appId)}`
+      + `&redirect_uri=${encodeURIComponent(FB_REDIRECT)}`
+      + `&scope=${encodeURIComponent("email,public_profile")}`
+      + `&response_type=code&state=facebook`;
+    window.location.href = url;
+  };
+  // FB dönüşü: /giris?code=...&state=facebook → kodu backend'e verip giriş yap.
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (q.get("state") !== "facebook" || !q.get("code")) return;
+    const code = q.get("code");
+    window.history.replaceState({}, "", "/giris"); // kod tekrar kullanılmasın
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await axios.post(`${API}/auth/facebook`, { code, redirect_uri: FB_REDIRECT });
+        if (res.data?.token) {
+          loginWithToken(res.data.token, res.data.user);
+          toast.success("Facebook ile giriş başarılı!");
+          let to = "/hesabim";
+          try { to = sessionStorage.getItem("fb_redirect_to") || to; } catch {}
+          navigate(to);
+        }
+      } catch (err) {
+        toast.error(err.response?.data?.detail || "Facebook ile giriş başarısız");
+      } finally { setLoading(false); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return;
     const init = () => {
@@ -139,7 +175,7 @@ export default function Login() {
           {/* Facebook Login */}
           {socialProviders.facebook && (
             <button type="button"
-              onClick={() => toast.info("Facebook Login yakında aktif olacak (App ID girildi)")}
+              onClick={handleFacebookLogin}
               disabled={loading}
               className="w-full flex items-center justify-center gap-3 border border-blue-600 bg-blue-600 text-white px-4 py-3 text-sm hover:bg-blue-700 transition-colors mb-3"
               data-testid="facebook-login-btn">

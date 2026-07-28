@@ -64,9 +64,13 @@ async def _get_social_settings() -> Dict[str, Any]:
 async def get_providers():
     """Public — frontend hangi butonu gösterecek karar verir."""
     s = await _get_social_settings()
+    fb_on = bool(s.get("facebook_enabled") and s.get("facebook_app_id"))
     return {
         "apple": bool(s.get("apple_enabled") and s.get("apple_client_id")),
-        "facebook": bool(s.get("facebook_enabled") and s.get("facebook_app_id")),
+        "apple_client_id": s.get("apple_client_id", "") if s.get("apple_enabled") else "",
+        "facebook": fb_on,
+        # App ID gizli değildir (client_id) — frontend Facebook dialog URL'ini kurar.
+        "facebook_app_id": s.get("facebook_app_id", "") if fb_on else "",
     }
 
 
