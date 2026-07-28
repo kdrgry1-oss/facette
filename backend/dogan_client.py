@@ -59,6 +59,47 @@ def _get_cached_client(wsdl_url, transport, settings):
     return c
 
 
+def _free_shipping_line_xml(idx: int, waived_incl: float, currency: str, kdv_rate: float = 20.0) -> str:
+    """Ücretsiz kargo kampanyası İSKONTO satırı. Satır-seviyesi cac:AllowanceCharge ile
+    LineExtensionAmount = Fiyat − İskonto = 0 → belge TOPLAM/MATRAH/KDV'sine 0 katkı (GİB-güvenli;
+    belge-seviyesi indirimin aksine matrahı bozmaz). Faturada 'Kargo Bedeli X' + 'Kampanya
+    İndirimi X' olarak görünür; müşteri kargonun bedava verildiğini iskonto olarak görür."""
+    base_excl = round(float(waived_incl or 0) / (1.0 + kdv_rate / 100.0), 2)
+    if base_excl <= 0:
+        return ""
+    return f"""<cac:InvoiceLine>
+    <cbc:ID>{idx}</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="{currency}">0.00</cbc:LineExtensionAmount>
+    <cac:AllowanceCharge>
+      <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+      <cbc:AllowanceChargeReason>Ücretsiz Kargo Kampanyası</cbc:AllowanceChargeReason>
+      <cbc:Amount currencyID="{currency}">{base_excl:.2f}</cbc:Amount>
+    </cac:AllowanceCharge>
+    <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="{currency}">0.00</cbc:TaxAmount>
+      <cac:TaxSubtotal>
+        <cbc:TaxableAmount currencyID="{currency}">0.00</cbc:TaxableAmount>
+        <cbc:TaxAmount currencyID="{currency}">0.00</cbc:TaxAmount>
+        <cbc:Percent>{kdv_rate:g}</cbc:Percent>
+        <cac:TaxCategory>
+          <cac:TaxScheme>
+            <cbc:Name>GERÇEK USULDE KATMA DEĞER VERGİSİ</cbc:Name>
+            <cbc:TaxTypeCode>0015</cbc:TaxTypeCode>
+          </cac:TaxScheme>
+        </cac:TaxCategory>
+      </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:Item>
+      <cbc:Name>Kargo Bedeli (Ücretsiz Kargo Kampanyası)</cbc:Name>
+      <cac:SellersItemIdentification><cbc:ID>KARGO-KAMP</cbc:ID></cac:SellersItemIdentification>
+    </cac:Item>
+    <cac:Price>
+      <cbc:PriceAmount currencyID="{currency}">{base_excl:.4f}</cbc:PriceAmount>
+    </cac:Price>
+  </cac:InvoiceLine>"""
+
+
 class DoganClient:
     def __init__(self, username: str, password: str, is_test: bool = True):
         self.username = username
@@ -536,6 +577,7 @@ class DoganClient:
                               line_items: list = None,    # [{name, qty, unit_price, kdv_rate, sku, note, barcode}]
                               shipping_cost: float = 0.0,
                               discount: float = 0.0,
+                              free_shipping_waived: float = 0.0,
                               note: str = "",
                               order_number: str = "",
                               payment_method: str = "",
@@ -691,6 +733,11 @@ class DoganClient:
   </cac:InvoiceLine>""")
 
         # İndirim — AllowanceCharge bloğu (root seviyesinde, TaxTotal öncesinde)
+        # Ücretsiz kargo kampanyası İSKONTO satırı (net 0, GİB-güvenli — toplam/matrah değişmez).
+        if free_shipping_waived and float(free_shipping_waived) > 0 and (shipping_cost or 0) <= 0:
+            _fsl = _free_shipping_line_xml(len(invoice_lines_xml) + 1, float(free_shipping_waived), currency)
+            if _fsl:
+                invoice_lines_xml.append(_fsl)
         allowance_charges_xml = []
         if discount > 0:
             line_subtotal -= discount
@@ -977,6 +1024,7 @@ class DoganClient:
                               line_items: list = None,    # [{name, qty, unit_price, kdv_rate, sku, note, barcode}]
                               shipping_cost: float = 0.0,
                               discount: float = 0.0,
+                              free_shipping_waived: float = 0.0,
                               note: str = "",
                               order_number: str = "",
                               payment_method: str = "",
@@ -1135,6 +1183,11 @@ class DoganClient:
   </cac:InvoiceLine>""")
 
         # İndirim — AllowanceCharge bloğu (root seviyesinde, TaxTotal öncesinde)
+        # Ücretsiz kargo kampanyası İSKONTO satırı (net 0, GİB-güvenli — toplam/matrah değişmez).
+        if free_shipping_waived and float(free_shipping_waived) > 0 and (shipping_cost or 0) <= 0:
+            _fsl = _free_shipping_line_xml(len(invoice_lines_xml) + 1, float(free_shipping_waived), currency)
+            if _fsl:
+                invoice_lines_xml.append(_fsl)
         allowance_charges_xml = []
         if discount > 0:
             line_subtotal -= discount
@@ -1423,6 +1476,7 @@ class DoganClient:
                                 line_items: list = None,
                                 shipping_cost: float = 0.0,
                                 discount: float = 0.0,
+                              free_shipping_waived: float = 0.0,
                                 order_number: str = "",
                                 order_date: str = "",
                                 profile_id: str = "TICARIFATURA",
@@ -1603,6 +1657,11 @@ class DoganClient:
     </cac:Price>
   </cac:InvoiceLine>""")
 
+        # Ücretsiz kargo kampanyası İSKONTO satırı (net 0, GİB-güvenli — toplam/matrah değişmez).
+        if free_shipping_waived and float(free_shipping_waived) > 0 and (shipping_cost or 0) <= 0:
+            _fsl = _free_shipping_line_xml(len(invoice_lines_xml) + 1, float(free_shipping_waived), currency)
+            if _fsl:
+                invoice_lines_xml.append(_fsl)
         allowance_charges_xml = []
         if discount > 0:
             line_subtotal -= discount

@@ -89,6 +89,12 @@ RULE_CATALOG = [
              "ve Conversions API'ye event GÖNDERİLMEZ (KVKK/GDPR uyumu). KAPALI (varsayılan) = mevcut "
              "davranış (onaydan bağımsız gönderilir). Açmadan önce çerez bildirimi kabul oranını göz "
              "önünde bulundurun — açık onay düşükse Meta event hacmi ciddi düşebilir."},
+    {"group": "Fatura", "key": "invoice.free_shipping_as_discount", "label": "Ücretsiz kargoyu faturada iskonto göster",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "AÇIK: 4000 TL+ (eşik) veya kupon ile kargo bedava verilen SİTE siparişlerinde faturaya "
+             "(e-Arşiv + e-Fatura) 'Kargo Bedeli' + eşit 'Ücretsiz Kargo Kampanyası' iskonto satırı "
+             "eklenir; net 0, toplam/matrah/KDV DEĞİŞMEZ (satır-seviyesi iskonto, GİB-güvenli). "
+             "Pazaryeri siparişlerine uygulanmaz. GİB reddederse ANINDA KAPATIN (deploy gerekmez)."},
     {"group": "İade & Değişim", "key": "return.presume_delivered_after_days", "label": "Varsayılan teslim (kargo durumu gelmezse)",
      "type": "number", "default": 5, "unit": "gün", "options": [3, 4, 5, 7, 10],
      "help": "Kargo firması teslimat durumunu raporlamazsa (MNG/DHL statü takılırsa), kargoya "

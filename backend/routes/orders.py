@@ -3587,6 +3587,32 @@ async def create_invoice_for_order(
             _fs_note = (f"Kargo Kampanyasi: {_fs_waived:.2f} TL tutarindaki kargo bedeli magazamizca "
                         f"karsilanmis olup fatura tutarina yansitilmamistir.")
 
+        # KARGO İSKONTO SATIRI (kullanıcı isteği: 4000 TL+ bedava kargoyu faturada iskonto göster).
+        # TÜM SİTE siparişleri için sağlam hesap: kayıtlı waived yoksa; kargo ÖDENMEMİŞ (bedava) +
+        # eşik/kupon karşılanmışsa standart kargo ücretini ayardan türet. Pazaryeri siparişlerinde
+        # kargo modeli farklı (bizim kampanya değil) → uygulanmaz. İşletme Kuralı ile anında kapatılır.
+        _fs_invoice_waived = 0.0
+        try:
+            _is_mp = (str(order.get("platform") or order.get("marketplace") or "").lower()
+                      in ("trendyol", "hepsiburada", "temu"))
+            from business_rules import get_rule as _gr_fs
+            if (not _is_mp) and await _gr_fs(db, "invoice.free_shipping_as_discount", True):
+                _w = _fs_waived
+                if _w <= 0 and float(order.get("shipping_cost") or 0) <= 0.001:
+                    _mset = await db.settings.find_one(
+                        {"id": "main"}, {"_id": 0, "shipping_fee": 1, "free_shipping_threshold": 1}) or {}
+                    _fee = float(_mset.get("shipping_fee") or 0)
+                    _thr = _mset.get("free_shipping_threshold")
+                    _sub = float(order.get("subtotal") or 0)
+                    _qual = (bool(order.get("free_shipping_applied")) or bool(order.get("coupon_free_shipping"))
+                             or (_thr is not None and _sub >= float(_thr)))
+                    if _fee > 0 and _qual:
+                        _w = _fee
+                _fs_invoice_waived = round(float(_w or 0), 2)
+        except Exception as _fse:
+            logger.warning(f"[kargo iskonto hesap {order_id}] {_fse}")
+            _fs_invoice_waived = 0.0
+
         # İndirimi ÜRÜN satırlarının birim fiyatına orantılı dağıt (kargo hariç).
         # Böylece her satırın KDV matrahı indirimli tutardan hesaplanır; satır toplamları
         # ve KDV tutarlı kalır → GİB/Doğan geçerli. (Builder'ın belge-seviyesi indirimi
@@ -3675,6 +3701,7 @@ async def create_invoice_for_order(
             kdv_rate=10.0,
             line_items=line_items,
             shipping_cost=float(order.get("shipping_cost") or 0),
+            free_shipping_waived=_fs_invoice_waived,
             discount=0.0,
             order_number=order.get("order_number") or order_id,
             payment_method=order.get("payment_method") or "DIGER",
@@ -3909,6 +3936,7 @@ async def create_invoice_for_order(
             kdv_rate=10.0,
             line_items=line_items,
             shipping_cost=float(order.get("shipping_cost") or 0),
+            free_shipping_waived=_fs_invoice_waived,
             discount=0.0,
             order_number=order.get("order_number") or order_id,
             order_date=(order.get("created_at") or now.isoformat())[:10],
