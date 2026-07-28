@@ -526,6 +526,7 @@ function ShopLookModal({ post, onClose }) {
   const { addItem } = useCart();
   const [products, setProducts] = useState(post.products || []);
   const [loading, setLoading] = useState(true);
+  const [justAdded, setJustAdded] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -567,8 +568,9 @@ function ShopLookModal({ post, onClose }) {
     if (s.stock <= 0) { toast.error("Bu beden tükendi"); return; }
     addItem(p, s.variant, 1);
     toast.success(`Sepete eklendi · Beden ${s.size}`);
+    setJustAdded(true);
   };
-  const addNoSize = (p) => { addItem(p, null, 1); toast.success("Sepete eklendi 🛍️"); };
+  const addNoSize = (p) => { addItem(p, null, 1); toast.success("Sepete eklendi 🛍️"); setJustAdded(true); };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center" onClick={onClose}>
@@ -638,6 +640,19 @@ function ShopLookModal({ post, onClose }) {
               );
             })}
           </div>
+          {/* Sepete eklendi onay çubuğu — Sepete Git / Alışverişe Devam Et */}
+          {justAdded && (
+            <div className="border-t bg-white p-3 flex items-center gap-2">
+              <Link to="/sepet" onClick={onClose}
+                className="flex-1 text-center bg-black text-white text-sm py-2.5 hover:bg-gray-800 transition-colors">
+                Sepete Git
+              </Link>
+              <button onClick={() => setJustAdded(false)}
+                className="flex-1 text-center border border-gray-300 text-sm py-2.5 hover:border-black transition-colors">
+                Alışverişe Devam Et
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
