@@ -118,13 +118,21 @@ async def _diag_set_content28(payload: dict):
     if not slug:
         raise HTTPException(status_code=400, detail="slug gerekli")
     existing = await db.pages.find_one({"slug": slug})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Sayfa bulunamadı")
     upd = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if "content" in (payload or {}):
         upd["content"] = payload.get("content") or ""
     if "is_active" in (payload or {}):
         upd["is_active"] = bool(payload.get("is_active"))
+    if not existing:
+        # Yoksa oluştur (ör. Üyelik Sözleşmesi)
+        title = (payload or {}).get("title") or slug
+        doc = {"id": generate_id(), "slug": slug, "title": title,
+               "content": upd.get("content", ""), "is_active": upd.get("is_active", True),
+               "meta_title": title, "meta_description": "",
+               "created_at": datetime.now(timezone.utc).isoformat(),
+               "updated_at": upd["updated_at"]}
+        await db.pages.insert_one(doc)
+        return {"ok": True, "slug": slug, "created": True}
     await db.pages.update_one({"id": existing["id"]}, {"$set": upd})
     return {"ok": True, "slug": slug, "set": list(upd.keys())}
 
