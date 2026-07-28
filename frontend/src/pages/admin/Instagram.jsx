@@ -16,7 +16,7 @@ export default function AdminInstagram() {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ access_token: "", ig_user_id: "", source: "media", auto_sync: false });
   // Otomatik kurulum: App ID + Secret + KISA token → backend uzatır, IG hesabını bulur, senkronlar
-  const [auto, setAuto] = useState({ app_id: "", app_secret: "", short_token: "" });
+  const [auto, setAuto] = useState({ app_id: "", app_secret: "", short_token: "", ig_user_id: "" });
   const [autoBusy, setAutoBusy] = useState(false);
   const [showTokenFlow, setShowTokenFlow] = useState(false); // alternatif (token yapıştırma) akışı
 
@@ -59,7 +59,7 @@ export default function AdminInstagram() {
       const r = await axios.post(`${API}/admin/instagram/auto-setup`, auto,
         { headers: { Authorization: `Bearer ${token}` } });
       toast.success(r.data?.message || "Instagram bağlandı");
-      setAuto({ app_id: "", app_secret: "", short_token: "" });
+      setAuto({ app_id: "", app_secret: "", short_token: "", ig_user_id: "" });
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Otomatik kurulum başarısız"); }
     finally { setAutoBusy(false); }
@@ -225,16 +225,20 @@ export default function AdminInstagram() {
           <div className="mt-3 pt-3 border-t border-emerald-200">
             <p className="text-xs text-emerald-700 mb-2">
               <a className="underline font-semibold" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noopener noreferrer">Graph API Explorer</a>'dan
-              (izinler: <b>instagram_basic</b> + <b>pages_show_list</b>) alınan KISA ömürlü token'ı yapıştırın — gerisini sistem yapar.
+              (izinler: <b>instagram_basic</b> + <b>pages_show_list</b>) alınan KISA ömürlü token'ı yapıştırın — sistem 60 günlük
+              token'a çevirir, doğrudan Instagram'dan çeker. <b>Instagram User ID</b> girerseniz (sayfa bağınız görünmese bile)
+              hesabı doğrudan bulur — Business Suite → Instagram hesapları'nda "Kod:" ile yazan sayıdır.
             </p>
-            <div className="flex gap-3 flex-wrap">
+            <div className="grid md:grid-cols-2 gap-3 mb-2">
               <input type="password" value={auto.short_token} onChange={(e) => setAuto({ ...auto, short_token: e.target.value })}
-                placeholder="Kısa ömürlü token (EAAB...)" className="border px-3 py-2 rounded text-sm flex-1 min-w-[220px]" />
-              <button onClick={runAutoSetup} disabled={autoBusy}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-50">
-                {autoBusy ? "Bağlanıyor…" : "⚡ Bağla ve Senkronla"}
-              </button>
+                placeholder="Kısa ömürlü token (EAAB...)" className="border px-3 py-2 rounded text-sm" />
+              <input value={auto.ig_user_id} onChange={(e) => setAuto({ ...auto, ig_user_id: e.target.value })}
+                placeholder="Instagram User ID (ops. — ör. 17841410045037513)" className="border px-3 py-2 rounded text-sm" />
             </div>
+            <button onClick={runAutoSetup} disabled={autoBusy}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-50">
+              {autoBusy ? "Bağlanıyor…" : "⚡ Bağla ve Senkronla"}
+            </button>
           </div>
         )}
       </div>

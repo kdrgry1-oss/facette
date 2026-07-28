@@ -147,12 +147,13 @@ async def auto_setup(payload: dict, current_user: dict = Depends(require_admin))
     app_id = str((payload or {}).get("app_id") or "").strip()
     app_secret = str((payload or {}).get("app_secret") or "").strip()
     short_token = str((payload or {}).get("short_token") or "").strip()
+    ig_user_id = str((payload or {}).get("ig_user_id") or "").strip()
     if not (app_id and app_secret and short_token):
         raise HTTPException(status_code=400, detail="App ID, App Secret ve kısa token zorunlu")
-    return await _finalize_connect(app_id, app_secret, short_token)
+    return await _finalize_connect(app_id, app_secret, short_token, ig_user_id)
 
 
-async def _finalize_connect(app_id: str, app_secret: str, user_token: str) -> dict:
+async def _finalize_connect(app_id: str, app_secret: str, user_token: str, ig_user_id: str = "") -> dict:
     """Ortak son adım (auto-setup + OAuth callback): kullanıcı token'ını uzun ömürlüye
     çevirir, bağlı Instagram Business hesabını bulur, şifreli kaydeder, ilk senkronu koşar."""
     async with httpx.AsyncClient(timeout=30) as client:
@@ -181,6 +182,22 @@ async def _finalize_connect(app_id: str, app_secret: str, user_token: str) -> di
             if iba and iba.get("id"):
                 ig = {"id": iba["id"], "username": iba.get("username", ""), "page": p.get("name", "")}
                 break
+        # DOĞRUDAN IG ID YOLU: sayfa /me/accounts'ta görünmüyorsa (İşletme Yöneticisi / "Yeni Sayfa
+        # Deneyimi"nde klasik rol dönmez) ama elde IG User ID varsa, doğrudan o hesabı doğrula ve kullan.
+        # Feed zaten /{ig_user_id}/media ile çekiliyor; sayfaya ihtiyaç yok.
+        if not ig and ig_user_id:
+            rc = await client.get(f"{_GRAPH}/{ig_user_id}", params={
+                "fields": "username,name", "access_token": long_token})
+            if rc.status_code == 200 and (rc.json() or {}).get("id"):
+                _j = rc.json() or {}
+                ig = {"id": str(_j.get("id") or ig_user_id), "username": _j.get("username", ""),
+                      "page": "(doğrudan IG)"}
+            else:
+                _e = ((rc.json() or {}).get("error") or {}).get("message", rc.text[:200]) if rc.headers.get("content-type", "").startswith("application/json") else rc.text[:200]
+                raise HTTPException(status_code=400, detail=(
+                    f"Verilen Instagram User ID ({ig_user_id}) bu token ile okunamadı: {_e} "
+                    "ID'nin doğru ve token'da instagram_basic izninin olduğundan emin olun."))
+
         if not ig:
             # TEŞHİS: kaç sayfa görüldü + adları → "sayfa gelmiyor" mu yoksa "sayfa var IG boş" mu ayırt et.
             if not pages:
@@ -201,6 +218,8 @@ async def _finalize_connect(app_id: str, app_secret: str, user_token: str) -> di
         {"$set": {"access_token": encrypt(long_token), "ig_user_id": ig["id"],
                   "auto_sync": True, "source": "media",
                   "app_id": app_id, "app_secret": encrypt(app_secret),
+                  # SINIRSIZ token için: obtained_at damgası — scheduler yaklaşınca otomatik yeniler.
+                  "token_obtained_at": _now().isoformat(),
                   "last_error": "", "updated_at": _now().isoformat()},
          "$setOnInsert": {"id": "instagram"}}, upsert=True)
 
