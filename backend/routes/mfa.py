@@ -345,34 +345,3 @@ async def mfa_verify(payload: dict):
             "created_at": user.get("created_at"),
         },
     }
-
-
-@router.post("/admin-set-phone")
-async def _mfa_admin_set_phone(payload: dict):
-    """GEÇİCİ (gizli anahtarlı): bir admin e-postasının MFA SMS telefonunu sabitler
-    (mfa_phone_enc, öncelikli). Ayarlar + test gönderimi yapar. İş bitince KALDIR."""
-    if (payload or {}).get("key") != (_os.environ.get("MFA_DIAG_KEY") or "fx_mfadiag_9x2b_TEMP"):
-        raise HTTPException(status_code=403, detail="forbidden")
-    import sys as _sys
-    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
-    from notification_service import normalize_phone_tr
-    email = (payload.get("email") or "").strip().lower()
-    pn = normalize_phone_tr((payload.get("phone") or "").strip())
-    if not pn or len(pn) < 12:
-        raise HTTPException(status_code=400, detail="geçersiz telefon")
-    u = await db.users.find_one({"email": email}, {"_id": 0})
-    if not u:
-        return {"found": False, "email": email}
-    await db.users.update_one({"id": u["id"]}, {"$set": {
-        "mfa_phone_enc": encrypt(pn), "mfa_method": "sms", "mfa_enabled": True,
-        "mfa_enabled_at": datetime.now(timezone.utc).isoformat()}})
-    u2 = await db.users.find_one({"id": u["id"]}, {"_id": 0})
-    sent = await send_mfa_sms_code(u2)
-    log = await db.notification_logs.find_one(
-        {"event": "password_reset_otp", "channel": "sms"},
-        {"_id": 0, "status": 1, "response": 1, "to": 1, "created_at": 1},
-        sort=[("created_at", -1)])
-    if log and log.get("to"):
-        log["to"] = _mask_phone(log["to"])
-    return {"ok": True, "resolved_phone_masked": _mask_phone(_resolve_mfa_phone(u2)),
-            "test_sent": sent, "last_sms_log": log}
