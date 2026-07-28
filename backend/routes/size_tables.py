@@ -21,6 +21,43 @@ from .deps import db, require_admin, logger
 router = APIRouter(prefix="/size-tables", tags=["size-tables"])
 
 
+@router.get("/_diag/state")
+async def _size_tables_diag(key: str):
+    """GEÇİCİ TANI (gizli anahtarlı): ölçü tablosu veri kaybını teşhis. Kaç kayıt dolu/boş,
+    ne zaman ezilmiş (updated_at günü), kaç tanesi kardeş-senkron (synced_from) ile yazılmış,
+    ürünlerde kaç adet render edilmiş 'is_size_table' görsel duruyor (görsel-kurtarma kaynağı)."""
+    if key != (os.environ.get("SIZE_DIAG_KEY") or "fx_sizediag_4k7_TEMP"):
+        raise HTTPException(status_code=403, detail="forbidden")
+    total = await db.size_tables.count_documents({})
+    non_empty = await db.size_tables.count_documents({"sizes": {"$exists": True, "$ne": []}})
+    empty = await db.size_tables.count_documents({"$or": [{"sizes": {"$exists": False}}, {"sizes": []}]})
+    synced = await db.size_tables.count_documents({"synced_from": {"$exists": True, "$ne": ""}})
+    with_model = await db.size_tables.count_documents({"model_info": {"$exists": True, "$nin": [{}, None]}})
+    # updated_at gün dağılımı (son ezme dalgasını yakala)
+    by_day = {}
+    async for st in db.size_tables.find({}, {"_id": 0, "updated_at": 1}).limit(20000):
+        d = str(st.get("updated_at") or "")[:10]
+        by_day[d] = by_day.get(d, 0) + 1
+    # Ürünlerde render edilmiş ölçü-tablosu görseli (veri kaybında görselden kurtarma kaynağı)
+    img_products = await db.products.count_documents({"images": {"$elemMatch": {"is_size_table": True}}})
+    # Boş kayıt örnekleri (ürün adı + ne zaman + synced_from)
+    empties = []
+    async for st in db.size_tables.find(
+            {"$or": [{"sizes": {"$exists": False}}, {"sizes": []}]},
+            {"_id": 0, "product_id": 1, "updated_at": 1, "synced_from": 1}).limit(8):
+        pr = await db.products.find_one({"id": st.get("product_id")}, {"_id": 0, "name": 1, "stock_code": 1})
+        st["_name"] = (pr or {}).get("name", "")
+        st["_stock_code"] = (pr or {}).get("stock_code", "")
+        empties.append(st)
+    return {
+        "size_tables_total": total, "non_empty": non_empty, "empty": empty,
+        "synced_from_count": synced, "with_model_info": with_model,
+        "products_with_rendered_size_image": img_products,
+        "updated_at_by_day": dict(sorted(by_day.items())),
+        "empty_samples": empties,
+    }
+
+
 def _find_font(size=28, bold=False):
     # ÖNCE depoya gömülü font (Railway imajında sistem fontu YOK — bitmap fallback'e
     # düşünce yazı minicik ve Türkçe karakterler kutu çıkıyordu).
