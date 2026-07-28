@@ -109,6 +109,25 @@ async def update_page(page_id: str, payload: dict, current_user: dict = Depends(
     return {"ok": True}
 
 
+@router.post("/_diag/set_content28")
+async def _diag_set_content28(payload: dict):
+    """GEÇİCİ: bir CMS sayfasının içeriğini slug ile günceller (key-gated). İş bitince kaldırılacak."""
+    if (payload or {}).get("key") != "fcttdiag2807":
+        raise HTTPException(status_code=403, detail="forbidden")
+    slug = (payload or {}).get("slug") or ""
+    content = (payload or {}).get("content") or ""
+    if not slug or not content:
+        raise HTTPException(status_code=400, detail="slug ve content gerekli")
+    existing = await db.pages.find_one({"slug": slug})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Sayfa bulunamadı")
+    await db.pages.update_one(
+        {"id": existing["id"]},
+        {"$set": {"content": content, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True, "slug": slug, "content_len": len(content)}
+
+
 @router.delete("/{page_id}")
 async def delete_page(page_id: str, current_user: dict = Depends(require_admin)):
     res = await db.pages.delete_one({"$or": [{"id": page_id}, {"slug": page_id}]})
