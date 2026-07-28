@@ -1110,6 +1110,55 @@ async def cancel_return_products(
     return {"items": out}
 
 
+@router.get("/_diag/channel_audit28")
+async def _diag_channel_audit28(key: str = "", start_date: Optional[str] = None,
+                                end_date: Optional[str] = None):
+    """GEÇİCİ salt-okunur tanı: tarih aralığında KANAL × STATÜ dökümü + tutar + sıfır-tutar
+    sayısı; ayrıca sales-by-platform / cancel-return-by-source raporlarının o kanal için
+    tam olarak hangi statüleri sayıp saymadığını gösterir. İş bitince kaldırılacak."""
+    if key != "fcttdiag2807":
+        raise HTTPException(status_code=403, detail="forbidden")
+    s, e = _iso_range(start_date, end_date)
+    _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}
+    _ch = {"$cond": [{"$in": [_plat, _MARKETPLACES]}, _plat, "site"]}
+    pipe = [
+        {"$match": {"created_at": {"$gte": s, "$lte": e}}},
+        {"$group": {
+            "_id": {"ch": _ch, "st": {"$ifNull": ["$status", "(none)"]}},
+            "n": {"$sum": 1},
+            "tot": {"$sum": {"$ifNull": ["$total", 0]}},
+            "zero_tot": {"$sum": {"$cond": [{"$gt": [{"$ifNull": ["$total", 0]}, 0]}, 0, 1]}},
+        }},
+        {"$sort": {"n": -1}},
+    ]
+    _RETURN_ST = ["return_requested", "return_approved", "return_in_transit",
+                  "returned", "refunded", "partial_refunded"]
+    _CANCEL_ST = ["cancelled", "cancel_refunded"]
+    by_ch: dict = {}
+    async for r in db.orders.aggregate(pipe):
+        ch = r["_id"]["ch"]; st = r["_id"]["st"]
+        d = by_ch.setdefault(ch, {"channel": ch, "statuses": [], "sales_orders": 0,
+                                  "sales_total": 0.0, "cancel_orders": 0, "cancel_total": 0.0,
+                                  "return_orders": 0, "return_total": 0.0, "unpaid_orders": 0,
+                                  "grand_orders": 0, "zero_total_orders": 0})
+        d["statuses"].append({"status": st, "n": r["n"], "total": round(r["tot"], 2), "zero_total": r["zero_tot"]})
+        d["grand_orders"] += r["n"]
+        d["zero_total_orders"] += r["zero_tot"]
+        if st in _CANCEL_ST:
+            d["cancel_orders"] += r["n"]; d["cancel_total"] += r["tot"]
+        elif st in _RETURN_ST:
+            d["return_orders"] += r["n"]; d["return_total"] += r["tot"]
+        elif st in _EXCLUDED_STATUSES:
+            d["unpaid_orders"] += r["n"]
+        else:
+            d["sales_orders"] += r["n"]; d["sales_total"] += r["tot"]
+    for d in by_ch.values():
+        d["statuses"].sort(key=lambda x: -x["n"])
+        for k in ("sales_total", "cancel_total", "return_total"):
+            d[k] = round(d[k], 2)
+    return {"range": {"start": s, "end": e}, "channels": list(by_ch.values())}
+
+
 @router.get("/cancel-return-by-source")
 async def cancel_return_by_source(
     start_date: Optional[str] = None,
