@@ -1888,6 +1888,55 @@ async def alert_critical_stock_for_rpt():
     logger.info("[rpt-alert] %d ürün için RPT uyarısı gönderildi", len(critical))
 
 
+async def _refresh_instagram_token():
+    """SINIRSIZ Instagram feed: 60 günlük kullanıcı token'ı ~45 günde bir otomatik yeniden
+    exchange edilir (fb_exchange_token → taze 60 gün). Kullanıcı bir daha dokunmaz.
+    token_obtained_at 45 günden yeniyse hiçbir şey yapmaz; app_id sayısal değilse (bozuk kayıt) atlar.
+    Ödeme/sipariş akışıyla ilgisi yoktur — tamamen bağımsız görev."""
+    from routes.deps import db
+    try:
+        from security.crypto import encrypt, decrypt
+    except Exception:
+        def encrypt(x): return x
+        def decrypt(x): return x
+    try:
+        s = await db.settings.find_one({"id": "instagram"}, {"_id": 0}) or {}
+        tok_enc = s.get("access_token")
+        app_id = str(s.get("app_id") or "").strip()
+        app_secret_enc = s.get("app_secret")
+        obtained = s.get("token_obtained_at")
+        if not (tok_enc and app_id and app_secret_enc and obtained) or not app_id.isdigit():
+            return
+        try:
+            _dt = datetime.fromisoformat(obtained)
+            if _dt.tzinfo is None:
+                _dt = _dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return
+        if (datetime.now(timezone.utc) - _dt).days < 45:
+            return  # henüz erken
+        cur_token = decrypt(tok_enc)
+        app_secret = decrypt(app_secret_enc)
+        import httpx
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get("https://graph.facebook.com/v19.0/oauth/access_token", params={
+                "grant_type": "fb_exchange_token", "client_id": app_id,
+                "client_secret": app_secret, "fb_exchange_token": cur_token})
+        if r.status_code == 200 and (r.json() or {}).get("access_token"):
+            new_tok = r.json()["access_token"]
+            await db.settings.update_one({"id": "instagram"}, {"$set": {
+                "access_token": encrypt(new_tok),
+                "token_obtained_at": datetime.now(timezone.utc).isoformat(),
+                "token_refreshed_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": ""}})
+            logger.info("[instagram] uzun ömürlü token otomatik yenilendi (+60 gün)")
+        else:
+            _t = r.text[:200] if hasattr(r, "text") else str(r.status_code)
+            logger.warning(f"[instagram] token yenilenemedi: {_t}")
+    except Exception as e:
+        logger.warning(f"[instagram] token refresh hata: {e}")
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -1897,6 +1946,16 @@ def start_scheduler():
     def _add(fn, *a, **k):
         # A2.8: her iş lider-sarmalıyla eklenir (çok-instance'ta çift çalışmayı önler).
         return _scheduler.add_job(_lead(fn), *a, **k)
+    # SINIRSIZ Instagram feed: token'ı günde bir kontrol et, 45 günü geçince otomatik yenile.
+    _add(
+        _refresh_instagram_token,
+        "interval",
+        hours=24,
+        id="instagram_token_refresh",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+        max_instances=1,
+        coalesce=True,
+    )
     # Run every 30 minutes; catches orders promptly as they cross the 48h mark
     _add(
         auto_cancel_unpaid_havale_orders,
