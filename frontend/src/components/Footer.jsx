@@ -22,8 +22,7 @@ const SERIF = { fontFamily: 'Georgia, "Times New Roman", "Playfair Display", ser
 // KVKK / ticari-ileti onay metni — kutucuk etiketiyle AYNI; abone kaydına ve İYS'ye
 // bu metin işlenir (ne onayladığının kanıtı).
 const CONSENT_TEXT =
-  "KVKK Aydınlatma Metni kapsamında kişisel verilerimin işlenmesini ve Facette'ten " +
-  "kampanya, indirim ve yeniliklerle ilgili ticari elektronik ileti (e-posta) gönderilmesini kabul ediyorum.";
+  "KVKK Aydınlatma Metni'ni okudum; kampanya ve fırsatlar için ticari elektronik ileti (e-posta) almayı kabul ediyorum.";
 
 function NewsletterBand({ nl }) {
   const [email, setEmail] = useState("");
@@ -108,7 +107,7 @@ function NewsletterBand({ nl }) {
                 <p className="text-xs text-red-500 mt-3 text-left" data-testid="newsletter-error">{msg}</p>
               )}
               {/* KVKK / ticari-ileti onayı — ZORUNLU kutucuk (İYS'ye 'ONAY' olarak işlenir) */}
-              <label className="flex items-start gap-2 mt-4 text-left text-[12px] text-neutral-700 leading-relaxed cursor-pointer">
+              <label className="flex items-start gap-2 mt-4 text-left text-[12px] text-neutral-700 leading-snug cursor-pointer">
                 <input
                   type="checkbox"
                   checked={consent}
@@ -118,10 +117,8 @@ function NewsletterBand({ nl }) {
                   data-testid="newsletter-consent"
                 />
                 <span>
-                  <Link to="/sayfa/kvkk" className="underline hover:text-black">KVKK Aydınlatma Metni</Link> kapsamında
-                  kişisel verilerimin işlenmesini ve Facette'ten kampanya, indirim ve yeniliklerle ilgili
-                  ticari elektronik ileti (e-posta) gönderilmesini kabul ediyorum. Dilediğin zaman
-                  aboneliğinden çıkabilirsin.
+                  <Link to="/sayfa/kvkk" className="underline hover:text-black">KVKK Aydınlatma Metni</Link>'ni okudum;
+                  kampanya ve fırsatlar için ticari elektronik ileti (e-posta) almayı kabul ediyorum.
                 </span>
               </label>
             </form>

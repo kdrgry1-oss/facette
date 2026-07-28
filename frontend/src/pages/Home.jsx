@@ -468,25 +468,28 @@ function ProductSlider({ block, products }) {
           (2. görsel tarzı). Standalone alt "Tümünü Gör" butonu kaldırıldı. */}
       {(title || subtitle) && (
         <div className="max-w-screen-2xl mx-auto px-4 md:px-6 mb-6 md:mb-9">
-          {/* Masaüstü: başlık ortada + CTA sağda; ALT HİZALARI aynı (items-end → başlığın
-              alt çizgisi ile 'Tümünü Gör' alt çizgisi aynı hatta oturur) */}
+          {/* Masaüstü: [boşluk | başlık+altyazı ortada | CTA sağda]; ALT HİZALARI aynı
+              (items-end → 'Tümünü Gör' alt çizgisi, alt-yazı 'Koleksiyonumuzdan...' satırıyla hizalı) */}
           <div className="hidden md:flex items-end justify-between gap-4">
             <div className="flex-1" />
-            {title && <h2 className="text-5xl font-light tracking-tight text-black leading-none text-center">{title}</h2>}
+            <div className="text-center">
+              {title && <h2 className="text-5xl font-light tracking-tight text-black leading-none">{title}</h2>}
+              {subtitle && <p className="mt-3 text-[15px] text-gray-500 font-light max-w-md mx-auto leading-relaxed">{subtitle}</p>}
+            </div>
             <div className="flex-1 flex justify-end">
               <Link to={ctaHref} className="inline-flex items-center gap-2 text-[11px] tracking-[0.24em] uppercase text-gray-600 hover:text-black border-b border-gray-600 hover:border-black pb-1 transition-colors whitespace-nowrap">
                 {ctaLabel} <ArrowRight size={13} />
               </Link>
             </div>
           </div>
-          {/* Mobil: ortalı başlık */}
-          {title && <h2 className="md:hidden text-3xl font-light tracking-tight text-black leading-none text-center">{title}</h2>}
-          {/* Alt yazı — her iki modda ortalı */}
-          {subtitle && <p className="mt-3 text-sm md:text-[15px] text-gray-500 font-light max-w-md mx-auto leading-relaxed text-center">{subtitle}</p>}
-          {/* Mobil CTA — başlık/alt yazı altında ortalı */}
-          <Link to={ctaHref} className="md:hidden mt-4 mx-auto w-fit flex items-center gap-1.5 text-[10px] tracking-[0.18em] uppercase text-gray-600 hover:text-black border-b border-gray-600 hover:border-black pb-1 transition-colors whitespace-nowrap">
-            {ctaLabel} <ArrowRight size={13} />
-          </Link>
+          {/* Mobil: ortalı başlık + altyazı + CTA */}
+          <div className="md:hidden text-center">
+            {title && <h2 className="text-3xl font-light tracking-tight text-black leading-none">{title}</h2>}
+            {subtitle && <p className="mt-3 text-sm text-gray-500 font-light max-w-md mx-auto leading-relaxed">{subtitle}</p>}
+            <Link to={ctaHref} className="mt-4 mx-auto w-fit flex items-center gap-1.5 text-[10px] tracking-[0.18em] uppercase text-gray-600 hover:text-black border-b border-gray-600 hover:border-black pb-1 transition-colors whitespace-nowrap">
+              {ctaLabel} <ArrowRight size={13} />
+            </Link>
+          </div>
         </div>
       )}
 
