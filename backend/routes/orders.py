@@ -1610,6 +1610,16 @@ async def update_order(
 
     order_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
+    # KISMİ İPTAL TESPİTİ (site + elle düzenleme): kalemlerden biri çıkarılıp toplam adet
+    # DÜŞTÜYSE ve sipariş tamamen iptal DEĞİLSE işaretle → panelde "iptal edilen ürün var"
+    # kırmızı noktası. (Pazaryeri kısmi iptalleri kendi senkronunda işaretlenir.)
+    if "items" in order_data:
+        _old_q = sum(int(it.get("quantity") or 1) for it in (existing.get("items") or []))
+        _new_q = sum(int(it.get("quantity") or 1) for it in (order_data.get("items") or []))
+        if 0 < _new_q < _old_q and (order_data.get("status") or existing.get("status")) not in ("cancelled", "cancel_refunded"):
+            order_data["partial_cancelled"] = True
+            order_data["partial_cancel_at"] = datetime.now(timezone.utc).isoformat()
+
     await db.orders.update_one({"id": order_id}, {"$set": order_data})
 
     return {"message": "Sipariş güncellendi"}

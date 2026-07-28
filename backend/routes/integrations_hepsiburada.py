@@ -547,8 +547,17 @@ async def hepsiburada_import_by_number(on: str = "", current_user: dict = Depend
             onum = order_data["order_number"]
             existing = await db.orders.find_one({"order_number": onum, "platform": "hepsiburada"})
             if existing:
-                await db.orders.update_one({"_id": existing["_id"]},
-                                           {"$set": {k: v for k, v in order_data.items() if k != "status"}})
+                _upd = {k: v for k, v in order_data.items() if k != "status"}
+                # KISMİ İPTAL TESPİTİ: müşteri kalemlerden birini iptal edince HB yanıtındaki
+                # toplam adet DÜŞER. Sipariş tamamen iptal DEĞİLKEN adet azaldıysa işaretle →
+                # panelde "iptal edilen ürün var" kırmızı noktası yanar.
+                def _qsum(o):
+                    return sum(int(it.get("quantity") or 1) for it in (o.get("items") or []))
+                _old_q, _new_q = _qsum(existing), _qsum(order_data)
+                if 0 < _new_q < _old_q and not existing.get("partial_cancelled"):
+                    _upd["partial_cancelled"] = True
+                    _upd["partial_cancel_at"] = datetime.now(timezone.utc).isoformat()
+                await db.orders.update_one({"_id": existing["_id"]}, {"$set": _upd})
                 updated += 1
             else:
                 order_data["id"] = generate_id()
@@ -642,8 +651,13 @@ async def import_selected_hepsiburada_orders(req: HbOrderImportReq, current_user
         try:
             existing = await db.orders.find_one({"order_number": on, "platform": "hepsiburada"})
             if existing:
-                await db.orders.update_one({"_id": existing["_id"]},
-                                           {"$set": {k: v for k, v in order_data.items() if k != "status"}})
+                _upd = {k: v for k, v in order_data.items() if k != "status"}
+                _old_q = sum(int(it.get("quantity") or 1) for it in (existing.get("items") or []))
+                _new_q = sum(int(it.get("quantity") or 1) for it in (order_data.get("items") or []))
+                if 0 < _new_q < _old_q and not existing.get("partial_cancelled"):
+                    _upd["partial_cancelled"] = True
+                    _upd["partial_cancel_at"] = datetime.now(timezone.utc).isoformat()
+                await db.orders.update_one({"_id": existing["_id"]}, {"$set": _upd})
                 updated += 1
             else:
                 order_data["id"] = generate_id()
