@@ -89,7 +89,7 @@ export const TRAINING = [
         where: "Siparişler → İptaller.",
         how: [
           "Ödeme tipine (kart, havale, kapıda) göre filtrele.",
-          "Ödenmiş ve iptal edilen (mor) siparişte 'İptal Ödemesi Yapıldı' durumunu işaretle.",
+          "Ödenmiş ve iptal edilen (mor) siparişte 'Ödemeli İptal Onaylandı' durumunu işaretle.",
         ],
         tips: ["Ödenip iptal edilen siparişin iptali muhasebe yetkisi ister."],
       },

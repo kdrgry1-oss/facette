@@ -176,7 +176,7 @@ export default function Dashboard() {
     refunded: "İade Bedeli Ödendi",
     partial_refunded: "Kısmi İade Yapıldı",
     cancelled: "İptal Edildi",
-    cancel_refunded: "İptal Ödemesi Yapıldı",
+    cancel_refunded: "Ödemeli İptal Onaylandı",
     payment_failed: "Ödeme Alınamadı",
   };
 

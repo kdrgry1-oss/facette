@@ -1767,13 +1767,13 @@ async def update_order_status(
             if "*" not in _perms and "returns.expense_note" not in _perms:
                 raise HTTPException(status_code=403,
                     detail="Ödemesi alınmış (mor) siparişin iptali yalnızca Finans (muhasebe) yetkisine sahip kullanıcı tarafından yapılabilir.")
-    # #19: "İptal Ödemesi Yapıldı" durumu yalnızca Finans (muhasebe) tarafından seçilebilir.
+    # #19: "Ödemeli İptal Onaylandı" durumu yalnızca Finans (muhasebe) tarafından seçilebilir.
     if status == "cancel_refunded":
         from .deps import get_effective_permissions
         _perms = await get_effective_permissions(current_user)
         if "*" not in _perms and "returns.expense_note" not in _perms:
             raise HTTPException(status_code=403,
-                detail="'İptal Ödemesi Yapıldı' durumu yalnızca Finans (muhasebe) yetkisine sahip kullanıcı tarafından seçilebilir.")
+                detail="'Ödemeli İptal Onaylandı' durumu yalnızca Finans (muhasebe) yetkisine sahip kullanıcı tarafından seçilebilir.")
 
     # DENETİM FIX: reaktivasyon (iptal/iade → aktif fulfillment) stok re-decrement'i için
     # ÖNCEKİ durumu güncellemeden ÖNCE yakala.
