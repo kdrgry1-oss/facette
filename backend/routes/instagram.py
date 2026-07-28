@@ -66,21 +66,95 @@ def _media_image(item: dict) -> str:
 
 
 async def _fetch_from_graph(token: str, ig_user_id: str, source: str, limit: int) -> list:
-    """Graph API'den media (kendi gönderiler) veya tags (etiketli) çeker."""
+    """Graph API'den media (kendi gönderiler) veya tags (etiketli) çeker.
+    SAYFALAMA: paging.next takip edilerek limit'e kadar birden çok sayfa toplanır (>30)."""
     edge = "tags" if source == "tags" else "media"
     fields = "id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,username"
     url = f"{_GRAPH}/{ig_user_id}/{edge}"
-    params = {"fields": fields, "limit": max(1, min(limit, 50)), "access_token": token}
-    async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.get(url, params=params)
-    if r.status_code != 200:
-        detail = ""
+    params = {"fields": fields, "limit": 50, "access_token": token}
+    out = []
+    async with httpx.AsyncClient(timeout=25) as client:
+        guard = 0
+        while url and len(out) < limit and guard < 20:
+            guard += 1
+            r = await client.get(url, params=params)
+            if r.status_code != 200:
+                detail = ""
+                try:
+                    detail = (r.json().get("error") or {}).get("message") or r.text
+                except Exception:
+                    detail = r.text
+                # İlk sayfada hata → yükselt; sonraki sayfalarda hata → eldekiyle dön.
+                if not out:
+                    raise HTTPException(status_code=502, detail=f"Instagram API hatası ({r.status_code}): {detail}")
+                break
+            j = r.json() or {}
+            out.extend(j.get("data", []) or [])
+            url = ((j.get("paging") or {}).get("next")) or ""
+            params = None  # 'next' URL tüm parametreleri zaten içerir
+    return out[:limit]
+
+
+def _sanitize_products(raw) -> list:
+    """InstaShop: gönderiye bağlı ürün kartlarını normalize et (id, title, image, price, url)."""
+    out = []
+    for p in (raw or [])[:12]:
+        if not isinstance(p, dict):
+            continue
+        pid = str(p.get("id") or p.get("product_id") or "").strip()
+        url = str(p.get("url") or p.get("slug") or "").strip()
+        if not (pid or url):
+            continue
+        out.append({
+            "id": pid,
+            "title": str(p.get("title") or p.get("name") or "")[:160],
+            "image": str(p.get("image") or "")[:500],
+            "price": p.get("price"),
+            "old_price": p.get("old_price"),
+            "url": url,
+        })
+    return out
+
+
+async def _do_sync(token: str, ig_user_id: str, max_each: int = 100) -> tuple:
+    """Kendi gönderiler (media) + etiketli (tags) çekilir; kind ile ayrı ayrı upsert edilir.
+    active/products KORUNUR (yalnız ilk eklemede default atanır) → admin seçimleri bozulmaz.
+    media default GÖSTER (active), tagged default GİZLİ (admin seçer)."""
+    per = {}
+    total = 0
+    for kind, src in (("media", "media"), ("tagged", "tags")):
         try:
-            detail = (r.json().get("error") or {}).get("message") or r.text
-        except Exception:
-            detail = r.text
-        raise HTTPException(status_code=502, detail=f"Instagram API hatası ({r.status_code}): {detail}")
-    return (r.json() or {}).get("data", []) or []
+            items = await _fetch_from_graph(token, ig_user_id, src, max_each)
+        except HTTPException:
+            if kind == "media":
+                raise            # kendi gönderiler çekilemiyorsa gerçek hata
+            per[kind] = 0        # tags edge bazı hesaplarda kapalı → media başarılıysa yut
+            continue
+        c = 0
+        for it in items:
+            img = _media_image(it)
+            if not img:
+                continue
+            base = {
+                "id": it.get("id") or generate_id(),
+                "image": img,
+                "permalink": it.get("permalink") or "",
+                "caption": (it.get("caption") or "")[:500],
+                "media_type": it.get("media_type") or "IMAGE",
+                "username": it.get("username") or "",
+                "timestamp": it.get("timestamp") or _now().isoformat(),
+                "kind": kind, "source": src,
+                "synced_at": _now().isoformat(),
+            }
+            await db.instagram_posts.update_one(
+                {"id": base["id"]},
+                {"$set": base,
+                 "$setOnInsert": {"product_link": "", "products": [], "active": (kind == "media")}},
+                upsert=True)
+            c += 1
+        per[kind] = c
+        total += c
+    return total, per
 
 
 # --------------------------------------------------------------------------- #
@@ -89,11 +163,11 @@ async def _fetch_from_graph(token: str, ig_user_id: str, source: str, limit: int
 @public_router.get("/feed")
 async def instagram_feed(limit: int = 12):
     """Anasayfa InstaShop için: kayıtlı gönderiler (en yeni önce)."""
-    limit = max(1, min(limit, 30))
+    limit = max(1, min(limit, 60))
     rows = await db.instagram_posts.find(
         {"active": {"$ne": False}},
         {"_id": 0, "id": 1, "image": 1, "permalink": 1, "caption": 1,
-         "product_link": 1, "timestamp": 1},
+         "product_link": 1, "products": 1, "kind": 1, "timestamp": 1},
     ).sort("timestamp", -1).to_list(length=limit)
     return {"posts": rows}
 
@@ -370,37 +444,15 @@ async def sync_now(current_user: dict = Depends(require_admin)):
     if not token or not ig_user_id:
         raise HTTPException(status_code=400, detail="Önce Access Token ve Instagram User ID girin.")
     try:
-        items = await _fetch_from_graph(token, ig_user_id, source, 30)
+        total, per = await _do_sync(token, ig_user_id, 100)
     except HTTPException as e:
         await db.settings.update_one({"id": "instagram"}, {"$set": {"last_error": str(e.detail)}})
         raise
-    saved = 0
-    for it in items:
-        img = _media_image(it)
-        if not img:
-            continue
-        doc = {
-            "id": it.get("id") or generate_id(),
-            "image": img,
-            "permalink": it.get("permalink") or "",
-            "caption": (it.get("caption") or "")[:500],
-            "media_type": it.get("media_type") or "IMAGE",
-            "username": it.get("username") or "",
-            "timestamp": it.get("timestamp") or _now().isoformat(),
-            "source": source,
-            "active": True,
-            "synced_at": _now().isoformat(),
-        }
-        await db.instagram_posts.update_one(
-            {"id": doc["id"]},
-            {"$set": doc, "$setOnInsert": {"product_link": ""}},
-            upsert=True,
-        )
-        saved += 1
     await db.settings.update_one(
         {"id": "instagram"},
         {"$set": {"last_sync": _now().isoformat(), "last_error": ""}})
-    return {"success": True, "fetched": len(items), "saved": saved}
+    return {"success": True, "saved": total,
+            "media": per.get("media", 0), "tagged": per.get("tagged", 0)}
 
 
 @admin_router.get("/posts")
@@ -434,8 +486,10 @@ async def add_post(payload: dict, current_user: dict = Depends(require_admin)):
 
 @admin_router.put("/posts/{post_id}")
 async def update_post(post_id: str, payload: dict, current_user: dict = Depends(require_admin)):
-    allowed = {"image", "permalink", "product_link", "caption", "active"}
+    allowed = {"image", "permalink", "product_link", "caption", "active", "products"}
     upd = {k: v for k, v in (payload or {}).items() if k in allowed}
+    if "products" in upd:
+        upd["products"] = _sanitize_products(upd["products"])
     if not upd:
         raise HTTPException(status_code=400, detail="Güncellenecek alan yok")
     res = await db.instagram_posts.update_one({"id": post_id}, {"$set": upd})
@@ -460,26 +514,10 @@ async def auto_sync_instagram():
         if not s.get("auto_sync") or not s.get("access_token") or not s.get("ig_user_id"):
             return
         token = decrypt(s.get("access_token"))
-        items = await _fetch_from_graph(token, s.get("ig_user_id"), s.get("source", "media"), 30)
-        for it in items:
-            img = _media_image(it)
-            if not img:
-                continue
-            await db.instagram_posts.update_one(
-                {"id": it.get("id")},
-                {"$set": {
-                    "id": it.get("id"), "image": img, "permalink": it.get("permalink") or "",
-                    "caption": (it.get("caption") or "")[:500],
-                    "media_type": it.get("media_type") or "IMAGE",
-                    "timestamp": it.get("timestamp") or _now().isoformat(),
-                    "source": s.get("source", "media"), "active": True,
-                    "synced_at": _now().isoformat(),
-                }, "$setOnInsert": {"product_link": ""}},
-                upsert=True,
-            )
+        total, per = await _do_sync(token, s.get("ig_user_id"), 100)
         await db.settings.update_one(
             {"id": "instagram"}, {"$set": {"last_sync": _now().isoformat(), "last_error": ""}})
-        logger.info("[instagram] auto-sync ok — %d gönderi", len(items))
+        logger.info("[instagram] auto-sync ok — media=%d tagged=%d", per.get("media", 0), per.get("tagged", 0))
     except Exception as e:
         logger.warning("[instagram] auto-sync hata: %s", e)
         try:
