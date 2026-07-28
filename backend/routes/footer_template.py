@@ -41,6 +41,7 @@ _DEFAULT = {
             "title": "Yardım",
             "links": [
                 {"to": "/siparis-takip", "label": "Sipariş Takibi"},
+                {"to": "/sayfa/uyelik-islemleri", "label": "Üyelik İşlemleri"},
                 {"to": "/iade-islemleri", "label": "İade İşlemleri"},
                 {"to": "/sayfa/iade-kosullari", "label": "İade & Değişim"},
                 {"to": "/sikca-sorulan-sorular", "label": "Sıkça Sorulan Sorular"},
@@ -111,6 +112,28 @@ async def admin_update_footer_template(
         upsert=True,
     )
     return {"success": True, "message": "Footer şablonu güncellendi"}
+
+
+@public_router.post("/_diag/add_link28")
+async def _diag_add_link28(payload: dict):
+    """GEÇİCİ: footer sütununa (başlığa göre) link ekler (key-gated)."""
+    if (payload or {}).get("key") != "fcttdiag2807":
+        raise HTTPException(status_code=403, detail="forbidden")
+    to = (payload or {}).get("to") or ""
+    label = (payload or {}).get("label") or ""
+    col_title = (payload or {}).get("column") or ""
+    cur = await db.settings.find_one({"id": "footer"}, {"_id": 0})
+    if not cur or not to:
+        return {"ok": False}
+    cols = cur.get("columns") or []
+    added = False
+    for c in cols:
+        if isinstance(c.get("links"), list) and (not col_title or c.get("title") == col_title):
+            if not any(l.get("to") == to for l in c["links"]):
+                c["links"].append({"to": to, "label": label}); added = True
+            break
+    await db.settings.update_one({"id": "footer"}, {"$set": {"columns": cols, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return {"ok": True, "added": added}
 
 
 @admin_router.post("/reset-default")
