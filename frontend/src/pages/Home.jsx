@@ -717,35 +717,32 @@ function InstaShop({ block }) {
 
   return (
     <section className="py-14 md:py-20 bg-white" data-testid="instashop">
-      <div className="max-w-screen-2xl mx-auto">
-        <div className="text-center mb-8 md:mb-10 px-4">
-          {/* "Senin için seçtik" ile aynı font */}
-          <h2 className="text-3xl md:text-5xl font-light tracking-tight text-black leading-none">GET THE LOOK</h2>
-        </div>
-        <div className="relative group/car">
-          <button onClick={() => scrollBy(-1)} aria-label="Geri"
-            className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/95 shadow-lg items-center justify-center opacity-0 group-hover/car:opacity-100 transition hover:bg-white">
-            <ChevronLeft size={20} />
-          </button>
-          <button onClick={() => scrollBy(1)} aria-label="İleri"
-            className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/95 shadow-lg items-center justify-center opacity-0 group-hover/car:opacity-100 transition hover:bg-white">
-            <ChevronRight size={20} />
-          </button>
-          <div ref={scrollerRef}
-            className="flex gap-2 sm:gap-3 overflow-x-auto snap-x snap-mandatory px-4 pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            {posts.map((p, index) => (
-              <div key={p.id || index}
-                className="snap-start shrink-0 w-[72vw] sm:w-[46%] lg:w-[23%] aspect-[3/4] rounded-lg overflow-hidden bg-gray-100">
-                <ShopTile post={p} onShop={setModalPost} />
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="text-center mt-8 px-4">
-          <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 text-[11px] tracking-[0.24em] uppercase text-gray-600 hover:text-black border-b border-gray-300 hover:border-black pb-1.5 transition-colors">
-            <Instagram size={14} /> Instagram'da bize katılın · @facette
-          </a>
+      {/* Başlık + hemen altında Instagram daveti — ortalı */}
+      <div className="text-center mb-8 md:mb-10 px-4">
+        <h2 className="text-3xl md:text-5xl font-light tracking-tight text-black leading-none">Get The Look</h2>
+        <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer"
+          className="mt-3.5 inline-flex items-center gap-2 text-xs text-gray-500 hover:text-black border-b border-gray-300 hover:border-black pb-1 transition-colors">
+          <Instagram size={14} /> Instagram'da bize katılın @facette
+        </a>
+      </div>
+      {/* Carousel — TAM GENİŞLİK (sağdan sola tüm alan) */}
+      <div className="relative group/car">
+        <button onClick={() => scrollBy(-1)} aria-label="Geri"
+          className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/95 shadow-lg items-center justify-center opacity-0 group-hover/car:opacity-100 transition hover:bg-white">
+          <ChevronLeft size={20} />
+        </button>
+        <button onClick={() => scrollBy(1)} aria-label="İleri"
+          className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/95 shadow-lg items-center justify-center opacity-0 group-hover/car:opacity-100 transition hover:bg-white">
+          <ChevronRight size={20} />
+        </button>
+        <div ref={scrollerRef}
+          className="flex gap-2 sm:gap-3 overflow-x-auto snap-x snap-mandatory px-3 md:px-4 pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          {posts.map((p, index) => (
+            <div key={p.id || index}
+              className="snap-start shrink-0 w-[72vw] sm:w-[46%] lg:w-[23.5%] aspect-[3/4] rounded-lg overflow-hidden bg-gray-100">
+              <ShopTile post={p} onShop={setModalPost} />
+            </div>
+          ))}
         </div>
       </div>
       {modalPost && <ShopLookModal post={modalPost} onClose={() => setModalPost(null)} />}

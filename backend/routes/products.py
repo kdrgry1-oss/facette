@@ -1245,19 +1245,25 @@ async def list_trashed_products(
 
 
 @router.get("/_diag/sibs28")
-async def _diag_siblings(sc: str = "", name: str = "", key: str = ""):
+async def _diag_siblings(sc: str = "", name: str = "", bc: str = "", full_id: str = "", key: str = ""):
     """GEÇİCİ salt-okunur tanı: aynı stok kodu / ada sahip TÜM ürünleri (aktif+pasif+silinmiş)
     döndürür — kaybolan rengin nereye gittiğini (pasif mi, başka renge mi yazıldı, varyantı
-    başka üründe mi) görmek için. HİÇBİR ŞEY DEĞİŞTİRMEZ. İş bitince kaldırılacak."""
+    başka üründe mi) görmek için. HİÇBİR ŞEY DEĞİŞTİRMEZ. İş bitince kaldırılacak.
+    bc: barkoda göre ara (varyant barkodu). full_id: tek ürünün TAM belgesini döndür."""
     if key != "fcttdiag2807":
         raise HTTPException(status_code=403, detail="forbidden")
+    if full_id:
+        p = await db.products.find_one({"id": full_id}, {"_id": 0})
+        return {"full": p}
     q = {}
     if sc:
         q["stock_code"] = sc
     elif name:
         q["name"] = {"$regex": name, "$options": "i"}
+    elif bc:
+        q["variants.barcode"] = bc
     else:
-        raise HTTPException(status_code=400, detail="sc veya name gerekli")
+        raise HTTPException(status_code=400, detail="sc, name veya bc gerekli")
     rows = []
     async for p in db.products.find(q, {
         "_id": 0, "id": 1, "name": 1, "color": 1, "stock_code": 1, "urun_karti_id": 1,
@@ -1273,6 +1279,7 @@ async def _diag_siblings(sc: str = "", name: str = "", key: str = ""):
             "updated_at": p.get("updated_at"), "synced_from": p.get("synced_from"),
             "desc_len": len(p.get("description") or ""),
             "variant_colors": sorted({str(v.get("color") or "") for v in vs}),
+            "variant_barcodes": [str(v.get("barcode") or "") for v in vs],
             "variant_count": len(vs),
         })
     return {"count": len(rows), "rows": rows}
