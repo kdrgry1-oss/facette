@@ -26,6 +26,18 @@ function MegaPrice({ p }) {
   return <p className="text-[11px] tabular-nums text-black/65">{pv.display.toFixed(2)} TL</p>;
 }
 
+// Arama önizleme/öneri mini kartlarında görsel üzerine indirim oranı rozeti
+// (vitrin ProductCard ile aynı — sol üst köşe). priceView tek kaynağından.
+function MegaDiscountBadge({ p }) {
+  const pv = priceView(p);
+  if (!pv.hasDiscount || pv.discountPct <= 0) return null;
+  return (
+    <div className="absolute top-0 left-0 z-10 bg-[#6b6b64] text-white text-[11px] font-normal px-2 py-1 leading-none">
+      %{pv.discountPct}
+    </div>
+  );
+}
+
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Menü — TEK KAYNAK panel (Admin > Tasarım > Menü Yönetimi → page-blocks/header-menu).
@@ -695,7 +707,8 @@ export default function Header({ hideMenu = false }) {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
                     {suggestedProducts.map((p) => (
                       <button key={p.id} onClick={() => { navigate(`/${p.slug}`); closeSearch(); }} className="text-left group">
-                        <div className="aspect-[2/3] bg-gray-50 mb-2.5 overflow-hidden">
+                        <div className="relative aspect-[2/3] bg-gray-50 mb-2.5 overflow-hidden">
+                          <MegaDiscountBadge p={p} />
                           <img src={optimizeImg(p.images?.[0], 500)} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
                         </div>
                         <p className="text-xs font-light line-clamp-1 mb-0.5">{p.name}</p>
@@ -711,7 +724,8 @@ export default function Header({ hideMenu = false }) {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
                   {searchResults.map((p) => (
                     <button key={p.id} onClick={() => { navigate(`/${p.slug}`); closeSearch(); }} className="text-left group">
-                      <div className="aspect-[2/3] bg-gray-50 mb-2.5 overflow-hidden">
+                      <div className="relative aspect-[2/3] bg-gray-50 mb-2.5 overflow-hidden">
+                        <MegaDiscountBadge p={p} />
                         <img src={optimizeImg(p.images?.[0], 500)} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
                       </div>
                       <p className="text-xs font-light line-clamp-1 mb-0.5">{p.name}</p>
