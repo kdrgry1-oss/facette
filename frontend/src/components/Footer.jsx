@@ -147,7 +147,6 @@ const DEFAULT_COLUMNS = [
   { title: "Kurumsal", links: [
     { to: "/sayfa/hakkimizda", label: "Hakkımızda" },
     { to: "/sayfa/mesafeli-satis", label: "Mesafeli Satış Sözleşmesi" },
-    { to: "/sayfa/on-bilgilendirme", label: "Ön Bilgilendirme" },
     { to: "/sayfa/kvkk", label: "KVKK Aydınlatma Metni" },
     { to: "/sayfa/gizlilik", label: "Gizlilik Politikası" },
   ]},

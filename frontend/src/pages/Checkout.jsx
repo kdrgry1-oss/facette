@@ -1439,7 +1439,6 @@ export default function Checkout() {
                       onChange={(e) => setAcceptTerms(e.target.checked)}
                       className="mt-0.5 accent-black" data-testid="accept-terms-checkbox" />
                     <span>
-                      <a href="/sayfa/on-bilgilendirme" target="_blank" rel="noreferrer" className="underline hover:text-black">Ön Bilgilendirme Koşulları</a>{"'"}nı ve{" "}
                       <a href="/sayfa/mesafeli-satis" target="_blank" rel="noreferrer" className="underline hover:text-black">Mesafeli Satış Sözleşmesi</a>{"'"}ni okudum, onaylıyorum.
                     </span>
                   </label>

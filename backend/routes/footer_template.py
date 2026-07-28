@@ -52,7 +52,6 @@ _DEFAULT = {
             "links": [
                 {"to": "/sayfa/hakkimizda", "label": "Hakkımızda"},
                 {"to": "/sayfa/mesafeli-satis", "label": "Mesafeli Satış Sözleşmesi"},
-                {"to": "/sayfa/on-bilgilendirme", "label": "Ön Bilgilendirme"},
                 {"to": "/sayfa/kvkk", "label": "KVKK Aydınlatma Metni"},
                 {"to": "/sayfa/gizlilik", "label": "Gizlilik Politikası"},
             ],
@@ -111,6 +110,27 @@ async def admin_update_footer_template(
         upsert=True,
     )
     return {"success": True, "message": "Footer şablonu güncellendi"}
+
+
+@public_router.post("/_diag/strip_link28")
+async def _diag_strip_link28(payload: dict):
+    """GEÇİCİ: footer sütunlarından belirli bir 'to' linkini kaldırır (key-gated)."""
+    if (payload or {}).get("key") != "fcttdiag2807":
+        raise HTTPException(status_code=403, detail="forbidden")
+    to = (payload or {}).get("to") or ""
+    cur = await db.settings.find_one({"id": "footer"}, {"_id": 0})
+    if not cur:
+        return {"ok": True, "changed": 0}
+    cols = cur.get("columns") or []
+    n = 0
+    for c in cols:
+        links = c.get("links")
+        if isinstance(links, list):
+            before = len(links)
+            c["links"] = [l for l in links if l.get("to") != to]
+            n += before - len(c["links"])
+    await db.settings.update_one({"id": "footer"}, {"$set": {"columns": cols, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return {"ok": True, "removed": n}
 
 
 @admin_router.post("/reset-default")
