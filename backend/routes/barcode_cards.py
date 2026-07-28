@@ -103,8 +103,9 @@ def _card_html_for_variant(product: dict, variant: dict) -> str:
     def _hb(v):  # GÜVENLİK: ürün/varyant alanlarını HTML-escape et (pazaryeri kaynaklı stored-XSS)
         return _html_b.escape(str(v if v is not None else ""))
     name = _hb((product.get("name", "") or "").strip())
-    card_no = _hb(str(product.get("urun_karti_id") or product.get("csv_card_id") or "").strip())
     stock_code = variant.get("stock_code") or product.get("stock_code") or ""
+    # Barkod etiketinde ürün KART ID'si değil STOK KODU yazılır (kullanıcı isteği).
+    card_no = _hb(str(stock_code or "").strip())
     bar_code = variant.get("barcode") or product.get("barcode") or stock_code
     size = _hb((variant.get("size") or "").strip())
     color = _hb((variant.get("color") or "").strip())
