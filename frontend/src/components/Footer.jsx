@@ -234,7 +234,14 @@ export default function Footer() {
       }
     }
   } catch (_) { /* yoksay */ }
-  const social = tpl?.social || { instagram: "https://instagram.com/facette" };
+  // Sosyal linkler footer ayarından gelir; girilmemişse markanın varsayılan hesaplarına düşer.
+  const _socialCfg = tpl?.social || {};
+  const social = {
+    instagram: _socialCfg.instagram || "https://instagram.com/facette",
+    tiktok: _socialCfg.tiktok || "https://www.tiktok.com/@facetteofficial",
+    facebook: _socialCfg.facebook || "https://facebook.com/facette",
+    twitter: _socialCfg.twitter || "",
+  };
   const copyright = tpl?.copyright || `© ${new Date().getFullYear()} Facette Dış. Tic. A.Ş. – Tüm hakları saklıdır.`;
 
   return (
@@ -246,16 +253,25 @@ export default function Footer() {
         <div className="md:flex md:items-end md:justify-between mb-12 md:mb-16">
           <div className="max-w-md">
             <Link to="/" className="inline-block mb-5">
-              <span className="text-2xl tracking-[0.45em] font-light">FACETTE</span>
+              {/* Koyu footer → logo beyaza zorlanır (brightness-0 + invert) */}
+              <img src="/logo.webp" alt="FACETTE" className="h-6 md:h-7 w-auto brightness-0 invert" />
             </Link>
             <p className="text-sm text-white/60 leading-relaxed">
-              Farkı hisset. Kadın modasında yeni koleksiyon, zamansız parçalar.
+              inspired by who you are. Kadın modasında yeni koleksiyon, zamansız parçalar.
             </p>
           </div>
           <div className="flex gap-5 mt-8 md:mt-0">
             {social.instagram && (
               <a href={social.instagram} target="_blank" rel="noreferrer noopener" className="text-white/70 hover:text-white transition-colors" aria-label="Instagram">
                 <Instagram size={18} strokeWidth={1.4} />
+              </a>
+            )}
+            {social.tiktok && (
+              <a href={social.tiktok} target="_blank" rel="noreferrer noopener" className="text-white/70 hover:text-white transition-colors" aria-label="TikTok">
+                {/* lucide'da TikTok yok → inline SVG */}
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M16.5 3c.29 2.02 1.45 3.42 3.5 3.6v2.36c-1.18.11-2.21-.27-3.41-1v4.9c0 4.4-4.8 7.18-8.63 4.68-2.45-1.6-2.9-5.02-.85-7.16 1.2-1.27 3.02-1.78 4.89-1.31v2.5c-.4-.12-.86-.16-1.34-.05-1.05.22-1.85 1.14-1.74 2.31.13 1.5 1.9 2.28 3.1 1.34.66-.5.9-1.2.9-2.02V3h3.63z"/>
+                </svg>
               </a>
             )}
             {social.facebook && (

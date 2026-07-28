@@ -551,7 +551,7 @@ export default function Header({ hideMenu = false }) {
               <X size={20} strokeWidth={1.4} />
             </button>
           </div>
-          <nav className="overflow-y-auto h-[calc(100vh-56px)] flex flex-col">
+          <nav className="overflow-y-auto h-[calc(100dvh-56px)] flex flex-col">
             {/* Primary Categories — sekmeler panelden (Tasarım > Menü Yönetimi) */}
             <div className="px-5 pt-6 pb-4">
               {visibleTabs.map((tab, ti) => {
@@ -616,8 +616,9 @@ export default function Header({ hideMenu = false }) {
               })}
             </div>
 
-            {/* Bottom: Account + Service */}
-            <div className="mt-auto px-5 py-6 bg-stone-50 border-t border-black/5 space-y-2.5">
+            {/* Bottom: Account + Service — mobil tarayıcı alt çubuğunun ARKASINDA kalmasın diye
+                safe-area + ekstra alt boşlukla yukarı çekildi (100dvh ile birlikte). */}
+            <div className="mt-auto px-5 pt-6 pb-[calc(2rem+env(safe-area-inset-bottom))] bg-stone-50 border-t border-black/5 space-y-2.5">
               <Link to={user ? "/hesabim" : "/giris"} className="block text-[13px] font-light text-black/85" onClick={() => setMobileMenuOpen(false)}>
                 {user ? "Hesabım" : "Giriş Yap / Üye Ol"}
               </Link>
