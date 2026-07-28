@@ -239,7 +239,7 @@ export default function Footer() {
   const social = {
     instagram: _socialCfg.instagram || "https://instagram.com/facette",
     tiktok: _socialCfg.tiktok || "https://www.tiktok.com/@facetteofficial",
-    facebook: _socialCfg.facebook || "https://facebook.com/facette",
+    facebook: _socialCfg.facebook || "https://www.facebook.com/faceette",
     twitter: _socialCfg.twitter || "",
   };
   const copyright = tpl?.copyright || `© ${new Date().getFullYear()} Facette Dış. Tic. A.Ş. – Tüm hakları saklıdır.`;
@@ -257,31 +257,31 @@ export default function Footer() {
               <img src="/logo.webp" alt="FACETTE" className="h-6 md:h-7 w-auto brightness-0 invert" />
             </Link>
             <p className="text-sm text-white/60 leading-relaxed">
-              inspired by who you are. Kadın modasında yeni koleksiyon, zamansız parçalar.
+              inspired by who you are
             </p>
           </div>
-          <div className="flex gap-5 mt-8 md:mt-0">
+          <div className="flex gap-7 mt-8 md:mt-0">
             {social.instagram && (
-              <a href={social.instagram} target="_blank" rel="noreferrer noopener" className="text-white/70 hover:text-white transition-colors" aria-label="Instagram">
-                <Instagram size={18} strokeWidth={1.4} />
+              <a href={social.instagram} target="_blank" rel="noreferrer noopener" className="text-white hover:text-white/70 transition-colors" aria-label="Instagram">
+                <Instagram size={30} strokeWidth={2} />
               </a>
             )}
             {social.tiktok && (
-              <a href={social.tiktok} target="_blank" rel="noreferrer noopener" className="text-white/70 hover:text-white transition-colors" aria-label="TikTok">
+              <a href={social.tiktok} target="_blank" rel="noreferrer noopener" className="text-white hover:text-white/70 transition-colors" aria-label="TikTok">
                 {/* lucide'da TikTok yok → inline SVG */}
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M16.5 3c.29 2.02 1.45 3.42 3.5 3.6v2.36c-1.18.11-2.21-.27-3.41-1v4.9c0 4.4-4.8 7.18-8.63 4.68-2.45-1.6-2.9-5.02-.85-7.16 1.2-1.27 3.02-1.78 4.89-1.31v2.5c-.4-.12-.86-.16-1.34-.05-1.05.22-1.85 1.14-1.74 2.31.13 1.5 1.9 2.28 3.1 1.34.66-.5.9-1.2.9-2.02V3h3.63z"/>
                 </svg>
               </a>
             )}
             {social.facebook && (
-              <a href={social.facebook} target="_blank" rel="noreferrer noopener" className="text-white/70 hover:text-white transition-colors" aria-label="Facebook">
-                <Facebook size={18} strokeWidth={1.4} />
+              <a href={social.facebook} target="_blank" rel="noreferrer noopener" className="text-white hover:text-white/70 transition-colors" aria-label="Facebook">
+                <Facebook size={30} strokeWidth={2} />
               </a>
             )}
             {social.twitter && (
-              <a href={social.twitter} target="_blank" rel="noreferrer noopener" className="text-white/70 hover:text-white transition-colors" aria-label="Twitter">
-                <Twitter size={18} strokeWidth={1.4} />
+              <a href={social.twitter} target="_blank" rel="noreferrer noopener" className="text-white hover:text-white/70 transition-colors" aria-label="Twitter">
+                <Twitter size={30} strokeWidth={2} />
               </a>
             )}
           </div>
@@ -297,13 +297,19 @@ export default function Footer() {
         {/* Bottom */}
         <div className="border-t border-white/10 mt-12 pt-8 flex flex-col-reverse md:flex-row justify-between items-center gap-6">
           <p className="text-[10px] tracking-[0.2em] uppercase text-white/40">{copyright}</p>
-          {/* Ödeme: iyzico güvenli ödeme etiketi + açık (beyaz) kart logoları */}
-          <div className="flex items-center gap-4">
+          {/* Ödeme: iyzico güvenli ödeme etiketi + beyaz kart rozetleri (self-contained, dış görsel yok) */}
+          <div className="flex items-center gap-4 flex-wrap justify-center md:justify-end">
             <span className="text-[10px] tracking-[0.18em] uppercase text-white/55 whitespace-nowrap">iyzico ile güvenli ödeme</span>
-            <div className="flex items-center gap-3">
-              <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" alt="Visa" className="h-4 brightness-0 invert opacity-90" loading="lazy" />
-              <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" alt="Mastercard" className="h-6 brightness-0 invert opacity-90" loading="lazy" />
-              <img src="https://upload.wikimedia.org/wikipedia/commons/b/b0/Troy_logo.svg" alt="Troy" className="h-4 brightness-0 invert opacity-90" loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+            <div className="flex items-center gap-2">
+              <span className="h-7 px-2.5 rounded-md border border-white/25 bg-white/[0.06] flex items-center text-white text-[13px] font-extrabold italic tracking-wide" aria-label="Visa">VISA</span>
+              <span className="h-7 w-11 rounded-md border border-white/25 bg-white/[0.06] flex items-center justify-center" aria-label="Mastercard">
+                <svg width="28" height="17" viewBox="0 0 28 17" aria-hidden="true">
+                  <circle cx="11" cy="8.5" r="7" fill="#fff" />
+                  <circle cx="17" cy="8.5" r="7" fill="#fff" fillOpacity="0.5" />
+                </svg>
+              </span>
+              <span className="h-7 px-2.5 rounded-md border border-white/25 bg-white/[0.06] flex items-center text-white text-[10px] font-extrabold tracking-tight" aria-label="American Express">AMEX</span>
+              <span className="h-7 px-2.5 rounded-md border border-white/25 bg-white/[0.06] flex items-center text-white text-[13px] font-bold lowercase tracking-tight" aria-label="Troy">troy</span>
             </div>
           </div>
         </div>
