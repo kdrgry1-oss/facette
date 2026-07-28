@@ -2875,10 +2875,16 @@ def map_trendyol_order(t_order: dict) -> dict:
     # Pazaryeri siparisi panele DAIMA "confirmed" (Onaylandi) duser; Trendyol'un is
     # akisi durumu (Picking/Invoiced/Shipped/Delivered) bizim operasyonel durumumuzu
     # EZMEZ. Yalnizca iptal/iade/teslim-edilemedi terminal durumlari yansir.
+    # KRİTİK: "UnDelivered" MÜŞTERİ İADESİ DEĞİL — kargo teslim edilemedi (adreste yok vb.);
+    # çoğu yeniden teslim edilir. Eskiden "returned"a eşlenmesi Delivered siparişleri iade
+    # gösterip ciroyu düşürüyordu (mutabakat: claim'siz 36 sahte iade). Artık iade sayılmaz →
+    # varsayılan "confirmed" (yeniden teslim bekliyor). Yalnız gerçek müşteri iadesi (Trendyol
+    # onaylı CLAIM) siparişi "returned" yapar (claims-sync). "UnDeliveredAndReturned" = mal
+    # geri döndü, satış tamamlanmadı → ciro dışı "cancelled".
     status_map = {
         "Cancelled": "cancelled",
         "Returned": "returned",
-        "UnDelivered": "returned",
+        "UnDeliveredAndReturned": "cancelled",
     }
     
     order_doc = {
@@ -3223,6 +3229,83 @@ async def _diag_ty_reconcile30(key: str = "", days: int = 30):
         "ty_claim_item_status_breakdown": dict(sorted(claim_status_buckets.items(), key=lambda x: -x[1])),
         "missing_sample": missing[:60], "errors": errors,
     }
+
+
+@router.post("/trendyol/_diag/fix_false_returns28")
+async def _diag_fix_false_returns28(key: str = "", dry: bool = True, days: int = 120):
+    """GEÇİCİ düzeltme: 'UnDelivered→returned' hatasının kurbanı SAHTE iadeleri onarır.
+    Hedef: platform=trendyol, statü iade-türü, AMA onaylı CLAIM YOK (return_claim_id boş ve
+    return_source 'trendyol_claim' değil). Her aday için GÜNCEL Trendyol statüsü çekilir ve
+    gerçeğine göre düzeltilir: teslim/kargo → confirmed, iptal → cancelled, geri-dönen →
+    cancelled, gerçek Returned → dokunma. dry=True önizler. İş bitince kaldırılacak."""
+    if key != "fcttdiag2807":
+        raise HTTPException(status_code=403, detail="forbidden")
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    import sys, os
+    from datetime import datetime, timezone, timedelta
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(supplier_id=config["supplier_id"], api_key=config["api_key"],
+                            api_secret=config["api_secret"], mode=config["mode"])
+    _RET = ["returned", "return_requested", "return_approved", "return_in_transit", "refunded", "partial_refunded"]
+    q = {
+        "$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}],
+        "status": {"$in": _RET},
+        "return_source": {"$nin": ["trendyol_claim"]},
+        "$and": [
+            {"$or": [{"return_claim_id": {"$exists": False}}, {"return_claim_id": None}, {"return_claim_id": ""}]},
+        ],
+    }
+    cands = await db.orders.find(q, {"_id": 0, "id": 1, "order_number": 1, "status": 1,
+                                     "return_source": 1, "created_at": 1}).to_list(1000)
+    # TY güncel statü → hedef statü
+    _TY_TO_STATUS = {
+        "Delivered": "confirmed", "Shipped": "confirmed", "ReadyToShip": "confirmed",
+        "Picking": "confirmed", "Invoiced": "confirmed", "Created": "confirmed",
+        "AtCollectionPoint": "confirmed", "UnDelivered": "confirmed",
+        "Cancelled": "cancelled", "UnDeliveredAndReturned": "cancelled",
+        "Returned": "returned",
+    }
+    plan = []
+    changed = 0
+    _now = datetime.now(timezone.utc).isoformat()
+    for o in cands:
+        onum = str(o.get("order_number") or "")
+        ty_st = "?"
+        target = "confirmed"
+        if onum:
+            try:
+                resp = await client.get_orders(order_number=onum, size=50)
+                pkgs = resp.get("content") or []
+                if pkgs:
+                    ty_st = str(pkgs[0].get("shipmentPackageStatus") or pkgs[0].get("status") or "?")
+                    target = _TY_TO_STATUS.get(ty_st, "confirmed")
+            except Exception as e:
+                plan.append({"order_number": onum, "error": str(e)[:150]})
+                continue
+        if target == o.get("status"):
+            continue  # zaten doğru
+        plan.append({"order_number": onum, "from": o.get("status"), "ty_status": ty_st, "to": target})
+        if not dry:
+            _set = {"status": target, "updated_at": _now}
+            _unset = {"returned_at": "", "return_source": "", "return_claim_id": ""}
+            if target == "cancelled":
+                _set["cancelled_at"] = _now
+                _set["cancel_source"] = "trendyol_undelivered_return"
+            await db.orders.update_one({"id": o["id"]}, {
+                "$set": _set, "$unset": _unset,
+                "$push": {"status_history": {"status": target, "at": _now, "by": "false-return-fix",
+                                             "note": f"UnDelivered→returned hatası düzeltildi (TY={ty_st})"}},
+            })
+            changed += 1
+    _to_counts: dict = {}
+    for p in plan:
+        if "to" in p:
+            _to_counts[p["to"]] = _to_counts.get(p["to"], 0) + 1
+    return {"dry": dry, "candidates": len(cands), "would_change": len([p for p in plan if "to" in p]),
+            "changed": changed, "target_breakdown": _to_counts, "plan_sample": plan[:80]}
 
 
 @router.post("/trendyol/orders/import")
