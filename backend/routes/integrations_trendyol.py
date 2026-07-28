@@ -3106,6 +3106,7 @@ async def _diag_ty_reconcile30(key: str = "", days: int = 30):
     from trendyol_client import TrendyolClient
     client = TrendyolClient(supplier_id=config["supplier_id"], api_key=config["api_key"],
                             api_secret=config["api_secret"], mode=config["mode"])
+    _RET = {"returned", "return_requested", "return_approved", "return_in_transit", "refunded", "partial_refunded"}
     ed = datetime.now(timezone.utc)
     sd = ed - timedelta(days=int(days))
     WIN = timedelta(days=13)
@@ -3113,6 +3114,10 @@ async def _diag_ty_reconcile30(key: str = "", days: int = 30):
     seen = set()
     ty_status: dict = {}
     db_status: dict = {}
+    ret_source: dict = {}       # bizim 'returned' siparişleri hangi kaynakla işaretlenmiş
+    ret_with_claim = 0          # return_claim_id dolu olanlar
+    ret_no_claim = 0            # iade statüsünde ama claim id YOK (şüpheli)
+    ty_delivered_but_returned = 0  # TY'de Delivered ama bizde iade
     missing = []
     in_db = 0
     errors = []
@@ -3135,11 +3140,20 @@ async def _diag_ty_reconcile30(key: str = "", days: int = 30):
                 st = str(t.get("shipmentPackageStatus") or t.get("status") or "?")
                 ty_status[st] = ty_status.get(st, 0) + 1
                 doc = await db.orders.find_one({"order_number": onum, "platform": "trendyol"},
-                                               {"_id": 0, "status": 1})
+                                               {"_id": 0, "status": 1, "return_source": 1, "return_claim_id": 1})
                 if doc:
                     in_db += 1
                     dst = str(doc.get("status") or "?")
                     db_status[dst] = db_status.get(dst, 0) + 1
+                    if dst in _RET:
+                        _src = str(doc.get("return_source") or "(yok)")
+                        ret_source[_src] = ret_source.get(_src, 0) + 1
+                        if str(doc.get("return_claim_id") or "").strip():
+                            ret_with_claim += 1
+                        else:
+                            ret_no_claim += 1
+                        if st in ("Delivered", "Shipped", "AtCollectionPoint"):
+                            ty_delivered_but_returned += 1
                 else:
                     missing.append({"orderNumber": onum, "ty_status": st,
                                     "date": _ms_to_iso(t.get("orderDate"))})
@@ -3148,11 +3162,65 @@ async def _diag_ty_reconcile30(key: str = "", days: int = 30):
             if not content or page >= total_pages:
                 break
         cur = wend
+
+    # --- Trendyol'un GERÇEK claim (iade/iptal talebi) tablosu: son N gün, claim tarihine göre ---
+    claim_ids = set()
+    claim_status_buckets: dict = {}
+    accepted_order_nums = set()
+    claim_orders = set()
+    c_end = ed
+    while c_end > sd:
+        c_start = max(c_end - timedelta(days=15), sd)
+        cs_ms, ce_ms = int(c_start.timestamp() * 1000), int(c_end.timestamp() * 1000)
+        cpage = 0
+        while True:
+            try:
+                curl = f"{client.base_url}/order/sellers/{client.supplier_id}/claims"
+                async with httpx.AsyncClient(timeout=30.0) as hc:
+                    cr = await hc.get(curl, headers=client._get_headers(),
+                                      params={"page": cpage, "size": 200, "startDate": cs_ms, "endDate": ce_ms})
+                    cr.raise_for_status()
+                    cdata = cr.json()
+            except Exception as e:
+                errors.append({"claims_window": c_start.date().isoformat(), "error": str(e)[:200]})
+                break
+            ccontent = cdata.get("content") or []
+            for cl in ccontent:
+                cid = str(cl.get("claimId") or cl.get("id") or "")
+                if not cid or cid in claim_ids:
+                    continue
+                claim_ids.add(cid)
+                onum = str(cl.get("orderNumber") or "")
+                if onum:
+                    claim_orders.add(onum)
+                has_accepted = False
+                for _it in (cl.get("items") or []):
+                    for _ci in (_it.get("claimItems") or []):
+                        nm = ((_ci.get("claimItemStatus") or {}).get("name") or "").strip() or "?"
+                        claim_status_buckets[nm] = claim_status_buckets.get(nm, 0) + 1
+                        if nm == "Accepted":
+                            has_accepted = True
+                if has_accepted and onum:
+                    accepted_order_nums.add(onum)
+            ctp = cdata.get("totalPages") or 0
+            cpage += 1
+            if not ccontent or cpage >= ctp:
+                break
+        c_end = c_start
+
     return {
         "days": int(days), "range": {"start": sd.isoformat(), "end": ed.isoformat()},
         "ty_unique_orders": len(seen), "in_db": in_db, "missing_count": len(missing),
         "ty_status_breakdown": dict(sorted(ty_status.items(), key=lambda x: -x[1])),
         "our_db_status_breakdown": dict(sorted(db_status.items(), key=lambda x: -x[1])),
+        "our_returned_by_source": dict(sorted(ret_source.items(), key=lambda x: -x[1])),
+        "our_returned_with_claim_id": ret_with_claim,
+        "our_returned_without_claim_id": ret_no_claim,
+        "ty_delivered_but_we_marked_returned": ty_delivered_but_returned,
+        "ty_claims_total_unique": len(claim_ids),
+        "ty_claims_distinct_orders": len(claim_orders),
+        "ty_claims_accepted_distinct_orders": len(accepted_order_nums),
+        "ty_claim_item_status_breakdown": dict(sorted(claim_status_buckets.items(), key=lambda x: -x[1])),
         "missing_sample": missing[:60], "errors": errors,
     }
 
