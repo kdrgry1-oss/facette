@@ -733,7 +733,7 @@ function InstaShop({ block }) {
   };
 
   return (
-    <section className="py-14 md:py-20 bg-white" data-testid="instashop">
+    <section className="pt-7 md:pt-10 pb-14 md:pb-20 bg-white" data-testid="instashop">
       {/* Başlık + hemen altında Instagram daveti — ortalı */}
       <div className="text-center mb-8 md:mb-10 px-4">
         <h2 className="text-3xl md:text-5xl font-light tracking-tight text-black leading-none">Get The Look</h2>

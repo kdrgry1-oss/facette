@@ -242,21 +242,21 @@ export default function Footer() {
     facebook: _socialCfg.facebook || "https://www.facebook.com/faceette",
     twitter: _socialCfg.twitter || "",
   };
-  const copyright = tpl?.copyright || `© ${new Date().getFullYear()} Facette Dış. Tic. A.Ş. – Tüm hakları saklıdır.`;
+  const copyright = tpl?.copyright || `© ${new Date().getFullYear()} Facette – Tüm hakları saklıdır.`;
 
   return (
     <>
     <NewsletterBand nl={newsletter} />
     <footer className="bg-black text-white" data-testid="footer-structured">
       <div className="container-main pt-14 md:pt-20 pb-8">
-        {/* Brand strip */}
-        <div className="md:flex md:items-end md:justify-between mb-12 md:mb-16">
+        {/* Brand strip — biraz aşağıda; 'inspired...' alt hizası ikonlarla eşit (items-end + leading-none) */}
+        <div className="md:flex md:items-end md:justify-between mb-12 md:mb-16 pt-6 md:pt-12">
           <div className="max-w-md">
             <Link to="/" className="inline-block mb-5">
               {/* Koyu footer → logo beyaza zorlanır (brightness-0 + invert) */}
               <img src="/logo.webp" alt="FACETTE" className="h-6 md:h-7 w-auto brightness-0 invert" />
             </Link>
-            <p className="text-sm text-white/60 leading-relaxed italic">
+            <p className="text-sm text-white/60 leading-none italic">
               inspired by who you are.
             </p>
           </div>
