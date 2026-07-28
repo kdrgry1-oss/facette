@@ -154,6 +154,10 @@ def _hmac_eq(a: str, b: str) -> bool:
 @router.post("/setup-sms")
 async def mfa_setup_sms(payload: dict, current_user: dict = Depends(require_auth)):
     """SMS MFA kurulumu: telefon kaydeder (şifreli) + doğrulama kodu gönderir (henüz aktif değil)."""
+    _me = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "mfa_admin_managed": 1})
+    if _me and _me.get("mfa_admin_managed"):
+        raise HTTPException(status_code=403,
+            detail="Giriş doğrulama telefonunuz yönetici tarafından belirlenir ve değiştirilemez. Değişiklik için yöneticinize başvurun.")
     phone = (payload or {}).get("phone", "")
     import sys as _sys
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
@@ -173,6 +177,10 @@ async def mfa_setup_sms(payload: dict, current_user: dict = Depends(require_auth
 async def mfa_enable_sms(payload: dict, current_user: dict = Depends(require_auth)):
     """Gönderilen SMS kodu doğrulanırsa SMS MFA aktifleşir."""
     code = (payload or {}).get("code")
+    _me = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "mfa_admin_managed": 1})
+    if _me and _me.get("mfa_admin_managed"):
+        raise HTTPException(status_code=403,
+            detail="Giriş doğrulama telefonunuz yönetici tarafından belirlenir ve değiştirilemez.")
     u = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "mfa_pending_phone_enc": 1})
     if not (u and u.get("mfa_pending_phone_enc")):
         raise HTTPException(status_code=400, detail="Önce SMS kurulumunu başlatın")

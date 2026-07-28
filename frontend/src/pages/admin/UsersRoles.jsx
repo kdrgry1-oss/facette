@@ -117,7 +117,7 @@ export default function AdminUsersRoles() {
   // User modal
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [userForm, setUserForm] = useState({ email: "", password: "", first_name: "", last_name: "", role_id: "", is_active: true });
+  const [userForm, setUserForm] = useState({ email: "", password: "", first_name: "", last_name: "", phone: "", role_id: "", is_active: true });
   const [savingUser, setSavingUser] = useState(false);
 
   useEffect(() => { fetchAll(); }, []);
@@ -197,7 +197,7 @@ export default function AdminUsersRoles() {
 
   const openCreateUser = () => {
     setEditingUser(null);
-    setUserForm({ email: "", password: "", first_name: "", last_name: "", role_id: roles[0]?.id || "", is_active: true });
+    setUserForm({ email: "", password: "", first_name: "", last_name: "", phone: "", role_id: roles[0]?.id || "", is_active: true });
     setUserModalOpen(true);
   };
 
@@ -206,6 +206,7 @@ export default function AdminUsersRoles() {
     setUserForm({
       email: user.email, password: "",
       first_name: user.first_name || "", last_name: user.last_name || "",
+      phone: user.phone || "",
       role_id: user.role_id || "", is_active: !!user.is_active,
     });
     setUserModalOpen(true);
@@ -497,6 +498,13 @@ export default function AdminUsersRoles() {
                   onChange={e => setUserForm({ ...userForm, last_name: e.target.value })}
                   className="w-full border px-3 py-2 rounded text-sm" />
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Giriş Doğrulama Telefonu (SMS)</label>
+              <input value={userForm.phone} type="tel" placeholder="05xx xxx xx xx"
+                onChange={e => setUserForm({ ...userForm, phone: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm" />
+              <p className="text-xs text-gray-500 mt-1">Giriş doğrulama kodu (SMS) bu numaraya gider. Yalnız yönetici belirler; kullanıcı kendisi değiştiremez. Boş bırakılırsa yönetici-kilidi kalkar.</p>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Rol <span className="text-red-500">*</span></label>

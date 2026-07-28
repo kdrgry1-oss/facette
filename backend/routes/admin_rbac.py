@@ -170,6 +170,19 @@ async def create_panel_user(payload: dict, current_user: dict = Depends(require_
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": current_user.get("email", ""),
     }
+    # Telefon (giriş SMS'i) — admin belirler; kullanıcı değiştiremez (mfa_admin_managed).
+    _ph = (payload.get("phone") or "").strip()
+    if _ph:
+        from notification_service import normalize_phone_tr
+        from security.crypto import encrypt as _enc
+        pn = normalize_phone_tr(_ph)
+        if not pn or len(pn) < 12:
+            raise HTTPException(status_code=400, detail="Geçerli bir telefon numarası girin (05xx…).")
+        doc["phone"] = pn
+        doc["mfa_phone_enc"] = _enc(pn)
+        doc["mfa_method"] = "sms"
+        doc["mfa_enabled"] = True
+        doc["mfa_admin_managed"] = True
     await db.users.insert_one(doc)
     doc.pop("_id", None)
     doc.pop("password", None)
@@ -182,6 +195,7 @@ async def update_panel_user(user_id: str, payload: dict, current_user: dict = De
     if not user:
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
     update = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    unset = {}
     for f in ("first_name", "last_name", "role_id", "is_active"):
         if f in payload:
             update[f] = payload[f]
@@ -191,7 +205,30 @@ async def update_panel_user(user_id: str, payload: dict, current_user: dict = De
             payload.get("last_name") or user.get("last_name")])
         update["password"] = hash_password(payload["password"])
         update["password_changed_at"] = datetime.now(timezone.utc).isoformat()
-    await db.users.update_one({"id": user_id}, {"$set": update})
+    # TELEFON (giriş SMS'i): YALNIZ admin buradan belirler. Set edilince MFA telefonu
+    # (mfa_phone_enc, öncelikli) admin-yönetimli olur → kullanıcı kendisi DEĞİŞTİREMEZ.
+    if "phone" in payload:
+        _ph = (payload.get("phone") or "").strip()
+        if _ph:
+            from notification_service import normalize_phone_tr
+            from security.crypto import encrypt as _enc
+            pn = normalize_phone_tr(_ph)
+            if not pn or len(pn) < 12:
+                raise HTTPException(status_code=400, detail="Geçerli bir telefon numarası girin (05xx…).")
+            update["phone"] = pn
+            update["mfa_phone_enc"] = _enc(pn)
+            update["mfa_method"] = "sms"
+            update["mfa_enabled"] = True
+            update["mfa_admin_managed"] = True
+        else:
+            # Boş bırakıldı → admin-yönetimli MFA telefonunu temizle.
+            update["phone"] = ""
+            update["mfa_admin_managed"] = False
+            unset["mfa_phone_enc"] = ""
+    _ops = {"$set": update}
+    if unset:
+        _ops["$unset"] = unset
+    await db.users.update_one({"id": user_id}, _ops)
     return {"success": True}
 
 
