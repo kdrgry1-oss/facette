@@ -85,6 +85,61 @@ export default function Login() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Apple Sign In JS SDK — sağlayıcı aktif + Services ID girildiyse yükle & init et.
+  useEffect(() => {
+    if (!socialProviders.apple || !socialProviders.apple_client_id) return;
+    const initApple = () => {
+      if (!window.AppleID?.auth) return;
+      try {
+        window.AppleID.auth.init({
+          clientId: socialProviders.apple_client_id,   // Services ID (ör. com.facette.web)
+          scope: "name email",
+          redirectURI: `${window.location.origin}/giris`,  // Apple'da Return URL olarak kayıtlı olmalı
+          usePopup: true,
+        });
+      } catch { /* init hatası sessiz */ }
+    };
+    if (window.AppleID?.auth) { initApple(); return; }
+    let s = document.getElementById("appleid-script");
+    if (!s) {
+      s = document.createElement("script");
+      s.id = "appleid-script";
+      s.src = "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js";
+      s.async = true;
+      document.body.appendChild(s);
+    }
+    s.addEventListener("load", initApple);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socialProviders.apple, socialProviders.apple_client_id]);
+
+  const handleAppleLogin = async () => {
+    if (!window.AppleID?.auth) { toast.error("Apple girişi henüz yüklenmedi, tekrar deneyin"); return; }
+    setLoading(true);
+    try {
+      const resp = await window.AppleID.auth.signIn();
+      const idToken = resp?.authorization?.id_token;
+      if (!idToken) throw new Error("identity_token yok");
+      // Ad-soyad Apple'dan YALNIZ ilk girişte gelir (sonraki girişlerde boş) — backend zaten
+      // hesabı Apple'ın imzaladığı 'sub' ile eşler, isim yalnız görünürlük içindir.
+      let userName = "";
+      const nm = resp?.user?.name;
+      if (nm) userName = `${nm.firstName || ""} ${nm.lastName || ""}`.trim();
+      const res = await axios.post(`${API}/auth/apple`, { identity_token: idToken, user_name: userName });
+      if (res.data?.token) {
+        loginWithToken(res.data.token, res.data.user);
+        toast.success("Apple ile giriş başarılı!");
+        navigate(_redirectTo);
+      }
+    } catch (err) {
+      const code = err?.error || "";
+      if (code === "popup_closed_by_user" || code === "user_cancelled_authorize" || code === "user_trigger_new_signin_flow") {
+        // kullanıcı vazgeçti → sessiz
+      } else {
+        toast.error(err.response?.data?.detail || "Apple ile giriş başarısız");
+      }
+    } finally { setLoading(false); }
+  };
+
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return;
     const init = () => {
@@ -173,7 +228,7 @@ export default function Login() {
             {/* Apple */}
             {socialProviders.apple && (
               <button type="button"
-                onClick={() => toast.info("Apple Sign-In yakında aktif olacak (Developer credential girildi)")}
+                onClick={handleAppleLogin}
                 disabled={loading} title="Apple ile giriş" aria-label="Apple ile giriş"
                 className="w-10 h-10 flex items-center justify-center rounded border border-black bg-black text-white hover:bg-gray-900 transition-colors disabled:opacity-60"
                 data-testid="apple-login-btn">
