@@ -241,7 +241,7 @@ export default function Header({ hideMenu = false }) {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     closeTimerRef.current = setTimeout(() => {
       setActiveMenu(null); setHoveredCategory(null); closeTimerRef.current = null;
-    }, 1000);
+    }, 180);  // 1sn çok uzundu ("geç kayboluyor"); 180ms panele imleç taşımaya yeter, laggy değil
   };
   const cancelClose = () => {
     if (closeTimerRef.current) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null; }
@@ -338,7 +338,7 @@ export default function Header({ hideMenu = false }) {
             <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/30 to-transparent" aria-hidden="true" />
           )}
           {/* Overlay'de logo/ikonlar görselin üzerinde biraz AŞAĞIDA başlasın: ekstra üst boşluk */}
-          <div className={`relative max-w-screen-2xl mx-auto px-3 md:px-6 ${heroOverlay ? "pt-6 md:pt-4" : ""}`}>
+          <div className={`relative max-w-[1800px] mx-auto px-3 md:px-8 ${heroOverlay ? "pt-6 md:pt-4" : ""}`}>
           {/* Masaüstünde (lg) logo + menü + butonlar YALNIZ hero-overlay (üst/şeffaf) durumunda
               biraz aşağıda dursun. STICKY (kaydırınca beyaz sabit header) devreye girince pt-6
               KALKAR → içerik dikeyde ortalı kalır (aşağı kaymaz). Mobil/tablet aynı. */}
@@ -368,7 +368,7 @@ export default function Header({ hideMenu = false }) {
 
                   {/* iPad (lg, ~1024-1280px) sıkışması: sekmeler lg'de daha kompakt (küçük punto,
                       dar tracking, dar gap), xl'de tam boy — logoya binme/overlap engellenir. */}
-                  <nav className="hidden lg:flex items-center gap-3 xl:gap-5 min-w-0 pr-3">
+                  <nav className="hidden lg:flex items-center gap-4 xl:gap-8 min-w-0 pr-3">
                     {/* Sekmeler TAMAMEN panelden (Tasarım > Menü Yönetimi): ad, sıra, tip (link/mega), stil.
                         style=accent → elmas işaretli premium stil; style=sale → kırmızı. */}
                     {visibleTabs.map((tab) => {
@@ -411,7 +411,7 @@ export default function Header({ hideMenu = false }) {
             </Link>
 
             {/* Right: Icons (mobile: search icon + account + favorites + cart, Mango tarzı; desktop: full set) */}
-            <div className="flex-1 flex items-center justify-end gap-0.5 md:gap-2">
+            <div className="flex-1 flex items-center justify-end gap-0.5 md:gap-3">
               {!isCheckout && (
                 <>
                   <button onClick={() => setSearchOpen(true)} className="inline-flex flex-col items-center md:items-start justify-center p-2 md:p-0 md:py-1.5 md:pr-4 opacity-80 hover:opacity-100 transition-opacity" aria-label="Ara" data-testid="search-btn">
@@ -460,7 +460,7 @@ export default function Header({ hideMenu = false }) {
             onMouseEnter={cancelClose}
             onMouseLeave={scheduleClose}
           >
-            <div className="max-w-screen-2xl mx-auto px-8 py-6">
+            <div className="max-w-[1800px] mx-auto px-8 py-6">
               <div className="flex gap-12">
                 {/* Kolonlar — panele girilen başlık + alt kategoriler (birbirine yakın, genişliğe yayılmaz).
                     Hiçbir kolonda alt kategori yoksa (ör. koleksiyon listesi) başlıklar TEK kolonda ALT ALTA. */}
