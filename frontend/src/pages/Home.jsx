@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Play, ArrowRight, Instagram, ShoppingBag } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, ArrowRight, Instagram, ShoppingBag, X } from "lucide-react";
 import axios from "axios";
+import { toast } from "sonner";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
+import { useCart } from "../context/CartContext";
 import { optimizeImg, aspectFromDims } from "../lib/img";
 import { trackSelectPromotion } from "../lib/dataLayer";
 import { dedupeColorGroups } from "../lib/colorGroups";
@@ -519,67 +521,125 @@ function ProductSlider({ block, products }) {
   );
 }
 
-// Tek InstaShop karesi — ürün bağlıysa hover(masaüstü)/dokun(mobil) ile shop-the-look kartları.
-function ShopTile({ post }) {
-  const [open, setOpen] = useState(false);
-  const products = Array.isArray(post.products) ? post.products : [];
-  const hasProducts = products.length > 0;
-  const img = optimizeImg(post.image, 700);
+// "Shop the Look" modalı — kombindeki ürünleri getirir, beden seçtirir, DOĞRUDAN sepete ekler.
+function ShopLookModal({ post, onClose }) {
+  const { addItem } = useCart();
+  const [products, setProducts] = useState(post.products || []);
+  const [loading, setLoading] = useState(true);
+  const [sel, setSel] = useState({}); // productId -> seçili variant id
 
-  // Ürün yoksa: eski davranış — ürün linki ya da Instagram gönderisine gider.
-  if (!hasProducts) {
-    const href = post.product_link || post.permalink || null;
-    const external = !post.product_link && !!post.permalink;
-    const inner = (
-      <>
-        <img src={img} alt="" className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
-        <span className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center">
-          <Instagram size={22} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={1.5} />
-        </span>
-      </>
-    );
-    if (!href) return <div className="relative block overflow-hidden group">{inner}</div>;
-    return external ? (
-      <a href={href} target="_blank" rel="noopener noreferrer" className="relative block overflow-hidden group">{inner}</a>
-    ) : (
-      <Link to={href} className="relative block overflow-hidden group">{inner}</Link>
-    );
-  }
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const base = post.products || [];
+      const full = await Promise.all(base.map(async (pr) => {
+        try {
+          const slug = String(pr.url || "").replace(/^\//, "") || pr.id;
+          const r = await axios.get(`${API}/products/${slug}`);
+          return { ...pr, ...r.data };
+        } catch { return { ...pr }; }
+      }));
+      if (alive) { setProducts(full); setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [post]);
 
-  // Ürün varsa: shoppable kare.
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
+  }, [onClose]);
+
+  const sizesOf = (p) => {
+    const vs = Array.isArray(p.variants) ? p.variants : [];
+    const map = new Map();
+    vs.forEach((v) => {
+      const s = v.size || v.name || "";
+      if (!s) return;
+      const cur = map.get(s) || { size: s, stock: 0, variant: v };
+      cur.stock += Number(v.stock) || 0;
+      map.set(s, cur);
+    });
+    return [...map.values()];
+  };
+  const add = (p) => {
+    const sizes = sizesOf(p);
+    if (sizes.length > 0) {
+      const chosen = sizes.find((s) => String(s.variant.id) === String(sel[p.id]));
+      if (!chosen) { toast.error("Lütfen beden seçin"); return; }
+      if (chosen.stock <= 0) { toast.error("Bu beden tükendi"); return; }
+      addItem(p, chosen.variant, 1);
+    } else {
+      addItem(p, null, 1);
+    }
+    toast.success("Sepete eklendi 🛍️");
+  };
+
   return (
-    <div className="relative block overflow-hidden group cursor-pointer select-none"
-      onClick={() => setOpen((v) => !v)} onMouseLeave={() => setOpen(false)}>
-      <img src={img} alt="" loading="lazy" decoding="async"
-        className={`w-full aspect-square object-cover transition-transform duration-500 ${open ? "scale-105" : "group-hover:scale-105"}`} />
-      {/* Shoppable rozeti */}
-      <span className={`absolute top-2 right-2 z-10 w-7 h-7 rounded-full bg-white/85 backdrop-blur flex items-center justify-center shadow-sm transition-transform ${open ? "scale-0" : "scale-100"}`}>
-        <ShoppingBag size={13} className="text-black" strokeWidth={1.75} />
-      </span>
-      {/* Karartma + ürün şeridi */}
-      <div className={`absolute inset-0 flex items-end bg-gradient-to-t from-black/75 via-black/15 to-transparent transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-        <div className="w-full p-1.5 sm:p-2">
-          <div className="flex gap-1.5 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-            onClick={(e) => e.stopPropagation()}>
-            {products.map((pr) => (
-              <Link key={pr.id} to={pr.url || `/${pr.id}`}
-                className="shrink-0 w-[92px] sm:w-[104px] bg-white rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow"
-                title={pr.title}>
-                <img src={optimizeImg(pr.image, 240)} alt={pr.title || ""} loading="lazy"
-                  className="w-full aspect-[3/4] object-cover bg-gray-100" />
-                <div className="p-1.5">
-                  <p className="text-[10px] leading-tight text-gray-800 line-clamp-2 min-h-[24px]">{pr.title}</p>
-                  {pr.price != null && pr.price !== "" && (
-                    <div className="mt-0.5 flex items-baseline gap-1">
-                      <span className="text-[11px] font-semibold text-black">{Number(pr.price).toLocaleString("tr-TR")} TL</span>
-                      {pr.old_price != null && Number(pr.old_price) > Number(pr.price) && (
-                        <span className="text-[9px] text-gray-400 line-through">{Number(pr.old_price).toLocaleString("tr-TR")}</span>
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="relative w-full sm:max-w-3xl bg-white sm:rounded-2xl rounded-t-2xl max-h-[92vh] sm:max-h-[86vh] overflow-hidden flex flex-col sm:flex-row shadow-2xl"
+        onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} aria-label="Kapat"
+          className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white">
+          <X size={16} />
+        </button>
+        <div className="sm:w-[45%] shrink-0 bg-gray-100">
+          <img src={optimizeImg(post.image, 800)} alt="" className="w-full h-44 sm:h-full object-cover" />
+        </div>
+        <div className="sm:w-[55%] flex flex-col min-h-0">
+          <div className="px-4 pt-4 pb-3 border-b">
+            <p className="text-[10px] tracking-[0.3em] uppercase text-gray-400">Shop The Look</p>
+            <h3 className="text-lg font-light tracking-wide text-black">Bu Kombindeki Ürünler</h3>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {loading && <p className="text-sm text-gray-400 text-center py-10">Yükleniyor…</p>}
+            {!loading && products.length === 0 && <p className="text-sm text-gray-400 text-center py-10">Ürün bulunamadı.</p>}
+            {!loading && products.map((p) => {
+              const sizes = sizesOf(p);
+              const listP = Number(p.price) || 0;
+              const price = p.sale_price && p.sale_price < listP ? p.sale_price : listP;
+              const href = p.url || `/${p.slug || p.id}`;
+              return (
+                <div key={p.id} className="flex gap-3 border rounded-xl p-2.5">
+                  <Link to={href} onClick={onClose} className="shrink-0">
+                    <img src={optimizeImg((Array.isArray(p.images) && p.images[0]) || p.image, 200)} alt={p.name || p.title || ""}
+                      className="w-20 h-24 object-cover rounded-lg bg-gray-100" loading="lazy" />
+                  </Link>
+                  <div className="flex-1 min-w-0 flex flex-col">
+                    <Link to={href} onClick={onClose} className="text-sm leading-snug line-clamp-2 hover:underline text-black">
+                      {p.name || p.title}
+                    </Link>
+                    <div className="mt-0.5 flex items-baseline gap-1.5">
+                      <span className="text-sm font-semibold text-black">{Number(price).toLocaleString("tr-TR")} TL</span>
+                      {listP > 0 && price < listP && (
+                        <span className="text-xs text-gray-400 line-through">{listP.toLocaleString("tr-TR")} TL</span>
                       )}
                     </div>
-                  )}
+                    {sizes.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {sizes.map((s) => {
+                          const active = String(sel[p.id]) === String(s.variant.id);
+                          const oos = s.stock <= 0;
+                          return (
+                            <button key={s.size} disabled={oos}
+                              onClick={() => setSel((m) => ({ ...m, [p.id]: s.variant.id }))}
+                              className={`min-w-[30px] px-1.5 h-7 text-[11px] border rounded transition-colors ${oos ? "text-gray-300 border-gray-100 line-through cursor-not-allowed" : active ? "bg-black text-white border-black" : "border-gray-300 hover:border-black"}`}>
+                              {s.size}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <button onClick={() => add(p)}
+                      className="mt-2 self-start inline-flex items-center gap-1.5 bg-black text-white text-xs px-3.5 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <ShoppingBag size={13} /> Sepete Ekle
+                    </button>
+                  </div>
                 </div>
-              </Link>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -587,10 +647,44 @@ function ShopTile({ post }) {
   );
 }
 
+// Carousel karesi (dikey) — ürün bağlıysa "Shop The Look +" ile modal açar; değilse IG'ye gider.
+function ShopTile({ post, onShop }) {
+  const products = Array.isArray(post.products) ? post.products : [];
+  const hasProducts = products.length > 0;
+  const img = optimizeImg(post.image, 700);
+  const cls = "relative block h-full w-full overflow-hidden group";
+  if (!hasProducts) {
+    const href = post.product_link || post.permalink || null;
+    const external = !post.product_link && !!post.permalink;
+    const inner = (
+      <>
+        <img src={img} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" loading="lazy" decoding="async" />
+        <span className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center">
+          <Instagram size={22} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={1.5} />
+        </span>
+      </>
+    );
+    if (!href) return <div className={cls}>{inner}</div>;
+    return external
+      ? <a href={href} target="_blank" rel="noopener noreferrer" className={cls}>{inner}</a>
+      : <Link to={href} className={cls}>{inner}</Link>;
+  }
+  return (
+    <button onClick={() => onShop(post)} className={`${cls} text-left`}>
+      <img src={img} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" loading="lazy" decoding="async" />
+      <span className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+      <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 text-white text-xs sm:text-sm font-light tracking-wide drop-shadow-md">
+        <ShoppingBag size={14} strokeWidth={1.75} /> Shop The Look +
+      </span>
+    </button>
+  );
+}
+
 function InstaShop({ block }) {
-  // Gerçek @facette akışı: backend /instagram/feed (token'la çekilen ya da elle eklenen
-  // gönderiler). Boşsa bloktaki elle görsellere / varsayılana düşer.
+  // Gerçek @facette akışı: backend /instagram/feed. Boşsa bloktaki elle görsellere düşer.
   const [feed, setFeed] = useState(null);
+  const [modalPost, setModalPost] = useState(null);
+  const scrollerRef = useRef(null);
   useEffect(() => {
     let alive = true;
     axios.get(`${API}/instagram/feed?limit=12`)
@@ -602,35 +696,53 @@ function InstaShop({ block }) {
   const blockImages = block?.images?.length > 0 ? block.images : DEFAULT_INSTASHOP.map(i => i.image);
   const blockLinks = block?.links?.length > 0 ? block.links : DEFAULT_INSTASHOP.map(i => i.link);
   const usingFeed = Array.isArray(feed) && feed.length > 0;
-
-  // feed doluysa gerçek gönderiler (ürünleriyle); değilse blok görselleri.
   const posts = usingFeed
     ? feed.slice(0, 12)
-    : blockImages.slice(0, 6).map((img, i) => ({ image: img, product_link: blockLinks[i] || "/", products: [] }));
+    : blockImages.slice(0, 8).map((img, i) => ({ image: img, product_link: blockLinks[i] || "/", products: [] }));
+
+  const scrollBy = (dir) => {
+    const el = scrollerRef.current;
+    if (el) el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: "smooth" });
+  };
 
   return (
-    <section className="py-14 md:py-20 bg-gray-50" data-testid="instashop">
-      <div className="max-w-screen-2xl mx-auto px-4">
-        {/* #FACETTE × YOU — premium imza başlığı */}
-        <div className="text-center mb-8 md:mb-10">
-          <p className="text-[10px] md:text-[11px] tracking-[0.42em] uppercase text-gray-400 mb-3">Stilini Paylaş</p>
-          <h2 className="text-2xl md:text-[2.4rem] leading-none font-extralight tracking-[0.22em] text-black">
-            #FACETTE <span className="text-gray-300 mx-1">×</span> YOU
-          </h2>
+    <section className="py-14 md:py-20 bg-white" data-testid="instashop">
+      <div className="max-w-screen-2xl mx-auto">
+        <div className="text-center mb-8 md:mb-10 px-4">
+          <p className="text-[10px] md:text-[11px] tracking-[0.42em] uppercase text-gray-400 mb-3">Stilini Keşfet</p>
+          <h2 className="text-2xl md:text-[2.4rem] leading-none font-extralight tracking-[0.28em] text-black">SHOP THE LOOK</h2>
           <p className="mt-3.5 text-xs md:text-sm font-light text-gray-500 max-w-md mx-auto leading-relaxed">
-            Tarzını <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer" className="text-black hover:underline">@facette</a> etiketiyle paylaş, koleksiyonun bir parçası ol.
+            Kombinlere göz at, beğendiğin ürünü tek dokunuşla sepete ekle ·{" "}
+            <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer" className="text-black hover:underline">@facette</a>
           </p>
         </div>
-        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-1.5">
-          {posts.map((p, index) => <ShopTile key={p.id || index} post={p} />)}
+        <div className="relative group/car">
+          <button onClick={() => scrollBy(-1)} aria-label="Geri"
+            className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/95 shadow-lg items-center justify-center opacity-0 group-hover/car:opacity-100 transition hover:bg-white">
+            <ChevronLeft size={20} />
+          </button>
+          <button onClick={() => scrollBy(1)} aria-label="İleri"
+            className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/95 shadow-lg items-center justify-center opacity-0 group-hover/car:opacity-100 transition hover:bg-white">
+            <ChevronRight size={20} />
+          </button>
+          <div ref={scrollerRef}
+            className="flex gap-2 sm:gap-3 overflow-x-auto snap-x snap-mandatory px-4 pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            {posts.map((p, index) => (
+              <div key={p.id || index}
+                className="snap-start shrink-0 w-[68vw] sm:w-[280px] lg:w-[300px] aspect-[3/4] rounded-lg overflow-hidden bg-gray-100">
+                <ShopTile post={p} onShop={setModalPost} />
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="text-center mt-8">
+        <div className="text-center mt-8 px-4">
           <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer"
             className="inline-flex items-center gap-2 text-[11px] tracking-[0.24em] uppercase text-gray-600 hover:text-black border-b border-gray-300 hover:border-black pb-1.5 transition-colors">
             <Instagram size={14} /> @facette
           </a>
         </div>
       </div>
+      {modalPost && <ShopLookModal post={modalPost} onClose={() => setModalPost(null)} />}
     </section>
   );
 }
