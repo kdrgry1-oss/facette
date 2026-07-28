@@ -526,7 +526,6 @@ function ShopLookModal({ post, onClose }) {
   const { addItem } = useCart();
   const [products, setProducts] = useState(post.products || []);
   const [loading, setLoading] = useState(true);
-  const [sel, setSel] = useState({}); // productId -> seçili variant id
 
   useEffect(() => {
     let alive = true;
@@ -563,18 +562,13 @@ function ShopLookModal({ post, onClose }) {
     });
     return [...map.values()];
   };
-  const add = (p) => {
-    const sizes = sizesOf(p);
-    if (sizes.length > 0) {
-      const chosen = sizes.find((s) => String(s.variant.id) === String(sel[p.id]));
-      if (!chosen) { toast.error("Lütfen beden seçin"); return; }
-      if (chosen.stock <= 0) { toast.error("Bu beden tükendi"); return; }
-      addItem(p, chosen.variant, 1);
-    } else {
-      addItem(p, null, 1);
-    }
-    toast.success("Sepete eklendi 🛍️");
+  // Site mantığı (ProductCard ile aynı): beden pill'ine TIKLAYINCA doğrudan sepete ekler.
+  const addSize = (p, s) => {
+    if (s.stock <= 0) { toast.error("Bu beden tükendi"); return; }
+    addItem(p, s.variant, 1);
+    toast.success(`Sepete eklendi · Beden ${s.size}`);
   };
+  const addNoSize = (p) => { addItem(p, null, 1); toast.success("Sepete eklendi 🛍️"); };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center" onClick={onClose}>
@@ -585,10 +579,11 @@ function ShopLookModal({ post, onClose }) {
           className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white">
           <X size={16} />
         </button>
-        <div className="sm:w-[45%] shrink-0 bg-gray-100">
-          <img src={optimizeImg(post.image, 800)} alt="" className="w-full h-44 sm:h-full object-cover" />
+        {/* Look görseli yalnız masaüstünde — mobilde doğrudan ürün+sepete-ekle gösterilir */}
+        <div className="hidden sm:block sm:w-[45%] shrink-0 bg-gray-100">
+          <img src={optimizeImg(post.image, 800)} alt="" className="w-full h-full object-cover" />
         </div>
-        <div className="sm:w-[55%] flex flex-col min-h-0">
+        <div className="w-full sm:w-[55%] flex flex-col min-h-0">
           <div className="px-4 pt-4 pb-3 border-b">
             <p className="text-[10px] tracking-[0.3em] uppercase text-gray-400">Shop The Look</p>
             <h3 className="text-lg font-light tracking-wide text-black">Bu Kombindeki Ürünler</h3>
@@ -617,25 +612,28 @@ function ShopLookModal({ post, onClose }) {
                         <span className="text-xs text-gray-400 line-through">{listP.toLocaleString("tr-TR")} TL</span>
                       )}
                     </div>
-                    {sizes.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {sizes.map((s) => {
-                          const active = String(sel[p.id]) === String(s.variant.id);
-                          const oos = s.stock <= 0;
-                          return (
-                            <button key={s.size} disabled={oos}
-                              onClick={() => setSel((m) => ({ ...m, [p.id]: s.variant.id }))}
-                              className={`min-w-[30px] px-1.5 h-7 text-[11px] border rounded transition-colors ${oos ? "text-gray-300 border-gray-100 line-through cursor-not-allowed" : active ? "bg-black text-white border-black" : "border-gray-300 hover:border-black"}`}>
-                              {s.size}
-                            </button>
-                          );
-                        })}
-                      </div>
+                    {sizes.length > 0 ? (
+                      <>
+                        <p className="text-[10px] text-gray-400 mt-1.5 mb-1">Beden seç · sepete ekle</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {sizes.map((s) => {
+                            const oos = s.stock <= 0;
+                            return (
+                              <button key={s.size} disabled={oos} onClick={() => addSize(p, s)}
+                                title={oos ? `${s.size} · Tükendi` : `${s.size} · Sepete ekle`}
+                                className={`min-w-[36px] px-2 h-8 text-[12px] border transition-colors ${oos ? "text-gray-300 border-gray-100 line-through cursor-not-allowed" : "border-gray-300 text-gray-800 hover:bg-black hover:text-white hover:border-black"}`}>
+                                {s.size}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <button onClick={() => addNoSize(p)}
+                        className="mt-2 self-start inline-flex items-center gap-1.5 bg-black text-white text-xs px-4 py-2.5 hover:bg-gray-800 transition-colors">
+                        <ShoppingBag size={13} /> Sepete Ekle
+                      </button>
                     )}
-                    <button onClick={() => add(p)}
-                      className="mt-2 self-start inline-flex items-center gap-1.5 bg-black text-white text-xs px-3.5 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <ShoppingBag size={13} /> Sepete Ekle
-                    </button>
                   </div>
                 </div>
               );
