@@ -49,12 +49,26 @@ async def _size_tables_diag(key: str):
         st["_name"] = (pr or {}).get("name", "")
         st["_stock_code"] = (pr or {}).get("stock_code", "")
         empties.append(st)
+    # Son güncellenen 12 satırın İÇERİK özeti (bozulma/eksilme var mı görmek için)
+    recent = []
+    async for st in db.size_tables.find({}, {"_id": 0}).sort("updated_at", -1).limit(12):
+        pr = await db.products.find_one({"id": st.get("product_id")}, {"_id": 0, "name": 1})
+        _vals = st.get("values") or {}
+        recent.append({
+            "product_id": st.get("product_id"), "name": (pr or {}).get("name", "")[:34],
+            "updated_at": str(st.get("updated_at"))[:19],
+            "n_sizes": len(st.get("sizes") or []), "n_cols": len(st.get("columns") or []),
+            "n_value_rows": len(_vals), "synced_from": st.get("synced_from", ""),
+            "has_model_info": bool(st.get("model_info")), "product_size": (st.get("product_size") or "")[:20],
+            "sizes": (st.get("sizes") or [])[:8], "columns": (st.get("columns") or [])[:8],
+        })
     return {
         "size_tables_total": total, "non_empty": non_empty, "empty": empty,
         "synced_from_count": synced, "with_model_info": with_model,
         "products_with_rendered_size_image": img_products,
         "updated_at_by_day": dict(sorted(by_day.items())),
         "empty_samples": empties,
+        "recent_rows": recent,
     }
 
 
