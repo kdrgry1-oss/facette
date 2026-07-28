@@ -297,9 +297,14 @@ export default function Footer() {
         {/* Bottom */}
         <div className="border-t border-white/10 mt-12 pt-8 flex flex-col-reverse md:flex-row justify-between items-center gap-6">
           <p className="text-[10px] tracking-[0.2em] uppercase text-white/40">{copyright}</p>
-          <div className="flex items-center gap-3 opacity-60">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" alt="Visa" className="h-5 invert" />
-            <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" alt="Mastercard" className="h-5" />
+          {/* Ödeme: iyzico güvenli ödeme etiketi + açık (beyaz) kart logoları */}
+          <div className="flex items-center gap-4">
+            <span className="text-[10px] tracking-[0.18em] uppercase text-white/55 whitespace-nowrap">iyzico ile güvenli ödeme</span>
+            <div className="flex items-center gap-3">
+              <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" alt="Visa" className="h-4 brightness-0 invert opacity-90" loading="lazy" />
+              <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" alt="Mastercard" className="h-6 brightness-0 invert opacity-90" loading="lazy" />
+              <img src="https://upload.wikimedia.org/wikipedia/commons/b/b0/Troy_logo.svg" alt="Troy" className="h-4 brightness-0 invert opacity-90" loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+            </div>
           </div>
         </div>
       </div>
