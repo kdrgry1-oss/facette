@@ -735,8 +735,8 @@ function InstaShop({ block }) {
       <div className="text-center mb-8 md:mb-10 px-4">
         <h2 className="text-3xl md:text-5xl font-light tracking-tight text-black leading-none">Get The Look</h2>
         <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer"
-          className="mt-3.5 inline-flex items-center gap-2 text-xs text-gray-500 hover:text-black border-b border-gray-300 hover:border-black pb-1 transition-colors">
-          <Instagram size={14} /> Instagram'da bize katılın @facette
+          className="mt-3.5 inline-flex items-center gap-2 text-sm md:text-[15px] font-light text-gray-500 hover:text-black border-b border-gray-300 hover:border-black pb-1 transition-colors">
+          <Instagram size={16} /> Instagram'da bize katılın @facette
         </a>
       </div>
       {/* Carousel — TAM GENİŞLİK (sağdan sola tüm alan) */}

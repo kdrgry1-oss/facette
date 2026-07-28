@@ -148,7 +148,7 @@ export default function CountdownBar() {
   if (!block) {
     return (
       <div className="bg-black text-white text-center py-1.5 md:py-2" data-testid="topbar-static">
-        <p className="text-[10px] md:text-[11px] tracking-[0.25em] uppercase font-light">
+        <p className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold">
           {currentMsg}
         </p>
       </div>
@@ -163,7 +163,7 @@ export default function CountdownBar() {
            data-testid="topbar-fallback">
         {fadeKeyframes}
         <Rotator idx={msgIdx} text={currentMsg} multi={multi}
-           className="text-[10px] md:text-[11px] tracking-[0.25em] uppercase font-light" />
+           className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold" />
       </div>
     );
   }
@@ -183,11 +183,11 @@ export default function CountdownBar() {
       <div className="max-w-screen-2xl mx-auto px-3 md:px-6 flex items-center justify-center md:justify-between gap-3 flex-wrap">
         {currentMsg && (
           <Rotator idx={msgIdx} text={currentMsg} multi={multi}
-             className="text-[10px] md:text-[12px] tracking-[0.25em] uppercase font-light flex-shrink-0" />
+             className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold flex-shrink-0" />
         )}
         <div className="flex items-center gap-2 md:gap-3">
           {timerLbl && (
-            <span className="text-[10px] md:text-[12px] tracking-[0.25em] uppercase font-light hidden md:inline">
+            <span className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-medium hidden md:inline">
               {timerLbl}
             </span>
           )}
