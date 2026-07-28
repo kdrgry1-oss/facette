@@ -3268,6 +3268,27 @@ async def _diag_fix_false_returns28(key: str = "", dry: bool = True, days: int =
         "Cancelled": "cancelled", "UnDeliveredAndReturned": "cancelled",
         "Returned": "returned",
     }
+    async def _order_has_accepted_claim(onum: str):
+        """GÜVENLİK: gerçek onaylı iade claim'i olan siparişi YANLIŞLIKLA geri alma.
+        Trendyol claims'i orderNumber ile sorgular; Accepted kalemi varsa (claim_id, True)."""
+        try:
+            curl = f"{client.base_url}/order/sellers/{client.supplier_id}/claims"
+            async with httpx.AsyncClient(timeout=30.0) as hc:
+                cr = await hc.get(curl, headers=client._get_headers(),
+                                  params={"page": 0, "size": 50, "orderNumber": onum})
+                cr.raise_for_status()
+                cdata = cr.json()
+            for cl in (cdata.get("content") or []):
+                if str(cl.get("orderNumber") or "") != onum:
+                    continue
+                for _it in (cl.get("items") or []):
+                    for _ci in (_it.get("claimItems") or []):
+                        if ((_ci.get("claimItemStatus") or {}).get("name") or "").strip() == "Accepted":
+                            return (str(cl.get("claimId") or cl.get("id") or ""), True)
+        except Exception:
+            return (None, None)  # sorgu başarısız → belirsiz
+        return (None, False)
+
     plan = []
     changed = 0
     _now = datetime.now(timezone.utc).isoformat()
@@ -3285,6 +3306,20 @@ async def _diag_fix_false_returns28(key: str = "", dry: bool = True, days: int =
             except Exception as e:
                 plan.append({"order_number": onum, "error": str(e)[:150]})
                 continue
+        # GERÇEK onaylı claim var mı? Varsa geri ALMA — claim linkini backfill et, returned KALSIN.
+        _claim_id, _has = await _order_has_accepted_claim(onum)
+        if _has is None:
+            plan.append({"order_number": onum, "skipped": "claim-sorgu-belirsiz"})
+            continue
+        if _has:
+            plan.append({"order_number": onum, "from": o.get("status"), "ty_status": ty_st,
+                         "to": "returned", "note": "gerçek onaylı claim — link backfill", "claim_id": _claim_id})
+            if not dry:
+                await db.orders.update_one({"id": o["id"]}, {"$set": {
+                    "status": "returned", "return_source": "trendyol_claim",
+                    "return_claim_id": _claim_id, "updated_at": _now}})
+                changed += 1
+            continue
         if target == o.get("status"):
             continue  # zaten doğru
         plan.append({"order_number": onum, "from": o.get("status"), "ty_status": ty_st, "to": target})
