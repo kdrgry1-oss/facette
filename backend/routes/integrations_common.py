@@ -1364,7 +1364,14 @@ async def upload_rooftr_products_excel(
             if renk:
                 existing = await db.products.find_one({"urun_karti_id": kart_id, "color": renk.title()})
             if not existing:
-                existing = await db.products.find_one({"urun_karti_id": kart_id})
+                # RENK-KÖRÜ FALLBACK GÜVENLİĞİ: kart_id aynı ama FARKLI renk kardeşine ASLA yazma
+                # (ad/renk/açıklama/varyant ezilmesi = ürün kaybolması bug'ının kökü). Aday YALNIZ
+                # rengi BOŞ ya da bu renkle AYNI ise kullanılır; farklıysa None kalır → yeni renk açılır.
+                _cand = await db.products.find_one({"urun_karti_id": kart_id})
+                if _cand:
+                    _cc = str(_cand.get("color") or "").strip().lower()
+                    if (not _cc) or _cc == (renk or "").strip().lower():
+                        existing = _cand
             if not existing and parent_stock_code:
                 existing = await db.products.find_one({
                     "$or": [
@@ -1410,8 +1417,13 @@ async def upload_rooftr_products_excel(
                 # "...Ceket Ekru" ürünü "...Siyah"a dönüp kayboluyordu. Ad/renk artık YALNIZ
                 # YENİ üründe yazılır; mevcut kayıtta Facette panelindeki küratörlü ad korunur.
                 _set_doc.pop("name", None)
-                if existing.get("color") and str(existing.get("color")).strip().lower() != (renk or "").strip().lower():
-                    _set_doc.pop("color", None)
+                _ec = str(existing.get("color") or "").strip().lower()
+                _color_ok = (not _ec) or _ec == (renk or "").strip().lower()
+                if not _color_ok:
+                    # Renk KESİN eşleşmiyor → renge-özel alanların hiçbirini yazma (ezme).
+                    # Bu, ürün kaybolma/renk-adı-değişme bug'ının ikinci savunma hattı.
+                    for _k in ("color", "description", "variants", "stock_code", "sku", "breadcrumb"):
+                        _set_doc.pop(_k, None)
                 # slug'ı da (name'e bağlı) bozmamak için dokunmuyoruz (zaten update_doc'ta yok).
                 await db.products.update_one({"id": existing["id"]}, {"$set": _set_doc})
                 stats["parents_updated_db"] += 1
