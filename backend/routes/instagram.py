@@ -126,7 +126,24 @@ async def update_settings(payload: dict, current_user: dict = Depends(require_ad
     # Token yalnızca doluysa güncellenir (boş gönderim mevcut token'ı silmez).
     tok = (payload or {}).get("access_token")
     if isinstance(tok, str) and tok.strip():
-        upd["access_token"] = encrypt(tok.strip())
+        tok = tok.strip()
+        # SINIRSIZ: app_id (sayısal) + app_secret kayıtlıysa, yapıştırılan KISA token'ı 60 günlük
+        # uzun ömürlüye çevir + damga bas → scheduler 45 günde bir otomatik yeniler.
+        try:
+            _s0 = await _get_settings()
+            _aid = str(_s0.get("app_id") or "").strip()
+            _asec = decrypt(_s0.get("app_secret")) if _s0.get("app_secret") else ""
+            if _aid.isdigit() and _asec:
+                async with httpx.AsyncClient(timeout=30) as _c:
+                    _r = await _c.get(f"{_GRAPH}/oauth/access_token", params={
+                        "grant_type": "fb_exchange_token", "client_id": _aid,
+                        "client_secret": _asec, "fb_exchange_token": tok})
+                if _r.status_code == 200 and (_r.json() or {}).get("access_token"):
+                    tok = _r.json()["access_token"]
+                    upd["token_obtained_at"] = _now().isoformat()
+        except Exception:
+            pass  # çevrilemezse kısa token'la devam (sync yine çalışır, sadece süresi kısa olur)
+        upd["access_token"] = encrypt(tok)
     if "ig_user_id" in (payload or {}):
         upd["ig_user_id"] = str(payload.get("ig_user_id") or "").strip()
     if "source" in (payload or {}):
