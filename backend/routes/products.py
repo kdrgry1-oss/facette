@@ -1278,6 +1278,35 @@ async def _diag_siblings(sc: str = "", name: str = "", key: str = ""):
     return {"count": len(rows), "rows": rows}
 
 
+@router.post("/_diag/restore28")
+async def _diag_restore28(key: str = "", dry: bool = True):
+    """GEÇİCİ hedefli geri-yükleme (renk-körü overwrite kurbanları). dry=True önizler, yazmaz.
+    1) Şardonlu Bej: adı/rengi 'Acı Kahve'ye ezilmiş ama VARYANTLARI Bej olan kaydı geri al.
+    2) Celeste Acı Kahve: boşalan açıklamayı Bej kardeşten kopyala. İş bitince kaldırılacak."""
+    import re as _re
+    if key != "fcttdiag2807":
+        raise HTTPException(status_code=403, detail="forbidden")
+    changes = []
+    # 1) Şardonlu Bej
+    async for p in db.products.find({"name": {"$regex": "Şardonlu", "$options": "i"}}):
+        vcols = {str(v.get("color") or "").strip().lower() for v in (p.get("variants") or []) if str(v.get("color") or "").strip()}
+        nm = str(p.get("name") or ""); col = str(p.get("color") or "").strip().lower()
+        if col == "acı kahve" and vcols == {"bej"}:
+            new_name = _re.sub("acı kahve", "Bej", nm, flags=_re.I).strip()
+            changes.append({"id": p.get("id"), "type": "sardonlu_bej", "from_name": nm, "to_name": new_name})
+            if not dry:
+                await db.products.update_one({"id": p["id"]}, {"$set": {"name": new_name, "color": "Bej"}})
+    # 2) Celeste Acı Kahve açıklaması
+    _bej = await db.products.find_one({"name": {"$regex": "Celeste.*Bej", "$options": "i"}}, {"_id": 0, "description": 1})
+    if _bej and (_bej.get("description") or "").strip():
+        async for p in db.products.find({"name": {"$regex": "Celeste.*Acı Kahve", "$options": "i"}}, {"_id": 0, "id": 1, "description": 1}):
+            if not (p.get("description") or "").strip():
+                changes.append({"id": p.get("id"), "type": "celeste_desc", "copied_len": len(_bej["description"])})
+                if not dry:
+                    await db.products.update_one({"id": p["id"]}, {"$set": {"description": _bej["description"]}})
+    return {"dry": dry, "count": len(changes), "changes": changes}
+
+
 @router.get("/{product_id}")
 async def get_product(product_id: str, request: Request):
     """Get single product by ID or slug"""
