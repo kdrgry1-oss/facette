@@ -62,10 +62,30 @@ async def _size_tables_diag(key: str):
             "has_model_info": bool(st.get("model_info")), "product_size": (st.get("product_size") or "")[:20],
             "sizes": (st.get("sizes") or [])[:8], "columns": (st.get("columns") or [])[:8],
         })
+    # GERÇEK KAYIP ÖLÇÜSÜ: render edilmiş ölçü-tablosu GÖRSELİ olan (kesinlikle tablo girilmiş)
+    # ama get_size_table mantığıyla ŞU AN BOŞ dönen (kendi satırı yok/boş VE kardeşte de yok) ürünler.
+    had_img_but_empty = 0
+    lost_samples = []
+    async for p in db.products.find(
+            {"images": {"$elemMatch": {"is_size_table": True}}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1, "name": 1, "stock_code": 1}).limit(5000):
+        own = await db.size_tables.find_one(
+            {"product_id": p["id"], "sizes": {"$exists": True, "$ne": []}}, {"_id": 1})
+        if own:
+            continue
+        inh = await _inherited_size_table(p["id"])
+        if inh and inh.get("sizes"):
+            continue
+        had_img_but_empty += 1
+        if len(lost_samples) < 12:
+            lost_samples.append({"id": p["id"], "name": (p.get("name") or "")[:34],
+                                 "stock_code": p.get("stock_code", "")})
     return {
         "size_tables_total": total, "non_empty": non_empty, "empty": empty,
         "synced_from_count": synced, "with_model_info": with_model,
         "products_with_rendered_size_image": img_products,
+        "had_image_but_now_empty": had_img_but_empty,
+        "lost_samples": lost_samples,
         "updated_at_by_day": dict(sorted(by_day.items())),
         "empty_samples": empties,
         "recent_rows": recent,
