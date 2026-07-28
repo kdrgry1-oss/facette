@@ -665,8 +665,11 @@ async def _build_products_query(
                 cat_or.append({"category_name": {"$in": matched_names}})
             # Kategori adı tam eşleşme (diakritik duyarsız)
             cat_or.append({"category_name": {"$regex": f"^{dia}$", "$options": "i"}})
-            # Breadcrumb segment eşleşmesi: üst kategori (GİYİM>...) ya da yaprak (...>Şort)
-            cat_or.append({"breadcrumb": {"$regex": f"(?:^|>){dia}(?:>|$)", "$options": "i"}})
+            # NOT: 'breadcrumb' segment eşleşmesi KALDIRILDI. Ürün başka kategoriye taşınınca
+            # category_name/category_ids güncelleniyor ama breadcrumb BAYAT kalabiliyordu →
+            # kategoriden çıkarılan ürün eski kategoride görünmeye devam ediyordu (kullanıcı bug).
+            # Artık YALNIZ güncel category_name + category_ids (atalar dahil) + category_slug yetkili.
+            # Üst kategori listeleme category_ids ataları taşıdığı için bozulmaz (doğrulandı).
             cat_or.append({"category_slug": cat_slug})
             # ÇOKLU KATEGORİ: slug'a karşılık gelen kategori id'lerini category_ids içinde de ara.
             # Ürün ana kategoride olmasa bile (ör. ana "Pantolon") admin'de ekstra eklendiği
