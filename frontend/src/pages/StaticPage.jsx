@@ -42,9 +42,22 @@ export default function StaticPage() {
           </div>
         ) : page ? (
           <>
-            <h1 className="text-3xl font-medium mb-8">{page.title}</h1>
-            <div 
-              className="prose prose-lg max-w-none"
+            <h1 className="text-3xl md:text-4xl font-light tracking-tight text-black mb-8 md:mb-10">{page.title}</h1>
+            {/* İçerik tipografisi — @tailwindcss/typography YOK; bu yüzden alt-eleman
+                seçicileriyle (arbitrary variants) minimalist, okunaklı ve site fontuyla uyumlu
+                stil verilir. Tüm statik sayfalar (Hakkımızda, Mesafeli Satış, KVKK...) aynı görünür. */}
+            <div
+              className="max-w-none text-neutral-700 font-light
+                [&_p]:text-[15px] md:[&_p]:text-base [&_p]:leading-[1.9] [&_p]:mb-5 [&_p]:text-neutral-600
+                [&_.lead]:text-lg md:[&_.lead]:text-2xl [&_.lead]:leading-relaxed [&_.lead]:tracking-tight [&_.lead]:text-black [&_.lead]:mb-10 [&_.lead]:font-light
+                [&_h2]:text-2xl md:[&_h2]:text-3xl [&_h2]:font-light [&_h2]:tracking-tight [&_h2]:text-black [&_h2]:mt-12 [&_h2]:mb-4
+                [&_h3]:text-lg md:[&_h3]:text-xl [&_h3]:font-medium [&_h3]:tracking-tight [&_h3]:text-black [&_h3]:mt-9 [&_h3]:mb-3
+                [&_h4]:text-base [&_h4]:font-semibold [&_h4]:text-black [&_h4]:mt-6 [&_h4]:mb-2
+                [&_strong]:font-semibold [&_strong]:text-black
+                [&_a]:text-black [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:opacity-60
+                [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-5 [&_li]:mb-2 [&_li]:leading-relaxed [&_li]:text-neutral-600
+                [&_hr]:my-10 md:[&_hr]:my-12 [&_hr]:border-neutral-200
+                [&_blockquote]:border-l-2 [&_blockquote]:border-black [&_blockquote]:pl-5 [&_blockquote]:italic [&_blockquote]:text-neutral-800 [&_blockquote]:my-8"
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(page.content) }}
             />
           </>
