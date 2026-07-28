@@ -686,7 +686,7 @@ function ShopTile({ post, onShop }) {
       <img src={img} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" loading="lazy" decoding="async" />
       <span className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
       <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 text-white text-xs sm:text-sm font-light tracking-wide drop-shadow-md">
-        <ShoppingBag size={14} strokeWidth={1.75} /> Shop The Look +
+        <ShoppingBag size={14} strokeWidth={1.75} /> GET THE LOOK
       </span>
     </button>
   );
@@ -721,12 +721,8 @@ function InstaShop({ block }) {
     <section className="py-14 md:py-20 bg-white" data-testid="instashop">
       <div className="max-w-screen-2xl mx-auto">
         <div className="text-center mb-8 md:mb-10 px-4">
-          <p className="text-[10px] md:text-[11px] tracking-[0.42em] uppercase text-gray-400 mb-3">Stilini Keşfet</p>
-          <h2 className="text-2xl md:text-[2.4rem] leading-none font-extralight tracking-[0.28em] text-black">SHOP THE LOOK</h2>
-          <p className="mt-3.5 text-xs md:text-sm font-light text-gray-500 max-w-md mx-auto leading-relaxed">
-            Kombinlere göz at, beğendiğin ürünü tek dokunuşla sepete ekle ·{" "}
-            <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer" className="text-black hover:underline">@facette</a>
-          </p>
+          {/* "Senin için seçtik" ile aynı font */}
+          <h2 className="text-3xl md:text-5xl font-light tracking-tight text-black leading-none">GET THE LOOK</h2>
         </div>
         <div className="relative group/car">
           <button onClick={() => scrollBy(-1)} aria-label="Geri"
@@ -750,7 +746,7 @@ function InstaShop({ block }) {
         <div className="text-center mt-8 px-4">
           <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer"
             className="inline-flex items-center gap-2 text-[11px] tracking-[0.24em] uppercase text-gray-600 hover:text-black border-b border-gray-300 hover:border-black pb-1.5 transition-colors">
-            <Instagram size={14} /> @facette
+            <Instagram size={14} /> Instagram'da bize katılın · @facette
           </a>
         </div>
       </div>
