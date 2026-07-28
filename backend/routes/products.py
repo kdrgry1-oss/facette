@@ -1243,6 +1243,41 @@ async def list_trashed_products(
     total = await db.products.count_documents(query)
     return {"products": products, "total": total, "page": page, "pages": (total + limit - 1) // limit}
 
+
+@router.get("/_diag/sibs28")
+async def _diag_siblings(sc: str = "", name: str = "", key: str = ""):
+    """GEÇİCİ salt-okunur tanı: aynı stok kodu / ada sahip TÜM ürünleri (aktif+pasif+silinmiş)
+    döndürür — kaybolan rengin nereye gittiğini (pasif mi, başka renge mi yazıldı, varyantı
+    başka üründe mi) görmek için. HİÇBİR ŞEY DEĞİŞTİRMEZ. İş bitince kaldırılacak."""
+    if key != "fcttdiag2807":
+        raise HTTPException(status_code=403, detail="forbidden")
+    q = {}
+    if sc:
+        q["stock_code"] = sc
+    elif name:
+        q["name"] = {"$regex": name, "$options": "i"}
+    else:
+        raise HTTPException(status_code=400, detail="sc veya name gerekli")
+    rows = []
+    async for p in db.products.find(q, {
+        "_id": 0, "id": 1, "name": 1, "color": 1, "stock_code": 1, "urun_karti_id": 1,
+        "csv_card_id": 1, "is_active": 1, "is_deleted": 1, "status": 1, "updated_at": 1,
+        "synced_from": 1, "description": 1, "variants": 1,
+    }).limit(60):
+        vs = p.get("variants") or []
+        rows.append({
+            "id": p.get("id"), "name": p.get("name"), "color": p.get("color"),
+            "stock_code": p.get("stock_code"), "kart_id": p.get("urun_karti_id"),
+            "csv": p.get("csv_card_id"), "active": p.get("is_active"),
+            "deleted": p.get("is_deleted"), "status": p.get("status"),
+            "updated_at": p.get("updated_at"), "synced_from": p.get("synced_from"),
+            "desc_len": len(p.get("description") or ""),
+            "variant_colors": sorted({str(v.get("color") or "") for v in vs}),
+            "variant_count": len(vs),
+        })
+    return {"count": len(rows), "rows": rows}
+
+
 @router.get("/{product_id}")
 async def get_product(product_id: str, request: Request):
     """Get single product by ID or slug"""
