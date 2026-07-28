@@ -294,8 +294,8 @@ export default function Footer() {
           ))}
         </div>
 
-        {/* Bottom */}
-        <div className="border-t border-white/10 mt-12 pt-8 flex flex-col-reverse md:flex-row justify-between items-center gap-6">
+        {/* Bottom — mobilde üst çizgi YOK (son sütunun alt çizgisiyle çift çizgi olmasın); masaüstünde var */}
+        <div className="md:border-t md:border-white/10 mt-6 md:mt-12 pt-8 flex flex-col-reverse md:flex-row justify-between items-center gap-6">
           <p className="text-[10px] tracking-[0.2em] uppercase text-white/40">{copyright}</p>
           {/* Ödeme: kilit + iyzico güvenli ödeme etiketi + beyaz kart rozetleri (self-contained) */}
           <div className="flex items-center gap-4 flex-wrap justify-center md:justify-end">
