@@ -85,10 +85,24 @@ async def admin_mfa_enforced() -> bool:
         return False
 
 
+def _resolve_mfa_phone(user: dict) -> str:
+    """MFA SMS'inin gideceği telefon. Öncelik: kurulmuş mfa_phone_enc (şifreli),
+    yoksa HESABIN kayıtlı telefonu (user.phone). Böylece admin ayrıca telefon
+    KURMAK/GİRMEK zorunda kalmaz — her e-posta kendi kayıtlı numarasıyla doğrular."""
+    if user.get("mfa_phone_enc"):
+        try:
+            p = decrypt(user["mfa_phone_enc"])
+            if p:
+                return p
+        except Exception:
+            pass
+    return (user.get("phone") or "").strip()
+
+
 async def send_mfa_sms_code(user: dict) -> bool:
-    """Kullanıcının kayıtlı MFA telefonuna 6 haneli kod gönderir (5 dk geçerli, hash'li saklanır).
-    Telefon mfa_phone_enc'ten (şifreli) çözülür. Başarısızsa False."""
-    phone = decrypt(user.get("mfa_phone_enc")) if user.get("mfa_phone_enc") else None
+    """Kullanıcının MFA telefonuna 6 haneli kod gönderir (5 dk geçerli, hash'li saklanır).
+    Telefon: mfa_phone_enc → yoksa hesabın user.phone'u. Başarısızsa False."""
+    phone = _resolve_mfa_phone(user)
     if not phone:
         return False
     import sys as _sys
@@ -185,10 +199,12 @@ async def mfa_send_login_code(payload: dict):
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Geçersiz MFA token")
     user = await db.users.find_one({"id": decoded["user_id"]}, {"_id": 0})
-    if not user or user.get("mfa_method") != "sms":
+    # SMS yöntemi kurulu VEYA otomatik SMS (kayıtlı telefon + hesap TOTP secret'i yok) ise gönder.
+    _phone = _resolve_mfa_phone(user) if user else ""
+    if not user or not _phone or (user.get("mfa_method") not in (None, "", "sms") and user.get("mfa_secret_enc")):
         raise HTTPException(status_code=400, detail="SMS MFA aktif değil")
     sent = await send_mfa_sms_code(user)
-    return {"success": True, "sent": sent, "phone_masked": _mask_phone(decrypt(user.get("mfa_phone_enc")) if user.get("mfa_phone_enc") else "")}
+    return {"success": True, "sent": sent, "phone_masked": _mask_phone(_phone)}
 
 
 @router.get("/status")
@@ -268,8 +284,16 @@ async def mfa_verify(payload: dict):
         raise HTTPException(status_code=401, detail="Geçersiz MFA token")
 
     user = await db.users.find_one({"id": decoded["user_id"]}, {"_id": 0})
-    if not user or not user.get("mfa_enabled"):
+    if not user:
         raise HTTPException(status_code=400, detail="MFA aktif değil")
+    # OTOMATİK SMS-MFA: hesap resmî olarak MFA kurmamış olsa bile, admin + zorunlu MFA +
+    # kayıtlı telefon varsa SMS doğrulaması geçerlidir (kurulum ekranı gerekmez).
+    _auto_sms = False
+    if not user.get("mfa_enabled"):
+        if user.get("is_admin") and await admin_mfa_enforced() and _resolve_mfa_phone(user):
+            _auto_sms = True
+        else:
+            raise HTTPException(status_code=400, detail="MFA aktif değil")
 
     # Brute-force kilidi
     now = datetime.now(timezone.utc)
@@ -282,8 +306,9 @@ async def mfa_verify(payload: dict):
     if win_dt and (now - win_dt) < timedelta(minutes=5) and fails >= 10:
         raise HTTPException(status_code=429, detail="Çok fazla hatalı deneme, 5 dakika sonra tekrar deneyin")
 
-    # Yöntem: SMS ise SMS kodunu, değilse (TOTP) authenticator kodunu doğrula.
-    if user.get("mfa_method") == "sms":
+    # Yöntem: SMS (kurulu veya otomatik) ise SMS kodunu, TOTP secret'i olan hesapta
+    # authenticator kodunu doğrula.
+    if _auto_sms or user.get("mfa_method") == "sms" or not user.get("mfa_secret_enc"):
         _code_ok = await _verify_sms_code(user["id"], code)
     else:
         secret = decrypt(user.get("mfa_secret_enc")) if user.get("mfa_secret_enc") else None
@@ -297,7 +322,18 @@ async def mfa_verify(payload: dict):
         raise HTTPException(status_code=401, detail="Kod doğrulanamadı")
 
     # başarı -> sayaç sıfırla
-    await db.users.update_one({"id": user["id"]}, {"$set": {"mfa_fail_count": 0}, "$unset": {"mfa_fail_window": ""}})
+    _succ_set = {"mfa_fail_count": 0}
+    # OTOMATİK SMS-MFA'yı ilk başarılı doğrulamada KALICI kaydet: hesap telefonu
+    # mfa_phone_enc'e şifreli yazılır → bundan sonra kurulum/telefon girme sorulmaz.
+    if _auto_sms:
+        _succ_set["mfa_enabled"] = True
+        _succ_set["mfa_method"] = "sms"
+        if not user.get("mfa_phone_enc"):
+            _pn = _resolve_mfa_phone(user)
+            if _pn:
+                _succ_set["mfa_phone_enc"] = encrypt(_pn)
+        _succ_set["mfa_enabled_at"] = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one({"id": user["id"]}, {"$set": _succ_set, "$unset": {"mfa_fail_window": ""}})
 
     token = create_token(user["id"], user.get("is_admin", False), token_version=user.get("token_version", 0))
     return {

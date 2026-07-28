@@ -292,15 +292,14 @@ async def login(request: Request):
 
     # MFA aktifse: tam token verme, ikinci adım iste
     if user.get("mfa_enabled"):
-        from .mfa import create_mfa_pending_token, send_mfa_sms_code, _mask_phone
-        from security.crypto import decrypt as _dec
+        from .mfa import create_mfa_pending_token, send_mfa_sms_code, _mask_phone, _resolve_mfa_phone
         _method = user.get("mfa_method") or "totp"
         _pmask = ""
         if _method == "sms":
             # Login'de SMS kodunu OTOMATİK gönder + maskeli numara döndür.
             try:
                 await send_mfa_sms_code(user)
-                _pmask = _mask_phone(_dec(user.get("mfa_phone_enc")) if user.get("mfa_phone_enc") else "")
+                _pmask = _mask_phone(_resolve_mfa_phone(user))
             except Exception:
                 pass
         await write_audit_log("login_mfa_challenge", user_id=user["id"], email=email,
@@ -312,14 +311,30 @@ async def login(request: Request):
             "mfa_token": create_mfa_pending_token(user["id"]),
         }
 
-    # ZORUNLU MFA (Amazon DPP): admin MFA kurmamışsa login'de KURULUM zorunlu kılınır.
-    # Kilitlenmez — tam token verilir ama mfa_setup_required=True ile frontend kurulum ekranına
-    # yönlendirir (kurmadan panele geçemez). Break-glass: env ADMIN_MFA_ENFORCE=off.
+    # ZORUNLU MFA (Amazon DPP): admin MFA kurmamışsa —
+    #  • Hesabın KAYITLI TELEFONU varsa: kurulum ekranı GÖSTERME; OTOMATİK SMS gönder ve
+    #    doğrudan OTP adımına geç (telefon girmeye gerek yok, her e-posta kendi numarasıyla).
+    #  • Hiç telefon yoksa: mfa_setup_required=True (bir kere numara girilir).
+    # Break-glass: env ADMIN_MFA_ENFORCE=off.
     _mfa_setup_required = False
     if user.get("is_admin"):
         try:
-            from .mfa import admin_mfa_enforced
+            from .mfa import admin_mfa_enforced, send_mfa_sms_code, create_mfa_pending_token, _mask_phone, _resolve_mfa_phone
             if await admin_mfa_enforced():
+                _auto_phone = _resolve_mfa_phone(user)
+                if _auto_phone:
+                    try:
+                        await send_mfa_sms_code(user)
+                    except Exception:
+                        pass
+                    await write_audit_log("login_mfa_challenge", user_id=user["id"], email=email,
+                                          ip=ip, user_agent=ua, success=True)
+                    return {
+                        "mfa_required": True,
+                        "mfa_method": "sms",
+                        "phone_masked": _mask_phone(_auto_phone),
+                        "mfa_token": create_mfa_pending_token(user["id"]),
+                    }
                 _mfa_setup_required = True
         except Exception:
             _mfa_setup_required = False
