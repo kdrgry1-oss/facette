@@ -3090,6 +3090,73 @@ async def backfill_trendyol_orders(payload: dict, current_user: dict = Depends(r
                                 "success", f"tarandı={scanned} aktarıldı={imported} atlandı={skipped} dry={dry}")
     return {"dry_run": dry, "scanned": scanned, "imported": imported,
             "skipped_existing": skipped, "windows": windows, "errors": errors[:20]}
+@router.get("/trendyol/_diag/reconcile30")
+async def _diag_ty_reconcile30(key: str = "", days: int = 30):
+    """GEÇİCİ salt-okunur mutabakat: son N gün Trendyol sipariş MOTORUNU çalıştırır —
+    TY'de görünen benzersiz sipariş sayısı vs bizim DB'de olanları karşılaştırır, EKSİK
+    siparişleri ve TY statü dağılımını raporlar. HİÇBİR ŞEY YAZMAZ. İş bitince kaldırılacak."""
+    if key != "fcttdiag2807":
+        raise HTTPException(status_code=403, detail="forbidden")
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    import sys, os
+    from datetime import datetime, timezone, timedelta
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(supplier_id=config["supplier_id"], api_key=config["api_key"],
+                            api_secret=config["api_secret"], mode=config["mode"])
+    ed = datetime.now(timezone.utc)
+    sd = ed - timedelta(days=int(days))
+    WIN = timedelta(days=13)
+    cur = sd
+    seen = set()
+    ty_status: dict = {}
+    db_status: dict = {}
+    missing = []
+    in_db = 0
+    errors = []
+    while cur < ed:
+        wend = min(cur + WIN, ed)
+        s_ms, e_ms = int(cur.timestamp() * 1000), int(wend.timestamp() * 1000)
+        page = 0
+        while True:
+            try:
+                resp = await client.get_orders(start_date_ms=s_ms, end_date_ms=e_ms, size=200, page=page)
+            except Exception as e:
+                errors.append({"window": cur.date().isoformat(), "page": page, "error": str(e)[:200]})
+                break
+            content = resp.get("content") or []
+            for t in content:
+                onum = str(t.get("orderNumber") or "")
+                if not onum or onum in seen:
+                    continue
+                seen.add(onum)
+                st = str(t.get("shipmentPackageStatus") or t.get("status") or "?")
+                ty_status[st] = ty_status.get(st, 0) + 1
+                doc = await db.orders.find_one({"order_number": onum, "platform": "trendyol"},
+                                               {"_id": 0, "status": 1})
+                if doc:
+                    in_db += 1
+                    dst = str(doc.get("status") or "?")
+                    db_status[dst] = db_status.get(dst, 0) + 1
+                else:
+                    missing.append({"orderNumber": onum, "ty_status": st,
+                                    "date": _ms_to_iso(t.get("orderDate"))})
+            total_pages = resp.get("totalPages") or 0
+            page += 1
+            if not content or page >= total_pages:
+                break
+        cur = wend
+    return {
+        "days": int(days), "range": {"start": sd.isoformat(), "end": ed.isoformat()},
+        "ty_unique_orders": len(seen), "in_db": in_db, "missing_count": len(missing),
+        "ty_status_breakdown": dict(sorted(ty_status.items(), key=lambda x: -x[1])),
+        "our_db_status_breakdown": dict(sorted(db_status.items(), key=lambda x: -x[1])),
+        "missing_sample": missing[:60], "errors": errors,
+    }
+
+
 @router.post("/trendyol/orders/import")
 async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
     """Import orders from Trendyol (Last 15 days) auto job"""
