@@ -4,8 +4,44 @@ import { useParams } from "react-router-dom";
 import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+import IconSectionsPage from "./IconSectionsPage";
+import { Calendar, Package, Truck, Headphones, Building2, Phone, Mail, CreditCard } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// İkonlu özel düzen kullanan sayfalar (İade & Değişim, İletişim). İçerik burada curate edilir;
+// tipografi/fontlar sitenin geneliyle aynı (ince, sans-serif).
+const ICON_PAGES = {
+  "iade-kosullari": {
+    title: "İade & Değişim",
+    intro: "FACETTE olarak alışveriş deneyiminizden memnun kalmanızı önemsiyoruz. Aşağıda iade ve değişim koşullarımızı bulabilirsiniz.",
+    sections: [
+      { Icon: Calendar, title: "Cayma Hakkı", lines: ["Ürünü teslim aldığınız tarihten itibaren 14 gün içinde herhangi bir gerekçe göstermeksizin cayma hakkınızı kullanabilirsiniz."] },
+      { Icon: Package, title: "İade Koşulları", bullets: [
+        "Ürün kullanılmamış, yıkanmamış ve yeniden satılabilir durumda olmalıdır.",
+        "Orijinal etiketleri sökülmemiş, ambalajı zarar görmemiş olmalıdır.",
+        "Hijyen kuralları gereği iç giyim ve mayo/bikini grubu ürünlerde iade kabul edilmemektedir.",
+      ] },
+      { Icon: Truck, title: "İade Süreci", lines: ["İade talebinizi oluşturduktan sonra ürünü anlaşmalı kargo ile tarafımıza gönderebilirsiniz. Ürün tarafımıza ulaşıp incelendikten sonra ödemeniz aynı ödeme yöntemiyle iade edilir. Bankaya bağlı olarak iade tutarının hesabınıza yansıması birkaç iş günü sürebilir."] },
+    ],
+    card: { Icon: Headphones, title: "Müşteri Hizmetleri",
+      lines: ["Hafta içi 10:00 - 18:00 saatleri arasında e-posta ve WhatsApp üzerinden taleplerinizi yanıtlıyoruz."],
+      note: "info@facette.com.tr   ·   +90 543 330 03 10 (WhatsApp Hattı)" },
+  },
+  "iletisim": {
+    title: "İletişim",
+    intro: "Bizimle her zaman iletişime geçebilirsiniz. Sorularınız, talepleriniz ve iş birlikleri için aşağıdaki kanallardan bize ulaşabilirsiniz.",
+    sections: [
+      { Icon: Building2, title: "FACETTE DIŞ TİCARET A.Ş.", lines: ["Adres: Küçükçekmece İkitelli OSB Mah. İMSAN D Blok No: 3 Küçükçekmece / İstanbul"] },
+      { Icon: Phone, title: "Telefon", lines: ["0543 330 03 10"] },
+      { Icon: Mail, title: "E-Posta", lines: ["info@facette.com.tr"] },
+      { Icon: CreditCard, title: "IBAN", lines: ["TR86 0006 4000 0011 4540 1414 67", "(FACETTE DIŞ TİCARET A.Ş.)"] },
+    ],
+    card: { Icon: Headphones, title: "Müşteri Hizmetleri",
+      lines: ["Hafta içi 10:00 - 18:00 saatleri arasında e-posta ve WhatsApp üzerinden taleplerinizi yanıtlıyoruz."],
+      note: "Siparişinizle ilgili sorularda sipariş numaranızı belirtmeniz sürecinizi hızlandıracaktır." },
+  },
+};
 
 export default function StaticPage() {
   const { slug } = useParams();
@@ -40,6 +76,8 @@ export default function StaticPage() {
             <div className="h-4 bg-gray-200 w-2/3" />
             <div className="h-4 bg-gray-200 w-full" />
           </div>
+        ) : ICON_PAGES[slug] ? (
+          <IconSectionsPage {...ICON_PAGES[slug]} />
         ) : page ? (
           <>
             <h1 className="text-3xl md:text-5xl font-light tracking-tight text-black mb-3">{page.title}</h1>
