@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 import openpyxl
 
-from .deps import db, require_admin
+from .deps import db, require_admin, logger, generate_id
 
 router = APIRouter(prefix="/bulk-ops", tags=["Bulk Operations"])
 
@@ -214,11 +214,36 @@ async def apply_upload(file: UploadFile = File(...),
                         if key_used == "barcode" and v.get("barcode") == ref:
                             target_idx = i; break
                     if target_idx is not None:
+                        _old_v = variants[target_idx] if target_idx < len(variants) else {}
+                        try:
+                            _old_stock = int(_old_v.get("stock") or 0)
+                        except Exception:
+                            _old_stock = 0
                         await db.products.update_one(
                             {"id": product["id"]},
                             {"$set": {f"variants.{target_idx}.stock": new_stock, "updated_at": now}}
                         )
                         variant_updated = True
+                        # Manuel (toplu Excel) stok düzeltmesi denetimi — hareket kaydı bırak.
+                        if new_stock != _old_stock:
+                            try:
+                                await db.stock_movements.insert_one({
+                                    "id": generate_id(),
+                                    "type": "manual_adjust",
+                                    "product_id": product["id"],
+                                    "items": [{
+                                        "product_id": product["id"],
+                                        "barcode": str(_old_v.get("barcode") or ref or ""),
+                                        "size": _old_v.get("size") or "",
+                                        "delta": new_stock - _old_stock,
+                                        "old": _old_stock, "new": new_stock,
+                                    }],
+                                    "created_at": now,
+                                    "created_by": (current_user or {}).get("email") or "",
+                                    "source": "bulk_excel",
+                                })
+                            except Exception as _me:
+                                logger.error(f"[bulk manual_stock_log {product['id']}] {_me}")
                     else:
                         root_updates["stock"] = new_stock
 

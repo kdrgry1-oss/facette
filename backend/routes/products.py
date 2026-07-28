@@ -1300,8 +1300,84 @@ _STOCK_MOVE_REASONS = {
     "return_restock": "İade — stok geri eklendi",
     "stock_in": "Stok girişi",
     "manual_increment": "Manuel stok girişi",
+    "manual_adjust": "Manuel stok düzeltmesi",
     "production": "Üretim — stok girişi",
 }
+
+
+async def _log_manual_stock_change(product_id: str, product_name: str, existing: dict,
+                                   new_variants, new_root_stock, by_email: str,
+                                   source: str = "admin_edit") -> None:
+    """Manuel stok düzeltmelerini db.stock_movements'a yazar.
+
+    Neden: Ürün düzenleme formu / toplu Excel yalnız variants[].stock'u $set eder,
+    HİÇBİR hareket kaydı bırakmazdı → çalışanın 'sıfırladım' dediği düzeltmeler
+    stok hareketleri panelinde GÖRÜNMÜYORDU ve 'en son hangi kayıt' izlenemiyordu.
+    Bu fonksiyon eski (DB) ile yeni (forma girilen) stoğu barkod/id ile eşleştirip
+    yalnız DEĞİŞEN varyantlar için delta (yeni-eski) kaydı üretir. Böylece manuel
+    düzeltmeler, gider_pusulası/iade restock'larıyla AYNI zaman çizelgesine düşer.
+    """
+    try:
+        old_variants = existing.get("variants") or []
+        old_by_bc, old_by_id = {}, {}
+        for v in old_variants:
+            _bc = str(v.get("barcode") or "").strip()
+            if _bc:
+                old_by_bc[_bc] = v
+            _id = str(v.get("id") or v.get("urun_id") or "").strip()
+            if _id:
+                old_by_id[_id] = v
+        items = []
+        for nv in (new_variants or []):
+            bc = str(nv.get("barcode") or "").strip()
+            ov = old_by_bc.get(bc) if bc else None
+            if ov is None:
+                ov = old_by_id.get(str(nv.get("id") or nv.get("urun_id") or "").strip())
+            if ov is None:
+                continue  # yeni eklenen varyant — 'ekleme', düzeltme değil
+            try:
+                old_s = int(ov.get("stock") or 0)
+            except Exception:
+                old_s = 0
+            if nv.get("stock") is None:
+                continue
+            try:
+                new_s = int(nv.get("stock") or 0)
+            except Exception:
+                continue
+            if new_s != old_s:
+                items.append({
+                    "product_id": product_id,
+                    "barcode": bc,
+                    "size": nv.get("size") or ov.get("size") or "",
+                    "delta": new_s - old_s,
+                    "old": old_s,
+                    "new": new_s,
+                })
+        # Varyantsız ürün — kök stok
+        if new_root_stock is not None and not old_variants:
+            try:
+                old_root = int(existing.get("stock") or 0)
+                new_root = int(new_root_stock)
+                if new_root != old_root:
+                    items.append({"product_id": product_id, "barcode": "", "size": "",
+                                  "delta": new_root - old_root, "old": old_root, "new": new_root})
+            except Exception:
+                pass
+        if not items:
+            return
+        await db.stock_movements.insert_one({
+            "id": generate_id(),
+            "type": "manual_adjust",
+            "product_id": product_id,
+            "product_name": product_name or existing.get("name", ""),
+            "items": items,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_by": by_email or "",
+            "source": source,
+        })
+    except Exception as e:
+        logger.error(f"[manual_stock_log {product_id}] {e}")
 
 
 @router.get("/{product_id}/stock-movements")
@@ -2072,7 +2148,27 @@ async def update_product(
 
     product_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
+    # MANUEL STOK DÜZELTMESİ DENETİMİ (delta için TAZE okuma): üstteki 'existing'
+    # fonksiyon başında okundu; buraya kadarki await'lerde araya bir gider_pusulası/iade
+    # $inc girmiş olabilir. Delta'yı doğru (canlı stokla tutarlı) hesaplamak için stoğu
+    # $set'ten HEMEN ÖNCE taze oku. Yazım semantiği değişmiyor (son yazan kazanır) — yalnız
+    # ledger doğru: 'en son kayıt = canlı stok' korunur.
+    _pre = None
+    if ("variants" in product_data) or ("stock" in product_data):
+        _pre = await db.products.find_one(
+            {"id": product_id}, {"_id": 0, "variants": 1, "stock": 1, "name": 1})
+
     await db.products.update_one({"id": product_id}, {"$set": product_data})
+
+    if _pre is not None:
+        await _log_manual_stock_change(
+            product_id,
+            product_data.get("name") or existing.get("name"),
+            _pre,
+            product_data.get("variants"),
+            product_data.get("stock"),
+            (current_user or {}).get("email") or (current_user or {}).get("username") or "",
+        )
 
     # RENK KARDEŞİ OTOMATİK SENKRONU (kullanıcı isteği): stok kodu AYNI olan kartlarda
     # model-düzeyi alanlar bu kayıtla birlikte eşitlenir — Sezon, Beden Önerisi (Kalıp)
