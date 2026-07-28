@@ -579,9 +579,9 @@ function ShopLookModal({ post, onClose }) {
           className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white">
           <X size={16} />
         </button>
-        {/* Look görseli yalnız masaüstünde — mobilde doğrudan ürün+sepete-ekle gösterilir */}
-        <div className="hidden sm:block sm:w-[45%] shrink-0 bg-gray-100">
-          <img src={optimizeImg(post.image, 800)} alt="" className="w-full h-full object-cover" />
+        {/* Look görseli yalnız masaüstünde — TAM görünsün (kırpma yok) */}
+        <div className="hidden sm:flex sm:w-[45%] shrink-0 bg-gray-50 items-center justify-center">
+          <img src={optimizeImg(post.image, 900)} alt="" className="max-w-full max-h-full w-auto h-auto object-contain" />
         </div>
         <div className="w-full sm:w-[55%] flex flex-col min-h-0">
           <div className="px-4 pt-4 pb-3 border-b">
