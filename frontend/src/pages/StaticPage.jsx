@@ -42,13 +42,15 @@ export default function StaticPage() {
           </div>
         ) : page ? (
           <>
-            <h1 className="text-3xl md:text-4xl font-light tracking-tight text-black mb-8 md:mb-10">{page.title}</h1>
+            <h1 className="text-3xl md:text-5xl font-light tracking-tight text-black mb-4">{page.title}</h1>
+            {/* Minimalist marka aksanı — başlık altı kısa çizgi */}
+            <div className="w-10 h-px bg-black/70 mb-8 md:mb-12" />
             {/* İçerik tipografisi — @tailwindcss/typography YOK; bu yüzden alt-eleman
                 seçicileriyle (arbitrary variants) minimalist, okunaklı ve site fontuyla uyumlu
                 stil verilir. Tüm statik sayfalar (Hakkımızda, Mesafeli Satış, KVKK...) aynı görünür. */}
             <div
               className="max-w-none text-neutral-700 font-light
-                [&_p]:text-[15px] md:[&_p]:text-base [&_p]:leading-[1.9] [&_p]:mb-5 [&_p]:text-neutral-600
+                [&_p]:text-[15px] md:[&_p]:text-base [&_p]:leading-[1.9] [&_p]:mb-5 [&_p]:text-neutral-700
                 [&_.lead]:text-lg md:[&_.lead]:text-2xl [&_.lead]:leading-relaxed [&_.lead]:tracking-tight [&_.lead]:text-black [&_.lead]:mb-10 [&_.lead]:font-light
                 [&_h2]:text-2xl md:[&_h2]:text-3xl [&_h2]:font-light [&_h2]:tracking-tight [&_h2]:text-black [&_h2]:mt-12 [&_h2]:mb-4
                 [&_h3]:text-lg md:[&_h3]:text-xl [&_h3]:font-medium [&_h3]:tracking-tight [&_h3]:text-black [&_h3]:mt-9 [&_h3]:mb-3
