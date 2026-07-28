@@ -105,7 +105,10 @@ export default function AdminInstagram() {
     setBusy(true);
     try {
       const r = await axios.post(`${API}/admin/instagram/sync`, {}, auth);
-      toast.success(`${r.data?.saved || 0} gönderi güncellendi`);
+      toast.success(`${r.data?.saved || 0} gönderi güncellendi (kendi: ${r.data?.media || 0}, etiketli: ${r.data?.tagged || 0})`);
+      if (r.data?.tags_note) {
+        toast.error(`Etiketli gönderiler çekilemedi: ${r.data.tags_note}`, { duration: 12000 });
+      }
       await loadPosts(); await loadSettings();
     } catch (e) { toast.error(e?.response?.data?.detail || "Senkron başarısız"); }
     finally { setBusy(false); }

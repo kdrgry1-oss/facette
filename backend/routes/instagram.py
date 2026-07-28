@@ -122,13 +122,15 @@ async def _do_sync(token: str, ig_user_id: str, max_each: int = 100) -> tuple:
     media default GÖSTER (active), tagged default GİZLİ (admin seçer)."""
     per = {}
     total = 0
+    tags_error = ""
     for kind, src in (("media", "media"), ("tagged", "tags")):
         try:
             items = await _fetch_from_graph(token, ig_user_id, src, max_each)
-        except HTTPException:
+        except HTTPException as e:
             if kind == "media":
                 raise            # kendi gönderiler çekilemiyorsa gerçek hata
-            per[kind] = 0        # tags edge bazı hesaplarda kapalı → media başarılıysa yut
+            per[kind] = 0        # tags edge izin/erişim isteyebilir → media başarılıysa yut ama SEBEBİ sakla
+            tags_error = str(getattr(e, "detail", e))[:300]
             continue
         c = 0
         for it in items:
@@ -154,7 +156,7 @@ async def _do_sync(token: str, ig_user_id: str, max_each: int = 100) -> tuple:
             c += 1
         per[kind] = c
         total += c
-    return total, per
+    return total, per, tags_error
 
 
 # --------------------------------------------------------------------------- #
@@ -190,6 +192,7 @@ async def get_settings(current_user: dict = Depends(require_admin)):
         "auto_sync": bool(s.get("auto_sync", False)),
         "last_sync": s.get("last_sync"),
         "last_error": s.get("last_error", ""),
+        "tags_note": s.get("tags_note", ""),
         "post_count": count,
     }
 
@@ -444,15 +447,16 @@ async def sync_now(current_user: dict = Depends(require_admin)):
     if not token or not ig_user_id:
         raise HTTPException(status_code=400, detail="Önce Access Token ve Instagram User ID girin.")
     try:
-        total, per = await _do_sync(token, ig_user_id, 100)
+        total, per, tags_error = await _do_sync(token, ig_user_id, 100)
     except HTTPException as e:
         await db.settings.update_one({"id": "instagram"}, {"$set": {"last_error": str(e.detail)}})
         raise
     await db.settings.update_one(
         {"id": "instagram"},
-        {"$set": {"last_sync": _now().isoformat(), "last_error": ""}})
+        {"$set": {"last_sync": _now().isoformat(), "last_error": "", "tags_note": tags_error}})
     return {"success": True, "saved": total,
-            "media": per.get("media", 0), "tagged": per.get("tagged", 0)}
+            "media": per.get("media", 0), "tagged": per.get("tagged", 0),
+            "tags_note": tags_error}
 
 
 @admin_router.get("/posts")
@@ -514,7 +518,7 @@ async def auto_sync_instagram():
         if not s.get("auto_sync") or not s.get("access_token") or not s.get("ig_user_id"):
             return
         token = decrypt(s.get("access_token"))
-        total, per = await _do_sync(token, s.get("ig_user_id"), 100)
+        total, per, _tags_err = await _do_sync(token, s.get("ig_user_id"), 100)
         await db.settings.update_one(
             {"id": "instagram"}, {"$set": {"last_sync": _now().isoformat(), "last_error": ""}})
         logger.info("[instagram] auto-sync ok — media=%d tagged=%d", per.get("media", 0), per.get("tagged", 0))
