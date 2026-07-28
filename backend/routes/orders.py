@@ -177,8 +177,16 @@ async def _order_notify_vars(order: dict, **extra) -> dict:
     """
     import os as _os
     ship = order.get("shipping_address") or {}
-    full_name = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
-                 or ship.get("full_name") or ship.get("name") or "Müşterimiz")
+    bill = order.get("billing_address") or {}
+    # Ad-soyad HER kaynaktan aranır — {customer_name} bazı SMS'lerde boş/"Müşterimiz" kalıyordu
+    # (isim shipping değil; top-level, billing veya guest full_name alanındaydı).
+    def _fn(d):
+        d = d or {}
+        return f"{d.get('first_name','')} {d.get('last_name','')}".strip()
+    full_name = (_fn(ship) or ship.get("full_name") or ship.get("name")
+                 or _fn(order) or order.get("customer_name") or order.get("full_name") or order.get("name")
+                 or _fn(bill) or bill.get("full_name") or bill.get("name")
+                 or "Müşterimiz")
 
     # Kalemler tablosu (items_html) — sipariş onay mailindeki ürün listesi
     items_rows = ""
