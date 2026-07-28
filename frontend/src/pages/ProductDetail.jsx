@@ -1131,7 +1131,37 @@ export default function ProductDetail() {
                   {expandedSections.description ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                 </button>
                 {expandedSections.description && (
-                  <div className="pb-3 text-xs text-gray-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.description) || "Ürün açıklaması bulunmamaktadır." }} />
+                  <div className="pb-3">
+                    <div className="text-xs text-gray-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.description) || "Ürün açıklaması bulunmamaktadır." }} />
+                    {/* Materyal / İçerik + müşteri-ilgili özellikler (attributes) — daha önce hiç gösterilmiyordu */}
+                    {(() => {
+                      const raw = product.attributes;
+                      const pairs = Array.isArray(raw) ? raw.map((a) => [a?.name, a?.value])
+                        : (raw && typeof raw === "object") ? Object.entries(raw) : [];
+                      const HIDE = ["persona", "kutu durumu", "performans", "sürdürülebilirlik detayı", "surdurulebilirlik detayi",
+                        "sürdürülebilirlik", "surdurulebilirlik", "ek özellik", "ek ozellik", "ortam", "yaş grubu", "yas grubu",
+                        "menşei", "mensei", "gtin", "barkod", "stok kodu", "marka", "cinsiyet"];
+                      const rows = pairs
+                        .map(([k, v]) => [String(k || "").trim(), String(v || "").trim()])
+                        .filter(([k, v]) => k && v && !["yok", "hayır", "hayir", "-"].includes(v.toLowerCase()) && !HIDE.includes(k.toLocaleLowerCase("tr")));
+                      if (!rows.length) return null;
+                      const PRIO = ["ürün i̇çerik bilgisi", "ürün içerik bilgisi", "urun icerik bilgisi", "materyal", "kumaş tipi", "kumas tipi"];
+                      const _p = (k) => { const i = PRIO.indexOf(k.toLocaleLowerCase("tr")); return i < 0 ? 99 : i; };
+                      rows.sort((a, b) => _p(a[0]) - _p(b[0]));
+                      return (
+                        <table className="mt-3 w-full text-[11px]">
+                          <tbody>
+                            {rows.map(([k, v]) => (
+                              <tr key={k} className="border-b border-gray-100 last:border-0">
+                                <td className="py-1.5 pr-3 text-gray-500 align-top w-2/5">{k}</td>
+                                <td className="py-1.5 text-gray-800">{v}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      );
+                    })()}
+                  </div>
                 )}
               </div>
               
