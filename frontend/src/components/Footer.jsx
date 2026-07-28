@@ -248,9 +248,10 @@ export default function Footer() {
     <>
     <NewsletterBand nl={newsletter} />
     <footer className="bg-black text-white" data-testid="footer-structured">
-      <div className="container-main pt-14 md:pt-20 pb-8">
-        {/* Brand strip — biraz aşağıda; 'inspired...' alt hizası ikonlarla eşit (items-end + leading-none) */}
-        <div className="md:flex md:items-end md:justify-between mb-12 md:mb-16 pt-6 md:pt-12">
+      <div className="container-main pt-10 md:pt-12 pb-8">
+        {/* Brand strip — logo/slogan/ikon bloğu; üstte modest boşluk (çift padding kaldırıldı,
+            footer dikey olarak kısaldı). 'inspired...' alt hizası ikonlarla eşit (items-end + leading-none) */}
+        <div className="md:flex md:items-end md:justify-between mb-10 md:mb-12 pt-2 md:pt-4">
           <div className="max-w-md">
             <Link to="/" className="inline-block mb-5">
               {/* Koyu footer → logo beyaza zorlanır (brightness-0 + invert) */}
