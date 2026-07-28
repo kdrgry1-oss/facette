@@ -307,6 +307,36 @@ async def get_size_table(product_id: str, current_user: dict = Depends(require_a
     return st
 
 
+@router.get("/{product_id}/sibling-model-info")
+async def sibling_model_info(product_id: str, current_user: dict = Depends(require_admin)):
+    """'Diğer renkten getir' butonu: aynı stok kodlu renk kardeşlerinden DOLU manken (model_info)
+    + ürün bedenini döndürür (en son güncellenen). Bu ürüne HİÇBİR ŞEY YAZMAZ — sadece döndürür;
+    admin editörde uygulayıp kaydeder. Böylece her rengin kendi mankeni korunur, otomatik ezme olmaz."""
+    prod = await db.products.find_one({"id": product_id}, {"_id": 0, "stock_code": 1})
+    sc = str((prod or {}).get("stock_code") or "").strip()
+    empty = {"found": False, "model_info": {}, "product_size": ""}
+    if not sc:
+        return empty
+    sibling_ids = []
+    async for p in db.products.find(
+            {"stock_code": sc, "id": {"$ne": product_id}, "is_deleted": {"$ne": True}}, {"_id": 0, "id": 1}):
+        if p.get("id"):
+            sibling_ids.append(p["id"])
+    if not sibling_ids:
+        return empty
+    st = await db.size_tables.find_one(
+        {"product_id": {"$in": sibling_ids}, "model_info": {"$exists": True, "$nin": [None, {}]}},
+        {"_id": 0, "model_info": 1, "product_size": 1, "product_id": 1},
+        sort=[("updated_at", -1)],
+    )
+    mi = (st or {}).get("model_info") or {}
+    # tümü boş string ise "bulunamadı" say
+    if not any(str(v).strip() for v in mi.values()):
+        return empty
+    return {"found": True, "model_info": mi,
+            "product_size": (st or {}).get("product_size") or "", "from": (st or {}).get("product_id")}
+
+
 @router.post("/maintenance/fix-labels")
 async def fix_size_table_labels(current_user: dict = Depends(require_admin)):
     """Tüm ölçü tablolarında kolon etiketlerini düzeltir (boyuu→boyu + Türkçe

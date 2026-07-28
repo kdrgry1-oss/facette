@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { Ruler, Plus, Trash2, Download, Save, Wand2 } from "lucide-react";
+import { Ruler, Plus, Trash2, Download, Save, Wand2, Copy } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -17,6 +17,39 @@ export default function SizeTablePanel({ productId, productName = "", variants =
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [pulling, setPulling] = useState(false);
+
+  // "Diğer renkten getir": renk kardeşinin manken ölçülerini SADECE istenildiğinde getirir.
+  // Bu ürüne otomatik yazılmaz; getirilen değerler alanlara doldurulur, admin Kaydet'e basınca kalıcı olur.
+  // Manuel girilen değerleri korumak için: yalnız BOŞ alanlar doldurulur (dolu alan ezilmez).
+  const pullFromSibling = async () => {
+    setPulling(true);
+    try {
+      const token = localStorage.getItem("token");
+      const r = await axios.get(`${API}/size-tables/${productId}/sibling-model-info`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (r.data?.found) {
+        const inc = r.data.model_info || {};
+        setModelInfo((prev) => {
+          const next = { ...prev };
+          ["Boy", "Göğüs", "Bel", "Basen"].forEach((k) => {
+            // yalnız boş alanı doldur — manuel girilmiş değeri EZME
+            if (!String(prev[k] || "").trim() && String(inc[k] || "").trim()) next[k] = inc[k];
+          });
+          return next;
+        });
+        if (r.data.product_size && !String(productSize || "").trim()) setProductSize(r.data.product_size);
+        onToast?.("Manken ölçüleri renk kardeşinden getirildi (boş alanlar dolduruldu). Kaydetmeyi unutmayın.", "ok");
+      } else {
+        onToast?.("Dolu manken ölçüsü olan renk kardeşi bulunamadı.", "err");
+      }
+    } catch {
+      onToast?.("Getirilemedi", "err");
+    } finally {
+      setPulling(false);
+    }
+  };
 
   useEffect(() => {
     if (productId) fetchTable();
@@ -31,17 +64,18 @@ export default function SizeTablePanel({ productId, productName = "", variants =
         headers: { Authorization: `Bearer ${token}` }
       });
       const d = res.data;
-      if (d.exists) {
-        setSizes(d.sizes || []);
-        setColumns(d.columns && d.columns.length ? d.columns : DEFAULT_COLUMNS);
-        setValues(d.values || {});
-        setProductSize(d.product_size || "");
-        if (d.model_info && Object.keys(d.model_info).length) {
-          setModelInfo({ Boy: "", Göğüs: "", Bel: "", Basen: "", ...d.model_info });
-        }
-      }
+      // HER ZAMAN yanıttan uygula/sıfırla — renk kardeşleri arasında geçişte ÖNCEKİ rengin
+      // manken/ürün-bedeni değerleri sızmasın (karışma bugı). Ölçü tablosu (sizes/columns/values)
+      // miras alınabilir ama MANKEN yalnız ürünün KENDİ tablosundan gelir; yoksa BOŞ kalır.
+      setSizes(d.sizes || []);
+      setColumns(d.columns && d.columns.length ? d.columns : DEFAULT_COLUMNS);
+      setValues(d.values || {});
+      setProductSize(d.product_size || "");
+      setModelInfo({ Boy: "", Göğüs: "", Bel: "", Basen: "", ...(d.model_info || {}) });
     } catch (err) {
-      /* İlk yüklemede beden tablosu henüz yoksa 404 beklenir — kasıtlı sessiz geçiş */
+      /* Tablo yoksa (404) her şeyi temizle — stale değer kalmasın */
+      setSizes([]); setColumns(DEFAULT_COLUMNS); setValues({});
+      setProductSize(""); setModelInfo({ Boy: "", Göğüs: "", Bel: "", Basen: "" });
     } finally {
       setLoading(false);
     }
@@ -190,20 +224,33 @@ export default function SizeTablePanel({ productId, productName = "", variants =
         </div>
       )}
 
-      {/* "suud" örneği: Ürün Bedeni + Manken ölçüleri (beden kılavuzunda gösterilir) */}
-      <div className="mb-5 grid sm:grid-cols-5 gap-3 bg-gray-50/60 border rounded-lg p-3">
-        <div>
-          <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Ürün Bedeni</label>
-          <input value={productSize} onChange={(e) => setProductSize(e.target.value)} placeholder="34"
-            className="w-full border px-2 py-1.5 rounded text-sm focus:outline-none focus:border-pink-500" />
+      {/* Ürün Bedeni + Manken ölçüleri — her renk kendi mankenini korur (otomatik kopyalanmaz). */}
+      <div className="mb-5 bg-gray-50/60 border rounded-lg p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <p className="text-[11px] text-gray-500">
+            <b className="text-gray-600">Ürün bedeni + Manken ölçüleri</b> ·{" "}
+            <span className="text-gray-400">bu renge özeldir, boş bırakabilirsiniz — girilen değerler asla ezilmez.</span>
+          </p>
+          <button type="button" onClick={pullFromSibling} disabled={pulling}
+            title="Aynı modelin başka bir renginin manken ölçülerini getirir (yalnız boş alanları doldurur)"
+            className="shrink-0 inline-flex items-center gap-1 text-[11px] border border-gray-300 rounded px-2 py-1 hover:border-black hover:bg-white disabled:opacity-50">
+            <Copy size={12} /> {pulling ? "Getiriliyor…" : "Diğer renkten getir"}
+          </button>
         </div>
-        {["Boy", "Göğüs", "Bel", "Basen"].map((k) => (
-          <div key={k}>
-            <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Manken {k} (cm)</label>
-            <input value={modelInfo[k] || ""} onChange={(e) => setModelInfo({ ...modelInfo, [k]: e.target.value })}
-              placeholder="—" className="w-full border px-2 py-1.5 rounded text-sm focus:outline-none focus:border-pink-500" />
+        <div className="grid sm:grid-cols-5 gap-3">
+          <div>
+            <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Ürün Bedeni</label>
+            <input value={productSize} onChange={(e) => setProductSize(e.target.value)} placeholder="34"
+              className="w-full border px-2 py-1.5 rounded text-sm focus:outline-none focus:border-pink-500" />
           </div>
-        ))}
+          {["Boy", "Göğüs", "Bel", "Basen"].map((k) => (
+            <div key={k}>
+              <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Manken {k} (cm)</label>
+              <input value={modelInfo[k] || ""} onChange={(e) => setModelInfo({ ...modelInfo, [k]: e.target.value })}
+                placeholder="—" className="w-full border px-2 py-1.5 rounded text-sm focus:outline-none focus:border-pink-500" />
+            </div>
+          ))}
+        </div>
       </div>
 
       {loading ? (
