@@ -802,30 +802,42 @@ async def profitability(
                     {"$and": [{"$ne": ["$$bc", ""]}, {"$in": ["$$bc", {"$map": {"input": {"$ifNull": ["$variants", []]}, "as": "v", "in": {"$toString": "$$v.barcode"}}}]}]},
                 ]}}},
                 {"$limit": 1},
-                {"$project": {"_id": 0, "category_name": 1, "purchase_price": 1}},
+                {"$project": {"_id": 0, "category_name": 1, "purchase_price": 1, "cost_price": 1}},
             ],
             "as": "p",
         }},
         {"$unwind": {"path": "$p", "preserveNullAndEmptyArrays": True}},
+        # Birim maliyet zinciri: purchase_price (>0) → cost_price. Denetim: eskiden yalnız
+        # purchase_price okunup cost_price (canlı senkron maliyeti) yok sayılıyordu.
+        {"$addFields": {"_unit_cost": {"$let": {
+            "vars": {"pp": {"$ifNull": ["$p.purchase_price", 0]}, "cp": {"$ifNull": ["$p.cost_price", 0]}},
+            "in": {"$cond": [{"$gt": ["$$pp", 0]}, "$$pp", "$$cp"]}}}}},
         {"$group": {
             "_id": {"cat": {"$ifNull": ["$p.category_name",
                         {"$ifNull": ["$items.category_name", {"$ifNull": ["$items.category", "(Kategorisiz)"]}]}]},
                     "ch": "$_ch"},
             "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
             "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
-            "cogs": {"$sum": {"$multiply": [{"$ifNull": ["$p.purchase_price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
-            "revenue_nocost": {"$sum": {"$cond": [{"$gt": [{"$ifNull": ["$p.purchase_price", 0]}, 0]}, 0,
+            "cogs": {"$sum": {"$multiply": [{"$ifNull": ["$_unit_cost", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
+            "revenue_nocost": {"$sum": {"$cond": [{"$gt": [{"$ifNull": ["$_unit_cost", 0]}, 0]}, 0,
                                 {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}]}},
         }},
     ]
-    # Kanal başına toplam kargo (ciro payına göre kategorilere dağıtılır)
+    # Kanal başına toplam kargo + İNDİRİM (ciro payına göre kategorilere dağıtılır).
+    # İndirim: order.discount = promo motorunun kupon+otomatik kampanya toplamı; kalem
+    # fiyatındaki (sale_price) indirim ZATEN items.price'ta olduğundan bu AYRI/EK indirimdir.
+    # Denetim bulgusu: eskiden kâr hesabından hiç düşülmüyordu → kâr indirim kadar şişiyordu.
     cargo_by_ch = _dd(float)
     async for r in db.orders.aggregate([
         {"$match": _base_match(s, e, source)},
         {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
-        {"$group": {"_id": "$_ch", "shipping": {"$sum": {"$ifNull": ["$shipping_cost", 0]}}, "orders": {"$sum": 1}}},
+        {"$group": {"_id": "$_ch", "shipping": {"$sum": {"$ifNull": ["$shipping_cost", 0]}},
+                    "discount": {"$sum": {"$ifNull": ["$discount", {"$ifNull": ["$discount_amount", 0]}]}},
+                    "orders": {"$sum": 1}}},
     ]):
-        cargo_by_ch[_CH_ALIAS.get((r["_id"] or "site"), r["_id"] or "site")] = {"shipping": float(r["shipping"] or 0), "orders": int(r["orders"])}
+        cargo_by_ch[_CH_ALIAS.get((r["_id"] or "site"), r["_id"] or "site")] = {
+            "shipping": float(r["shipping"] or 0), "discount": float(r["discount"] or 0),
+            "orders": int(r["orders"])}
 
     # Kategori-kanal satırlarını topla
     rows = []
@@ -851,21 +863,26 @@ async def profitability(
         commission = rev * float(cfg["commission_pct"].get(ch, 5.0)) / 100.0
         service_fee = rev * float(cfg["service_fee_pct"].get(ch, 0.0)) / 100.0
         # Kargo: kanal toplam kargosunu bu satırın ciro payına göre dağıt
+        _ch_share = (rev / rev_by_ch[ch]) if rev_by_ch.get(ch) else 0.0
         ch_cargo = (cargo_by_ch.get(ch) or {}).get("shipping", 0.0)
-        cargo = ch_cargo * (rev / rev_by_ch[ch]) if rev_by_ch.get(ch) else 0.0
+        cargo = ch_cargo * _ch_share
+        # İndirim (kupon+kampanya): kanal toplam indirimini ciro payına göre dağıtıp DÜŞ.
+        ch_disc = (cargo_by_ch.get(ch) or {}).get("discount", 0.0)
+        discount_alloc = ch_disc * _ch_share
         # Reklam: AYLIK bütçe girildiyse tarih aralığına orantıla (aylık × gün/30), yoksa dönem toplamı.
         _monthly = float((cfg.get("ad_spend_monthly") or {}).get(ch, 0.0))
         ad_total = round(_monthly * _days_range / 30.0, 2) if _monthly > 0 else float(cfg["ad_spend"].get(ch, 0.0))
         ad_alloc = ad_total * (rev / rev_by_ch[ch]) if rev_by_ch.get(ch) else 0.0
-        operating = rev - cogs - commission - service_fee - cargo - ad_alloc
-        # KDV (net ödenecek — katma değer üzerinden): (ciro - maliyet) içindeki KDV
-        vat_payable = max(0.0, (rev - cogs)) * vat / (100.0 + vat)
+        operating = rev - discount_alloc - cogs - commission - service_fee - cargo - ad_alloc
+        # KDV (net ödenecek — katma değer üzerinden): (net ciro - maliyet) içindeki KDV.
+        # Net ciro = brüt ciro - indirim (matrah indirim düşülmüş tutar üzerinden hesaplanır).
+        vat_payable = max(0.0, (rev - discount_alloc - cogs)) * vat / (100.0 + vat)
         pre_tax = operating - vat_payable
         corporate_tax = max(0.0, pre_tax) * corp / 100.0
         net = pre_tax - corporate_tax
         out.append({
             "category": row["category"], "channel": ch, "qty": row["qty"],
-            "revenue": round(rev, 2), "cogs": round(cogs, 2),
+            "revenue": round(rev, 2), "discount": round(discount_alloc, 2), "cogs": round(cogs, 2),
             "commission": round(commission, 2), "service_fee": round(service_fee, 2),
             "cargo": round(cargo, 2), "ad_spend": round(ad_alloc, 2),
             "vat_payable": round(vat_payable, 2), "corporate_tax": round(corporate_tax, 2),
@@ -947,6 +964,8 @@ async def stock_report(current_user: dict = Depends(require_admin)):
     units = 0
     value = 0.0
     async for r in db.products.aggregate([
+        # Denetim: silinmiş (çöp kutusu) + pasif ürünler stok toplam/değerine katılmasın.
+        {"$match": {"is_deleted": {"$ne": True}, "is_active": {"$ne": False}}},
         {"$project": {"_id": 0, "id": 1, "name": 1, "stock_code": 1, "price": 1, "eff": _eff}}
     ]):
         s = int(r.get("eff") or 0)
@@ -1140,7 +1159,8 @@ async def cargo_report(
 ):
     s, e = _iso_range(start_date, end_date)
     pipeline = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e}}},
+        # Denetim: ödenmemiş/iptal/iade siparişler kargolanmaz → kargo hacmine katılmasın.
+        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}}},
         {"$group": {"_id": {"$ifNull": ["$cargo_provider_name", "$cargo.company"]}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$shipping_cost", 0]}}}},
         {"$sort": {"orders": -1}},
     ]
@@ -1656,13 +1676,18 @@ async def customer_type(
     (daha önce de sipariş vermiş). Müşteri anahtarı: e-posta."""
     s, e = _iso_range(start_date, end_date)
     key = {"$toLower": {"$ifNull": ["$email", {"$ifNull": ["$shipping_address.email", "$user_id"]}]}}
+    # Denetim: firstOrder (ilk sipariş tarihi) TÜM siparişlerden hesaplanmalı — iptal/iade dahil.
+    # Aksi halde gerçek ilk siparişi iptal olan müşteri yanlışlıkla "YENİ" sayılıyordu. Ciro/adet
+    # ise yalnız GEÇERLİ (dışlanmamış) siparişlerden sayılır.
+    _in_range = {"$and": [{"$gte": ["$created_at", s]}, {"$lte": ["$created_at", e]}]}
+    _valid = {"$not": [{"$in": ["$status", _EXCLUDED_STATUSES]}]}
+    _valid_in_range = {"$and": [_in_range, _valid]}
     pipeline = [
-        {"$match": {"status": {"$nin": _EXCLUDED_STATUSES}}},
         {"$group": {
             "_id": key,
             "firstOrder": {"$min": "$created_at"},
-            "ordersInRange": {"$sum": {"$cond": [{"$and": [{"$gte": ["$created_at", s]}, {"$lte": ["$created_at", e]}]}, 1, 0]}},
-            "revInRange": {"$sum": {"$cond": [{"$and": [{"$gte": ["$created_at", s]}, {"$lte": ["$created_at", e]}]}, {"$ifNull": ["$total", 0]}, 0]}},
+            "ordersInRange": {"$sum": {"$cond": [_valid_in_range, 1, 0]}},
+            "revInRange": {"$sum": {"$cond": [_valid_in_range, {"$ifNull": ["$total", 0]}, 0]}},
         }},
         {"$match": {"ordersInRange": {"$gt": 0}}},
     ]

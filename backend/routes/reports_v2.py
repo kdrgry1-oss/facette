@@ -72,6 +72,27 @@ async def _build_cost_map(product_ids: Optional[List[str]] = None) -> dict:
     return cost_map
 
 
+async def _product_cost_lookup(product_ids: Optional[List[str]] = None) -> dict:
+    """product_id → BİRİM MALİYET, tek doğru zincirle: manuel product_costs >
+    products.purchase_price (alış fiyatı) > products.cost_price (canlı senkron maliyeti).
+    Son çare (price*0.5) çağıran tarafta uygulanır. Denetim bulgusu: eskiden
+    stock-valuation yalnız purchase_price, profit-by-channel yalnız manuel maliyet
+    okuyup cost_price'ı yok sayıyordu → entegrasyondan gelen ürünlerin maliyeti
+    kaybolup kâr şişiyordu."""
+    out: dict = dict(await _build_cost_map(product_ids))  # manuel öncelik
+    q: dict = {}
+    if product_ids:
+        q["id"] = {"$in": product_ids}
+    async for p in db.products.find(q, {"_id": 0, "id": 1, "cost_price": 1, "purchase_price": 1}):
+        pid = str(p.get("id"))
+        if out.get(pid, 0) > 0:
+            continue
+        c = float(p.get("purchase_price") or 0) or float(p.get("cost_price") or 0)
+        if c > 0:
+            out[pid] = c
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 1) STOK DEĞER RAPORU — Toplam alış + satış değeri
 # ---------------------------------------------------------------------------
@@ -103,7 +124,7 @@ async def stock_valuation(
     by_category: dict = defaultdict(lambda: {"units": 0, "cost": 0.0, "sale": 0.0})
     missing: list = []
     cursor = db.products.find(q, {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1,
-                                    "sale_price": 1, "purchase_price": 1, "brand": 1,
+                                    "sale_price": 1, "purchase_price": 1, "cost_price": 1, "brand": 1,
                                     "category_name": 1, "stock_code": 1, "variants": 1})
     async for p in cursor:
         variants = p.get("variants") or []
@@ -112,8 +133,13 @@ async def stock_valuation(
         if units <= 0:
             continue
         sale = float(p.get("sale_price") or 0) or float(p.get("price") or 0)
+        # Maliyet zinciri: manuel product_costs > purchase_price > cost_price (canlı senkron).
+        # Eskiden yalnız purchase_price+manuel okunup cost_price yok sayılıyordu → entegrasyon
+        # ürünleri "maliyeti yok" sayılıp kâr şişiyordu.
         pp = float(p.get("purchase_price") or 0)
-        cost = pp if pp > 0 else float(cost_map.get(str(p.get("id"))) or 0)
+        cost = (float(cost_map.get(str(p.get("id"))) or 0)
+                or pp
+                or float(p.get("cost_price") or 0))
 
         total_units += units
         total_sale_value += units * sale
@@ -516,7 +542,7 @@ async def profit_by_channel(
         "site": 3.0, "manual": 0.0,
     }
 
-    cost_map = await _build_cost_map()
+    cost_map = await _product_cost_lookup()  # manuel > cost_price > purchase_price
 
     pipeline = [
         {"$match": {"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}}},
