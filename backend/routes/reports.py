@@ -1156,7 +1156,17 @@ async def _diag_channel_audit28(key: str = "", start_date: Optional[str] = None,
         d["statuses"].sort(key=lambda x: -x["n"])
         for k in ("sales_total", "cancel_total", "return_total"):
             d[k] = round(d[k], 2)
-    return {"range": {"start": s, "end": e}, "channels": list(by_ch.values())}
+    # HAM (platform, marketplace) çiftleri — yanlış-sınıflandırma (boş platform string vb.) yakalamak için
+    raw_pipe = [
+        {"$match": {"created_at": {"$gte": s, "$lte": e}}},
+        {"$group": {"_id": {"p": {"$ifNull": ["$platform", None]}, "m": {"$ifNull": ["$marketplace", None]}},
+                    "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}},
+    ]
+    raw = []
+    async for r in db.orders.aggregate(raw_pipe):
+        raw.append({"platform": r["_id"]["p"], "marketplace": r["_id"]["m"], "n": r["n"]})
+    return {"range": {"start": s, "end": e}, "channels": list(by_ch.values()), "raw_pairs": raw}
 
 
 @router.get("/cancel-return-by-source")
