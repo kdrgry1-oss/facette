@@ -157,8 +157,8 @@ export default function Login() {
 
           {/* Sosyal giriş — ikon butonlar yan yana (Google + Facebook + Apple), eşit ölçü */}
           <div className="flex items-center justify-center gap-3 mb-6">
-            {/* Google — resmi GIS ikon butonu */}
-            <div ref={googleBtnRef} data-testid="google-login-btn" className="h-10 overflow-hidden rounded" />
+            {/* Google — resmi GIS ikon butonu (kırpma yok; kendi boyutunda render olur) */}
+            <div ref={googleBtnRef} data-testid="google-login-btn" className="flex items-center justify-center" />
             {/* Facebook */}
             {socialProviders.facebook && (
               <button type="button" onClick={handleFacebookLogin} disabled={loading}
