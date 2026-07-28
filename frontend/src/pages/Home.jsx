@@ -585,7 +585,6 @@ function ShopLookModal({ post, onClose }) {
         </div>
         <div className="w-full sm:w-[55%] flex flex-col min-h-0">
           <div className="px-4 pt-4 pb-3 border-b">
-            <p className="text-[10px] tracking-[0.3em] uppercase text-gray-400">Shop The Look</p>
             <h3 className="text-lg font-light tracking-wide text-black">Bu Kombindeki Ürünler</h3>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
