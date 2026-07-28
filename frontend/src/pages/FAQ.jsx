@@ -3,10 +3,43 @@
  * Sitenin fontu miras alınır (font-inherit). Sorular/önemli alanlar kalın, cevaplar ince.
  * İçerik kullanıcıdan geldiği için cevaplar HTML olarak (dangerouslySetInnerHTML) render edilir.
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import axios from "axios";
 import { sanitizeHtml } from "../lib/sanitizeHtml";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// Admin "Sayfalar > Sıkça Sorulan Sorular" (slug: sss) içeriği facetteFaq yapısındadır.
+// Bunu ayrıştırıp sekmeli akordeon verisine çeviririz → SSS ARTIK PANELDEN DÜZENLENEBİLİR.
+// Ayrıştırma başarısızsa aşağıdaki gömülü FAQ_DATA yedeğe düşer.
+function parseFaqHtml(html) {
+  try {
+    if (!html || html.indexOf("facetteFaq") === -1) return null;
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const tabs = Array.from(doc.querySelectorAll(".facetteFaqTab"));
+    if (!tabs.length) return null;
+    const out = [];
+    tabs.forEach((tab, ti) => {
+      const target = (tab.getAttribute("data-target") || "").replace("#", "");
+      const label = (tab.textContent || "").trim();
+      const panel = target ? doc.getElementById(target) : null;
+      const items = [];
+      if (panel) {
+        panel.querySelectorAll(".facetteFaqQ").forEach((q) => {
+          const qc = q.cloneNode(true);
+          qc.querySelectorAll(".facetteFaqIcon").forEach((s) => s.remove());
+          let a = q.nextElementSibling;
+          while (a && !(a.classList && a.classList.contains("facetteFaqA"))) a = a.nextElementSibling;
+          items.push({ q: (qc.textContent || "").trim(), a: a ? a.innerHTML : "" });
+        });
+      }
+      if (items.length) out.push({ id: target || `t${ti}`, label, items });
+    });
+    return out.length ? out : null;
+  } catch { return null; }
+}
 
 const FAQ_DATA = [
   {
@@ -64,10 +97,23 @@ const FAQ_DATA = [
 ];
 
 export default function FAQ() {
+  const [data, setData] = useState(FAQ_DATA);          // panel içeriği gelene kadar gömülü yedek
   const [activeTab, setActiveTab] = useState(FAQ_DATA[0].id);
   const [openKey, setOpenKey] = useState(null); // `${tabId}:${index}` — panel başına tek açık
 
-  const panel = FAQ_DATA.find((t) => t.id === activeTab) || FAQ_DATA[0];
+  // Panelden (Sayfalar > SSS) düzenlenen içeriği çek → ayrıştır → kullan.
+  useEffect(() => {
+    let alive = true;
+    axios.get(`${API}/pages/sss`)
+      .then((r) => {
+        const parsed = parseFaqHtml(r?.data?.content || "");
+        if (alive && parsed && parsed.length) { setData(parsed); setActiveTab(parsed[0].id); }
+      })
+      .catch(() => { /* yedek gömülü veri kalır */ });
+    return () => { alive = false; };
+  }, []);
+
+  const panel = data.find((t) => t.id === activeTab) || data[0];
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -77,7 +123,7 @@ export default function FAQ() {
 
         {/* Sekmeler */}
         <div role="tablist" aria-label="SSS Kategorileri" className="flex flex-wrap justify-center gap-2.5 md:gap-3.5">
-          {FAQ_DATA.map((t) => {
+          {data.map((t) => {
             const active = t.id === activeTab;
             return (
               <button
