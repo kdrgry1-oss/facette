@@ -929,6 +929,23 @@ export default function PageDesign() {
             
             {needsImages && (
               <div>
+                {formData.type === "instashop" && (
+                  <div className="mb-4 bg-gradient-to-br from-fuchsia-50 to-purple-50 border border-fuchsia-200 rounded-lg p-3.5">
+                    <p className="text-sm font-bold text-fuchsia-800 mb-1">📸 Instagram gönderilerini seçmek + ürün eklemek için</p>
+                    <p className="text-[12px] text-fuchsia-900/80 leading-relaxed mb-2">
+                      Anasayfadaki <b>SHOP THE LOOK</b> bölümü, artık <b>Instagram Akışı</b> sayfasından yönetilir:
+                      oradan gönderileri çekersin (kendi + etiketli), hangileri görünsün seçersin ve her gönderiye
+                      <b> ürün bağlarsın</b> (müşteri tıklayınca sepete ekler). Bağlı feed varsa <b>otomatik</b> anasayfaya gelir.
+                    </p>
+                    <a href="/admin/instagram"
+                      className="inline-flex items-center gap-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-xs font-semibold px-3 py-2 rounded-lg">
+                      Instagram Akışı sayfasına git →
+                    </a>
+                    <p className="text-[11px] text-fuchsia-900/60 mt-2">
+                      Aşağıdaki görseller yalnızca <b>Instagram bağlı değilken</b> (feed boşsa) yedek olarak gösterilir.
+                    </p>
+                  </div>
+                )}
                 {formData.type === "hero_slider" && (
                   <div className="mb-4">
                     <label className="block text-sm font-medium mb-1">Slider Stili</label>
