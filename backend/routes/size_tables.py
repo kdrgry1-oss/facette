@@ -22,12 +22,32 @@ router = APIRouter(prefix="/size-tables", tags=["size-tables"])
 
 
 @router.get("/_diag/state")
-async def _size_tables_diag(key: str):
+async def _size_tables_diag(key: str, q: str = ""):
     """GEÇİCİ TANI (gizli anahtarlı): ölçü tablosu veri kaybını teşhis. Kaç kayıt dolu/boş,
     ne zaman ezilmiş (updated_at günü), kaç tanesi kardeş-senkron (synced_from) ile yazılmış,
     ürünlerde kaç adet render edilmiş 'is_size_table' görsel duruyor (görsel-kurtarma kaynağı)."""
     if key != (os.environ.get("SIZE_DIAG_KEY") or "fx_sizediag_4k7_TEMP"):
         raise HTTPException(status_code=403, detail="forbidden")
+    # İSİMLE TEK ÜRÜN DÖKÜMÜ: kullanıcının "boş" dediği ürünü doğrulamak için.
+    if q:
+        out = []
+        async for p in db.products.find(
+                {"name": {"$regex": re.escape(q), "$options": "i"}, "is_deleted": {"$ne": True}},
+                {"_id": 0, "id": 1, "name": 1, "stock_code": 1}).limit(12):
+            own = await db.size_tables.find_one({"product_id": p["id"]}, {"_id": 0})
+            inh = None if (own and own.get("sizes")) else await _inherited_size_table(p["id"])
+            src = own if (own and own.get("sizes")) else inh
+            out.append({
+                "id": p["id"], "name": p.get("name", ""), "stock_code": p.get("stock_code", ""),
+                "own_row": bool(own), "own_has_data": bool(own and own.get("sizes")),
+                "inherited": bool(inh and inh.get("sizes")),
+                "resolved_sizes": (src or {}).get("sizes", []),
+                "resolved_columns": (src or {}).get("columns", []),
+                "has_values": bool((src or {}).get("values")),
+                "model_info_keys": list(((own or {}).get("model_info") or {}).keys()),
+                "product_size": (own or {}).get("product_size", ""),
+            })
+        return {"query": q, "matches": out}
     total = await db.size_tables.count_documents({})
     non_empty = await db.size_tables.count_documents({"sizes": {"$exists": True, "$ne": []}})
     empty = await db.size_tables.count_documents({"$or": [{"sizes": {"$exists": False}}, {"sizes": []}]})
