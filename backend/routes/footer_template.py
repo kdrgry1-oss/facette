@@ -113,52 +113,6 @@ async def admin_update_footer_template(
     return {"success": True, "message": "Footer şablonu güncellendi"}
 
 
-@public_router.post("/_diag/restructure28")
-async def _diag_footer_restructure28(key: str = ""):
-    """GEÇİCİ: footer sütunlarını yeni yapıya kurar (ABOUT FACETTE / DESTEK / KOLEKSİYONLAR /
-    BİZE ULAŞIN). Mevcut iletişim/sosyal/bülten korunur. İş bitince kaldırılacak."""
-    if key != "fcttdiag2807":
-        raise HTTPException(status_code=403, detail="forbidden")
-    cur = await db.settings.find_one({"id": "footer"}, {"_id": 0}) or {}
-    # Mevcut İletişim/BİZE ULAŞIN statik bilgisini koru (yoksa varsayılan)
-    contact_static = None
-    for c in (cur.get("columns") or []):
-        if c.get("static"):
-            contact_static = c["static"]; break
-    if not contact_static:
-        contact_static = ["info@facette.com.tr", "+90 543 330 03 10", "Pazartesi-Cumartesi 09:00 - 18:00"]
-    columns = [
-        {"title": "ABOUT FACETTE", "links": [
-            {"to": "/sayfa/hakkimizda", "label": "Hakkımızda"},
-            {"to": "/sayfa/mesafeli-satis", "label": "Mesafeli Satış Sözleşmesi"},
-            {"to": "/sayfa/on-bilgilendirme", "label": "Ön Bilgilendirme"},
-            {"to": "/sayfa/kvkk", "label": "KVKK Aydınlatma Metni"},
-            {"to": "/sayfa/gizlilik", "label": "Gizlilik Politikası"},
-        ]},
-        {"title": "DESTEK", "links": [
-            {"to": "/siparis-takip", "label": "Sipariş Takibi"},
-            {"to": "/iade-islemleri", "label": "İade İşlemleri"},
-            {"to": "/sayfa/iade-kosullari", "label": "İade & Değişim"},
-            {"to": "/sikca-sorulan-sorular", "label": "Sıkça Sorulan Sorular"},
-            {"to": "/sayfa/iletisim", "label": "İletişim"},
-        ]},
-        {"title": "KOLEKSİYONLAR", "links": [
-            {"to": "/feminora", "label": "Feminora"},
-            {"to": "/light-touch", "label": "Light Touch"},
-            {"to": "/bloom-together", "label": "Bloom Together"},
-            {"to": "/beachwear", "label": "Beachwear"},
-        ]},
-        {"title": "BİZE ULAŞIN", "static": contact_static},
-    ]
-    await db.settings.update_one(
-        {"id": "footer"},
-        {"$set": {"columns": columns, "updated_at": datetime.now(timezone.utc).isoformat()},
-         "$setOnInsert": {"id": "footer", "mode": "structured"}},
-        upsert=True,
-    )
-    return {"success": True, "columns": [c["title"] for c in columns]}
-
-
 @admin_router.post("/reset-default")
 async def reset_footer_default(current_user: dict = Depends(require_admin)):
     """Footer'ı varsayılan değerlere döndür."""
