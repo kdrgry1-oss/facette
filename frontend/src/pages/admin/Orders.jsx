@@ -914,6 +914,28 @@ export default function AdminOrders({ unpaidView = false }) {
     }
   };
 
+  const [reminderSending, setReminderSending] = useState(false);
+  const sendPaymentReminder = async (orderId) => {
+    const ok = window.appConfirm ? await window.appConfirm('Müşteriye ödeme hatırlatma SMS\'i (ve e-postası) gönderilsin mi?') : window.confirm('Hatırlatma gönderilsin mi?');
+    if (!ok) return;
+    setReminderSending(true);
+    try {
+      const token = localStorage.getItem('token');
+      const r = await axios.post(`${API}/orders/${orderId}/send-payment-reminder`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      if (r.data?.success) {
+        toast.success(`Ödeme hatırlatması gönderildi${r.data.sms ? ' · SMS' : ''}${r.data.email ? ' · E-posta' : ''}`);
+        const now = new Date().toISOString();
+        if (selectedOrder?.id === orderId) setSelectedOrder({ ...selectedOrder, payment_reminder_last_at: now, payment_reminder_count: (selectedOrder.payment_reminder_count || 0) + 1 });
+      } else {
+        toast.error(r.data?.message || 'Hatırlatma gönderilemedi');
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Hatırlatma gönderilemedi');
+    } finally {
+      setReminderSending(false);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -1747,10 +1769,21 @@ export default function AdminOrders({ unpaidView = false }) {
                       {selectedOrder.payment_receipt?.note && (
                         <p className="text-xs text-gray-500 mt-0.5">Not: {selectedOrder.payment_receipt.note}</p>
                       )}
+                      {selectedOrder.payment_status !== 'paid' && selectedOrder.payment_reminder_last_at && (
+                        <p className="text-xs text-blue-600 mt-1">
+                          Son hatırlatma: {new Date(selectedOrder.payment_reminder_last_at).toLocaleString('tr-TR')}
+                          {selectedOrder.payment_reminder_count ? ` (${selectedOrder.payment_reminder_count} kez)` : ''}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       {selectedOrder.payment_receipt && (
                         <button onClick={() => viewReceipt(selectedOrder.id)} className="px-3 py-2 bg-white border rounded text-sm font-medium hover:bg-gray-50">Dekontu Görüntüle</button>
+                      )}
+                      {selectedOrder.payment_status !== 'paid' && (
+                        <button onClick={() => sendPaymentReminder(selectedOrder.id)} disabled={reminderSending} className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                          {reminderSending ? 'Gönderiliyor…' : '🔔 Ödeme Hatırlatma SMS\'i Gönder'}
+                        </button>
                       )}
                       {selectedOrder.payment_status !== 'paid' && (
                         <button onClick={() => approvePayment(selectedOrder.id)} className="px-3 py-2 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700">Ödemeyi Onayla</button>

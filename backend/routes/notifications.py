@@ -174,6 +174,8 @@ _DEFAULT_TEMPLATES = {
         "{order_number} numarali siparisiniz iptal edildi. Bilgi: destek@facette.com",
     ("order_awaiting_payment", "sms"):
         "Merhaba {customer_name}, {order_number} numarali siparisiniz alindi. Havale/EFT odemenizi bekliyoruz; detaylar e-postanizda. Facette",
+    ("order_payment_reminder", "sms"):
+        "Sayin {customer_name}, {order_number} numarali siparisinizin havale/EFT odemesini henuz alamadik. {bank_name} IBAN {bank_iban} ({bank_account_holder}), Tutar {amount}. Odeme bildirimi: {payment_url} Facette",
     ("order_payment_notified", "sms"):
         "Merhaba {customer_name}, {order_number} numarali siparisiniz icin odeme bildiriminiz alindi, kontrol ediliyor. Facette",
     ("order_return_requested", "sms"):
@@ -243,6 +245,22 @@ _EMAIL_HTML_TEMPLATES = {
             intro_html="Sevgili {customer_name}, {order_number} numaralı siparişini aldık. Havale/EFT ödemen tarafımıza ulaştığında siparişin hazırlanmaya başlanır.",
             body_html=info_row("Sipariş Tutarı", "{amount}"),
             cta_text="SİPARİŞİMİ GÖRÜNTÜLE", cta_url="{order_link}",
+        ),
+    },
+    "order_payment_reminder": {
+        "subject": "Ödeme hatırlatması · {order_number}",
+        "body": email_shell(
+            icon="₺", eyebrow="ÖDEME HATIRLATMA", title="Ödemeni bekliyoruz",
+            intro_html="Sevgili {customer_name}, {order_number} numaralı siparişinin havale/EFT ödemesini henüz alamadık. Siparişini kaçırmamak için ödemeni tamamlaman yeterli.",
+            body_html=(
+                info_row("Sipariş Tutarı", "{amount}")
+                + '<div style="border:1px solid #eee;border-radius:8px;padding:14px;margin:14px 0;">'
+                  '<div style="font-weight:700;margin-bottom:8px;">Havale / EFT Bilgileri</div>'
+                  '<div>Banka: {bank_name}</div><div>Şube: {bank_branch}</div>'
+                  '<div>IBAN: <b>{bank_iban}</b></div><div>Hesap Sahibi: {bank_account_holder}</div></div>'
+            ),
+            cta_text="ÖDEME BİLDİRİMİ YAP", cta_url="{payment_url}",
+            preheader="Ödeme hatırlatması · {order_number}",
         ),
     },
     "order_payment_notified": {

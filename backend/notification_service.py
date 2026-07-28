@@ -60,6 +60,7 @@ DEFAULT_EVENTS = [
     {"key": "order_undelivered", "name": "Teslim Edilemedi (Şubede Bekliyor)"},
     {"key": "order_cancelled", "name": "Sipariş İptal Edildi"},
     {"key": "order_awaiting_payment", "name": "Siparişiniz Alındı · Ödeme Bekleniyor (Havale)"},
+    {"key": "order_payment_reminder", "name": "Ödeme Hatırlatma (Havale · elle gönder)"},
     {"key": "order_payment_notified", "name": "Ödeme Bildirimi Alındı"},
     {"key": "order_pending", "name": "Sipariş Alındı (Onay Bekliyor)"},
     {"key": "order_preparing", "name": "Sipariş Hazırlanıyor"},

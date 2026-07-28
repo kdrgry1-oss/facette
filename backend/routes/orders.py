@@ -3164,6 +3164,78 @@ def _havale_invoice_block(order: dict):
     return None
 
 
+async def _ensure_payment_reminder_templates():
+    """order_payment_reminder SMS+e-posta şablonlarını (yoksa) idempotent tohumlar —
+    böylece buton ilk basıldığında boş gitmez; sonra admin Bildirim Şablonları'ndan düzenler."""
+    try:
+        from .notifications import _DEFAULT_TEMPLATES, _EMAIL_HTML_TEMPLATES
+        _now = datetime.now(timezone.utc).isoformat()
+        for ch in ("sms", "email"):
+            ex = await db.notification_templates.find_one(
+                {"event": "order_payment_reminder", "channel": ch}, {"_id": 0})
+            if ex:
+                continue
+            if ch == "sms":
+                body, subj = _DEFAULT_TEMPLATES.get(("order_payment_reminder", "sms"), ""), ""
+            else:
+                rich = _EMAIL_HTML_TEMPLATES.get("order_payment_reminder", {})
+                body, subj = rich.get("body", ""), rich.get("subject", "")
+            if body:
+                await db.notification_templates.insert_one({
+                    "event": "order_payment_reminder", "channel": ch, "enabled": True,
+                    "subject": subj, "body": body, "created_at": _now,
+                })
+    except Exception as _e:
+        logger.warning(f"[payment_reminder seed] {_e}")
+
+
+@router.post("/{order_id}/send-payment-reminder")
+async def send_payment_reminder(order_id: str, current_user: dict = Depends(require_admin)):
+    """Havale/EFT ödemesi henüz alınmamış siparişe MÜŞTERİYE ödeme hatırlatma SMS'i (+e-posta)
+    gönderir. 72 saatlik ödeme penceresinde elle tetiklenir. Şablon: 'order_payment_reminder'
+    (Bildirim Şablonları'ndan düzenlenebilir)."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    pm = (order.get("payment_method") or "").lower()
+    pstat = (order.get("payment_status") or "").lower()
+    if pm not in _HAVALE_PMS:
+        raise HTTPException(status_code=400, detail="Ödeme hatırlatması yalnızca Havale/EFT siparişlerinde gönderilebilir.")
+    if pstat in _SETTLED_PAY:
+        raise HTTPException(status_code=400, detail="Bu siparişin ödemesi zaten alınmış — hatırlatma gerekmez.")
+    if (order.get("status") or "") in ("cancelled", "cancel_refunded", "returned", "refunded"):
+        raise HTTPException(status_code=400, detail="İptal/iade edilmiş siparişe hatırlatma gönderilemez.")
+
+    _addr = order.get("shipping_address") or {}
+    _phone = _addr.get("phone") or order.get("phone")
+    _email = _addr.get("email") or order.get("email")
+    if not _phone and not _email:
+        raise HTTPException(status_code=400, detail="Siparişte telefon/e-posta yok — hatırlatma gönderilemedi.")
+
+    await _ensure_payment_reminder_templates()
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
+    from notification_service import send_notification
+    _vars = await _order_notify_vars(order)
+    _res = await send_notification(db, "order_payment_reminder",
+                                   to_phone=_phone, to_email=_email,
+                                   variables=_vars, channels=["sms", "email"])
+    _now = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one({"id": order_id}, {
+        "$set": {"payment_reminder_last_at": _now},
+        "$inc": {"payment_reminder_count": 1},
+        "$push": {"payment_reminder_log": {"at": _now, "by": current_user.get("email", ""),
+                                           "sms": bool((_res.get("sms") or {}).get("success")),
+                                           "email": bool((_res.get("email") or {}).get("success"))}},
+    })
+    _sms_ok = bool((_res.get("sms") or {}).get("success"))
+    _mail_ok = bool((_res.get("email") or {}).get("success"))
+    return {"success": _sms_ok or _mail_ok, "sms": _sms_ok, "email": _mail_ok,
+            "phone_masked": ("***" + str(_phone)[-2:]) if _phone else "",
+            "message": ("Hatırlatma gönderildi." if (_sms_ok or _mail_ok)
+                        else "Gönderilemedi — SMS/e-posta sağlayıcı veya şablon ayarını kontrol edin.")}
+
+
 # #17: Fatura/kargo barkodu YALNIZ onaylanmış (confirmed) veya sonrası siparişe yapılabilir.
 # Ödeme öncesi (pending/awaiting_payment/payment_notified) ya da iptal edilmiş sipariş engellenir.
 _PRE_CONFIRM_STATUSES = {"pending", "awaiting_payment", "payment_notified", "cancelled"}
