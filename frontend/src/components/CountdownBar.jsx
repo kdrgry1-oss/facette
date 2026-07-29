@@ -144,26 +144,24 @@ export default function CountdownBar() {
     return <div className="bg-black" data-testid="topbar-loading" aria-hidden="true" style={{ minHeight: 38 }} />;
   }
 
-  // Hiç blok yok → orijinal statik metin (tek mesaj)
+  // Hiç blok yok → orijinal statik metin, vatkali tarzı SÜREKLİ kayan marquee.
   if (!block) {
     return (
-      <div className="bg-black text-white text-center py-1.5 md:py-2" data-testid="topbar-static">
-        <p className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold">
-          {currentMsg}
-        </p>
+      <div className="bg-black text-white py-1.5 md:py-2" data-testid="topbar-static">
+        <Marquee items={messages} fg="#ffffff"
+          className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold" />
       </div>
     );
   }
 
   if (!inWindow) {
-    // Bar pasif (planlanmış ya da süresi dolmuş) → fallback metin
-    if (!currentMsg) return null; // tamamen gizle
+    // Bar pasif (planlanmış ya da süresi dolmuş) → fallback metin (kayan marquee)
+    if (!messages.length) return null; // tamamen gizle
     return (
-      <div className="text-center py-1.5 md:py-2" style={{ backgroundColor: bg, color: fg }}
+      <div className="py-1.5 md:py-2" style={{ backgroundColor: bg, color: fg }}
            data-testid="topbar-fallback">
-        {fadeKeyframes}
-        <Rotator idx={msgIdx} text={currentMsg} multi={multi}
-           className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold" />
+        <Marquee items={messages} fg={fg}
+          className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold" />
       </div>
     );
   }
@@ -213,6 +211,42 @@ function Rotator({ idx, text, multi, className }) {
         {text}
       </span>
     </p>
+  );
+}
+
+// Vatkali tarzı SÜREKLİ kayan üst bar (marquee): mesajlar sağdan sola kesintisiz akar,
+// başa dönerken zıplama olmaz (içerik iki kez basılır, track -%50 kaydırılır). Hover'da
+// durur; prefers-reduced-motion açıksa animasyon kapalıdır. Hız metin uzunluğuna göre
+// ayarlanır → mesaj sayısından bağımsız sabit akış hızı.
+function Marquee({ items, className, fg = "#ffffff" }) {
+  const list = (items || []).filter(Boolean);
+  if (!list.length) return null;
+  const totalLen = list.join("   ").length || 20;
+  const durSec = Math.min(70, Math.max(16, Math.round(totalLen * 0.55)));
+  const Group = ({ ariaHidden }) => (
+    <div className="flex items-center shrink-0" aria-hidden={ariaHidden ? "true" : undefined}>
+      {list.map((t, i) => (
+        <span key={i} className="flex items-center shrink-0">
+          <span className={className}>{t}</span>
+          <span className="mx-5 md:mx-9 opacity-60 select-none" style={{ color: fg }}>◆</span>
+        </span>
+      ))}
+    </div>
+  );
+  return (
+    <div className="fct-marquee w-full overflow-hidden" data-testid="topbar-marquee">
+      <style>{`
+        @keyframes fctMarqueeScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .fct-marquee__track { display:flex; align-items:center; width:max-content; will-change:transform;
+          animation: fctMarqueeScroll ${durSec}s linear infinite; }
+        .fct-marquee:hover .fct-marquee__track { animation-play-state: paused; }
+        @media (prefers-reduced-motion: reduce) { .fct-marquee__track { animation: none; justify-content:center; width:100%; } }
+      `}</style>
+      <div className="fct-marquee__track">
+        <Group />
+        <Group ariaHidden />
+      </div>
+    </div>
   );
 }
 
