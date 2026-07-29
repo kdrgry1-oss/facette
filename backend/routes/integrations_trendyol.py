@@ -181,6 +181,68 @@ async def _diag_verify_orders2907(payload: dict = Body(default=None)):
     return {"requested": len(onums), "found_count": len(found), "found": found}
 
 
+@router.post("/trendyol/_diag/apply_return_reconcile2907")
+async def _diag_apply_return_reconcile2907(payload: dict = Body(default=None)):
+    """GEÇİCİ (key-korumalı) — Trendyol iade listesi mutabakatını uygular. Her sipariş
+    Trendyol'daki güncel iade durumuna göre bizim iade akışının doğru statüsüne alınır;
+    Onaylı (tam/kısmi) iadelerde iade edilen kalemler stoğa geri eklenir (İDEMPOTENT).
+    SESSİZ (müşteri bildirimi yok). Kullanımdan sonra KALDIRILACAK.
+    payload: {key, dry_run, plan:[{id, order_number, target, restock, items:{barcode:qty}, returned_at}]}"""
+    if (payload or {}).get("key") != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    from .orders import _stock_delta_for_order
+    dry = bool(payload.get("dry_run", True))
+    plan = payload.get("plan") or []
+    _RET = {"returned", "refunded", "partial_refunded"}
+    now = datetime.now(timezone.utc).isoformat()
+    applied = {"status": 0, "restock": 0, "skipped_already": 0, "not_found": 0}
+    details = []
+    for p in plan:
+        oid = p.get("id"); target = p.get("target")
+        if not oid or not target:
+            continue
+        o = await db.orders.find_one({"id": oid}, {"_id": 0, "id": 1, "status": 1, "order_number": 1})
+        if not o:
+            applied["not_found"] += 1; continue
+        cur = (o.get("status") or "").lower()
+        if cur in _RET:
+            applied["skipped_already"] += 1; continue
+        restock_items = [{"barcode": b, "quantity": int(q)} for b, q in (p.get("items") or {}).items() if b and int(q) > 0]
+        do_restock = bool(p.get("restock")) and target in ("returned", "partial_refunded") and restock_items
+        if dry:
+            details.append({"o": p.get("order_number"), "cur": cur, "target": target,
+                            "restock": do_restock, "items": p.get("items")})
+            applied["status"] += 1
+            if do_restock:
+                applied["restock"] += 1
+            continue
+        # --- UYGULA ---
+        _set = {"status": target, "updated_at": now}
+        if target in ("returned", "partial_refunded"):
+            _set.update({"return_source": "trendyol_iade_reconcile",
+                         "returned_at": p.get("returned_at") or now})
+        await db.orders.update_one({"id": oid}, {
+            "$set": _set,
+            "$push": {"status_history": {"status": target, "at": now, "by": "iade-mutabakat",
+                                         "note": "Trendyol iade listesi mutabakatı"}}})
+        applied["status"] += 1
+        # Stok geri — idempotent (reconcile_restocked guard)
+        if do_restock:
+            claim = await db.orders.update_one(
+                {"id": oid, "reconcile_restocked": {"$ne": True}},
+                {"$set": {"reconcile_restocked": True}})
+            if claim.modified_count > 0:
+                moves = await _stock_delta_for_order({"items": restock_items,
+                                                      "order_number": o.get("order_number"), "platform": "trendyol"}, +1)
+                import uuid as _uuid
+                await db.stock_movements.insert_one({
+                    "id": str(_uuid.uuid4()), "type": "return_restock", "order_id": oid,
+                    "order_number": o.get("order_number"), "items": moves, "created_at": now,
+                    "source": "trendyol_iade_reconcile"})
+                applied["restock"] += 1
+    return {"ok": True, "dry_run": dry, "applied": applied, "sample": details[:15]}
+
+
 @router.get("/trendyol/settings")
 async def get_trendyol_settings(current_user: dict = Depends(require_admin)):
     """Get Trendyol settings"""
