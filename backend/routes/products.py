@@ -3032,8 +3032,53 @@ async def export_products_excel(
             "_id": 0, "id": 1, "name": 1, "category_name": 1, "brand": 1,
             "stock_code": 1, "barcode": 1, "price": 1, "sale_price": 1, "stock": 1,
             "description": 1, "is_active": 1, "variants": 1, "attributes": 1, "season": 1,
+            # #71: alış fiyatı (ALISFIYATI) + pazaryeri taban fiyatı (Trendyol fiyatı hesabı için)
+            "purchase_price": 1, "cost_price": 1, "member_price_1": 1,
         }
         products = await db.products.find(query, _proj).to_list(None)
+
+        # #71: Trendyol SATIŞ fiyatı sütunu — pazaryeri feed'iyle AYNI formül:
+        #   taban (member_price_1 ya da price) × (1 + markup/100). markup: Ana Ayarlar >
+        #   trendyol_markup ÖNCELİKLİ, yoksa Trendyol config default_markup.
+        _ty_markup = 0.0
+        try:
+            _main_s = await db.settings.find_one({"id": "main"}, {"_id": 0, "trendyol_markup": 1}) or {}
+            _ty_s = await db.settings.find_one({"id": "trendyol"}, {"_id": 0, "default_markup": 1}) or {}
+            _mk = _main_s.get("trendyol_markup")
+            if _mk in (None, ""):
+                _mk = _ty_s.get("default_markup")
+            _ty_markup = float(_mk or 0)
+        except Exception:
+            _ty_markup = 0.0
+
+        # #71: manuel maliyet (product_costs) — alış fiyatı için toplu ön-yükleme (yedek kaynak).
+        _cost_map = {}
+        try:
+            _pids = [p.get("id") for p in products if p.get("id")]
+            if _pids:
+                async for _c in db.product_costs.find({"product_id": {"$in": _pids}}, {"_id": 0, "product_id": 1, "cost_price": 1}):
+                    _cost_map[_c.get("product_id")] = _c.get("cost_price")
+        except Exception:
+            _cost_map = {}
+
+        def _num(x):
+            try:
+                return float(x)
+            except Exception:
+                return 0.0
+
+        def _alis_fiyati(v, p):
+            """Alış (maliyet) fiyatı: varyant/ürün purchase_price (ALISFIYATI) → product_costs → cost_price."""
+            for cand in (v.get("purchase_price"), p.get("purchase_price"),
+                         _cost_map.get(p.get("id")), p.get("cost_price")):
+                if cand not in (None, "", 0, 0.0):
+                    return _num(cand)
+            return 0.0
+
+        def _trendyol_price(v, p):
+            base = _num(v.get("member_price_1")) or _num(p.get("member_price_1")) \
+                or _num(v.get("price")) or _num(p.get("price"))
+            return round(base * (1 + _ty_markup / 100.0), 2) if base > 0 else 0
         
         # Collect all unique attribute names
         all_attr_names = set()
@@ -3078,6 +3123,8 @@ async def export_products_excel(
                     "Renk": v.get("color", ""),
                     "Piyasa Fiyatı": v.get("price") or p.get("price", 0),
                     "Satış Fiyatı": v.get("sale_price") or p.get("sale_price") or p.get("price", 0),
+                    "Alış Fiyatı": _alis_fiyati(v, p),
+                    "Trendyol Satış Fiyatı": _trendyol_price(v, p),
                     "Stok": v.get("stock", 0),
                     "Açıklama": p.get("description", ""),
                     "Aktif": "Evet" if p.get("is_active") else "Hayır"
