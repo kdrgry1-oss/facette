@@ -114,6 +114,29 @@ async def admin_update_footer_template(
     return {"success": True, "message": "Footer şablonu güncellendi"}
 
 
+@public_router.post("/_diag/patch_labels2907")
+async def _diag_patch_labels2907(payload: dict):
+    """GEÇİCİ (key-korumalı) — kayıtlı footer'daki link etiketlerini `to`ya göre yamalar.
+    Kod default'u kayıtlı footer'ı ezemediğinden gerekli. Kullanımdan sonra KALDIRILACAK.
+    payload: {key, map: {"/iade-islemleri": "İade Talebi", ...}}"""
+    if (payload or {}).get("key") != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    label_map = (payload or {}).get("map") or {}
+    doc = await db.settings.find_one({"id": "footer"}, {"_id": 0})
+    if not doc or not doc.get("columns"):
+        return {"ok": False, "reason": "kayıtlı footer yok (kod default kullanılıyor)"}
+    changed = []
+    cols = doc.get("columns") or []
+    for c in cols:
+        for l in (c.get("links") or []):
+            to = l.get("to")
+            if to in label_map and l.get("label") != label_map[to]:
+                changed.append({"to": to, "old": l.get("label"), "new": label_map[to]})
+                l["label"] = label_map[to]
+    await db.settings.update_one({"id": "footer"}, {"$set": {"columns": cols, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return {"ok": True, "changed": changed}
+
+
 @admin_router.post("/reset-default")
 async def reset_footer_default(current_user: dict = Depends(require_admin)):
     """Footer'ı varsayılan değerlere döndür."""
