@@ -1216,6 +1216,16 @@ export default function Returns() {
                   <span className="text-sm font-bold">{gpData.cargo_campaign_warning}</span>
                 </div>
               )}
+              {/* Kargo müşteriden kesildiyse gider pusulasında AÇIKÇA belirt (net ödeme kargo kadar düşük). */}
+              {gpData.cargo?.mode === "deducted" && Number(gpData.cargo?.amount) > 0 && (
+                <div className="mb-3 flex items-start gap-2 rounded-lg border-2 border-amber-400 bg-amber-50 px-3 py-2 text-amber-900">
+                  <span className="text-lg leading-none">🚚</span>
+                  <span className="text-sm font-semibold">
+                    {gpData.cargo_deduction_note
+                      || `Kargo bedeli ${fmt2(gpData.cargo.amount)} TL müşteriden kesildi (ücretsiz kargo hakkı iade sonrası kalktı). Net ödeme buna göre ${fmt2(gpData.totals?.net)} TL.`}
+                  </span>
+                </div>
+              )}
               <p className="text-xs text-gray-500 mb-2">
                 {gpData.preview
                   ? <>Önizleme — gider pusulası numarası <b className="text-amber-700">YAZDIR'a basınca atanır</b>. Yazdırmadan kapatırsanız numara yanmaz.</>
@@ -1260,7 +1270,10 @@ function GiderPusulasiSlip({ data, overlay, offX = 0, offY = 0, guides = false }
   const net = tot.net || 0;
   const matrah = tot.net_without_vat || 0;
   const kdv = tot.vat_amount || 0;
-  const indirim = tot.discount || 0;
+  // Kargo müşteriden kesildiyse (deducted) AYRI göster: kesilen tutar "indirim"e katlanmıştı;
+  // burada ayırıp "Kargo mahsubu" satırında gösteririz (çift saymadan, net değişmez).
+  const cargoDeducted = (data.cargo && data.cargo.mode === "deducted") ? (Number(data.cargo.amount) || 0) : 0;
+  const indirim = Math.max(0, (tot.discount || 0) - cargoDeducted);
   const words = sayiToWords(Math.round(net));
   const cityLine = [c.district, c.city, c.country || "Türkiye"].filter(Boolean).join("/");
 
@@ -1334,7 +1347,11 @@ function GiderPusulasiSlip({ data, overlay, offX = 0, offY = 0, guides = false }
       <div style={{ height: "1.2mm" }} />
       {row("Tutar (V.D.)", fmt2(net), true)}
       {row("Toplam Satır İsk (VD)", fmt2(indirim))}
-      {row("Toplam Dip İsk (/D)", fmt2(0))}
+      {/* Kargo müşteriden kesildiyse her zaman 0 olan 'Dip İsk' satırını kargo mahsubu için kullan
+          (satır sayısı sabit → matbu form hizası bozulmaz). */}
+      {cargoDeducted > 0
+        ? row("Kargo Mahsubu (müşt.)", "−" + fmt2(cargoDeducted))
+        : row("Toplam Dip İsk (/D)", fmt2(0))}
       {row("Vergi Matrahı", fmt2(matrah))}
       {row("Kdv", fmt2(kdv))}
       {row("Net Tutar", fmt2(net), true)}

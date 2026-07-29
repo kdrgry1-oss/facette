@@ -7785,6 +7785,19 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
             _cargo_campaign_warning = ("KARGO KAMPANYA DIŞI KALDI — sipariş ücretsiz kargo ile alınmıştı; "
                 "kısmi iade sonrası kargo kampanya koşulunu yeniden değerlendirin.")
 
+    # Kargo müşteriden KESİLDİYSE (deduct_cargo) gider pusulasında AÇIKÇA belirt (Kadir isteği:
+    # 5000₺ sipariş → 1500₺ iade → kalan 3500₺ eşiğin altında → 1500−99 ödenir). Net ödeme kargo
+    # kadar düşürülür; pusulada "Kargo mahsubu" olarak gösterilir (önizleme + matbu).
+    _cargo_deduction_note = ""
+    if deduct_cargo and cargo_amount > 0:
+        _kept_after = _round2(order_sub - prod_net) if not is_full else 0.0
+        _cargo_deduction_note = (
+            f"Kargo bedeli {cargo_amount:.2f} TL müşteriden kesildi — ücretsiz kargo hakkı "
+            f"iade sonrası kalktı"
+            + (f" (kalan tutar {_kept_after:.2f} TL, eşiğin altında)" if not is_full else "")
+            + f". Net ödeme buna göre {net_total:.2f} TL."
+        )
+
     gider_pusulasi = {
         "number": gp_number,
         "display_number": display_number,
@@ -7815,11 +7828,13 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         },
         "cargo": {
             "included": bool(cargo_line),
-            "mode": cargo_mode,            # refund | clawback | none
+            "mode": cargo_mode,            # refund | deducted | none
             "amount": cargo_amount,
+            "deducted": bool(deduct_cargo),
             "paid_shipping": paid_shipping,
             "is_full": is_full,
         },
+        "cargo_deduction_note": _cargo_deduction_note,
         "claim_reason": rec.get("reason", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
