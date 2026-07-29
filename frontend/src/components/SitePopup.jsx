@@ -12,7 +12,7 @@
  * =============================================================================
  */
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import axios from "axios";
 import { Tag, Gift, Mail, Lock, Check, X } from "lucide-react";
 
@@ -31,8 +31,12 @@ const BENEFIT_ICONS = [Tag, Gift, Mail];
 export default function SitePopup() {
   const [popup, setPopup] = useState(null);
   const [visible, setVisible] = useState(false);
+  const location = useLocation();
+  // Popup YALNIZ vitrinde (storefront) gösterilir — admin panelinde ASLA.
+  const isAdmin = (location?.pathname || "").startsWith("/admin");
 
   useEffect(() => {
+    if (isAdmin) return;   // admin panelinde popup çekme/gösterme
     let alive = true;
     let timer = null;
     let onExit = null;
@@ -63,9 +67,9 @@ export default function SitePopup() {
       })
       .catch(() => {});
     return () => { alive = false; if (timer) clearTimeout(timer); cleanupExit(); };
-  }, []);
+  }, [isAdmin]);
 
-  if (!popup || !visible) return null;
+  if (isAdmin || !popup || !visible) return null;
 
   const close = () => {
     setVisible(false);
