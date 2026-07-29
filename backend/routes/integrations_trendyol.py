@@ -143,36 +143,6 @@ def calculate_trendyol_price(base_price: float, product_data: dict, trendyol_con
     return round(final_price, 2)
 
 
-@router.post("/trendyol/_diag/fix_one_return2907")
-async def _diag_fix_one_return2907(payload: dict = Body(default=None)):
-    """GEÇİCİ (key-korumalı) — tek siparişi returned yap + iade kalemlerini stoğa geri ekle
-    (idempotent). Mutabakat artığı için; sonra KALDIRILACAK."""
-    if (payload or {}).get("key") != "fcttdiag2907":
-        raise HTTPException(status_code=403, detail="forbidden")
-    from .orders import _stock_delta_for_order
-    onum = str(payload.get("order_number") or "").strip()
-    items = payload.get("items") or {}
-    o = await db.orders.find_one({"order_number": onum, "platform": "trendyol"}, {"_id": 0, "id": 1, "status": 1})
-    if not o:
-        return {"ok": False, "reason": "bulunamadı"}
-    now = datetime.now(timezone.utc).isoformat()
-    await db.orders.update_one({"id": o["id"]}, {"$set": {
-        "status": "returned", "return_source": "trendyol_iade_reconcile",
-        "returned_at": payload.get("returned_at") or now, "updated_at": now}})
-    restocked = None
-    ri = [{"barcode": b, "quantity": int(q)} for b, q in items.items() if b and int(q) > 0]
-    if ri:
-        claim = await db.orders.update_one({"id": o["id"], "reconcile_restocked": {"$ne": True}},
-                                           {"$set": {"reconcile_restocked": True}})
-        if claim.modified_count > 0:
-            restocked = await _stock_delta_for_order({"items": ri, "order_number": onum, "platform": "trendyol"}, +1)
-            import uuid as _uuid
-            await db.stock_movements.insert_one({"id": str(_uuid.uuid4()), "type": "return_restock",
-                "order_id": o["id"], "order_number": onum, "items": restocked, "created_at": now,
-                "source": "trendyol_iade_reconcile"})
-    return {"ok": True, "was": o.get("status"), "now": "returned", "restocked": restocked}
-
-
 @router.get("/trendyol/settings")
 async def get_trendyol_settings(current_user: dict = Depends(require_admin)):
     """Get Trendyol settings"""
