@@ -4,8 +4,13 @@ import { useParams } from "react-router-dom";
 import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+import IconDocPage from "./IconDocPage";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// Bu sayfalar ikon-kart düzeninde gösterilir (İade & Değişim, İletişim). İçerik yine
+// TAMAMEN CMS'ten gelir; sadece SUNUM ikonlu — kullanıcı metni panelden düzenler.
+const ICON_LAYOUT_SLUGS = new Set(["iade-kosullari", "iletisim"]);
 
 export default function StaticPage() {
   const { slug } = useParams();
@@ -40,6 +45,9 @@ export default function StaticPage() {
             <div className="h-4 bg-gray-200 w-2/3" />
             <div className="h-4 bg-gray-200 w-full" />
           </div>
+        ) : page && ICON_LAYOUT_SLUGS.has(slug) ? (
+          /* İkon-kart düzeni (İade & Değişim, İletişim) — içerik yine CMS'ten */
+          <IconDocPage page={page} />
         ) : page ? (
           <>
             <h1 className="text-3xl md:text-5xl font-light tracking-tight text-black mb-3">{page.title}</h1>

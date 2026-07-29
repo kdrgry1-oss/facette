@@ -3238,20 +3238,26 @@ async def send_payment_reminder(order_id: str, current_user: dict = Depends(requ
     _res = await send_notification(db, "order_payment_reminder",
                                    to_phone=_phone, to_email=_email,
                                    variables=_vars, channels=["sms", "email"])
+    # DÜZELTME: send_notification {"event","results":{"sms":{...},"email":{...}}} döndürür.
+    # Önceki kod kanalları üst seviyeden (_res.get("sms")) okuyordu → HER ZAMAN None/False →
+    # SMS gerçekten gitse bile "Gönderilemedi" yazıyor ve log sms:false kaydediyordu (mükerrer
+    # gönderim riski). Doğru seviye: _res["results"].
+    _results = _res.get("results") or {}
+    _sms_ok = bool((_results.get("sms") or {}).get("success"))
+    _mail_ok = bool((_results.get("email") or {}).get("success"))
+    _sms_err = (_results.get("sms") or {}).get("error") or (_results.get("sms") or {}).get("response") or ""
     _now = datetime.now(timezone.utc).isoformat()
     await db.orders.update_one({"id": order_id}, {
         "$set": {"payment_reminder_last_at": _now},
         "$inc": {"payment_reminder_count": 1},
         "$push": {"payment_reminder_log": {"at": _now, "by": current_user.get("email", ""),
-                                           "sms": bool((_res.get("sms") or {}).get("success")),
-                                           "email": bool((_res.get("email") or {}).get("success"))}},
+                                           "sms": _sms_ok, "email": _mail_ok}},
     })
-    _sms_ok = bool((_res.get("sms") or {}).get("success"))
-    _mail_ok = bool((_res.get("email") or {}).get("success"))
     return {"success": _sms_ok or _mail_ok, "sms": _sms_ok, "email": _mail_ok,
             "phone_masked": ("***" + str(_phone)[-2:]) if _phone else "",
+            "sent_at": _now,
             "message": ("Hatırlatma gönderildi." if (_sms_ok or _mail_ok)
-                        else "Gönderilemedi — SMS/e-posta sağlayıcı veya şablon ayarını kontrol edin.")}
+                        else f"Gönderilemedi — {_sms_err or 'SMS/e-posta sağlayıcı veya şablon ayarını kontrol edin.'}")}
 
 
 # #17: Fatura/kargo barkodu YALNIZ onaylanmış (confirmed) veya sonrası siparişe yapılabilir.
