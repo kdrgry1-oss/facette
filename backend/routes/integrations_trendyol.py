@@ -151,15 +151,33 @@ async def _diag_verify_orders2907(payload: dict = Body(default=None)):
     onums = [str(x).strip() for x in (payload.get("order_numbers") or []) if str(x).strip()]
     if not onums:
         raise HTTPException(status_code=400, detail="order_numbers gerekli")
-    proj = {"_id": 0, "order_number": 1, "platform": 1, "status": 1, "payment_status": 1,
-            "total": 1, "subtotal": 1, "return_source": 1, "return_claim_id": 1, "returned_at": 1}
+    proj = {"_id": 0, "order_number": 1, "id": 1, "platform": 1, "status": 1, "payment_status": 1,
+            "total": 1, "subtotal": 1, "return_source": 1, "return_claim_id": 1, "returned_at": 1,
+            "items": 1, "return_request": 1}
     found = {}
+    id_to_onum = {}
     cursor = db.orders.find({"order_number": {"$in": onums}}, proj)
     async for o in cursor:
-        found[str(o.get("order_number"))] = {"platform": o.get("platform"), "status": o.get("status"),
+        on = str(o.get("order_number"))
+        id_to_onum[o.get("id")] = on
+        found[on] = {"id": o.get("id"), "platform": o.get("platform"), "status": o.get("status"),
             "payment_status": o.get("payment_status"), "total": o.get("total"), "subtotal": o.get("subtotal"),
             "return_source": o.get("return_source"), "return_claim_id": o.get("return_claim_id"),
-            "returned_at": o.get("returned_at")}
+            "returned_at": o.get("returned_at"),
+            "return_request": o.get("return_request"),
+            "items": [{"barcode": str(it.get("barcode") or ""), "qty": int(it.get("quantity") or 1)}
+                      for it in (o.get("items") or [])],
+            "cr": None}
+    # customer_returns eşleşmesi (order_id veya order_number ile)
+    crs = db.customer_returns.find({"$or": [{"order_id": {"$in": list(id_to_onum.keys())}},
+                                            {"order_number": {"$in": onums}}]},
+                                   {"_id": 0, "order_id": 1, "order_number": 1, "status": 1,
+                                    "approved_items": 1, "stock_restored": 1, "id": 1})
+    async for c in crs:
+        on = id_to_onum.get(c.get("order_id")) or str(c.get("order_number") or "")
+        if on in found:
+            found[on]["cr"] = {"id": c.get("id"), "status": c.get("status"),
+                               "approved_items": c.get("approved_items"), "stock_restored": c.get("stock_restored")}
     return {"requested": len(onums), "found_count": len(found), "found": found}
 
 
