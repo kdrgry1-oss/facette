@@ -19,7 +19,7 @@ from typing import Optional
 import re
 
 from .deps import db, logger, require_admin, generate_id, _search_tr_regex
-from .orders import _order_vade_farki, _order_is_efatura, _compute_refund_breakdown
+from .orders import _order_vade_farki, _order_is_efatura, _compute_refund_breakdown, _stock_delta_for_order
 
 router = APIRouter(prefix="/admin/rooftr", tags=["rooftr-returns"])
 
@@ -594,18 +594,68 @@ async def _diag_fix_return_orders2907(payload: dict):
             "delivered_at": o.get("delivered_at"), "shipped_at": o.get("shipped_at"),
             "manual_return": o.get("manual_return"),
         }
+        # Onayda yapılan otomatik stok-geri (return_restock) hareketi — geri alınacak
+        # çünkü müşteri ürünü GÖNDERMEDİ (süre doldu). Kaydı bularak birebir tersine çevir.
+        restock_mv = await db.stock_movements.find_one(
+            {"return_id": (cr or {}).get("id"), "type": "return_restock"}, {"_id": 0}) if cr else None
+        info["was_restocked"] = bool(restock_mv)
+        info["already_reversed"] = bool(cr and cr.get("stock_reversed"))
+        if restock_mv:
+            info["restock_items"] = restock_mv.get("items")
+
         if action == "revert":
             if o.get("status") not in RETURN_STATUSES:
                 info["skipped"] = "zaten iade durumunda değil"
-            elif dry:
+                rows.append(info)
+                continue
+            # Refund yapılmış iadeyi bu araçla geri ALMA (para iadesi var → elle incelensin)
+            if o.get("payment_status") in ("refunded", "partial_refunded") or o.get("status") in ("refunded", "partial_refunded"):
+                info["skipped"] = "para iadesi yapılmış — elle incelenmeli"
+                rows.append(info)
+                continue
+            # planlanan stok tersine-çevirme
+            _reverse_items = []
+            if restock_mv and not (cr or {}).get("stock_reversed"):
+                for m in (restock_mv.get("items") or []):
+                    d = int(m.get("delta") or 0)
+                    if d > 0 and m.get("barcode"):
+                        _reverse_items.append({"barcode": m["barcode"], "quantity": d})
+            info["would_reverse_stock"] = _reverse_items
+            if dry:
                 info["would_set_status"] = target
-            else:
-                await db.orders.update_one({"id": oid}, {
-                    "$set": {"status": target, "manual_return": False, "updated_at": now_iso},
-                    "$unset": {"return_request": "", "return_approved_at": ""},
-                })
-                info["reverted_from"] = o.get("status")
-                info["reverted_to"] = target
+                rows.append(info)
+                continue
+            # --- UYGULA ---
+            # 1) Stok tersine (idempotent: cr.stock_reversed atomik guard)
+            if _reverse_items and cr:
+                _claim = await db.customer_returns.update_one(
+                    {"id": cr["id"], "stock_reversed": {"$ne": True}},
+                    {"$set": {"stock_reversed": True, "stock_reversed_at": now_iso}})
+                if _claim.modified_count > 0:
+                    moves = await _stock_delta_for_order({"items": _reverse_items,
+                                                          "order_number": onum, "platform": o.get("platform")}, -1)
+                    import uuid as _uuid
+                    await db.stock_movements.insert_one({
+                        "id": str(_uuid.uuid4()), "type": "return_restock_reversed",
+                        "order_id": oid, "order_number": onum, "return_id": cr["id"],
+                        "items": moves, "created_at": now_iso, "source": "return_abandoned",
+                        "note": "İade süresi doldu/ürün gelmedi — onaydaki stok-geri iptal edildi",
+                    })
+                    info["stock_reversed_now"] = moves
+            # 2) İade kaydını iptal işaretle
+            if cr:
+                await db.customer_returns.update_one({"id": cr["id"]}, {"$set": {
+                    "status": "cancelled",
+                    "cancel_reason": "İade süresi doldu / ürün gelmedi — normal siparişe alındı",
+                    "cancelled_at": now_iso,
+                }})
+            # 3) Siparişi normal statüye al (SESSİZ — müşteriye bildirim yok)
+            await db.orders.update_one({"id": oid}, {
+                "$set": {"status": target, "manual_return": False, "updated_at": now_iso},
+                "$unset": {"return_request": "", "return_approved_at": ""},
+            })
+            info["reverted_from"] = o.get("status")
+            info["reverted_to"] = target
         rows.append(info)
     return {"ok": True, "action": action, "dry_run": dry, "target_status": target, "rows": rows}
 
