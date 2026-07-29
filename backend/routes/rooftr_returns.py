@@ -557,6 +557,59 @@ async def set_return_status_silent(
     return {"success": True, "count": len(updated), "updated": updated}
 
 
+@router.post("/_diag/fix_return_orders2907")
+async def _diag_fix_return_orders2907(payload: dict):
+    """GEÇİCİ (key-korumalı) — iade panelinde OLUP gerçekte iade talebi/iadesi olmayan
+    siparişleri normal siparişlere geri taşır (durumu iade-dışı bir statüye çeker).
+    SESSİZ: müşteri bildirimi YOK, stok hareketi YOK (agent doğruladı: restore hareketi
+    olmayan siparişte statü geri alımının stok/iade yan etkisi yok). Kullanımdan sonra KALDIRILACAK.
+    payload: {key, order_numbers:[...], action:"inspect"|"revert", target_status:"delivered", dry_run:true}
+    """
+    if (payload or {}).get("key") != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    onums = [str(x).strip() for x in (payload.get("order_numbers") or []) if str(x).strip()]
+    action = (payload.get("action") or "inspect").lower()
+    target = str(payload.get("target_status") or "delivered").strip()
+    dry = bool(payload.get("dry_run", True))
+    if not onums:
+        raise HTTPException(status_code=400, detail="order_numbers gerekli")
+
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for onum in onums:
+        o = await db.orders.find_one({"order_number": onum}, {"_id": 0})
+        if not o:
+            rows.append({"order_number": onum, "found": False})
+            continue
+        oid = o.get("id")
+        cr = await db.customer_returns.find_one({"order_id": oid}, {"_id": 0, "id": 1, "status": 1})
+        info = {
+            "order_number": onum, "found": True, "id": oid,
+            "platform": o.get("platform"), "status": o.get("status"),
+            "payment_status": o.get("payment_status"),
+            "in_return_panel": o.get("status") in RETURN_STATUSES and o.get("platform") not in ("trendyol", "hepsiburada"),
+            "has_customer_returns_doc": bool(cr),
+            "return_request": o.get("return_request"),
+            "delivered_at": o.get("delivered_at"), "shipped_at": o.get("shipped_at"),
+            "manual_return": o.get("manual_return"),
+        }
+        if action == "revert":
+            if o.get("status") not in RETURN_STATUSES:
+                info["skipped"] = "zaten iade durumunda değil"
+            elif dry:
+                info["would_set_status"] = target
+            else:
+                await db.orders.update_one({"id": oid}, {
+                    "$set": {"status": target, "manual_return": False, "updated_at": now_iso},
+                    "$unset": {"return_request": "", "return_approved_at": ""},
+                })
+                info["reverted_from"] = o.get("status")
+                info["reverted_to"] = target
+        rows.append(info)
+    return {"ok": True, "action": action, "dry_run": dry, "target_status": target, "rows": rows}
+
+
 @router.post("/flatten-order/{order_id}")
 async def flatten_order_financials(
     order_id: str,
