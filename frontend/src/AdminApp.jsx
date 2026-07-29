@@ -17,6 +17,7 @@ import AdminPageDesign from "./pages/admin/PageDesign";
 import AdminFooterDesign from "./pages/admin/FooterDesign";
 import AdminMenu from "./pages/admin/MenuAdmin";
 import AdminInstagram from "./pages/admin/Instagram";
+import EmailMarketing from "./pages/admin/EmailMarketing";
 import AdminIntegrations from "./pages/admin/Integrations";
 import Payments from "./pages/admin/Payments";
 import OrderStatusSettings from "./pages/admin/OrderStatusSettings";
@@ -111,6 +112,7 @@ export default function AdminApp() {
         <Route path="footer-tasarim" element={<AdminFooterDesign />} />
         <Route path="menu-yonetimi" element={<AdminMenu />} />
         <Route path="instagram" element={<AdminInstagram />} />
+        <Route path="eposta-pazarlama" element={<EmailMarketing />} />
         <Route path="bannerlar" element={<AdminBanners />} />
         <Route path="temalar" element={<Themes />} />
         <Route path="kampanyalar" element={<AdminCampaigns />} />

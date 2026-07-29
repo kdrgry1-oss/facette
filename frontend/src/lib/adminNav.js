@@ -82,6 +82,7 @@ export const navigationGroups = [
       { label: "Sayfa Tasarımı", path: "/admin/sayfa-tasarimi", icon: Palette },
       { label: "Footer Tasarımı", path: "/admin/footer-tasarim", icon: Palette },
       { label: "Instagram Akışı", path: "/admin/instagram", icon: Instagram },
+      { label: "E-posta Pazarlama", path: "/admin/eposta-pazarlama", icon: MessageSquare },
       { label: "Sayfalar (CMS)", path: "/admin/sayfalar", icon: FileText },
     ],
   },
