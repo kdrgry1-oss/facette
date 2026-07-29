@@ -71,36 +71,6 @@ async def get_page(slug: str):
     return page
 
 
-@router.post("/_diag/set_content2907")
-async def _diag_set_content2907(payload: dict):
-    """GEÇİCİ (key-korumalı) — içerik sayfası upsert (create-if-missing).
-    İçerik migrasyonu için; kullanımdan sonra KALDIRILACAK.
-    payload: {key, slug, title?, content, is_active?}"""
-    if (payload or {}).get("key") != "fcttdiag2907":
-        raise HTTPException(status_code=403, detail="forbidden")
-    slug = (payload.get("slug") or "").strip()
-    if not slug:
-        raise HTTPException(status_code=400, detail="slug zorunlu")
-    now = datetime.now(timezone.utc).isoformat()
-    existing = await db.pages.find_one({"slug": slug})
-    setter = {"content": payload.get("content", ""), "updated_at": now}
-    if "title" in payload:
-        setter["title"] = payload.get("title", "")
-    if "is_active" in payload:
-        setter["is_active"] = bool(payload.get("is_active"))
-    if existing:
-        await db.pages.update_one({"slug": slug}, {"$set": setter})
-        return {"ok": True, "action": "updated", "slug": slug, "len": len(setter["content"])}
-    doc = {
-        "id": generate_id(), "title": payload.get("title", ""), "slug": slug,
-        "content": payload.get("content", ""), "meta_title": "", "meta_description": "",
-        "is_active": bool(payload.get("is_active", True)),
-        "created_at": now, "updated_at": now,
-    }
-    await db.pages.insert_one(doc)
-    return {"ok": True, "action": "created", "slug": slug, "len": len(doc["content"])}
-
-
 @router.post("")
 async def create_page(payload: dict, current_user: dict = Depends(require_admin)):
     slug = (payload.get("slug") or "").strip()
