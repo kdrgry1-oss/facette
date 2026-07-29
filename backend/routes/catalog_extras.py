@@ -112,31 +112,6 @@ async def public_popups():
     return {"items": items}
 
 
-@storefront_extras_router.post("/_diag/seed_popup2907")
-async def _diag_seed_popup2907(payload: dict):
-    """GEÇİCİ (key-korumalı) — sağ-alt bülten (%10 indirim) popup'ını oluşturur/günceller.
-    Kullanımdan sonra KALDIRILACAK (admin panelden düzenlenebilir)."""
-    if (payload or {}).get("key") != "fcttdiag2907":
-        raise HTTPException(status_code=403, detail="forbidden")
-    doc = {
-        "name": "Üyeliğinize Özel %10 İndirim",
-        "subtitle": "E-posta ile abone olun, herhangi bir alışverişinizde geçerli %10 indirim fırsatını kaçırmayın.",
-        "content": "Herhangi bir alışverişinizde %10 indirim\nÖzel kampanya ve ön satışlara erken erişim\nYeni koleksiyon ve fırsatlardan haberdar olun",
-        "button_text": "Üye Ol ve Kazan",
-        "newsletter": True, "is_active": True, "show_once": True,
-        "trigger": "delay", "delay_seconds": 6, "sort_order": 0,
-        "updated_at": _now(),
-    }
-    existing = await db.popups.find_one({"newsletter": True})
-    if existing:
-        await db.popups.update_one({"id": existing["id"]}, {"$set": doc})
-        return {"ok": True, "action": "updated", "id": existing["id"]}
-    doc["id"] = generate_id()
-    doc["created_at"] = _now()
-    await db.popups.insert_one(doc)
-    return {"ok": True, "action": "created", "id": doc["id"]}
-
-
 @storefront_extras_router.get("/member-discount")
 async def member_group_discount(current_user: Optional[dict] = Depends(get_current_user)):
     """DENETİM FIX (#41): Oturum açan üyenin üye-grubu indirimini döndürür (checkout tüketir).
