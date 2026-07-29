@@ -42,8 +42,8 @@ _DEFAULT = {
             "links": [
                 {"to": "/siparis-takip", "label": "Sipariş Takibi"},
                 {"to": "/sayfa/uyelik-islemleri", "label": "Üyelik İşlemleri"},
-                {"to": "/iade-islemleri", "label": "İade İşlemleri"},
-                {"to": "/sayfa/iade-kosullari", "label": "İade Koşulları"},
+                {"to": "/iade-islemleri", "label": "İade Talebi"},
+                {"to": "/sayfa/iade-kosullari", "label": "İade İşlemleri"},
                 {"to": "/sikca-sorulan-sorular", "label": "Sıkça Sorulan Sorular"},
                 {"to": "/sayfa/iletisim", "label": "İletişim"},
             ],

@@ -140,8 +140,8 @@ const DEFAULT_COLUMNS = [
   { title: "Yardım", links: [
     { to: "/siparis-takip", label: "Sipariş Takibi" },
     { to: "/sayfa/uyelik-islemleri", label: "Üyelik İşlemleri" },
-    { to: "/iade-islemleri", label: "İade İşlemleri" },
-    { to: "/sayfa/iade-kosullari", label: "İade Koşulları" },
+    { to: "/iade-islemleri", label: "İade Talebi" },
+    { to: "/sayfa/iade-kosullari", label: "İade İşlemleri" },
     { to: "/sikca-sorulan-sorular", label: "Sıkça Sorulan Sorular" },
     { to: "/sayfa/iletisim", label: "İletişim" },
   ]},
@@ -221,16 +221,16 @@ export default function Footer() {
 
   // Structured mode — admin sütunları/sosyal/copyright güncelledi
   let columns = tpl?.columns || DEFAULT_COLUMNS;
-  // "İade İşlemleri" linki her zaman görünür olsun (admin sütunları override etse bile)
+  // "İade Talebi" linki her zaman görünür olsun (admin sütunları override etse bile)
   try {
     const hasReturn = columns.some((c) => (c.links || []).some((l) => l.to === "/iade-islemleri"));
     if (!hasReturn) {
       columns = columns.map((c) => c.links ? c : c); // shallow copy tetikleyici
       const svc = columns.find((c) => /müşteri|hizmet|iade|customer/i.test(c.title || ""));
       if (svc && svc.links) {
-        svc.links = [...svc.links, { to: "/iade-islemleri", label: "İade İşlemleri" }];
+        svc.links = [...svc.links, { to: "/iade-islemleri", label: "İade Talebi" }];
       } else {
-        columns = [...columns, { title: "İade İşlemleri", links: [{ to: "/iade-islemleri", label: "İade İşlemleri" }] }];
+        columns = [...columns, { title: "İade İşlemleri", links: [{ to: "/iade-islemleri", label: "İade Talebi" }] }];
       }
     }
   } catch (_) { /* yoksay */ }
