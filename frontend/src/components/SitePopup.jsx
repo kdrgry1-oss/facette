@@ -106,8 +106,6 @@ function CornerNewsletter({ popup, onClose }) {
   const [msg, setMsg] = useState("");
 
   const title = popup.name || popup.title || "Üyeliğinize Özel %10 İndirim";
-  const subtitle = popup.subtitle ||
-    "E-posta ile abone olun, herhangi bir alışverişinizde geçerli %10 indirim fırsatını kaçırmayın.";
   const benefits = (() => {
     const lines = String(popup.content || "").split(/\n+/).map((x) => x.trim()).filter(Boolean);
     return lines.length ? lines : DEFAULT_BENEFITS;
@@ -145,9 +143,8 @@ function CornerNewsletter({ popup, onClose }) {
           </div>
         ) : (
           <>
-            <h3 className="text-[26px] leading-[1.1] font-light tracking-tight text-black pr-6">{title}</h3>
-            <p className="text-[13px] text-neutral-600 mt-3 leading-relaxed">{subtitle}</p>
-            <div className="h-px bg-neutral-300/70 my-5" />
+            <h3 className="text-[26px] leading-[1.1] font-light tracking-tight text-black text-center px-6">{title}</h3>
+            <div className="h-px bg-neutral-300/70 mt-5 mb-5" />
 
             <ul className="space-y-3.5 mb-5">
               {benefits.map((b, i) => {
