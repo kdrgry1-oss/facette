@@ -2731,10 +2731,11 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                                 }
                                 if _amap.get("total") is not None:
                                     _pset["total"] = _amap.get("total")
-                                await db.orders.update_one(
-                                    {"order_number": onum, "platform": "trendyol"},
-                                    {"$set": _pset},
-                                )
+                                # İADE KORUMASI: kısmi-iptal aktif pakete çekerken, claim ile
+                                # 'returned' yapılmış siparişi ezme (iptal→aktif meşru, iade→aktif değil).
+                                _ppf = {"order_number": onum, "platform": "trendyol",
+                                        "status": {"$nin": ["returned", "refunded", "partial_refunded"]}}
+                                await db.orders.update_one(_ppf, {"$set": _pset})
                                 updated += 1
                                 logger.info(f"[trendyol kismi-iptal] {onum}: aktif paket "
                                             f"{_active_pkg.get('id')} yansitildi, siparis iptal EDILMEDI")
@@ -2750,10 +2751,15 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                     if st == "Cancelled":
                         _set["cancel_reason"] = _reason
                         _set["cancel_source"] = "trendyol"
-                    res = await db.orders.update_one(
-                        {"order_number": onum, "platform": "trendyol"},
-                        {"$set": _set},
-                    )
+                    # İADE KORUMASI (kök neden): bu sweep bir siparişi ASLA terminal (iade/iptal)
+                    # durumundan TEKRAR aktif 'confirmed'e ÇEKMESİN. Örn. "UnDelivered" paketi
+                    # 'confirmed'e map olur; claim ile 'returned' yapılmış siparişi bu ezip ciroyu
+                    # geri şişiriyordu (211 iade kayboldu). Terminal→terminal (returned↔cancelled)
+                    # serbest; yalnız terminal→confirmed engellenir.
+                    _uf = {"order_number": onum, "platform": "trendyol"}
+                    if mapped.get("status") not in ("cancelled", "returned", "refunded", "partial_refunded"):
+                        _uf["status"] = {"$nin": ["returned", "refunded", "partial_refunded", "cancelled"]}
+                    res = await db.orders.update_one(_uf, {"$set": _set})
                     if res.modified_count:
                         updated += 1
                     # ÖNEMLİ ("bi düşüyor bi düşmüyor" kök nedeni): sipariş bizde YOKSA
