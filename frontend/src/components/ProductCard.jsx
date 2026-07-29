@@ -280,7 +280,7 @@ export default function ProductCard({ product, listId = "", listName = "", index
             <button
               onClick={handleQuickAdd}
               disabled={isSoldOut}
-              className={`flex-shrink-0 p-1 transition-opacity ${isSoldOut ? "opacity-30 cursor-not-allowed" : "hover:opacity-60"}`}
+              className={`flex-shrink-0 p-1 md:mr-2 transition-opacity ${isSoldOut ? "opacity-30 cursor-not-allowed" : "hover:opacity-60"}`}
               data-testid={`quick-add-${product.id}`}
               aria-label={isSoldOut ? "Tükendi" : "Sepete ekle"}
               title={isSoldOut ? "Tükendi" : "Sepete Ekle"}

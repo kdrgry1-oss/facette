@@ -43,7 +43,7 @@ _DEFAULT = {
                 {"to": "/siparis-takip", "label": "Sipariş Takibi"},
                 {"to": "/sayfa/uyelik-islemleri", "label": "Üyelik İşlemleri"},
                 {"to": "/iade-islemleri", "label": "İade İşlemleri"},
-                {"to": "/sayfa/iade-kosullari", "label": "İade & Değişim"},
+                {"to": "/sayfa/iade-kosullari", "label": "İade Koşulları"},
                 {"to": "/sikca-sorulan-sorular", "label": "Sıkça Sorulan Sorular"},
                 {"to": "/sayfa/iletisim", "label": "İletişim"},
             ],
