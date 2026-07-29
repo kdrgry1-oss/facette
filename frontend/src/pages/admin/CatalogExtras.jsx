@@ -173,10 +173,13 @@ export function Announcements() {
 export function Popups() {
   return <SimpleCrudPage title="Süreli Popup Yönetimi" icon={BellRing} endpoint="/admin/popups"
     fields={[
-      { key: "name", label: "Popup Adı", required: true },
-      { key: "content", label: "HTML İçerik", type: "textarea" },
+      { key: "name", label: "Popup Adı / Başlık", required: true },
+      { key: "content", label: "Metin / HTML İçerik", type: "textarea" },
+      { key: "newsletter", label: "Bülten kayıt formu göster (e-posta + KVKK onayı)", type: "checkbox" },
+      { key: "subtitle", label: "Alt açıklama (bülten formunda)", type: "textarea", hidden_in_list: true },
+      { key: "button_text", label: "Buton yazısı (bülten formu)", hidden_in_list: true },
       { key: "image", label: "Görsel URL" },
-      { key: "link", label: "Yönlendirme" },
+      { key: "link", label: "Yönlendirme (bülten kapalıysa)" },
       { key: "delay_seconds", label: "Saniye sonra göster", type: "number" },
       { key: "trigger", label: "Tetikleyici (exit_intent/scroll/time)" },
       { key: "show_once", label: "Sadece 1 kez", type: "checkbox", hidden_in_list: true },

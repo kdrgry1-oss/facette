@@ -75,7 +75,11 @@ member_groups_router = _simple_crud("member_groups", "/admin/member-groups", "ad
 announcements_router = _simple_crud("announcements", "/admin/announcements", "admin-announcements",
                                     extra_allowed=("content", "link", "start_at", "end_at", "position", "bg_color"))
 popups_router = _simple_crud("popups", "/admin/popups", "admin-popups",
-                             extra_allowed=("content", "image", "link", "delay_seconds", "trigger", "show_once", "start_at", "end_at"))
+                             extra_allowed=("content", "image", "link", "delay_seconds", "trigger", "show_once",
+                                            "start_at", "end_at",
+                                            # Bülten kayıt formu modu (ekran görüntüsündeki gibi): e-posta +
+                                            # KVKK onayı + buton. newsletter=True ise storefront modalı form gösterir.
+                                            "newsletter", "subtitle", "button_text"))
 
 
 # DENETİM FIX (#35): Popup ve Duyuru için PUBLIC endpoint yoktu → storefront hiç okuyamıyor,
