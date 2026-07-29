@@ -143,6 +143,26 @@ def calculate_trendyol_price(base_price: float, product_data: dict, trendyol_con
     return round(final_price, 2)
 
 
+@router.post("/trendyol/_diag/verify_orders2907")
+async def _diag_verify_orders2907(payload: dict = Body(default=None)):
+    """GEÇİCİ (key-korumalı) — sipariş no'ların sistemdeki statü/iade karşılığı. Denetim; sonra KALDIRILACAK."""
+    if (payload or {}).get("key") != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    onums = [str(x).strip() for x in (payload.get("order_numbers") or []) if str(x).strip()]
+    if not onums:
+        raise HTTPException(status_code=400, detail="order_numbers gerekli")
+    proj = {"_id": 0, "order_number": 1, "platform": 1, "status": 1, "payment_status": 1,
+            "total": 1, "subtotal": 1, "return_source": 1, "return_claim_id": 1, "returned_at": 1}
+    found = {}
+    cursor = db.orders.find({"order_number": {"$in": onums}}, proj)
+    async for o in cursor:
+        found[str(o.get("order_number"))] = {"platform": o.get("platform"), "status": o.get("status"),
+            "payment_status": o.get("payment_status"), "total": o.get("total"), "subtotal": o.get("subtotal"),
+            "return_source": o.get("return_source"), "return_claim_id": o.get("return_claim_id"),
+            "returned_at": o.get("returned_at")}
+    return {"requested": len(onums), "found_count": len(found), "found": found}
+
+
 @router.get("/trendyol/settings")
 async def get_trendyol_settings(current_user: dict = Depends(require_admin)):
     """Get Trendyol settings"""
