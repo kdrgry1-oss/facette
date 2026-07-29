@@ -131,7 +131,7 @@ function CornerNewsletter({ popup, onClose }) {
   return (
     <div className="fixed z-[9999] bottom-4 right-4 left-4 md:left-auto md:w-[380px]" data-testid="site-popup-newsletter">
       <style>{`@keyframes fctPopIn{0%{opacity:0;transform:translateY(24px)}100%{opacity:1;transform:translateY(0)}}`}</style>
-      <div className="relative bg-[#f7f6f4] border border-neutral-200 shadow-2xl rounded-lg p-6 md:p-7"
+      <div className="relative bg-white border border-neutral-200 shadow-2xl rounded-lg p-6 md:p-7"
            style={{ animation: "fctPopIn .45s cubic-bezier(.16,1,.3,1)" }}>
         <button onClick={onClose} aria-label="Kapat"
           className="absolute right-3 top-3 text-neutral-400 hover:text-black transition-colors"><X size={20} /></button>
@@ -154,7 +154,7 @@ function CornerNewsletter({ popup, onClose }) {
                 const Icon = BENEFIT_ICONS[i % BENEFIT_ICONS.length];
                 return (
                   <li key={i} className="flex items-center gap-3">
-                    <span className="w-9 h-9 rounded-full bg-white border border-neutral-200 flex items-center justify-center flex-shrink-0">
+                    <span className="w-9 h-9 rounded-full bg-neutral-100 flex items-center justify-center flex-shrink-0">
                       <Icon size={16} strokeWidth={1.5} className="text-neutral-700" />
                     </span>
                     <span className="text-[13px] text-neutral-700 leading-snug">{b}</span>
@@ -164,11 +164,12 @@ function CornerNewsletter({ popup, onClose }) {
             </ul>
 
             <form onSubmit={submit}>
+              {/* Alt-çizgi (underline) e-posta alanı — referanstaki css mantığı */}
               <input
                 type="email" value={email}
                 onChange={(e) => { setEmail(e.target.value); if (state === "error") setState("idle"); }}
                 placeholder="E-posta adresiniz"
-                className="w-full bg-white border border-neutral-300 rounded-md px-4 py-3 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-900 transition-colors"
+                className="w-full bg-transparent border-0 border-b border-neutral-300 rounded-none px-0 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-900 transition-colors"
                 aria-label="E-posta adresi"
               />
               <button type="submit" disabled={state === "loading"}
