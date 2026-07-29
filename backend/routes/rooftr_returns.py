@@ -599,6 +599,8 @@ async def _diag_fix_return_orders2907(payload: dict):
         restock_mv = await db.stock_movements.find_one(
             {"return_id": (cr or {}).get("id"), "type": "return_restock"}, {"_id": 0}) if cr else None
         info["was_restocked"] = bool(restock_mv)
+        info["cr_stock_restored_flag"] = bool(cr and cr.get("stock_restored"))
+        info["cr_status"] = (cr or {}).get("status")
         info["already_reversed"] = bool(cr and cr.get("stock_reversed"))
         if restock_mv:
             info["restock_items"] = restock_mv.get("items")
