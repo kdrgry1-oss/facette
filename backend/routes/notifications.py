@@ -139,36 +139,6 @@ async def save_providers(req: ProviderConfigReq, current_user: dict = Depends(re
     return {"success": True, "message": "Bildirim sağlayıcı ayarları kaydedildi"}
 
 
-@router.post("/_diag/fix_placeholder2907")
-async def _diag_fix_placeholder2907(payload: dict):
-    """GEÇİCİ (key-korumalı) — kayıtlı şablonlarda ELLE yazılmış literal yer-tutucuları
-    ('(order number)' vb.) doğru değişkenle ({order_number}) değiştirir. Sonra KALDIRILACAK."""
-    if (payload or {}).get("key") != "fcttdiag2907":
-        raise HTTPException(status_code=403, detail="forbidden")
-    import re as _re
-    reps = {
-        "order number": "{order_number}", "order_number": "{order_number}",
-        "customer name": "{customer_name}", "customer_name": "{customer_name}",
-        "refund amount": "{refund_amount}", "return code": "{return_code}",
-        "tracking number": "{tracking_number}", "amount": "{amount}",
-    }
-    changed = []
-    async for t in db.notification_templates.find({}, {"_id": 0}):
-        body = t.get("body") or ""; subj = t.get("subject") or ""
-        nb, ns = body, subj
-        for lit, var in reps.items():
-            # yalnız PARANTEZ içi literal ('(order number)') → değişken; serbest kelimeye dokunma
-            pat = _re.compile(r"\(\s*" + _re.escape(lit) + r"\s*\)", _re.IGNORECASE)
-            nb = pat.sub(var, nb); ns = pat.sub(var, ns)
-        if nb != body or ns != subj:
-            await db.notification_templates.update_one(
-                {"event": t.get("event"), "channel": t.get("channel")},
-                {"$set": {"body": nb, "subject": ns}})
-            changed.append({"event": t.get("event"), "channel": t.get("channel"),
-                            "before": body[:80], "after": nb[:80]})
-    return {"ok": True, "changed": changed}
-
-
 @router.get("/templates")
 async def list_templates(current_user: dict = Depends(require_admin)):
     rows = await db.notification_templates.find({}, {"_id": 0}).to_list(length=None)
