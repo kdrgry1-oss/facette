@@ -3402,12 +3402,14 @@ async def _diag_hb_cargo_backfill2907(payload: dict = Body(default=None)):
                     _ns = _r.get("OrderNumbers") if isinstance(_r.get("OrderNumbers"), list) else []
                     _n1 = _hb_g(_r, "orderNumber", "OrderNumber", "orderNo", "OrderNo", "orderNumberStr")
                     _all = [str(x or "").strip() for x in ([_n1] + _ns) if str(x or "").strip()]
-                    _no = str(_hb_g(_r, "cargoTrackingNumber", "trackingNumber", "cargoTrackingCode", "packageBarcode", "barcode") or "")
-                    _nm = str(_hb_g(_r, "cargoCompany", "cargoProviderName", "cargoCompanyName", "cargoCompanyShortName", "shippingCompany") or "")
-                    if (_no or _nm) and _all:
+                    _no = str(_hb_g(_r, "Barcode", "barcode", "cargoTrackingNumber", "trackingNumber") or "")
+                    _pkgno = str(_hb_g(_r, "PackageNumber", "packageNumber") or "")
+                    _nm = str(_hb_g(_r, "CargoCompany", "cargoCompany", "cargoProviderName", "cargoCompanyName") or "")
+                    if (_no or _pkgno) and _all:
                         _cset = {}
                         if _no: _cset["cargo_tracking_number"] = _no
                         if _nm: _cset["cargo_provider_name"] = _nm
+                        if _pkgno: _cset["hb_package_number"] = _pkgno
                         _hbn = list({*_all, *[(x if x.upper().startswith("HB") else f"HB{x}") for x in _all]})
                         r = await db.orders.update_many({"order_number": {"$in": _hbn}, "platform": "hepsiburada"}, {"$set": _cset})
                         matched += 1; updated += r.modified_count
