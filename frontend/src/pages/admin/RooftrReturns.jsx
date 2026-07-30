@@ -935,16 +935,18 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                             altındaki siparişlerde kutu HİÇ gösterilmez. Kısmi iade sonrası KALAN
                             tutar eşiğin altına düşerse KIRMIZI uyarı çıkar. */}
                         {(() => {
-                          const paid = Number(r.shipping_cost) > 0;
                           const threshold = Number(r.free_shipping_threshold) || Number(freeShipThreshold) || 0;
                           // Siparişin verildiği (ücretsiz kargoyu tetikleyen) sepet tutarı: KDV-dahil ara toplam
                           // (yoksa toplam). Ücretsiz kargo checkout'ta sepet tutarına göre uygulanır.
                           const orderAmount = Number(r.subtotal) || Number(r.total) || 0;
-                          // KUTUYU GÖSTERME KOŞULU: kargo ödenmemiş + eşik tanımlı + sipariş tutarı eşiği aşmış.
-                          const qualifiedFreeShip = !paid && threshold > 0 && orderAmount >= threshold;
+                          // KUTUYU GÖSTERME KOŞULU: eşik tanımlı + sipariş tutarı eşiği (4000) aşmış.
+                          // NOT: 'paid' (kargo ödenmiş) siparişlerde de gösterilir — 4000+ bir sipariş
+                          // kısmi iade sonrası 4000 altına düşerse operatör kargoyu kesip kesmeyeceğine
+                          // karar verebilmeli (backend zaten fault=customer'da bu kesintiyi uygular).
+                          const qualifiedFreeShip = threshold > 0 && orderAmount >= threshold;
                           if (!qualifiedFreeShip) return null;
-                          // Kargo ödenmemiş (free shipping) → standart kargo ücretini (ayarlardan) kes.
-                          const amt = Number(freeShipFee) || 0;
+                          // Kesilecek standart kargo ücreti (ayarlardan; ödenmiş siparişte de aynı fee).
+                          const amt = Number(freeShipFee) || Number(r.shipping_cost) || 0;
                           const sel = !!cargoSel[r.id];
                           const locked = r.return_is_approved && !editRows[r.id];
                           // Kalan (iade sonrası tutulan) net tutar — seçili kalem netleri (indirim + taksit
@@ -977,7 +979,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                               )}
                               {belowThreshold && !sel && (
                                 <div className="block text-xs bg-red-50 border border-red-300 text-red-700 rounded-md px-2.5 py-1.5 font-semibold max-w-2xl">
-                                  ⚠️ İade sonrası kalan tutar {fmtTL(keptNet)} — ücretsiz kargo eşiğinin ({fmtTL(threshold)}) ALTINDA. Müşteri ücretsiz kargo hakkını kaybetti; <b>kargoyu müşteriden kesmelisiniz</b> (yukarıdaki kutuyu işaretleyin).
+                                  ⚠️ İade sonrası kalan tutar {fmtTL(keptNet)} — ücretsiz kargo eşiğinin ({fmtTL(threshold)}) ALTINA düşüyor. Müşteri ücretsiz kargo kampanyasının dışında kalıyor; <b>kargoyu müşteriden kesmeniz gerekebilir</b> (yukarıdaki kutuyu işaretleyin).
                                 </div>
                               )}
                             </div>
