@@ -2940,36 +2940,55 @@ async def _diag_report_integrity2907(key: str = Query(...)):
       - rapor dışı (excluded) statü kırılımı — satış toplamına neyin girmediği."""
     if key != "fcttdiag2907":
         raise HTTPException(status_code=403, detail="forbidden")
-    from .reports import _EXCLUDED_STATUSES
-    # 1) Aylık histogram (platform × YYYY-MM)
-    hist = await db.orders.aggregate([
-        {"$match": {"created_at": {"$type": "string", "$ne": ""}}},
-        {"$addFields": {"_ym": {"$substr": ["$created_at", 0, 7]},
-                        "_plat": {"$ifNull": ["$platform", "site"]}}},
-        {"$group": {"_id": {"ym": "$_ym", "plat": "$_plat"}, "n": {"$sum": 1},
-                    "rev": {"$sum": {"$ifNull": ["$total", 0]}}}},
-        {"$sort": {"_id.ym": 1}},
-    ]).to_list(500)
+    try:
+        from .reports import _EXCLUDED_STATUSES
+    except Exception as _e:
+        _EXCLUDED_STATUSES = []
+    errors = {}
     by_month = {}
-    for h in hist:
-        ym = h["_id"]["ym"]; plat = h["_id"]["plat"]
-        by_month.setdefault(ym, {})[plat] = {"n": h["n"], "rev": round(h["rev"], 2)}
-    # 2) Son 7 gün created_at (backfill-as-new spike)
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-    recent = await db.orders.aggregate([
-        {"$match": {"created_at": {"$gte": cutoff}}},
-        {"$group": {"_id": {"$ifNull": ["$platform", "site"]}, "n": {"$sum": 1}}},
-    ]).to_list(50)
-    recent_by_plat = {r["_id"]: r["n"] for r in recent}
-    # 3) created_at boş/eksik
-    missing_date = await db.orders.count_documents(
-        {"$or": [{"created_at": {"$exists": False}}, {"created_at": None}, {"created_at": ""}]})
-    # 4) statü kırılımı + rapora giren/girmeyen
-    st = await db.orders.aggregate([
-        {"$group": {"_id": {"$ifNull": ["$status", "?"]}, "n": {"$sum": 1}}},
-        {"$sort": {"n": -1}},
-    ]).to_list(100)
-    status_breakdown = {s["_id"]: s["n"] for s in st}
+    try:
+        # created_at bir string OLMAYABİLİR (BSON date). Python tarafında topla (dayanıklı).
+        cur = db.orders.find({}, {"_id": 0, "created_at": 1, "platform": 1, "total": 1})
+        async for o in cur:
+            ca = o.get("created_at")
+            ym = ca[:7] if isinstance(ca, str) and len(ca) >= 7 else (
+                ca.isoformat()[:7] if hasattr(ca, "isoformat") else "?")
+            plat = o.get("platform") or "site"
+            try:
+                rev = float(o.get("total") or 0)
+            except Exception:
+                rev = 0.0
+            slot = by_month.setdefault(ym, {}).setdefault(plat, {"n": 0, "rev": 0.0})
+            slot["n"] += 1
+            slot["rev"] = round(slot["rev"] + rev, 2)
+    except Exception as _e:
+        errors["histogram"] = str(_e)
+    # Son 7 gün (string created_at)
+    recent_by_plat = {}
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        recent = await db.orders.aggregate([
+            {"$match": {"created_at": {"$gte": cutoff, "$type": "string"}}},
+            {"$group": {"_id": {"$ifNull": ["$platform", "site"]}, "n": {"$sum": 1}}},
+        ]).to_list(50)
+        recent_by_plat = {(r["_id"] or "site"): r["n"] for r in recent}
+    except Exception as _e:
+        errors["recent7d"] = str(_e)
+    missing_date = 0
+    try:
+        missing_date = await db.orders.count_documents(
+            {"$or": [{"created_at": {"$exists": False}}, {"created_at": None}, {"created_at": ""}]})
+    except Exception as _e:
+        errors["missing_date"] = str(_e)
+    status_breakdown = {}
+    try:
+        st = await db.orders.aggregate([
+            {"$group": {"_id": {"$ifNull": ["$status", "?"]}, "n": {"$sum": 1}}},
+            {"$sort": {"n": -1}},
+        ]).to_list(100)
+        status_breakdown = {(s["_id"] or "?"): s["n"] for s in st}
+    except Exception as _e:
+        errors["status"] = str(_e)
     counted = sum(n for s, n in status_breakdown.items() if s not in _EXCLUDED_STATUSES)
     excluded = sum(n for s, n in status_breakdown.items() if s in _EXCLUDED_STATUSES)
     total_orders = await db.orders.count_documents({})
@@ -2983,6 +3002,7 @@ async def _diag_report_integrity2907(key: str = Query(...)):
         "monthly_histogram": by_month,
         "excluded_statuses": _EXCLUDED_STATUSES,
         "status_breakdown": status_breakdown,
+        "errors": errors,
     }
 
 
