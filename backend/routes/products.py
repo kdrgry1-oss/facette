@@ -1764,7 +1764,11 @@ async def create_product(
         "images": product_data.get("images", []),
         "variants": product_data.get("variants", []),
         "attributes": product_data.get("attributes", []),
-        "stock": int(product_data.get("stock", 0)),
+        # KÖK-NEDEN FIX: varyantlı üründe parent 'stock' istemciden ALINMAZ — Σvaryant'tan türetilir.
+        # Aksi halde (admin formu/import parent=300 + varyant=0 gönderdiğinde) parent≠Σvaryant desync
+        # doğuyordu (yüksek hayalet parent stok, satılamayan/yanıltıcı rakam). Varyantsız üründe istemci.
+        "stock": (sum(int(v.get("stock", 0) or 0) for v in variants) if variants
+                  else int(product_data.get("stock", 0) or 0)),
         "stock_code": product_data.get("stock_code", ""),
         "barcode": product_data.get("barcode", ""),
         "sku": product_data.get("sku", ""),
@@ -2106,6 +2110,14 @@ async def update_product(
                 v["id"] = generate_id()
             if not str(v.get("urun_id") or "").strip():
                 v["urun_id"] = next_urun_id(used_uid_set)
+
+    # KÖK-NEDEN FIX (desync önleme): varyantlı üründe parent 'stock' HER ZAMAN Σvaryant'tır —
+    # istemci (admin formu / import) parent'ı bağımsız YAZAMAZ. Yeni varyant geldiyse ondan, yoksa
+    # mevcut varyanttan hesaplanır. Bu, 14 REVIEW ürününde görülen "parent yüksek, varyant 0"
+    # hayalet stok desync'inin TEK gerçek kaynağıydı (ürün oluşturma/import parent'ı doğrudan yazıyordu).
+    _eff_variants = variants if variants else (existing.get("variants") or [])
+    if _eff_variants:
+        product_data["stock"] = sum(int(v.get("stock", 0) or 0) for v in _eff_variants)
 
     if ("categories" in product_data) or ("category_id" in product_data):
         _sel = product_data.get("categories")
