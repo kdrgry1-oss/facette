@@ -327,6 +327,28 @@ def map_hepsiburada_order(o: dict) -> dict:
     cust_name = (_hb_g(o, "customerName") or _hb_g(cust, "name")
                  or _hb_g(ship, "name", "firstName") or "Hepsiburada Müşterisi")
     parts = str(cust_name).split(" ", 1)
+    # KARGO (Trendyol'daki gibi çekilir): kargo firması + takip no + takip linki. HB bunları
+    # sipariş/paket seviyesinde farklı adlarla verebilir; yoksa ilk kargo kaleminden yedeklenir.
+    # NOT: shipping_cost yine 0 kalır — pazaryeri kargoyu üstlenir (TY ile aynı kural).
+    _l0 = lines[0] if lines else {}
+    # HB kargoyu sipariş üstünde, nested paket dizisinde (packages/shipmentPackages) ya da
+    # kalem üstünde verebilir — üçünü de tara (ilk dolu olan kazanır).
+    _pkgs = (o.get("packages") or o.get("shipmentPackages") or o.get("shipmentPackage")
+             or o.get("cargoPackages") or [])
+    if isinstance(_pkgs, dict):
+        _pkgs = [_pkgs]
+    _pk0 = _pkgs[0] if (isinstance(_pkgs, list) and _pkgs) else {}
+    def _cg(*keys):
+        for src in (o, _pk0, _l0):
+            v = _hb_g(src or {}, *keys)
+            if v:
+                return str(v)
+        return ""
+    cargo_no = _cg("cargoTrackingNumber", "trackingNumber", "cargoTrackingCode",
+                   "shipmentTrackingNumber", "packageTrackingNumber")
+    cargo_name = _cg("cargoCompany", "cargoProviderName", "cargoCompanyName",
+                     "shippingCompany", "cargoCompanyModelCode", "cargoCompanyShortName")
+    cargo_link = _cg("cargoTrackingUrl", "cargoTrackingLink", "trackingUrl")
     return {
         "order_number": order_number, "platform": "hepsiburada", "marketplace": "hepsiburada",
         "hepsiburada_order_number": raw_no, "user_id": None, "items": items,
@@ -352,6 +374,10 @@ def map_hepsiburada_order(o: dict) -> dict:
         "subtotal": subtotal, "shipping_cost": 0, "discount_amount": 0, "total": total,
         "payment_method": "marketplace", "payment_status": "paid", "status": "confirmed",
         "marketplace_status": _hb_g(o, "status"), "hb_order_date": _hb_g(o, "orderDate"),
+        # Kargo (TY ile aynı alan adları — panel/liste/etiket bu alanları okur)
+        "cargo_tracking_number": cargo_no,
+        "cargo_provider_name": cargo_name,
+        "cargo_tracking_link": cargo_link,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 def _hb_created_at(o):
@@ -548,6 +574,10 @@ async def hepsiburada_import_by_number(on: str = "", current_user: dict = Depend
             existing = await db.orders.find_one({"order_number": onum, "platform": "hepsiburada"})
             if existing:
                 _upd = {k: v for k, v in order_data.items() if k != "status"}
+                # Kargo alanları BOŞ geldiyse mevcut değeri EZME (henüz kargolanmamış tekrar-senkron).
+                for _ck in ("cargo_tracking_number", "cargo_provider_name", "cargo_tracking_link"):
+                    if not _upd.get(_ck):
+                        _upd.pop(_ck, None)
                 # KISMİ İPTAL TESPİTİ: müşteri kalemlerden birini iptal edince HB yanıtındaki
                 # toplam adet DÜŞER. Sipariş tamamen iptal DEĞİLKEN adet azaldıysa işaretle →
                 # panelde "iptal edilen ürün var" kırmızı noktası yanar.
@@ -652,6 +682,9 @@ async def import_selected_hepsiburada_orders(req: HbOrderImportReq, current_user
             existing = await db.orders.find_one({"order_number": on, "platform": "hepsiburada"})
             if existing:
                 _upd = {k: v for k, v in order_data.items() if k != "status"}
+                for _ck in ("cargo_tracking_number", "cargo_provider_name", "cargo_tracking_link"):
+                    if not _upd.get(_ck):
+                        _upd.pop(_ck, None)
                 _old_q = sum(int(it.get("quantity") or 1) for it in (existing.get("items") or []))
                 _new_q = sum(int(it.get("quantity") or 1) for it in (order_data.get("items") or []))
                 if 0 < _new_q < _old_q and not existing.get("partial_cancelled"):
