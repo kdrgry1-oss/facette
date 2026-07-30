@@ -1313,7 +1313,7 @@ function GiderPusulasiSlip({ data, overlay, offX = 0, offY = 0, guides = false }
     </div>
   );
   const black = (
-    <div style={{ position: "absolute", left: "6mm", top: "41mm", width: "63mm", transform: `translate(${offX}mm, ${offY}mm)`, fontSize: "2.0mm", lineHeight: 1.12, color: "#000" }}>
+    <div style={{ position: "absolute", left: "6mm", top: "49mm", width: "63mm", transform: `translate(${offX}mm, ${offY}mm)`, fontSize: "2.0mm", lineHeight: 1.12, color: "#000" }}>
       <div style={{ fontWeight: 700 }}>{c.name || ""}</div>
       <div style={{ height: "2.4mm" }} />
       {c.address ? <div>{c.address}</div> : null}

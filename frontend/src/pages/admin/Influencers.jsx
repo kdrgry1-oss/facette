@@ -1,15 +1,15 @@
 /**
- * Influencer CRM & ROI — işlevsel admin sayfası (Modül 5).
- * Doğum günü / ayrı Instagram+TikTok hesapları / adres-telefon / arama / düzenleme;
- * her gönderim ayrı kampanya kartı (ne zaman gönderildi + paylaşıldı mı tik'i) +
- * ürün seçimi + kargo kodu + direktif/not alanı.
+ * Influencer CRM & ROI — iki sekme:
+ *   1) Influencerlar  → kayıtlı influencer kartları (arama + ekle/düzenle + ROI detay)
+ *   2) Ürün Gönderimleri → tüm gönderim geçmişi (kim, ne, ne zaman, paylaşıldı mı) +
+ *      "Yeni Gönderim" (influencer seç → ürün seç → stok düş → kargo).
  */
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
   Plus, TrendingUp, CheckCircle, Trash2, X,
-  Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Music2,
+  Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Music2, Package,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -24,12 +24,92 @@ const fmtDate = (s) => {
   } catch { return String(s).slice(0, 10); }
 };
 
+/* Kampanya/gönderim aksiyonları — hem detay modalı hem gönderim geçmişi aynı davranışı kullanır. */
+function makeCampaignActions(reload) {
+  return {
+    createCargo: async (cid) => {
+      try {
+        const r = await axios.post(`${API}/influencer-campaigns/${cid}/cargo`, {}, auth());
+        toast.success(`Kargo barkodu: ${r.data.cargo_barcode}`);
+        reload();
+      } catch (e) { toast.error(e.response?.data?.detail || "Kargo oluşturulamadı"); }
+    },
+    toggleShared: async (c) => {
+      try { await axios.put(`${API}/influencer-campaigns/${c.id}`, { shared: !c.shared }, auth()); reload(); }
+      catch { toast.error("Güncellenemedi"); }
+    },
+    markSent: async (cid) => {
+      try {
+        await axios.put(`${API}/influencer-campaigns/${cid}`, { sent_at: new Date().toISOString(), status: "shipped" }, auth());
+        toast.success("Gönderildi olarak işaretlendi"); reload();
+      } catch { toast.error("Güncellenemedi"); }
+    },
+    saveContentUrl: async (cid, url) => {
+      try { await axios.put(`${API}/influencer-campaigns/${cid}`, { content_url: url }, auth()); toast.success("İçerik linki kaydedildi"); reload(); }
+      catch { toast.error("Kaydedilemedi"); }
+    },
+    uncommitStock: async (cid) => {
+      if (!window.confirm("Bu gönderimin ürünleri stoğa GERİ yüklensin mi?")) return;
+      try { await axios.post(`${API}/influencer-campaigns/${cid}/uncommit-products`, {}, auth()); toast.success("Stok geri yüklendi"); reload(); }
+      catch (e) { toast.error(e.response?.data?.detail || "Geri alınamadı"); }
+    },
+    delCampaign: async (cid) => {
+      if (!window.confirm("Gönderim silinsin mi? (Düşülen stok varsa otomatik geri yüklenir)")) return;
+      await axios.delete(`${API}/influencer-campaigns/${cid}`, auth()); reload();
+    },
+  };
+}
+
 export default function Influencers() {
+  const [tab, setTab] = useState("influencers"); // 'influencers' | 'shipments'
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto" data-testid="influencers-page">
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <Instagram className="text-pink-600" size={24} /> Influencer / İş Birlikleri
+        </h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Influencer kayıtları, seeding gönderimleri, kargo otomasyonu ve ROI takibi.
+        </p>
+      </div>
+
+      {/* Sekmeler */}
+      <div className="flex gap-2 border-b mb-5">
+        <TabBtn active={tab === "influencers"} onClick={() => setTab("influencers")} icon={<Instagram size={15} />} testid="tab-influencers">
+          Kayıtlı Influencerlar
+        </TabBtn>
+        <TabBtn active={tab === "shipments"} onClick={() => setTab("shipments")} icon={<Package size={15} />} testid="tab-shipments">
+          Ürün Gönderimleri
+        </TabBtn>
+      </div>
+
+      {tab === "influencers" ? <InfluencerListTab /> : <ShipmentsTab />}
+    </div>
+  );
+}
+
+function TabBtn({ active, onClick, icon, children, testid }) {
+  return (
+    <button
+      onClick={onClick}
+      data-testid={testid}
+      className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors ${
+        active ? "border-black text-black" : "border-transparent text-gray-500 hover:text-gray-800"
+      }`}
+    >
+      {icon} {children}
+    </button>
+  );
+}
+
+/* ======================= SEKME 1: KAYITLI INFLUENCERLAR ======================= */
+function InfluencerListTab() {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [editTarget, setEditTarget] = useState(null); // düzenlenecek influencer objesi
+  const [editTarget, setEditTarget] = useState(null);
   const [selected, setSelected] = useState(null);
 
   const load = useCallback(async (search) => {
@@ -47,23 +127,20 @@ export default function Influencers() {
   }, []);
 
   useEffect(() => { load(""); }, [load]);
-
-  // arama: 350ms debounce
-  useEffect(() => {
-    const t = setTimeout(() => load(q), 350);
-    return () => clearTimeout(t);
-  }, [q, load]);
+  useEffect(() => { const t = setTimeout(() => load(q), 350); return () => clearTimeout(t); }, [q, load]);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto" data-testid="influencers-page">
-      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Instagram className="text-pink-600" size={24} /> Influencer / İş Birlikleri
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Influencer kayıtları, seeding kampanyaları, kargo otomasyonu ve ROI takibi.
-          </p>
+    <div>
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+        <div className="relative flex-1 min-w-[240px] max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            data-testid="influencer-search"
+            placeholder="İsim, @kullanıcı, Instagram, TikTok, telefon, kupon ara…"
+            className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-black"
+          />
         </div>
         <button
           onClick={() => { setEditTarget(null); setShowForm(true); }}
@@ -72,18 +149,6 @@ export default function Influencers() {
         >
           <Plus size={16} /> Yeni Influencer
         </button>
-      </div>
-
-      {/* Arama */}
-      <div className="relative mb-5 max-w-md">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          data-testid="influencer-search"
-          placeholder="İsim, @kullanıcı, Instagram, TikTok, telefon, kupon ara…"
-          className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-black"
-        />
       </div>
 
       {loading ? (
@@ -108,10 +173,7 @@ export default function Influencers() {
               >
                 <Pencil size={14} />
               </button>
-              <button
-                onClick={() => setSelected(inf.id)}
-                className="text-left w-full"
-              >
+              <button onClick={() => setSelected(inf.id)} className="text-left w-full">
                 <div className="flex items-center gap-2 pr-6">
                   <span className="font-semibold">{inf.name}</span>
                   <span className={`text-[10px] px-2 py-0.5 rounded-full ${inf.is_active ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
@@ -147,7 +209,91 @@ export default function Influencers() {
   );
 }
 
-/* Ekleme + Düzenleme aynı modal (initial verilirse PUT ile günceller). */
+/* ======================= SEKME 2: ÜRÜN GÖNDERİMLERİ (GEÇMİŞ) ======================= */
+function ShipmentsTab() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState("all"); // all | shared | pending
+  const [showCreate, setShowCreate] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (q.trim()) params.q = q.trim();
+      if (filter === "shared") params.shared = true;
+      if (filter === "pending") params.shared = false;
+      const r = await axios.get(`${API}/influencer-campaigns`, { ...auth(), params });
+      setRows(r.data?.campaigns || []);
+    } catch {
+      toast.error("Gönderimler yüklenemedi");
+    } finally {
+      setLoading(false);
+    }
+  }, [q, filter]);
+
+  useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [load]);
+
+  const act = makeCampaignActions(load);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+        <div className="relative flex-1 min-w-[240px] max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            data-testid="shipment-search"
+            placeholder="Influencer, gönderim başlığı veya ürün ara…"
+            className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-black"
+          />
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          data-testid="new-shipment-btn"
+          className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800"
+        >
+          <Plus size={16} /> Yeni Gönderim
+        </button>
+      </div>
+
+      {/* Filtre */}
+      <div className="flex gap-1.5 mb-4">
+        {[["all", "Tümü"], ["pending", "Paylaşım Bekleyen"], ["shared", "Paylaşıldı"]].map(([k, lbl]) => (
+          <button key={k} onClick={() => setFilter(k)}
+            className={`text-xs px-3 py-1.5 rounded-full border ${filter === k ? "bg-black text-white border-black" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="text-gray-400 text-sm py-12 text-center">Yükleniyor...</div>
+      ) : rows.length === 0 ? (
+        <div className="border border-dashed rounded-xl py-16 text-center text-gray-500">
+          {q.trim() || filter !== "all"
+            ? "Eşleşen gönderim yok."
+            : 'Henüz ürün gönderimi yok. "Yeni Gönderim" ile influencer seçip ürün yollayın.'}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((c) => <CampaignCard key={c.id} c={c} act={act} showInfluencer />)}
+        </div>
+      )}
+
+      {showCreate && (
+        <CampaignModal
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ======================= INFLUENCER EKLE/DÜZENLE ======================= */
 function InfluencerFormModal({ initial, onClose, onSaved }) {
   const isEdit = !!initial;
   const addr = initial?.shipping_address || {};
@@ -241,6 +387,7 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
   );
 }
 
+/* ======================= INFLUENCER DETAY (ROI + o kişinin gönderimleri) ======================= */
 function DetailModal({ influencerId, onClose }) {
   const [inf, setInf] = useState(null);
   const [roi, setRoi] = useState(null);
@@ -261,65 +408,7 @@ function DetailModal({ influencerId, onClose }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const createCargo = async (cid) => {
-    try {
-      const r = await axios.post(`${API}/influencer-campaigns/${cid}/cargo`, {}, auth());
-      toast.success(`Kargo barkodu: ${r.data.cargo_barcode}`);
-      load();
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Kargo oluşturulamadı");
-    }
-  };
-
-  // Paylaşıldı tik'i (checkbox): PUT ile shared toggle — shared_at otomatik damgalanır/silinir.
-  const toggleShared = async (c) => {
-    try {
-      await axios.put(`${API}/influencer-campaigns/${c.id}`, { shared: !c.shared }, auth());
-      load();
-    } catch {
-      toast.error("Güncellenemedi");
-    }
-  };
-
-  // Manuel "gönderildi" işareti (kargo oluşturmadan) — sent_at damgalar.
-  const markSent = async (cid) => {
-    try {
-      await axios.put(`${API}/influencer-campaigns/${cid}`, {
-        sent_at: new Date().toISOString(), status: "shipped",
-      }, auth());
-      toast.success("Gönderildi olarak işaretlendi");
-      load();
-    } catch {
-      toast.error("Güncellenemedi");
-    }
-  };
-
-  const saveContentUrl = async (cid, url) => {
-    try {
-      await axios.put(`${API}/influencer-campaigns/${cid}`, { content_url: url }, auth());
-      toast.success("İçerik linki kaydedildi");
-      load();
-    } catch {
-      toast.error("Kaydedilemedi");
-    }
-  };
-
-  const delCampaign = async (cid) => {
-    if (!window.confirm("Kampanya silinsin mi? (Düşülen stok varsa otomatik geri yüklenir)")) return;
-    await axios.delete(`${API}/influencer-campaigns/${cid}`, auth());
-    load();
-  };
-
-  const uncommitStock = async (cid) => {
-    if (!window.confirm("Bu kampanyanın ürünleri stoğa GERİ yüklensin mi?")) return;
-    try {
-      await axios.post(`${API}/influencer-campaigns/${cid}/uncommit-products`, {}, auth());
-      toast.success("Stok geri yüklendi");
-      load();
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Geri alınamadı");
-    }
-  };
+  const act = makeCampaignActions(load);
 
   if (!inf) return <Modal title="Yükleniyor..." onClose={onClose}><div className="py-8 text-center text-gray-400">...</div></Modal>;
 
@@ -346,95 +435,20 @@ function DetailModal({ influencerId, onClose }) {
       )}
       {roi && (
         <p className="text-xs text-gray-500 mb-4">
-          {roi.revenue.successful_orders} başarılı sipariş · {roi.cost.campaign_count} kampanya · {roi.cost.shared_count} paylaşım · Komisyon: {money(roi.revenue.commission_due)}
+          {roi.revenue.successful_orders} başarılı sipariş · {roi.cost.campaign_count} gönderim · {roi.cost.shared_count} paylaşım · Komisyon: {money(roi.revenue.commission_due)}
         </p>
       )}
 
-      {/* Campaigns */}
+      {/* Gönderimler */}
       <div className="flex items-center justify-between mb-2">
-        <h3 className="font-semibold text-sm">Gönderiler / Kampanyalar</h3>
+        <h3 className="font-semibold text-sm">Bu influencer'a gönderimler</h3>
         <button onClick={() => setShowCampaign(true)} data-testid="new-campaign-btn" className="inline-flex items-center gap-1 text-sm border px-3 py-1.5 rounded-lg hover:bg-gray-50">
           <Plus size={14} /> Yeni Gönderim
         </button>
       </div>
       <div className="space-y-2">
         {(inf.campaigns || []).length === 0 && <p className="text-xs text-gray-400 py-3">Henüz gönderim yok. Her ürün gönderimi için ayrı kart açın.</p>}
-        {(inf.campaigns || []).map((c) => (
-          <div key={c.id} className="border rounded-lg p-3" data-testid={`campaign-${c.id}`}>
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">{c.title}</span>
-              <div className="flex items-center gap-2">
-                <Badge>{c.status}</Badge>
-                <Badge tone="cargo">{c.cargo_status}</Badge>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-3 mt-2 text-[11px] text-gray-500">
-              <span>Ücret: {money(c.fee_paid)}</span>
-              <span>Ürün: {money(c.product_cost)}</span>
-              <span>Kargo: {money(c.cargo_cost)}</span>
-              {c.sent_at && <span className="text-gray-700 font-medium">Gönderim: {fmtDate(c.sent_at)}</span>}
-              {c.cargo_barcode && <span className="text-blue-600">Barkod: {c.cargo_barcode}</span>}
-              {c.cargo_tracking_no && <span className="text-blue-600">Takip: {c.cargo_tracking_no}</span>}
-            </div>
-            {/* Direktif / not */}
-            {c.directives && (
-              <p className="text-[11px] text-gray-500 mt-2 bg-stone-50 border rounded p-2 whitespace-pre-wrap">
-                <b className="text-gray-600">Direktif:</b> {c.directives}
-              </p>
-            )}
-            {/* Gönderilen ürünler + stok durumu */}
-            {(c.sent_products || []).length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5 mt-2" data-testid={`sent-products-${c.id}`}>
-                {(c.sent_products || []).map((p, pi) => (
-                  <span key={pi} className="text-[10px] bg-stone-100 border rounded px-1.5 py-0.5">
-                    {p.name}{p.size ? ` (${p.size})` : ""} ×{p.qty || 1}
-                  </span>
-                ))}
-                {c.stock_deducted ? (
-                  <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-1.5 py-0.5">stok düşüldü ✓</span>
-                ) : (
-                  <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5">stok düşülmedi</span>
-                )}
-              </div>
-            )}
-            {/* Paylaşıldı tik'i + içerik linki */}
-            <div className="flex items-center flex-wrap gap-3 mt-3">
-              <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none" data-testid={`shared-toggle-${c.id}`}>
-                <input type="checkbox" checked={!!c.shared} onChange={() => toggleShared(c)} className="w-4 h-4 accent-green-600" />
-                <span className={c.shared ? "text-green-700 font-medium flex items-center gap-1" : "text-gray-600"}>
-                  {c.shared ? <><CheckCircle size={12} /> Paylaşıldı{c.shared_at ? ` · ${fmtDate(c.shared_at)}` : ""}</> : "Paylaşıldı mı?"}
-                </span>
-              </label>
-              {c.shared && (
-                <input
-                  defaultValue={c.content_url || ""}
-                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (c.content_url || "")) saveContentUrl(c.id, v); }}
-                  placeholder="İçerik linki (yapıştır)…"
-                  className="text-xs border rounded px-2 py-1 flex-1 min-w-[180px]"
-                />
-              )}
-            </div>
-            <div className="flex gap-2 mt-3 flex-wrap">
-              {!c.sent_at && (
-                <button onClick={() => markSent(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded hover:bg-gray-50">
-                  <Share2 size={12} /> Gönderildi İşaretle
-                </button>
-              )}
-              <button onClick={() => createCargo(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded hover:bg-gray-50">
-                <Truck size={12} /> Kargo Oluştur
-              </button>
-              {c.stock_deducted && (
-                <button onClick={() => uncommitStock(c.id)} title="Yanlış seçim/vazgeçme: ürünleri stoğa geri yükler"
-                  className="text-xs inline-flex items-center gap-1 border border-amber-300 text-amber-700 px-2 py-1 rounded hover:bg-amber-50">
-                  Stok Geri Al
-                </button>
-              )}
-              <button onClick={() => delCampaign(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded text-red-600 hover:bg-red-50 ml-auto">
-                <Trash2 size={12} /> Sil
-              </button>
-            </div>
-          </div>
-        ))}
+        {(inf.campaigns || []).map((c) => <CampaignCard key={c.id} c={c} act={act} />)}
       </div>
 
       {showCampaign && (
@@ -444,8 +458,92 @@ function DetailModal({ influencerId, onClose }) {
   );
 }
 
-/* Gönderilecek ürün seçici: ürün ara → beden/varyant seç → adet → listeye ekle.
-   Kaydette backend commit-products ile sent_products yazılır + STOK DÜŞÜLÜR. */
+/* ======================= TEK GÖNDERİM KARTI (paylaşılan) ======================= */
+function CampaignCard({ c, act, showInfluencer }) {
+  return (
+    <div className="border rounded-lg p-3" data-testid={`campaign-${c.id}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          {showInfluencer && (
+            <div className="text-[11px] text-pink-700 font-medium flex items-center gap-1 truncate">
+              <Instagram size={11} /> {c.influencer_name || "—"}{c.influencer_handle ? ` · ${c.influencer_handle}` : ""}
+            </div>
+          )}
+          <span className="font-medium text-sm">{c.title}</span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Badge>{c.status}</Badge>
+          <Badge tone="cargo">{c.cargo_status}</Badge>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-3 mt-2 text-[11px] text-gray-500">
+        <span>Ücret: {money(c.fee_paid)}</span>
+        <span>Ürün: {money(c.product_cost)}</span>
+        <span>Kargo: {money(c.cargo_cost)}</span>
+        {c.sent_at && <span className="text-gray-700 font-medium">Gönderim: {fmtDate(c.sent_at)}</span>}
+        {c.cargo_barcode && <span className="text-blue-600">Barkod: {c.cargo_barcode}</span>}
+        {c.cargo_tracking_no && <span className="text-blue-600">Takip: {c.cargo_tracking_no}</span>}
+      </div>
+      {c.directives && (
+        <p className="text-[11px] text-gray-500 mt-2 bg-stone-50 border rounded p-2 whitespace-pre-wrap">
+          <b className="text-gray-600">Direktif:</b> {c.directives}
+        </p>
+      )}
+      {(c.sent_products || []).length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 mt-2" data-testid={`sent-products-${c.id}`}>
+          {(c.sent_products || []).map((p, pi) => (
+            <span key={pi} className="text-[10px] bg-stone-100 border rounded px-1.5 py-0.5">
+              {p.name}{p.size ? ` (${p.size})` : ""} ×{p.qty || 1}
+            </span>
+          ))}
+          {c.stock_deducted ? (
+            <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-1.5 py-0.5">stok düşüldü ✓</span>
+          ) : (
+            <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5">stok düşülmedi</span>
+          )}
+        </div>
+      )}
+      {/* Paylaşıldı tik'i + içerik linki */}
+      <div className="flex items-center flex-wrap gap-3 mt-3">
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none" data-testid={`shared-toggle-${c.id}`}>
+          <input type="checkbox" checked={!!c.shared} onChange={() => act.toggleShared(c)} className="w-4 h-4 accent-green-600" />
+          <span className={c.shared ? "text-green-700 font-medium flex items-center gap-1" : "text-gray-600"}>
+            {c.shared ? <><CheckCircle size={12} /> Paylaşıldı{c.shared_at ? ` · ${fmtDate(c.shared_at)}` : ""}</> : "Paylaşıldı mı?"}
+          </span>
+        </label>
+        {c.shared && (
+          <input
+            defaultValue={c.content_url || ""}
+            onBlur={(e) => { const v = e.target.value.trim(); if (v !== (c.content_url || "")) act.saveContentUrl(c.id, v); }}
+            placeholder="İçerik linki (yapıştır)…"
+            className="text-xs border rounded px-2 py-1 flex-1 min-w-[180px]"
+          />
+        )}
+      </div>
+      <div className="flex gap-2 mt-3 flex-wrap">
+        {!c.sent_at && (
+          <button onClick={() => act.markSent(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded hover:bg-gray-50">
+            <Share2 size={12} /> Gönderildi İşaretle
+          </button>
+        )}
+        <button onClick={() => act.createCargo(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded hover:bg-gray-50">
+          <Truck size={12} /> Kargo Oluştur
+        </button>
+        {c.stock_deducted && (
+          <button onClick={() => act.uncommitStock(c.id)} title="Yanlış seçim/vazgeçme: ürünleri stoğa geri yükler"
+            className="text-xs inline-flex items-center gap-1 border border-amber-300 text-amber-700 px-2 py-1 rounded hover:bg-amber-50">
+            Stok Geri Al
+          </button>
+        )}
+        <button onClick={() => act.delCampaign(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded text-red-600 hover:bg-red-50 ml-auto">
+          <Trash2 size={12} /> Sil
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* Gönderilecek ürün seçici: ürün ara → beden/varyant seç → adet → listeye ekle. */
 function ProductPicker({ picked, setPicked }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
@@ -517,37 +615,55 @@ function ProductPicker({ picked, setPicked }) {
                 className="text-red-500 hover:text-red-700"><Trash2 size={12} /></button>
             </div>
           ))}
-          <p className="text-[10px] text-gray-400">Kaydedince bu ürünler kampanyaya işlenir ve STOKTAN DÜŞÜLÜR.</p>
+          <p className="text-[10px] text-gray-400">Kaydedince bu ürünler gönderime işlenir ve STOKTAN DÜŞÜLÜR.</p>
         </div>
       )}
     </div>
   );
 }
 
+/* Yeni gönderim. influencerId verilirse (detaydan) o kişiye; verilmezse (geçmiş sekmesi)
+   önce influencer seçtirilir. */
 function CampaignModal({ influencerId, onClose, onCreated }) {
+  const preset = !!influencerId;
+  const [infList, setInfList] = useState([]);
+  const [chosenInf, setChosenInf] = useState(influencerId || "");
   const [form, setForm] = useState({ title: "", fee_paid: 0, product_cost: 0, cargo_cost: 0, directives: "" });
   const [picked, setPicked] = useState([]);
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  // Geçmiş sekmesinden açıldıysa influencer listesini yükle (seçim için).
+  useEffect(() => {
+    if (preset) return;
+    (async () => {
+      try {
+        const r = await axios.get(`${API}/influencers`, auth());
+        setInfList(r.data?.influencers || []);
+      } catch { /* sessiz */ }
+    })();
+  }, [preset]);
+
   const save = async () => {
+    const infId = influencerId || chosenInf;
+    if (!infId) return toast.error("Önce influencer seçin");
     if (!form.title.trim()) return toast.error("Başlık gerekli");
     setSaving(true);
     try {
-      const r = await axios.post(`${API}/influencers/${influencerId}/campaigns`, {
+      const r = await axios.post(`${API}/influencers/${infId}/campaigns`, {
         title: form.title, fee_paid: Number(form.fee_paid) || 0,
         product_cost: Number(form.product_cost) || 0, cargo_cost: Number(form.cargo_cost) || 0,
         directives: form.directives,
       }, auth());
       const cid = r.data?.campaign?.id;
       if (cid && picked.length > 0) {
-        // Ürünleri işle + stok düş (maliyet elle girilmediyse otomatik hesaplanır)
         await axios.post(`${API}/influencer-campaigns/${cid}/commit-products`, {
           products: picked.map((p) => ({ barcode: p.barcode, qty: p.qty })),
           auto_cost: !(Number(form.product_cost) > 0),
         }, auth());
-        toast.success(`Kampanya oluşturuldu — ${picked.length} ürün stoktan düşüldü`);
+        toast.success(`Gönderim oluşturuldu — ${picked.length} ürün stoktan düşüldü`);
       } else {
-        toast.success("Kampanya oluşturuldu");
+        toast.success("Gönderim oluşturuldu");
       }
       onCreated();
     } catch (e) {
@@ -556,9 +672,26 @@ function CampaignModal({ influencerId, onClose, onCreated }) {
       setSaving(false);
     }
   };
+
   return (
-    <Modal title="Yeni Gönderim / Kampanya" onClose={onClose}>
-      <div className="grid grid-cols-2 gap-3">
+    <Modal title="Yeni Ürün Gönderimi" onClose={onClose}>
+      {!preset && (
+        <Field label="Influencer *" full>
+          {infList.length === 0 ? (
+            <p className="text-xs text-amber-600 py-1">Önce "Kayıtlı Influencerlar" sekmesinden influencer ekleyin.</p>
+          ) : (
+            <select className="inp" value={chosenInf} onChange={(e) => setChosenInf(e.target.value)} data-testid="ship-inf-select">
+              <option value="">— Influencer seçin —</option>
+              {infList.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name}{i.instagram ? ` (${i.instagram})` : i.handle ? ` (${i.handle})` : ""}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      )}
+      <div className="grid grid-cols-2 gap-3 mt-1">
         <Field label="Başlık *" full><input data-testid="camp-title" className="inp" value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="Örn. Temmuz gönderimi" /></Field>
         <Field label="Ödenen Ücret"><input type="number" className="inp" value={form.fee_paid} onChange={(e) => set("fee_paid", e.target.value)} /></Field>
         <Field label="Ürün Maliyeti (boşsa seçilen ürünlerden otomatik)"><input type="number" className="inp" value={form.product_cost} onChange={(e) => set("product_cost", e.target.value)} /></Field>
@@ -573,7 +706,7 @@ function CampaignModal({ influencerId, onClose, onCreated }) {
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm border rounded-lg">İptal</button>
         <button onClick={save} disabled={saving} data-testid="camp-save" className="px-4 py-2 text-sm bg-black text-white rounded-lg disabled:opacity-50">
-          {saving ? "..." : "Oluştur"}
+          {saving ? "..." : "Gönderim Oluştur"}
         </button>
       </div>
     </Modal>

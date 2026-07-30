@@ -196,6 +196,51 @@ async def list_campaigns(influencer_id: str, current_user: dict = Depends(requir
     return {"campaigns": docs, "total": len(docs)}
 
 
+@router.get("/influencer-campaigns")
+async def list_all_campaigns(
+    q: Optional[str] = Query(None),
+    shared: Optional[bool] = Query(None),
+    status: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
+    """TÜM influencer gönderimleri (ürün yollama geçmişi) — her kayıt influencer
+    adı/hesabıyla zenginleştirilir. 'Gönderim Geçmişi' sekmesini besler.
+    Filtreler: q (başlık/influencer/ürün adı), shared (paylaşıldı mı), status."""
+    query = {}
+    if shared is not None:
+        query["shared"] = shared
+    if status:
+        query["status"] = status
+    camps = await db.influencer_campaigns.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    inf_ids = list({c.get("influencer_id") for c in camps if c.get("influencer_id")})
+    infs = {}
+    if inf_ids:
+        cursor = db.influencers.find(
+            {"id": {"$in": inf_ids}},
+            {"_id": 0, "id": 1, "name": 1, "handle": 1, "instagram": 1, "tiktok": 1, "platform": 1},
+        )
+        async for d in cursor:
+            infs[d["id"]] = d
+    ql = (q or "").strip().lower()
+    out = []
+    for c in camps:
+        inf = infs.get(c.get("influencer_id"), {})
+        c["influencer_name"] = inf.get("name", "")
+        c["influencer_handle"] = inf.get("handle") or inf.get("instagram") or inf.get("tiktok") or ""
+        c["influencer_platform"] = inf.get("platform", "")
+        if ql:
+            hay = " ".join([
+                str(c.get("title") or ""),
+                str(c["influencer_name"]),
+                str(c["influencer_handle"]),
+                " ".join([str((p or {}).get("name") or "") for p in (c.get("sent_products") or [])]),
+            ]).lower()
+            if ql not in hay:
+                continue
+        out.append(c)
+    return {"campaigns": out, "total": len(out)}
+
+
 @router.put("/influencer-campaigns/{campaign_id}")
 async def update_campaign(campaign_id: str, payload: dict, current_user: dict = Depends(require_admin)):
     existing = await db.influencer_campaigns.find_one({"id": campaign_id}, {"_id": 0})
