@@ -2954,20 +2954,18 @@ async def _diag_report_integrity2907(key: str = Query(...)):
     errors = {}
     by_month = {}
     try:
-        # created_at bir string OLMAYABİLİR (BSON date). Python tarafında topla (dayanıklı).
-        cur = db.orders.find({}, {"_id": 0, "created_at": 1, "platform": 1, "total": 1})
-        async for o in cur:
-            ca = o.get("created_at")
-            ym = ca[:7] if isinstance(ca, str) and len(ca) >= 7 else (
-                ca.isoformat()[:7] if hasattr(ca, "isoformat") else "?")
-            plat = o.get("platform") or "site"
-            try:
-                rev = float(o.get("total") or 0)
-            except Exception:
-                rev = 0.0
-            slot = by_month.setdefault(ym, {}).setdefault(plat, {"n": 0, "rev": 0.0})
-            slot["n"] += 1
-            slot["rev"] = round(slot["rev"] + rev, 2)
+        # Sunucu-tarafı aggregation (allowDiskUse) — büyük koleksiyonda Python tarama timeout ediyordu.
+        hist = await db.orders.aggregate([
+            {"$project": {"_ca": {"$toString": {"$ifNull": ["$created_at", ""]}},
+                          "_plat": {"$ifNull": ["$platform", "site"]}}},
+            {"$project": {"_ym": {"$substrBytes": ["$_ca", 0, 7]}, "_plat": 1}},
+            {"$group": {"_id": {"ym": "$_ym", "plat": "$_plat"}, "n": {"$sum": 1}}},
+            {"$sort": {"_id.ym": 1}},
+        ], allowDiskUse=True).to_list(1000)
+        for h in hist:
+            ym = h["_id"].get("ym") or "?"
+            plat = h["_id"].get("plat") or "site"
+            by_month.setdefault(ym, {})[plat] = {"n": h["n"]}
     except Exception as _e:
         errors["histogram"] = str(_e)
     # Son 7 gün (string created_at)
