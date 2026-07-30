@@ -27,6 +27,12 @@ try {
 export const isNative = !!(Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
 export const platform = Capacitor ? Capacitor.getPlatform() : "web"; // ios | android | web
 
+// HANGİ NATIVE UYGULAMA? build sırasında REACT_APP_APP_TARGET ile belirlenir:
+//   "customer" (varsayılan) → native açılış STOREFRONT (Home) — müşteri uygulaması
+//   "admin"                 → native açılış /admin — yönetim uygulaması (ayrı appId)
+// Web build'de isNative=false olduğundan bu değer yalnız native app'te anlamlıdır.
+export const appTarget = (process.env.REACT_APP_APP_TARGET || "customer").toLowerCase();
+
 /* -------------------------------------------------------------------------- */
 /*  PUSH NOTIFICATIONS — FCM (Android) + APNs (iOS)                            */
 /* -------------------------------------------------------------------------- */
@@ -121,12 +127,31 @@ export function setupDeepLinks() {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  ANDROID DONANIM GERİ TUŞU                                                  */
+/*  Geri gidilebiliyorsa SPA içinde geri; kök/anasayfada uygulamadan çık.     */
+/*  (Aksi halde Android'de geri tuşu WebView'i kapatıp app'i öldürüyordu.)    */
+/* -------------------------------------------------------------------------- */
+export function setupBackButton() {
+  if (!isNative || !App || platform !== "android") return;
+  App.addListener("backButton", ({ canGoBack }) => {
+    const atRoot = window.location.pathname === "/" || window.location.pathname === "";
+    if (canGoBack && !atRoot && window.history.length > 1) {
+      window.history.back();
+    } else {
+      // Kök/anasayfada geri → uygulamadan çık (Android standardı).
+      try { App.exitApp(); } catch { /* no-op */ }
+    }
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /*  BOOTSTRAP — App.js'den çağrılır                                            */
 /* -------------------------------------------------------------------------- */
 export async function bootstrapNative() {
   if (!isNative) return { isNative: false };
 
   setupDeepLinks();
+  setupBackButton();
   await setupPushNotifications();
   const versionInfo = await checkAppVersion();
 
