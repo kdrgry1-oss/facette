@@ -2044,13 +2044,27 @@ async def update_order_status(
             # restock EDİLDİYSE (restore hareketi var) bir kez düş, sonra restore hareketini sil.
             _ACTIVE_FULFILL = {"confirmed", "preparing", "processing", "ready_to_ship",
                                "shipped", "in_transit", "out_for_delivery", "delivered"}
-            _RESTORE_GRP = {"cancelled", "returned", "refunded", "return_approved",
-                            "return_in_transit", "partial_refunded"}
-            if _prev_status in _RESTORE_GRP and status in _ACTIVE_FULFILL and order_doc:
-                _restore_mv = await db.stock_movements.find_one(
-                    {"order_id": order_id, "type": {"$in": list(_RESTORE_MOVE_TYPES)}}, {"_id": 1})
-                if _restore_mv:
-                    _dec = await _stock_delta_for_order(order_doc, -1)
+            # B5/B8: iade/iptal sonrası tekrar aktif fulfillment'a çekilince, DAHA ÖNCE İADE
+            # EDİLEN miktarı geri düş — tüm siparişi değil, yalnız gerçekten restock edilmiş
+            # kalem/adet kadar (kısmi iade simetrisi). Tetik: restore hareketi VARLIĞI (statü
+            # grubuna bağlı DEĞİL → payment_failed/expired de kapsanır; eskiden bu statülerde
+            # re-decrement hiç tetiklenmeyip stok düşmeden sevk = oversell oluyordu).
+            if status in _ACTIVE_FULFILL and order_doc:
+                _restore_items = []
+                async for _rmv in db.stock_movements.find(
+                        {"order_id": order_id, "type": {"$in": list(_RESTORE_MOVE_TYPES)}},
+                        {"_id": 0, "items": 1}):
+                    for _it in (_rmv.get("items") or []):
+                        _d = int(_it.get("delta") or 0)
+                        if _d > 0:
+                            _lvl = await _resolve_move_level(_it)
+                            _restore_items.append({
+                                "barcode": _it.get("barcode") or "", "product_id": _it.get("product_id"),
+                                "variant_id": _it.get("variant_id"), "level": _lvl, "delta": _d,
+                            })
+                if _restore_items:
+                    # _reverse_stock_moves: back = -delta → delta>0 verildiğinden İADE EDİLENİ geri DÜŞER.
+                    await _reverse_stock_moves(_restore_items)
                     await db.stock_movements.delete_many(
                         {"order_id": order_id, "type": {"$in": list(_RESTORE_MOVE_TYPES)}})
                     await db.stock_movements.insert_one({
@@ -2058,7 +2072,7 @@ async def update_order_status(
                         "type": "reactivate_decrement",
                         "order_id": order_id,
                         "order_number": order_doc.get("order_number", ""),
-                        "items": _dec,
+                        "items": [{**_ri, "delta": -_ri["delta"]} for _ri in _restore_items],
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     })
     except Exception as stock_err:
@@ -2483,6 +2497,106 @@ _RESTORE_MOVE_TYPES = ["order_cancelled", "auto_cancel_expired", "manual_increme
                        "backfill_increment", "havale_auto_cancel", "order_returned",
                        "return_restock"]  # A1: pazaryeri claim/site iade restock'u da guard'a dahil
 
+# TEK OTORİTER İADE — düşüm hareketi tipleri: iade bu hareketlerin GERÇEK (kayıtlı, cap sonrası,
+# variant_id/barcode taşıyan) delta'sını ters çevirir. reactivate_decrement BİLEREK dışarıda:
+# order_created zaten tam düşümü temsil eder; onu da saysak çift düşüm sayılırdı.
+_DEDUCT_MOVE_TYPES = ["order_created", "order_imported", "manual_decrement", "backfill_decrement"]
+
+
+def _mv_key(it: dict):
+    """Hareket kaleminin tekil stok anahtarı. barcode en tutarlı kaydedilen alan olduğundan
+     önceliklidir (düşüm ve iade hareketleri arasında eşleşme maksimum olsun); yoksa
+    variant_id, yoksa product_id. Böylece kalem-bazlı idempotency düşüm↔iade eşleşir."""
+    bc = str(it.get("barcode") or "").strip()
+    if bc:
+        return ("b", bc)
+    vid = str(it.get("variant_id") or "").strip()
+    if vid:
+        return ("v", vid)
+    pid = str(it.get("product_id") or "").strip()
+    if pid:
+        return ("p", pid)
+    return None
+
+
+async def _resolve_move_level(it: dict) -> str:
+    """Bir iade kaleminin _reverse_stock_moves için doğru 'level'ini çöz (kayıtlı değilse).
+    Yanlış level parent'ı $sum(variants) ile sıfırlayabildiğinden (varyantsız üründe) kritik."""
+    lvl = it.get("level")
+    if lvl:
+        return lvl
+    if it.get("variant_id"):
+        return "variant_by_id"
+    bc = str(it.get("barcode") or "").strip()
+    if bc:
+        if await db.products.find_one({"variants.barcode": bc}, {"_id": 1}):
+            return "variant"
+        return "product"
+    return "product"
+
+
+async def _restock_authoritative(order: dict, move_type: str, want: dict = None):
+    """TEK OTORİTER İADE YOLU (B1/B3/B5/B7/B8).
+
+    Siparişin KAYITLI düşüm hareketlerinden gerçekte düşülen miktarı okur, şimdiye kadar iade
+    edileni (_RESTORE_MOVE_TYPES) çıkarır ve KALANI simetrik geri ekler (_reverse_stock_moves —
+    level-farkında + parent recompute). Sonuç:
+      - oversell'de 0'a sabitlenen kalem TAM qty değil GERÇEK düşülen kadar iade edilir (B1),
+      - barkodsuz variant_by_id kalemi de iade edilir (B3),
+      - kısmi iade + tam iptal kalem-bazlı idempotent (çift/eksik iade yok) (B7),
+      - tetik hareket varlığına bağlı, statü grubuna değil (B5/B8).
+
+    want=None → tüm kalan kalemler (tam iptal). want={key: qty} → yalnız verilenlerden kalanı.
+    Döner: iade edilen hareket listesi (delta>0). Düşüm hareketi hiç yoksa None (çağıran eski
+    davranışa düşer — geçmiş siparişler bozulmaz)."""
+    oid = order.get("id")
+    if not oid:
+        return None
+    deducted = {}
+    async for mv in db.stock_movements.find(
+            {"order_id": oid, "type": {"$in": _DEDUCT_MOVE_TYPES}}, {"_id": 0, "items": 1}):
+        for it in (mv.get("items") or []):
+            d = int(it.get("delta") or 0)
+            if d >= 0:
+                continue
+            k = _mv_key(it)
+            if not k:
+                continue
+            slot = deducted.setdefault(k, {"qty": 0, "sample": it})
+            slot["qty"] += -d
+    if not deducted:
+        return None  # ledger yok → eski yola düş
+    restored = {}
+    async for mv in db.stock_movements.find(
+            {"order_id": oid, "type": {"$in": list(_RESTORE_MOVE_TYPES)}}, {"_id": 0, "items": 1}):
+        for it in (mv.get("items") or []):
+            d = int(it.get("delta") or 0)
+            if d <= 0:
+                continue
+            k = _mv_key(it)
+            if not k:
+                continue
+            restored[k] = restored.get(k, 0) + d
+    reversal, recorded = [], []
+    for k, slot in deducted.items():
+        remaining = slot["qty"] - restored.get(k, 0)
+        if remaining <= 0:
+            continue
+        if want is not None:
+            wq = int(want.get(k, 0) or 0)
+            if wq <= 0:
+                continue
+            remaining = min(remaining, wq)
+        it = slot["sample"]
+        lvl = await _resolve_move_level(it)
+        base = {"barcode": it.get("barcode") or "", "product_id": it.get("product_id"),
+                "variant_id": it.get("variant_id"), "level": lvl}
+        reversal.append({**base, "delta": -remaining})   # _reverse_stock_moves: back=+remaining
+        recorded.append({**base, "delta": remaining})
+    if reversal:
+        await _reverse_stock_moves(reversal)
+    return recorded
+
 
 async def release_order_redemptions(order_or_id) -> int:
     """Sipariş İPTAL edilince kupon kullanım kayıtlarını siler → müşteri kodu (örn. ilk
@@ -2600,19 +2714,31 @@ async def _restock_return_items_once(rec: dict, order: dict = None) -> int:
         # Guard'ı geri al ki eşleşme düzelince tekrar denenebilsin.
         await db.customer_returns.update_one({"id": rec.get("id")}, {"$unset": {"stock_restored": ""}})
         return 0
-    moves = await _stock_delta_for_order({"items": restock_items}, +1)
-    await db.stock_movements.insert_one({
-        "id": str(uuid.uuid4()),
-        "type": "return_restock",
-        "order_id": order.get("id"),
-        "order_number": order.get("order_number", ""),
-        "return_id": rec.get("id"),
-        "items": moves,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "source": "site_return",
-    })
-    logger.info(f"[iade] otomatik stok geri: {total} adet order={order.get('order_number')} return={rec.get('id')}")
-    return total
+    # TEK OTORİTER İADE (B7): kalem-bazlı KALAN üzerinden geri ekle — sipariş daha önce (örn.
+    # tam iptalle) bu kalemleri iade ettiyse TEKRAR eklemez; oversell-cap'li düşümde gerçek
+    # düşülen kadar iade eder. Ledger yoksa eski davranışa düşer.
+    want = {}
+    for r in restock_items:
+        k = _mv_key(r)
+        if k:
+            want[k] = want.get(k, 0) + int(r.get("quantity") or 0)
+    moves = await _restock_authoritative(order, "return_restock", want=want)
+    if moves is None:
+        moves = await _stock_delta_for_order({"items": restock_items}, +1)
+    _restocked = sum(int(m.get("delta") or 0) for m in (moves or []) if int(m.get("delta") or 0) > 0)
+    if moves:
+        await db.stock_movements.insert_one({
+            "id": str(uuid.uuid4()),
+            "type": "return_restock",
+            "order_id": order.get("id"),
+            "order_number": order.get("order_number", ""),
+            "return_id": rec.get("id"),
+            "items": moves,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "source": "site_return",
+        })
+    logger.info(f"[iade] otomatik stok geri: {_restocked} adet (talep {total}) order={order.get('order_number')} return={rec.get('id')}")
+    return _restocked
 
 
 async def _restock_order_once(order: dict, move_type: str) -> list:
@@ -2639,10 +2765,19 @@ async def _restock_order_once(order: dict, move_type: str) -> list:
             await release_order_redemptions(order)
         except Exception as _cr_err:
             logger.warning(f"[coupon] iptal serbest bırakma başarısız (sipariş {oid}): {_cr_err}")
-    if oid and await db.stock_movements.find_one(
-            {"order_id": oid, "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1}):
-        return []  # zaten iade edilmiş
-    moves = await _stock_delta_for_order(order, +1)
+    # TEK OTORİTER İADE (B1/B3/B7): kayıtlı düşümün GERÇEK delta'sından KALANI iade et
+    # (kısmi iade edilmiş kalemler tekrar iade edilmez; oversell-cap'li kalem gerçek düşülen
+    # kadar iade edilir). Kalem-bazlı idempotent.
+    moves = await _restock_authoritative(order, move_type, want=None)
+    if moves is None:
+        # Ledger yok (eski sipariş, order_created hareketi olmayan) → eski davranış: broad guard
+        # + tam qty (mevcut davranıştan daha kötü değil).
+        if oid and await db.stock_movements.find_one(
+                {"order_id": oid, "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1}):
+            return []  # zaten iade edilmiş
+        moves = await _stock_delta_for_order(order, +1)
+    if not moves:
+        return []  # kalan yok (tümü zaten iade edilmiş) — idempotent
     await db.stock_movements.insert_one({
         "id": str(uuid.uuid4()),
         "type": move_type,
@@ -2740,6 +2875,74 @@ async def reconcile_stock_backfill(
         "skipped_already_done": skipped_done,
         "zero_affected_count": len(zero_affected),
         "zero_affected": zero_affected[:50],
+    }
+
+
+@router.post("/_diag/stock_reconcile2907")
+async def _diag_stock_reconcile2907(
+    key: str = Query(...),
+    apply: bool = Query(False),
+    floor_negatives: bool = Query(False),
+):
+    """BİR KERELİK denetimli stok mutabakatı (geçici, key-gated — kullanımdan sonra KALDIRILACAK).
+    NON-DESTRUCTIVE: varyant adetlerini yeniden YAZMAZ (tarihsel ledger eksik olabilir).
+    - Parent 'stock' = varyant stok toplamı (desync onarımı — her zaman doğru, güvenli).
+    - Negatif varyant/parent stoklarını RAPORLAR; floor_negatives=true ise 0'a sabitler
+      (negatif stok asla geçerli değil; geçmiş asimetri hatalarından kalan gürültü).
+    apply=false → yalnız dry-run rapor (hiçbir yazım yapılmaz)."""
+    if key != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    scanned = 0
+    desync = []
+    negatives = []
+    fixed_parent = 0
+    floored = 0
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = db.products.find({}, {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1})
+    async for p in cursor:
+        scanned += 1
+        pid = p.get("id")
+        variants = p.get("variants") or []
+        # 1) Negatif varyantlar
+        neg_v = [(v.get("barcode") or v.get("id"), int(v.get("stock") or 0))
+                 for v in variants if int(v.get("stock") or 0) < 0]
+        if floor_negatives and apply and neg_v:
+            for v in variants:
+                if int(v.get("stock") or 0) < 0:
+                    await db.products.update_one(
+                        {"id": pid, "variants.id": v.get("id")},
+                        {"$set": {"variants.$[e].stock": 0, "updated_at": now}},
+                        array_filters=[{"e.id": v.get("id")}])
+                    floored += 1
+            variants = [{**v, "stock": max(0, int(v.get("stock") or 0))} for v in variants]
+        # 2) Parent = varyant toplamı (desync)
+        if variants:
+            vsum = sum(max(0, int(v.get("stock") or 0)) if floor_negatives else int(v.get("stock") or 0)
+                       for v in variants)
+            if int(p.get("stock") or 0) != vsum:
+                desync.append({"id": pid, "name": p.get("name"),
+                               "parent": p.get("stock"), "vsum": vsum})
+                if apply:
+                    await db.products.update_one({"id": pid}, {"$set": {"stock": vsum, "updated_at": now}})
+                    fixed_parent += 1
+            if neg_v:
+                negatives.append({"id": pid, "name": p.get("name"), "neg_variants": neg_v})
+        else:
+            _ps = int(p.get("stock") or 0)
+            if _ps < 0:
+                negatives.append({"id": pid, "name": p.get("name"), "parent_stock": _ps})
+                if floor_negatives and apply:
+                    await db.products.update_one({"id": pid}, {"$set": {"stock": 0, "updated_at": now}})
+                    floored += 1
+    return {
+        "mode": "APPLIED" if apply else "DRY-RUN",
+        "scanned": scanned,
+        "parent_desync_count": len(desync),
+        "parent_fixed": fixed_parent,
+        "negatives_count": len(negatives),
+        "negatives_floored": floored,
+        "desync_sample": desync[:40],
+        "negatives_sample": negatives[:40],
     }
 
 

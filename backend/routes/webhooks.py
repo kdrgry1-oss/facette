@@ -112,28 +112,20 @@ async def handle_stock_restoration(payload: dict):
     Trendyol 'ClaimApproved' ve 'OrderCancelled' eventlarında orderLineItem listesi atar.
     GÜVENLİK: idempotent — mükerrer event stoğu tekrar şişirmez.
     """
+    # B2: Bu webhook ARTIK stoğu DOĞRUDAN DÜŞMEZ/EKLEMEZ. Eskiden ham `$inc variants.$.stock`
+    # yapıyordu → (a) parent 'stock'u recompute etmiyor (parent/variant desync), (b) stock_movements
+    # yazmıyordu → iptal-senkron cron'u (_update_existing_trendyol_order / claims-sync) ile AYRI
+    # idempotency deposu kullanıp aynı iptali/iadeyi İKİ kez stoğa ekliyordu (hayalet şişme).
+    # Stok iadesi artık TEK yetkili yola bırakıldı: Trendyol iptal/iade senkron cron'u
+    # _stock_delta_for_order + parent recompute + broad _RESTORE_MOVE_TYPES guard ile işler.
+    # Webhook yalnız event'i loglar (statü/bildirim tarafı ayrı handler'larda).
     lines = payload.get("orderLines", [])
     if not lines:
         return
-
     if not await _webhook_event_is_new("trendyol", payload):
-        logger.info("Trendyol Webhook: mükerrer stok geri yükleme eventi atlandı (idempotens)")
         return
-
-    for line in lines:
-        barcode = line.get("barcode", "")
-        qty = int(line.get("quantity", 0))
-
-        if barcode and qty > 0:
-            # Find the product/variant with this barcode
-            product = await db.products.find_one({"variants.barcode": barcode})
-            if product:
-                # Update variant stock
-                await db.products.update_one(
-                    {"_id": product["_id"], "variants.barcode": barcode},
-                    {"$inc": {"variants.$.stock": qty}}
-                )
-                logger.info(f"Trendyol Webhook: Restored {qty} stock for barcode {barcode}")
+    logger.info(f"Trendyol Webhook: stok geri yükleme eventi alındı ({len(lines)} kalem) — "
+                f"stok iadesi iptal/iade senkron cron'unda tek yetkili yolda yapılır (webhook stoğa dokunmaz).")
 
 
 async def handle_order_status_change(payload: dict):

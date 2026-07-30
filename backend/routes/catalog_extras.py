@@ -345,8 +345,34 @@ async def create_manual_order(payload: dict, current_user: dict = Depends(requir
                 )
                 _moves.append({"variant_id": variant_id, "delta": -qty, "product_id": pid})
             elif pid:
-                await db.products.update_one({"id": pid}, {"$inc": {"stock": -qty}})
-                _moves.append({"product_id": pid, "delta": -qty})
+                # B11: variant_id/barcode çözülemeyen kalem. VARYANTLI üründe parent 'stock'u
+                # doğrudan düşmek YANLIŞ — sonraki herhangi bir varyant hareketi parent'ı
+                # $sum(variants) ile recompute edince bu düşüş SİLİNİR (parent yukarı sıçrar,
+                # hayalet stok). Ürünü çek ve dallan.
+                _p = await db.products.find_one({"id": pid}, {"_id": 0, "id": 1, "variants": 1, "name": 1})
+                if _p and (_p.get("variants") or []):
+                    # Varyantlı ama varyant çözülemedi → sessiz bozulma yerine UYAR, stoğa DOKUNMA.
+                    logger.warning(f"[manuel-sipariş] varyant çözülemedi, stok DÜŞÜLMEDİ: "
+                                   f"ürün={pid} ({_p.get('name','')}) sipariş={order_number}")
+                    try:
+                        from routes.push import send_push_to_admins
+                        await send_push_to_admins(
+                            "⚠️ Manuel siparişte varyant seçilmedi",
+                            f"{_p.get('name','ürün')} — beden/varyant çözülemediği için stok düşülmedi. "
+                            f"Manuel kontrol edin (sipariş {order_number}).",
+                            {"type": "manual_order_variant_missing"})
+                    except Exception:
+                        pass
+                elif _p:
+                    # Gerçekten varyantsız ürün → oversell guard'lı koşullu düşüm.
+                    _r = await db.products.update_one(
+                        {"id": pid, "stock": {"$gte": qty}},
+                        {"$inc": {"stock": -qty}, "$set": {"updated_at": _now_iso}})
+                    if _r.modified_count:
+                        _moves.append({"product_id": pid, "delta": -qty, "level": "product"})
+                    else:
+                        logger.warning(f"[manuel-sipariş] stok yetersiz, düşülmedi: "
+                                       f"ürün={pid} sipariş={order_number}")
         await db.stock_movements.insert_one({
             "id": str(uuid.uuid4()), "type": "manual_decrement",
             "order_id": doc["id"], "order_number": order_number,
