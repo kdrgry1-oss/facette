@@ -2878,6 +2878,104 @@ async def reconcile_stock_backfill(
     }
 
 
+@router.post("/_diag/stock_selftest2907")
+async def _diag_stock_selftest2907(key: str = Query(...)):
+    """GEÇİCİ, key-gated stok yaşam-döngüsü öz-testi (kullanımdan sonra KALDIRILACAK).
+    GERÇEK envantere DOKUNMAZ: tek-kullanımlık __STOCK TEST__ ürünü açar, gerçek stok
+    fonksiyonlarını çalıştırır, en sonunda ürün+hareket+iade kayıtlarını SİLER.
+    Kanıtlanan senaryolar: (1) tam iptal simetrisi, (2) B1 oversell-cap simetrisi,
+    (3) B7 kısmi iade→tam iptal kalem-bazlı idempotency."""
+    if key != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    TP = "__stocktest_prod_2907"
+    BCA, BCB = "__STBC_A__", "__STBC_B__"
+    VA, VB = "__stv_A", "__stv_B"
+    results = []
+
+    def _chk(label, got, exp):
+        ok = (got == exp)
+        results.append({"senaryo": label, "beklenen": exp, "gerçek": got, "geçti": ok})
+
+    async def _stock():
+        p = await db.products.find_one({"id": TP}, {"_id": 0, "stock": 1, "variants": 1})
+        vs = {v.get("id"): int(v.get("stock") or 0) for v in (p.get("variants") or [])}
+        return int(p.get("stock") or 0), vs.get(VA), vs.get(VB)
+
+    async def _recompute_parent():
+        await db.products.update_one({"id": TP}, [{"$set": {"stock": {"$sum": {"$map": {
+            "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+            "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}])
+
+    async def _reset(a=10, b=10):
+        await db.products.update_one({"id": TP}, {"$set": {
+            "variants": [{"id": VA, "barcode": BCA, "size": "S", "stock": a},
+                         {"id": VB, "barcode": BCB, "size": "M", "stock": b}]}})
+        await _recompute_parent()
+        await db.stock_movements.delete_many({"order_id": {"$regex": "^__sto_"}})
+        await db.customer_returns.delete_many({"id": {"$regex": "^__stret_"}})
+
+    try:
+        await db.products.delete_many({"id": TP})
+        await db.products.insert_one({
+            "id": TP, "name": "__STOCK TEST__ (geçici)", "stock": 20, "price": 100,
+            "is_active": False, "status": "passive",
+            "variants": [{"id": VA, "barcode": BCA, "size": "S", "stock": 10},
+                         {"id": VB, "barcode": BCB, "size": "M", "stock": 10}]})
+
+        # --- Senaryo 1: tam iptal simetrisi ---
+        await _reset(10, 10)
+        o1 = {"id": "__sto_1", "order_number": "__STO1", "platform": "facette", "items": [
+            {"barcode": BCA, "quantity": 2, "product_id": TP, "variant_id": VA},
+            {"barcode": BCB, "quantity": 3, "product_id": TP, "variant_id": VB}]}
+        dec = await _decrement_stock_atomic(o1)
+        await db.stock_movements.insert_one({"id": str(uuid.uuid4()), "type": "order_created",
+            "order_id": o1["id"], "items": dec.get("movements") or [],
+            "created_at": datetime.now(timezone.utc).isoformat()})
+        _chk("1a düşüm sonrası (A=8,B=7,parent=15)", list(await _stock()), [15, 8, 7])
+        await _restock_order_once(o1, "order_cancelled")
+        _chk("1b tam iptal sonrası (A=10,B=10,parent=20)", list(await _stock()), [20, 10, 10])
+
+        # --- Senaryo 2: B1 oversell-cap simetrisi (hayalet şişme YOK) ---
+        await _reset(1, 10)  # A yalnız 1 adet
+        o2 = {"id": "__sto_2", "order_number": "__STO2", "platform": "trendyol", "items": [
+            {"barcode": BCA, "quantity": 3, "product_id": TP, "variant_id": VA}]}
+        mv2 = await _stock_delta_for_order(o2, -1)  # 3 istendi, 1 var → 0'a sabitlenir (cap)
+        await db.stock_movements.insert_one({"id": str(uuid.uuid4()), "type": "order_imported",
+            "order_id": o2["id"], "items": mv2, "created_at": datetime.now(timezone.utc).isoformat()})
+        _chk("2a oversell düşüm (A=0'a sabit)", (await _stock())[1], 0)
+        await _restock_order_once(o2, "order_cancelled")
+        _chk("2b iptal → A=1 (3 DEĞİL; hayalet şişme yok)", (await _stock())[1], 1)
+
+        # --- Senaryo 3: B7 kısmi iade → tam iptal (kalem-bazlı idempotent) ---
+        await _reset(10, 10)
+        o3 = {"id": "__sto_3", "order_number": "__STO3", "platform": "facette", "items": [
+            {"barcode": BCA, "quantity": 2, "product_id": TP, "variant_id": VA},
+            {"barcode": BCB, "quantity": 2, "product_id": TP, "variant_id": VB}]}
+        dec3 = await _decrement_stock_atomic(o3)
+        await db.stock_movements.insert_one({"id": str(uuid.uuid4()), "type": "order_created",
+            "order_id": o3["id"], "items": dec3.get("movements") or [],
+            "created_at": datetime.now(timezone.utc).isoformat()})
+        _chk("3a düşüm (A=8,B=8)", list(await _stock())[1:], [8, 8])
+        rec = {"id": "__stret_3", "order_id": o3["id"], "platform": "facette",
+               "approved_items": [{"barcode": BCA, "quantity": 2}]}
+        await db.customer_returns.insert_one(dict(rec))
+        await _restock_return_items_once(rec, o3)
+        _chk("3b kısmi iade A x2 (A=10,B=8)", list(await _stock())[1:], [10, 8])
+        await _restock_order_once(o3, "order_cancelled")
+        _chk("3c tam iptal → A=10 (12 DEĞİL), B=10 (sızıntı yok)", list(await _stock())[1:], [10, 10])
+
+    finally:
+        await db.products.delete_many({"id": TP})
+        await db.stock_movements.delete_many({"order_id": {"$regex": "^__sto_"}})
+        await db.customer_returns.delete_many({"id": {"$regex": "^__stret_"}})
+
+    passed = sum(1 for r in results if r["geçti"])
+    return {"toplam": len(results), "geçti": passed, "kaldı": len(results) - passed,
+            "SONUÇ": "✅ HEPSİ GEÇTİ" if passed == len(results) else "❌ BAŞARISIZ VAR",
+            "detay": results}
+
+
 @router.post("/auto-cancel-expired")
 async def auto_cancel_expired_orders(
     hours: int = Query(48, ge=1),
