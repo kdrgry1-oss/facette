@@ -2889,7 +2889,8 @@ async def _diag_stock_integrity2907(key: str = Query(...)):
     scanned = 0
     desync, neg_parent, neg_variant = [], [], []
     untargetable, missing_stock_field = [], []
-    bc_owners = {}  # barcode -> [ "ürün adı / beden" ... ]
+    bc_owners = {}      # barcode -> [ "ürün adı / beden" ... ] (ürün + varyant düzeyi karışık)
+    vbc_owners = {}     # YALNIZ varyant barkodları -> [ürün/beden] (gerçek stok-çakışma riski)
     cursor = db.products.find({}, {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1, "barcode": 1})
     async for p in cursor:
         scanned += 1
@@ -2910,6 +2911,7 @@ async def _diag_stock_integrity2907(key: str = Query(...)):
                 vid = str(v.get("id") or "").strip()
                 if vbc:
                     bc_owners.setdefault(vbc, []).append(f"{nm} / {v.get('size') or '?'}")
+                    vbc_owners.setdefault(vbc, []).append(f"{nm} / {v.get('size') or '?'}")
                 if "stock" not in v or v.get("stock") is None:
                     missing_stock_field.append({"id": p["id"], "name": nm, "size": v.get("size")})
                 if int(v.get("stock") or 0) < 0:
@@ -2917,13 +2919,18 @@ async def _diag_stock_integrity2907(key: str = Query(...)):
                 if not vbc and not vid:
                     untargetable.append({"id": p["id"], "name": nm, "size": v.get("size")})
     dup_barcodes = {bc: owners for bc, owners in bc_owners.items() if len(owners) > 1}
+    # GERÇEK stok riski: aynı barkod ≥2 SATILABİLİR VARYANTTA → satış yanlış varyantı düşebilir.
+    variant_collisions = {bc: owners for bc, owners in vbc_owners.items() if len(owners) > 1}
     return {
         "scanned": scanned,
         "parent_desync": {"count": len(desync), "sample": desync[:30]},
         "negative_parent": {"count": len(neg_parent), "sample": neg_parent[:30]},
         "negative_variant": {"count": len(neg_variant), "sample": neg_variant[:30]},
-        "duplicate_barcodes": {"count": len(dup_barcodes),
-                               "sample": dict(list(dup_barcodes.items())[:20])},
+        "duplicate_barcodes_any_level": {"count": len(dup_barcodes),
+                                         "note": "ürün-kartı barkodu renk-kardeşlerde paylaşımı çoğunlukla ZARARSIZ"},
+        "variant_barcode_collisions": {"count": len(variant_collisions),
+                                       "note": "GERÇEK RİSK — aynı barkod ≥2 satılabilir varyantta",
+                                       "sample": dict(list(variant_collisions.items())[:25])},
         "untargetable_variants": {"count": len(untargetable), "sample": untargetable[:30]},
         "missing_stock_field": {"count": len(missing_stock_field), "sample": missing_stock_field[:30]},
     }
