@@ -1,29 +1,43 @@
 /**
- * Influencer CRM & ROI — işlevsel admin sayfası (Modül 5 basit hali).
- * Görsel tasarım sonradan uygulanacak; bu sürüm tam fonksiyonel.
+ * Influencer CRM & ROI — işlevsel admin sayfası (Modül 5).
+ * Doğum günü / ayrı Instagram+TikTok hesapları / adres-telefon / arama / düzenleme;
+ * her gönderim ayrı kampanya kartı (ne zaman gönderildi + paylaşıldı mı tik'i) +
+ * ürün seçimi + kargo kodu + direktif/not alanı.
  */
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
-  Plus, TrendingUp, Package, Send, CheckCircle, Trash2, X,
-  Instagram, DollarSign, Truck, Share2, RefreshCw,
+  Plus, TrendingUp, CheckCircle, Trash2, X,
+  Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Music2,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
 const money = (n) => `${(Number(n) || 0).toLocaleString("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} TL`;
+const fmtDate = (s) => {
+  if (!s) return "";
+  try {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return String(s).slice(0, 10);
+    return d.toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  } catch { return String(s).slice(0, 10); }
+};
 
 export default function Influencers() {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
+  const [q, setQ] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editTarget, setEditTarget] = useState(null); // düzenlenecek influencer objesi
   const [selected, setSelected] = useState(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (search) => {
     setLoading(true);
     try {
-      const r = await axios.get(`${API}/influencers`, auth());
+      const r = await axios.get(`${API}/influencers`, {
+        ...auth(), params: (search || "").trim() ? { q: search.trim() } : {},
+      });
       setList(r.data?.influencers || []);
     } catch {
       toast.error("Influencerlar yüklenemedi");
@@ -32,11 +46,17 @@ export default function Influencers() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(""); }, [load]);
+
+  // arama: 350ms debounce
+  useEffect(() => {
+    const t = setTimeout(() => load(q), 350);
+    return () => clearTimeout(t);
+  }, [q, load]);
 
   return (
     <div className="p-6 max-w-6xl mx-auto" data-testid="influencers-page">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Instagram className="text-pink-600" size={24} /> Influencer / İş Birlikleri
@@ -46,7 +66,7 @@ export default function Influencers() {
           </p>
         </div>
         <button
-          onClick={() => setShowCreate(true)}
+          onClick={() => { setEditTarget(null); setShowForm(true); }}
           data-testid="new-influencer-btn"
           className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800"
         >
@@ -54,49 +74,94 @@ export default function Influencers() {
         </button>
       </div>
 
+      {/* Arama */}
+      <div className="relative mb-5 max-w-md">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          data-testid="influencer-search"
+          placeholder="İsim, @kullanıcı, Instagram, TikTok, telefon, kupon ara…"
+          className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-black"
+        />
+      </div>
+
       {loading ? (
         <div className="text-gray-400 text-sm py-12 text-center">Yükleniyor...</div>
       ) : list.length === 0 ? (
         <div className="border border-dashed rounded-xl py-16 text-center text-gray-500">
-          Henüz influencer eklenmedi. "Yeni Influencer" ile başlayın.
+          {q.trim() ? "Aramayla eşleşen influencer yok." : 'Henüz influencer eklenmedi. "Yeni Influencer" ile başlayın.'}
         </div>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {list.map((inf) => (
-            <button
+            <div
               key={inf.id}
-              onClick={() => setSelected(inf.id)}
               data-testid={`influencer-card-${inf.id}`}
-              className="text-left bg-white border rounded-xl p-4 hover:border-black transition-colors"
+              className="relative bg-white border rounded-xl p-4 hover:border-black transition-colors"
             >
-              <div className="flex items-center justify-between">
-                <span className="font-semibold">{inf.name}</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full ${inf.is_active ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                  {inf.platform}
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">{inf.handle || "—"}</p>
-              <div className="flex flex-wrap gap-2 mt-3 text-[11px]">
-                {inf.coupon_code && <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded">Kupon: {inf.coupon_code}</span>}
-                {inf.aff_id && <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded">aff: {inf.aff_id}</span>}
-                <span className="bg-gray-50 text-gray-600 px-2 py-0.5 rounded">{(inf.follower_count || 0).toLocaleString("tr-TR")} takipçi</span>
-              </div>
-            </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setEditTarget(inf); setShowForm(true); }}
+                title="Düzenle"
+                className="absolute top-3 right-3 text-gray-400 hover:text-black"
+                data-testid={`influencer-edit-${inf.id}`}
+              >
+                <Pencil size={14} />
+              </button>
+              <button
+                onClick={() => setSelected(inf.id)}
+                className="text-left w-full"
+              >
+                <div className="flex items-center gap-2 pr-6">
+                  <span className="font-semibold">{inf.name}</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${inf.is_active ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                    {inf.platform}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-0.5 mt-1 text-xs text-gray-500">
+                  {inf.instagram && <span className="flex items-center gap-1"><Instagram size={11} /> {inf.instagram}</span>}
+                  {inf.tiktok && <span className="flex items-center gap-1"><Music2 size={11} /> {inf.tiktok}</span>}
+                  {!inf.instagram && !inf.tiktok && <span>{inf.handle || "—"}</span>}
+                  {inf.birthday && <span className="flex items-center gap-1"><Calendar size={11} /> {fmtDate(inf.birthday)}</span>}
+                </div>
+                <div className="flex flex-wrap gap-2 mt-3 text-[11px]">
+                  {inf.coupon_code && <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded">Kupon: {inf.coupon_code}</span>}
+                  {inf.aff_id && <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded">aff: {inf.aff_id}</span>}
+                  <span className="bg-gray-50 text-gray-600 px-2 py-0.5 rounded">{(inf.follower_count || 0).toLocaleString("tr-TR")} takipçi</span>
+                </div>
+              </button>
+            </div>
           ))}
         </div>
       )}
 
-      {showCreate && <CreateModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); }} />}
-      {selected && <DetailModal influencerId={selected} onClose={() => { setSelected(null); load(); }} />}
+      {showForm && (
+        <InfluencerFormModal
+          initial={editTarget}
+          onClose={() => { setShowForm(false); setEditTarget(null); }}
+          onSaved={() => { setShowForm(false); setEditTarget(null); load(q); }}
+        />
+      )}
+      {selected && <DetailModal influencerId={selected} onClose={() => { setSelected(null); load(q); }} />}
     </div>
   );
 }
 
-function CreateModal({ onClose, onCreated }) {
+/* Ekleme + Düzenleme aynı modal (initial verilirse PUT ile günceller). */
+function InfluencerFormModal({ initial, onClose, onSaved }) {
+  const isEdit = !!initial;
+  const addr = initial?.shipping_address || {};
   const [form, setForm] = useState({
-    name: "", platform: "instagram", handle: "", phone: "", email: "",
-    follower_count: 0, coupon_code: "", aff_id: "", commission_rate: 0,
-    address_full_name: "", address_phone: "", il: "", ilce: "", adres: "",
+    name: initial?.name || "", platform: initial?.platform || "instagram",
+    handle: initial?.handle || "", instagram: initial?.instagram || "", tiktok: initial?.tiktok || "",
+    birthday: (initial?.birthday || "").slice(0, 10),
+    phone: initial?.phone || "", email: initial?.email || "",
+    follower_count: initial?.follower_count || 0,
+    coupon_code: initial?.coupon_code || "", aff_id: initial?.aff_id || "",
+    commission_rate: initial?.commission_rate || 0,
+    notes: initial?.notes || "",
+    address_full_name: addr.full_name || "", address_phone: addr.phone || "",
+    il: addr.il || "", ilce: addr.ilce || "", adres: addr.adres || "",
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -104,32 +169,40 @@ function CreateModal({ onClose, onCreated }) {
   const save = async () => {
     if (!form.name.trim()) return toast.error("İsim gerekli");
     setSaving(true);
+    const body = {
+      name: form.name, platform: form.platform, handle: form.handle,
+      instagram: form.instagram, tiktok: form.tiktok, birthday: form.birthday || null,
+      phone: form.phone, email: form.email,
+      follower_count: Number(form.follower_count) || 0,
+      coupon_code: form.coupon_code, aff_id: form.aff_id,
+      commission_rate: Number(form.commission_rate) || 0,
+      notes: form.notes,
+      shipping_address: {
+        full_name: form.address_full_name || form.name, phone: form.address_phone || form.phone,
+        il: form.il, ilce: form.ilce, adres: form.adres,
+      },
+    };
     try {
-      await axios.post(`${API}/influencers`, {
-        name: form.name, platform: form.platform, handle: form.handle,
-        phone: form.phone, email: form.email,
-        follower_count: Number(form.follower_count) || 0,
-        coupon_code: form.coupon_code, aff_id: form.aff_id,
-        commission_rate: Number(form.commission_rate) || 0,
-        shipping_address: {
-          full_name: form.address_full_name || form.name, phone: form.address_phone || form.phone,
-          il: form.il, ilce: form.ilce, adres: form.adres,
-        },
-      }, auth());
-      toast.success("Influencer eklendi");
-      onCreated();
+      if (isEdit) {
+        await axios.put(`${API}/influencers/${initial.id}`, body, auth());
+        toast.success("Influencer güncellendi");
+      } else {
+        await axios.post(`${API}/influencers`, body, auth());
+        toast.success("Influencer eklendi");
+      }
+      onSaved();
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Eklenemedi");
+      toast.error(e.response?.data?.detail || "Kaydedilemedi");
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <Modal title="Yeni Influencer" onClose={onClose}>
+    <Modal title={isEdit ? "Influencer Düzenle" : "Yeni Influencer"} onClose={onClose}>
       <div className="grid grid-cols-2 gap-3">
         <Field label="İsim *"><input data-testid="inf-name" className="inp" value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
-        <Field label="Platform">
+        <Field label="Birincil Platform">
           <select className="inp" value={form.platform} onChange={(e) => set("platform", e.target.value)}>
             <option value="instagram">Instagram</option>
             <option value="tiktok">TikTok</option>
@@ -137,7 +210,9 @@ function CreateModal({ onClose, onCreated }) {
             <option value="x">X</option>
           </select>
         </Field>
-        <Field label="Kullanıcı Adı (@)"><input className="inp" value={form.handle} onChange={(e) => set("handle", e.target.value)} /></Field>
+        <Field label="Instagram (@)"><input className="inp" value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="@kullanici" /></Field>
+        <Field label="TikTok (@)"><input className="inp" value={form.tiktok} onChange={(e) => set("tiktok", e.target.value)} placeholder="@kullanici" /></Field>
+        <Field label="Doğum Günü"><input type="date" className="inp" value={form.birthday} onChange={(e) => set("birthday", e.target.value)} /></Field>
         <Field label="Takipçi"><input type="number" className="inp" value={form.follower_count} onChange={(e) => set("follower_count", e.target.value)} /></Field>
         <Field label="Telefon"><input className="inp" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
         <Field label="E-posta"><input className="inp" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
@@ -147,10 +222,15 @@ function CreateModal({ onClose, onCreated }) {
       </div>
       <p className="text-xs font-semibold text-gray-500 mt-4 mb-2">Kargo Adresi (seeding için)</p>
       <div className="grid grid-cols-2 gap-3">
+        <Field label="Alıcı Adı (boşsa isim)"><input className="inp" value={form.address_full_name} onChange={(e) => set("address_full_name", e.target.value)} /></Field>
+        <Field label="Alıcı Telefon (boşsa telefon)"><input className="inp" value={form.address_phone} onChange={(e) => set("address_phone", e.target.value)} /></Field>
         <Field label="İl"><input className="inp" value={form.il} onChange={(e) => set("il", e.target.value)} /></Field>
         <Field label="İlçe"><input className="inp" value={form.ilce} onChange={(e) => set("ilce", e.target.value)} /></Field>
         <Field label="Adres" full><input className="inp" value={form.adres} onChange={(e) => set("adres", e.target.value)} /></Field>
       </div>
+      <Field label="Not / Genel Direktif" full>
+        <textarea className="inp h-20" value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Bu influencer'a özel notlar…" />
+      </Field>
       <div className="flex justify-end gap-2 mt-5">
         <button onClick={onClose} className="px-4 py-2 text-sm border rounded-lg">İptal</button>
         <button onClick={save} disabled={saving} data-testid="inf-save" className="px-4 py-2 text-sm bg-black text-white rounded-lg disabled:opacity-50">
@@ -191,14 +271,36 @@ function DetailModal({ influencerId, onClose }) {
     }
   };
 
-  const confirmShare = async (cid) => {
-    const url = prompt("İçerik linki (opsiyonel):") || "";
+  // Paylaşıldı tik'i (checkbox): PUT ile shared toggle — shared_at otomatik damgalanır/silinir.
+  const toggleShared = async (c) => {
     try {
-      await axios.post(`${API}/influencer-campaigns/${cid}/confirm-share`, { content_url: url }, auth());
-      toast.success("Paylaşım onaylandı");
+      await axios.put(`${API}/influencer-campaigns/${c.id}`, { shared: !c.shared }, auth());
       load();
     } catch {
-      toast.error("Onaylanamadı");
+      toast.error("Güncellenemedi");
+    }
+  };
+
+  // Manuel "gönderildi" işareti (kargo oluşturmadan) — sent_at damgalar.
+  const markSent = async (cid) => {
+    try {
+      await axios.put(`${API}/influencer-campaigns/${cid}`, {
+        sent_at: new Date().toISOString(), status: "shipped",
+      }, auth());
+      toast.success("Gönderildi olarak işaretlendi");
+      load();
+    } catch {
+      toast.error("Güncellenemedi");
+    }
+  };
+
+  const saveContentUrl = async (cid, url) => {
+    try {
+      await axios.put(`${API}/influencer-campaigns/${cid}`, { content_url: url }, auth());
+      toast.success("İçerik linki kaydedildi");
+      load();
+    } catch {
+      toast.error("Kaydedilemedi");
     }
   };
 
@@ -223,6 +325,16 @@ function DetailModal({ influencerId, onClose }) {
 
   return (
     <Modal title={`${inf.name} · ${inf.platform}`} wide onClose={onClose}>
+      {/* Kimlik satırı */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 mb-4">
+        {inf.instagram && <span className="flex items-center gap-1"><Instagram size={12} /> {inf.instagram}</span>}
+        {inf.tiktok && <span className="flex items-center gap-1"><Music2 size={12} /> {inf.tiktok}</span>}
+        {inf.phone && <span>☎ {inf.phone}</span>}
+        {inf.birthday && <span className="flex items-center gap-1"><Calendar size={12} /> {fmtDate(inf.birthday)}</span>}
+        {inf.coupon_code && <span className="text-amber-700">Kupon: {inf.coupon_code}</span>}
+      </div>
+      {inf.notes && <p className="text-xs bg-stone-50 border rounded-lg p-2 mb-4 whitespace-pre-wrap">{inf.notes}</p>}
+
       {/* ROI */}
       {roi && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5" data-testid="inf-roi">
@@ -240,13 +352,13 @@ function DetailModal({ influencerId, onClose }) {
 
       {/* Campaigns */}
       <div className="flex items-center justify-between mb-2">
-        <h3 className="font-semibold text-sm">Kampanyalar</h3>
+        <h3 className="font-semibold text-sm">Gönderiler / Kampanyalar</h3>
         <button onClick={() => setShowCampaign(true)} data-testid="new-campaign-btn" className="inline-flex items-center gap-1 text-sm border px-3 py-1.5 rounded-lg hover:bg-gray-50">
-          <Plus size={14} /> Kampanya
+          <Plus size={14} /> Yeni Gönderim
         </button>
       </div>
       <div className="space-y-2">
-        {(inf.campaigns || []).length === 0 && <p className="text-xs text-gray-400 py-3">Kampanya yok.</p>}
+        {(inf.campaigns || []).length === 0 && <p className="text-xs text-gray-400 py-3">Henüz gönderim yok. Her ürün gönderimi için ayrı kart açın.</p>}
         {(inf.campaigns || []).map((c) => (
           <div key={c.id} className="border rounded-lg p-3" data-testid={`campaign-${c.id}`}>
             <div className="flex items-center justify-between">
@@ -254,16 +366,22 @@ function DetailModal({ influencerId, onClose }) {
               <div className="flex items-center gap-2">
                 <Badge>{c.status}</Badge>
                 <Badge tone="cargo">{c.cargo_status}</Badge>
-                {c.shared && <span className="text-green-600 text-xs flex items-center gap-1"><CheckCircle size={12} /> Paylaşıldı</span>}
               </div>
             </div>
             <div className="flex flex-wrap gap-3 mt-2 text-[11px] text-gray-500">
               <span>Ücret: {money(c.fee_paid)}</span>
               <span>Ürün: {money(c.product_cost)}</span>
               <span>Kargo: {money(c.cargo_cost)}</span>
+              {c.sent_at && <span className="text-gray-700 font-medium">Gönderim: {fmtDate(c.sent_at)}</span>}
               {c.cargo_barcode && <span className="text-blue-600">Barkod: {c.cargo_barcode}</span>}
               {c.cargo_tracking_no && <span className="text-blue-600">Takip: {c.cargo_tracking_no}</span>}
             </div>
+            {/* Direktif / not */}
+            {c.directives && (
+              <p className="text-[11px] text-gray-500 mt-2 bg-stone-50 border rounded p-2 whitespace-pre-wrap">
+                <b className="text-gray-600">Direktif:</b> {c.directives}
+              </p>
+            )}
             {/* Gönderilen ürünler + stok durumu */}
             {(c.sent_products || []).length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 mt-2" data-testid={`sent-products-${c.id}`}>
@@ -279,7 +397,29 @@ function DetailModal({ influencerId, onClose }) {
                 )}
               </div>
             )}
+            {/* Paylaşıldı tik'i + içerik linki */}
+            <div className="flex items-center flex-wrap gap-3 mt-3">
+              <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none" data-testid={`shared-toggle-${c.id}`}>
+                <input type="checkbox" checked={!!c.shared} onChange={() => toggleShared(c)} className="w-4 h-4 accent-green-600" />
+                <span className={c.shared ? "text-green-700 font-medium flex items-center gap-1" : "text-gray-600"}>
+                  {c.shared ? <><CheckCircle size={12} /> Paylaşıldı{c.shared_at ? ` · ${fmtDate(c.shared_at)}` : ""}</> : "Paylaşıldı mı?"}
+                </span>
+              </label>
+              {c.shared && (
+                <input
+                  defaultValue={c.content_url || ""}
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (c.content_url || "")) saveContentUrl(c.id, v); }}
+                  placeholder="İçerik linki (yapıştır)…"
+                  className="text-xs border rounded px-2 py-1 flex-1 min-w-[180px]"
+                />
+              )}
+            </div>
             <div className="flex gap-2 mt-3 flex-wrap">
+              {!c.sent_at && (
+                <button onClick={() => markSent(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded hover:bg-gray-50">
+                  <Share2 size={12} /> Gönderildi İşaretle
+                </button>
+              )}
               <button onClick={() => createCargo(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded hover:bg-gray-50">
                 <Truck size={12} /> Kargo Oluştur
               </button>
@@ -289,9 +429,6 @@ function DetailModal({ influencerId, onClose }) {
                   Stok Geri Al
                 </button>
               )}
-              <button onClick={() => confirmShare(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded hover:bg-gray-50">
-                <Share2 size={12} /> Paylaşıldı
-              </button>
               <button onClick={() => delCampaign(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded text-red-600 hover:bg-red-50 ml-auto">
                 <Trash2 size={12} /> Sil
               </button>
@@ -420,9 +557,9 @@ function CampaignModal({ influencerId, onClose, onCreated }) {
     }
   };
   return (
-    <Modal title="Yeni Kampanya" onClose={onClose}>
+    <Modal title="Yeni Gönderim / Kampanya" onClose={onClose}>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Başlık *" full><input data-testid="camp-title" className="inp" value={form.title} onChange={(e) => set("title", e.target.value)} /></Field>
+        <Field label="Başlık *" full><input data-testid="camp-title" className="inp" value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="Örn. Temmuz gönderimi" /></Field>
         <Field label="Ödenen Ücret"><input type="number" className="inp" value={form.fee_paid} onChange={(e) => set("fee_paid", e.target.value)} /></Field>
         <Field label="Ürün Maliyeti (boşsa seçilen ürünlerden otomatik)"><input type="number" className="inp" value={form.product_cost} onChange={(e) => set("product_cost", e.target.value)} /></Field>
         <Field label="Kargo Maliyeti"><input type="number" className="inp" value={form.cargo_cost} onChange={(e) => set("cargo_cost", e.target.value)} /></Field>
@@ -430,7 +567,7 @@ function CampaignModal({ influencerId, onClose, onCreated }) {
       <Field label="Gönderilecek Ürünler (beden seçin — kaydetmede stoktan düşer)" full>
         <ProductPicker picked={picked} setPicked={setPicked} />
       </Field>
-      <Field label="İçerik Talimatları (boşsa 9:16 dikey format standardı otomatik eklenir)" full>
+      <Field label="İçerik Talimatları / Direktif (boşsa 9:16 dikey format standardı otomatik eklenir)" full>
         <textarea className="inp h-24" value={form.directives} onChange={(e) => set("directives", e.target.value)} placeholder="Boş bırakırsanız zorunlu içerik standartları (9:16 dikey format, @facette mention) otomatik eklenir." />
       </Field>
       <div className="flex justify-end gap-2 mt-4">
