@@ -324,8 +324,11 @@ DEFAULT_CAMPAIGN_DIRECTIVES = (
 
 class InfluencerBase(BaseModel):
     name: str
-    platform: str = "instagram"            # instagram | tiktok | youtube | x
-    handle: Optional[str] = None           # @kullaniciadi
+    platform: str = "instagram"            # instagram | tiktok | youtube | x (birincil)
+    handle: Optional[str] = None           # @kullaniciadi (geriye uyum — birincil hesap)
+    instagram: Optional[str] = None        # Instagram hesabı (@...) — ayrı alan
+    tiktok: Optional[str] = None           # TikTok hesabı (@...) — ayrı alan
+    birthday: Optional[str] = None         # doğum günü (YYYY-MM-DD)
     phone: Optional[str] = None
     email: Optional[str] = None
     follower_count: int = 0
@@ -359,6 +362,7 @@ class InfluencerCampaignBase(BaseModel):
     cargo_status: str = "pending"            # pending | created | shipped | delivered
     cargo_barcode: Optional[str] = None
     cargo_tracking_no: Optional[str] = None
+    sent_at: Optional[str] = None            # ürünler ne zaman gönderildi (kargoya verildi)
     shared: bool = False
     shared_at: Optional[str] = None
     content_url: Optional[str] = None

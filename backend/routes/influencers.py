@@ -113,6 +113,9 @@ async def list_influencers(
         query["$or"] = [
             {"name": {"$regex": q, "$options": "i"}},
             {"handle": {"$regex": q, "$options": "i"}},
+            {"instagram": {"$regex": q, "$options": "i"}},
+            {"tiktok": {"$regex": q, "$options": "i"}},
+            {"phone": {"$regex": q, "$options": "i"}},
             {"coupon_code": {"$regex": q, "$options": "i"}},
         ]
     if platform:
@@ -141,7 +144,8 @@ async def update_influencer(influencer_id: str, payload: dict, current_user: dic
     if not existing:
         raise HTTPException(status_code=404, detail="Influencer bulunamadı")
     allowed = {
-        "name", "platform", "handle", "phone", "email", "follower_count",
+        "name", "platform", "handle", "instagram", "tiktok", "birthday",
+        "phone", "email", "follower_count",
         "coupon_code", "aff_id", "commission_rate", "shipping_address", "notes", "is_active",
     }
     update = {k: v for k, v in payload.items() if k in allowed}
@@ -200,9 +204,17 @@ async def update_campaign(campaign_id: str, payload: dict, current_user: dict = 
     allowed = {
         "title", "fee_paid", "product_cost", "cargo_cost", "sent_products",
         "directives", "status", "cargo_status", "cargo_barcode", "cargo_tracking_no",
-        "content_url", "notes",
+        "content_url", "notes", "sent_at", "shared", "shared_at",
     }
     update = {k: v for k, v in payload.items() if k in allowed}
+    # Paylaşım tik'i (checkbox toggle): shared True↔False; shared_at otomatik damgalanır/silinir.
+    if "shared" in update:
+        if update["shared"]:
+            update.setdefault("shared_at", _now_iso())
+            if (existing.get("status") or "draft") in ("draft", "shipped"):
+                update.setdefault("status", "shared")
+        else:
+            update["shared_at"] = None
     update["updated_at"] = _now_iso()
     await db.influencer_campaigns.update_one({"id": campaign_id}, {"$set": update})
     # Kampanya iptal edilirse düşülen seeding stoğu otomatik geri döner (idempotent).
@@ -416,6 +428,7 @@ async def create_campaign_cargo(campaign_id: str, current_user: dict = Depends(r
             "cargo_barcode": barkod,
             "cargo_tracking_no": siparis_no,
             "status": "shipped" if camp.get("status") == "draft" else camp.get("status"),
+            "sent_at": camp.get("sent_at") or _now_iso(),   # gönderim tarihi (kargoya verildi)
             "updated_at": _now_iso(),
         }},
     )
