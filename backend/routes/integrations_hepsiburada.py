@@ -3304,17 +3304,19 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
                             for _n in _all_ns:
                                 detail_numbers.add(_n)
                             # KARGO (geçmiş siparişlerde de göster): shipped/delivered paket satırı
-                            # kargo firması + takip no taşır → eşleşen sipariş kayıtlarına yaz.
-                            _cg_no = str(_hb_g(_r, "cargoTrackingNumber", "trackingNumber", "cargoTrackingCode",
-                                               "packageBarcode", "barcode") or "")
-                            _cg_nm = str(_hb_g(_r, "cargoCompany", "cargoProviderName", "cargoCompanyName",
-                                               "cargoCompanyShortName", "shippingCompany") or "")
-                            if (_cg_no or _cg_nm) and _all_ns:
+                            # kargo takip barkodu (Barcode) + paket no taşır → eşleşen siparişlere yaz.
+                            # (HB bu uçta kargo FİRMA adını vermez; takip barkodu = izlenebilir kargo.)
+                            _cg_no = str(_hb_g(_r, "Barcode", "barcode", "cargoTrackingNumber", "trackingNumber") or "")
+                            _cg_pkg = str(_hb_g(_r, "PackageNumber", "packageNumber") or "")
+                            _cg_nm = str(_hb_g(_r, "CargoCompany", "cargoCompany", "cargoProviderName", "cargoCompanyName") or "")
+                            if (_cg_no or _cg_pkg) and _all_ns:
                                 _cset = {}
                                 if _cg_no:
                                     _cset["cargo_tracking_number"] = _cg_no
                                 if _cg_nm:
                                     _cset["cargo_provider_name"] = _cg_nm
+                                if _cg_pkg:
+                                    _cset["hb_package_number"] = _cg_pkg
                                 _hbnums = list({*(_all_ns), *[(x if x.upper().startswith("HB") else f"HB{x}") for x in _all_ns]})
                                 try:
                                     await db.orders.update_many(
@@ -3361,64 +3363,6 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
         f"HB {days} gün backfill bitti — açık: +{tot_imp}/{tot_upd} · paket: +{pkg_imp}/{pkg_upd} · "
         f"iptal: +{cn_imp}/{cn_upd} · iade: {claims.get('synced', 0)} · kargo yazılan: {cargo_upd}"
         + (" · stok düşümü: AÇIK" if decrement_stock else " · stok düşümü: kapalı"))
-
-
-@router.post("/hepsiburada/_diag/cargo_backfill2907")
-async def _diag_hb_cargo_backfill2907(payload: dict = Body(default=None)):
-    """GEÇİCİ (key-korumalı) — shipped/delivered paketlerden kargo (firma+takip no) çekip
-    geçmiş HB siparişlerine yazar + bir örnek satır anahtarlarını döndürür (doğrulama).
-    Kullanımdan sonra KALDIRILACAK. payload:{key, days}"""
-    if (payload or {}).get("key") != "fcttdiag2907":
-        raise HTTPException(status_code=403, detail="forbidden")
-    import asyncio as _aio
-    from datetime import datetime, timezone, timedelta
-    from .category_mapping import _get_hb_client
-    client, err = await _get_hb_client()
-    if err:
-        return {"ok": False, "error": err}
-    days = int((payload or {}).get("days") or 45)
-    now_ = datetime.now(timezone.utc)
-    sample_keys = None
-    matched = updated = pkgs = 0
-    for label, fn in (("shipped", client.get_packages_shipped), ("delivered", client.get_packages_delivered)):
-        for d in range(days):
-            end = now_ - timedelta(days=d); begin = end - timedelta(days=1)
-            b, e = begin.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
-            off = 0
-            for _pg in range(6):
-                try:
-                    resp = await _aio.to_thread(fn, off, 50, b, e)
-                except Exception:
-                    break
-                rows_ = _hb_normalize_lines(resp) or []
-                if not rows_:
-                    break
-                for _r in rows_:
-                    if not isinstance(_r, dict):
-                        continue
-                    pkgs += 1
-                    if sample_keys is None:
-                        sample_keys = sorted([str(k) for k in _r.keys()])
-                    _ns = _r.get("OrderNumbers") if isinstance(_r.get("OrderNumbers"), list) else []
-                    _n1 = _hb_g(_r, "orderNumber", "OrderNumber", "orderNo", "OrderNo", "orderNumberStr")
-                    _all = [str(x or "").strip() for x in ([_n1] + _ns) if str(x or "").strip()]
-                    _no = str(_hb_g(_r, "Barcode", "barcode", "cargoTrackingNumber", "trackingNumber") or "")
-                    _pkgno = str(_hb_g(_r, "PackageNumber", "packageNumber") or "")
-                    _nm = str(_hb_g(_r, "CargoCompany", "cargoCompany", "cargoProviderName", "cargoCompanyName") or "")
-                    if (_no or _pkgno) and _all:
-                        _cset = {}
-                        if _no: _cset["cargo_tracking_number"] = _no
-                        if _nm: _cset["cargo_provider_name"] = _nm
-                        if _pkgno: _cset["hb_package_number"] = _pkgno
-                        _hbn = list({*_all, *[(x if x.upper().startswith("HB") else f"HB{x}") for x in _all]})
-                        r = await db.orders.update_many({"order_number": {"$in": _hbn}, "platform": "hepsiburada"}, {"$set": _cset})
-                        matched += 1; updated += r.modified_count
-                if len(rows_) < 50:
-                    break
-                off += 50
-            await _aio.sleep(0.15)
-    return {"ok": True, "packages_seen": pkgs, "cargo_rows": matched, "orders_updated": updated,
-            "sample_package_keys": sample_keys}
 
 
 @router.post("/hepsiburada/backfill")
