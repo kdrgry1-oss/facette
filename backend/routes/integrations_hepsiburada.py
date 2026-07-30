@@ -3400,7 +3400,7 @@ async def _diag_hb_cargo_backfill2907(payload: dict = Body(default=None)):
                     if sample_keys is None:
                         sample_keys = sorted([str(k) for k in _r.keys()])
                     _ns = _r.get("OrderNumbers") if isinstance(_r.get("OrderNumbers"), list) else []
-                    _n1 = _deep_find(_r, _ORDNO_KEYS)
+                    _n1 = _hb_g(_r, "orderNumber", "OrderNumber", "orderNo", "OrderNo", "orderNumberStr")
                     _all = [str(x or "").strip() for x in ([_n1] + _ns) if str(x or "").strip()]
                     _no = str(_hb_g(_r, "cargoTrackingNumber", "trackingNumber", "cargoTrackingCode", "packageBarcode", "barcode") or "")
                     _nm = str(_hb_g(_r, "cargoCompany", "cargoProviderName", "cargoCompanyName", "cargoCompanyShortName", "shippingCompany") or "")
