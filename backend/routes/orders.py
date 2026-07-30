@@ -2882,18 +2882,25 @@ async def reconcile_stock_backfill(
 async def _diag_stock_reconcile2907(
     key: str = Query(...),
     apply: bool = Query(False),
+    safe_only: bool = Query(True),
     floor_negatives: bool = Query(False),
 ):
     """BİR KERELİK denetimli stok mutabakatı (geçici, key-gated — kullanımdan sonra KALDIRILACAK).
     NON-DESTRUCTIVE: varyant adetlerini yeniden YAZMAZ (tarihsel ledger eksik olabilir).
-    - Parent 'stock' = varyant stok toplamı (desync onarımı — her zaman doğru, güvenli).
-    - Negatif varyant/parent stoklarını RAPORLAR; floor_negatives=true ise 0'a sabitler
-      (negatif stok asla geçerli değil; geçmiş asimetri hatalarından kalan gürültü).
-    apply=false → yalnız dry-run rapor (hiçbir yazım yapılmaz)."""
+
+    İki desync sınıfı ayrılır:
+      - SAFE  (Σvaryant>0): varyant otoriter → parent 'stock' = Σvaryant (kesin doğru, uygulanır).
+      - REVIEW (Σvaryant=0, parent>0): ürün parent-tracked/imalat stoğu olabilir; parent'ı 0'a
+        çekmek GERÇEK stoğu yok edebilir → DOKUNULMAZ, elle inceleme için raporlanır.
+    safe_only=True (varsayılan): yalnız SAFE sınıfı uygulanır. safe_only=False: REVIEW de uygulanır
+    (DİKKAT — parent'ı 0'a çekebilir, yalnız gerçekten hepsi tükendiyse).
+    floor_negatives=True: negatif varyant/parent stoklarını 0'a sabitler (negatif asla geçerli değil).
+    apply=false → dry-run (hiçbir yazım yapılmaz)."""
     if key != "fcttdiag2907":
         raise HTTPException(status_code=403, detail="forbidden")
     scanned = 0
-    desync = []
+    safe_desync = []
+    review_desync = []
     negatives = []
     fixed_parent = 0
     floored = 0
@@ -2903,7 +2910,6 @@ async def _diag_stock_reconcile2907(
         scanned += 1
         pid = p.get("id")
         variants = p.get("variants") or []
-        # 1) Negatif varyantlar
         neg_v = [(v.get("barcode") or v.get("id"), int(v.get("stock") or 0))
                  for v in variants if int(v.get("stock") or 0) < 0]
         if floor_negatives and apply and neg_v:
@@ -2915,14 +2921,15 @@ async def _diag_stock_reconcile2907(
                         array_filters=[{"e.id": v.get("id")}])
                     floored += 1
             variants = [{**v, "stock": max(0, int(v.get("stock") or 0))} for v in variants]
-        # 2) Parent = varyant toplamı (desync)
         if variants:
             vsum = sum(max(0, int(v.get("stock") or 0)) if floor_negatives else int(v.get("stock") or 0)
                        for v in variants)
-            if int(p.get("stock") or 0) != vsum:
-                desync.append({"id": pid, "name": p.get("name"),
-                               "parent": p.get("stock"), "vsum": vsum})
-                if apply:
+            parent = int(p.get("stock") or 0)
+            if parent != vsum:
+                rec = {"id": pid, "name": p.get("name"), "parent": parent, "vsum": vsum}
+                is_safe = vsum > 0            # varyant otoriter → kesin
+                (safe_desync if is_safe else review_desync).append(rec)
+                if apply and (is_safe or not safe_only):
                     await db.products.update_one({"id": pid}, {"$set": {"stock": vsum, "updated_at": now}})
                     fixed_parent += 1
             if neg_v:
@@ -2936,12 +2943,15 @@ async def _diag_stock_reconcile2907(
                     floored += 1
     return {
         "mode": "APPLIED" if apply else "DRY-RUN",
+        "safe_only": safe_only,
         "scanned": scanned,
-        "parent_desync_count": len(desync),
+        "safe_desync_count": len(safe_desync),
+        "review_desync_count": len(review_desync),
         "parent_fixed": fixed_parent,
         "negatives_count": len(negatives),
         "negatives_floored": floored,
-        "desync_sample": desync[:40],
+        "safe_sample": safe_desync[:60],
+        "review_sample": review_desync[:60],
         "negatives_sample": negatives[:40],
     }
 
