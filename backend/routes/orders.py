@@ -2878,6 +2878,58 @@ async def reconcile_stock_backfill(
     }
 
 
+@router.post("/_diag/stock_forensics2907")
+async def _diag_stock_forensics2907(key: str = Query(...), ids: str = Query("")):
+    """GEÇİCİ, key-gated, SALT-OKUNUR adli inceleme (KALDIRILACAK). Verilen ürünlerin (yoksa
+    varsayılan 14 REVIEW ürünü) stok hareket geçmişini + imalat teslim kayıtlarını döndürür →
+    'yüksek parent stok NEREDEN geldi' sorusunu kanıtla yanıtlar. Ayrıca imalat kaynaklı
+    parent≠Σvaryant riskini genel tarar."""
+    if key != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    default_ids = ["9473", "4540", "4162", "6697", "6967", "5499", "1990",
+                   "88d8735a-5404-4218-bd90-04838710460b", "881f4077-fc0b-45d0-9809-d0febecc2b80",
+                   "60bb204b-952c-4188-86a2-dff6b70f340b", "15773198-1d94-468e-bd5d-661294a05f1c",
+                   "3abcd410-5b58-45f2-b5d1-8b8a483d3d42", "5aff350b-5075-470e-8994-82a6cbdb9c2d", "1669"]
+    target = [x.strip() for x in ids.split(",") if x.strip()] or default_ids
+    forensics = []
+    for pid in target:
+        p = await db.products.find_one({"id": pid}, {"_id": 0, "name": 1, "stock": 1, "variants": 1})
+        moves = await db.stock_movements.find(
+            {"product_id": pid}, {"_id": 0}).sort("created_at", 1).to_list(200)
+        mv_sum = {}
+        mv_list = []
+        for m in moves:
+            t = m.get("type", "?")
+            inc = m.get("total_increment")
+            if inc is None:
+                # sipariş/iade hareketlerinde items[].delta topla
+                inc = sum(int(it.get("delta") or 0) for it in (m.get("items") or [])
+                          if str(it.get("product_id") or "") == pid) or None
+            mv_sum[t] = mv_sum.get(t, 0) + (int(inc) if isinstance(inc, int) else 0)
+            mv_list.append({"type": t, "inc": inc, "size_dist": m.get("size_distribution"),
+                            "reason": m.get("reason"), "at": (m.get("created_at") or "")[:19]})
+        forensics.append({
+            "id": pid, "name": (p or {}).get("name"),
+            "parent_now": int((p or {}).get("stock") or 0),
+            "variant_sum": sum(int(v.get("stock") or 0) for v in ((p or {}).get("variants") or [])),
+            "move_type_totals": mv_sum,
+            "moves": mv_list[-25:],
+        })
+    # Genel tarama: imalat teslimi görmüş ürünlerde şu an parent≠Σvaryant kalan var mı (residual risk)
+    mfg_pids = await db.stock_movements.distinct("product_id", {"type": "manufacturing_delivered"})
+    mfg_total = len(mfg_pids)
+    mfg_desync = 0
+    for pid in mfg_pids:
+        p = await db.products.find_one({"id": pid}, {"_id": 0, "stock": 1, "variants": 1})
+        if not p:
+            continue
+        vs = p.get("variants") or []
+        if vs and int(p.get("stock") or 0) != sum(int(v.get("stock") or 0) for v in vs):
+            mfg_desync += 1
+    return {"forensics": forensics,
+            "manufacturing_scan": {"products_with_delivery": mfg_total, "still_desync": mfg_desync}}
+
+
 @router.post("/auto-cancel-expired")
 async def auto_cancel_expired_orders(
     hours: int = Query(48, ge=1),
