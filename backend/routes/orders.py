@@ -2878,6 +2878,114 @@ async def reconcile_stock_backfill(
     }
 
 
+@router.post("/_diag/stock_integrity2907")
+async def _diag_stock_integrity2907(key: str = Query(...)):
+    """GEÇİCİ, key-gated, SALT-OKUNUR ürün stok bütünlük taraması (KALDIRILACAK).
+    Tüm ürünlerde çoklu anomali sınıfını tarar: parent≠Σvaryant desync, negatif stok,
+    MÜKERRER BARKOD (yanlış ürün düşme riski), hedeflenemeyen varyant (barkod+id yok),
+    eksik stok alanı. 'Başka ürünlerde de sıkıntı var mı' sorusunu kanıtla yanıtlar."""
+    if key != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    scanned = 0
+    desync, neg_parent, neg_variant = [], [], []
+    untargetable, missing_stock_field = [], []
+    bc_owners = {}  # barcode -> [ "ürün adı / beden" ... ]
+    cursor = db.products.find({}, {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1, "barcode": 1})
+    async for p in cursor:
+        scanned += 1
+        nm = (p.get("name") or "")[:40]
+        vs = p.get("variants") or []
+        # ürün-düzeyi barkod
+        pbc = str(p.get("barcode") or "").strip()
+        if pbc:
+            bc_owners.setdefault(pbc, []).append(f"{nm} (ürün)")
+        if int(p.get("stock") or 0) < 0:
+            neg_parent.append({"id": p["id"], "name": nm, "stock": p.get("stock")})
+        if vs:
+            vsum = sum(int(v.get("stock") or 0) for v in vs)
+            if int(p.get("stock") or 0) != vsum:
+                desync.append({"id": p["id"], "name": nm, "parent": int(p.get("stock") or 0), "vsum": vsum})
+            for v in vs:
+                vbc = str(v.get("barcode") or "").strip()
+                vid = str(v.get("id") or "").strip()
+                if vbc:
+                    bc_owners.setdefault(vbc, []).append(f"{nm} / {v.get('size') or '?'}")
+                if "stock" not in v or v.get("stock") is None:
+                    missing_stock_field.append({"id": p["id"], "name": nm, "size": v.get("size")})
+                if int(v.get("stock") or 0) < 0:
+                    neg_variant.append({"id": p["id"], "name": nm, "size": v.get("size"), "stock": v.get("stock")})
+                if not vbc and not vid:
+                    untargetable.append({"id": p["id"], "name": nm, "size": v.get("size")})
+    dup_barcodes = {bc: owners for bc, owners in bc_owners.items() if len(owners) > 1}
+    return {
+        "scanned": scanned,
+        "parent_desync": {"count": len(desync), "sample": desync[:30]},
+        "negative_parent": {"count": len(neg_parent), "sample": neg_parent[:30]},
+        "negative_variant": {"count": len(neg_variant), "sample": neg_variant[:30]},
+        "duplicate_barcodes": {"count": len(dup_barcodes),
+                               "sample": dict(list(dup_barcodes.items())[:20])},
+        "untargetable_variants": {"count": len(untargetable), "sample": untargetable[:30]},
+        "missing_stock_field": {"count": len(missing_stock_field), "sample": missing_stock_field[:30]},
+    }
+
+
+@router.post("/_diag/report_integrity2907")
+async def _diag_report_integrity2907(key: str = Query(...)):
+    """GEÇİCİ, key-gated, SALT-OKUNUR rapor/tarih bütünlük taraması (KALDIRILACAK).
+    'Eski siparişleri yeni gibi mi çektin, raporlar doğru mu' sorusunu kanıtla yanıtlar:
+      - created_at (raporlar buna göre gruplar) AYLIK histogram, platform bazında → backfill
+        eski siparişleri gerçek ayına mı yoksa bugüne mi koymuş görülür.
+      - son 7 gün içinde created_at olan sipariş sayısı (backfill-as-new spike tespiti).
+      - created_at boş/eksik sipariş (bugüne düşme riski).
+      - rapor dışı (excluded) statü kırılımı — satış toplamına neyin girmediği."""
+    if key != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    from .reports import _EXCLUDED_STATUSES
+    # 1) Aylık histogram (platform × YYYY-MM)
+    hist = await db.orders.aggregate([
+        {"$match": {"created_at": {"$type": "string", "$ne": ""}}},
+        {"$addFields": {"_ym": {"$substr": ["$created_at", 0, 7]},
+                        "_plat": {"$ifNull": ["$platform", "site"]}}},
+        {"$group": {"_id": {"ym": "$_ym", "plat": "$_plat"}, "n": {"$sum": 1},
+                    "rev": {"$sum": {"$ifNull": ["$total", 0]}}}},
+        {"$sort": {"_id.ym": 1}},
+    ]).to_list(500)
+    by_month = {}
+    for h in hist:
+        ym = h["_id"]["ym"]; plat = h["_id"]["plat"]
+        by_month.setdefault(ym, {})[plat] = {"n": h["n"], "rev": round(h["rev"], 2)}
+    # 2) Son 7 gün created_at (backfill-as-new spike)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    recent = await db.orders.aggregate([
+        {"$match": {"created_at": {"$gte": cutoff}}},
+        {"$group": {"_id": {"$ifNull": ["$platform", "site"]}, "n": {"$sum": 1}}},
+    ]).to_list(50)
+    recent_by_plat = {r["_id"]: r["n"] for r in recent}
+    # 3) created_at boş/eksik
+    missing_date = await db.orders.count_documents(
+        {"$or": [{"created_at": {"$exists": False}}, {"created_at": None}, {"created_at": ""}]})
+    # 4) statü kırılımı + rapora giren/girmeyen
+    st = await db.orders.aggregate([
+        {"$group": {"_id": {"$ifNull": ["$status", "?"]}, "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}},
+    ]).to_list(100)
+    status_breakdown = {s["_id"]: s["n"] for s in st}
+    counted = sum(n for s, n in status_breakdown.items() if s not in _EXCLUDED_STATUSES)
+    excluded = sum(n for s, n in status_breakdown.items() if s in _EXCLUDED_STATUSES)
+    total_orders = await db.orders.count_documents({})
+    return {
+        "total_orders": total_orders,
+        "report_date_field": "created_at",
+        "counted_in_sales": counted,
+        "excluded_from_sales": excluded,
+        "orders_missing_created_at": missing_date,
+        "recent_7d_created_by_platform": recent_by_plat,
+        "monthly_histogram": by_month,
+        "excluded_statuses": _EXCLUDED_STATUSES,
+        "status_breakdown": status_breakdown,
+    }
+
+
 @router.post("/auto-cancel-expired")
 async def auto_cancel_expired_orders(
     hours: int = Query(48, ge=1),
