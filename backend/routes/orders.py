@@ -2878,6 +2878,70 @@ async def reconcile_stock_backfill(
     }
 
 
+@router.post("/_diag/stock_fixreview2907")
+async def _diag_stock_fixreview2907(
+    key: str = Query(...),
+    action: str = Query("list"),   # list | zero | set_variant
+    exclude: str = Query(""),      # zero: virgüllü hariç tutulacak product id'ler
+    pid: str = Query(""),          # set_variant: ürün id
+    vid: str = Query(""),          # set_variant: varyant id
+    qty: int = Query(0),           # set_variant: yeni varyant stoğu
+):
+    """GEÇİCİ, key-gated — REVIEW ürünleri (Σvaryant=0, parent>0) düzeltme aracı.
+    KALDIRILACAK. list: mevcut REVIEW ürünlerini (beden yapısıyla) listeler.
+    zero: exclude dışındaki TÜM REVIEW ürünlerinin parent stoğunu 0'a çeker (tükendi onaylı).
+    set_variant: bir varyantın stoğunu set eder + parent'ı Σvaryant'tan recompute eder."""
+    if key != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    now = datetime.now(timezone.utc).isoformat()
+    proj = {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1}
+
+    async def _is_review(p):
+        vs = p.get("variants") or []
+        return bool(vs) and sum(int(v.get("stock") or 0) for v in vs) == 0 and int(p.get("stock") or 0) > 0
+
+    if action == "list":
+        out = []
+        async for p in db.products.find({}, proj):
+            if await _is_review(p):
+                out.append({"id": p["id"], "name": p.get("name"), "parent": int(p.get("stock") or 0),
+                            "variants": [{"id": v.get("id"), "size": v.get("size"),
+                                          "barcode": v.get("barcode"), "stock": int(v.get("stock") or 0)}
+                                         for v in (p.get("variants") or [])]})
+        return {"count": len(out), "items": out}
+
+    if action == "zero":
+        ex = set(x.strip() for x in exclude.split(",") if x.strip())
+        zeroed = []
+        async for p in db.products.find({}, proj):
+            if await _is_review(p) and p["id"] not in ex:
+                await db.products.update_one({"id": p["id"]}, {"$set": {"stock": 0, "updated_at": now}})
+                await db.stock_movements.insert_one({
+                    "id": str(uuid.uuid4()), "type": "manual_adjust_zero_out",
+                    "product_id": p["id"], "reason": "review_confirmed_out_of_stock",
+                    "from": int(p.get("stock") or 0), "to": 0, "created_at": now})
+                zeroed.append({"id": p["id"], "name": p.get("name"), "was": int(p.get("stock") or 0)})
+        return {"zeroed_count": len(zeroed), "excluded": list(ex), "zeroed": zeroed}
+
+    if action == "set_variant":
+        if not (pid and vid):
+            raise HTTPException(status_code=400, detail="pid ve vid gerekli")
+        r = await db.products.update_one(
+            {"id": pid, "variants.id": vid},
+            {"$set": {"variants.$[e].stock": int(qty), "updated_at": now}},
+            array_filters=[{"e.id": vid}])
+        await db.products.update_one({"id": pid}, [{"$set": {"stock": {"$sum": {"$map": {
+            "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+            "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}])
+        p = await db.products.find_one({"id": pid}, proj)
+        return {"matched": r.matched_count, "modified": r.modified_count,
+                "parent_now": int((p or {}).get("stock") or 0),
+                "variants": [{"id": v.get("id"), "size": v.get("size"), "stock": int(v.get("stock") or 0)}
+                             for v in ((p or {}).get("variants") or [])]}
+
+    raise HTTPException(status_code=400, detail="bilinmeyen action")
+
+
 @router.post("/auto-cancel-expired")
 async def auto_cancel_expired_orders(
     hours: int = Query(48, ge=1),
