@@ -2787,9 +2787,11 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                         try:
                             _o = await db.orders.find_one({"order_number": onum, "platform": "trendyol"}, {"_id": 0, "id": 1, "items": 1})
                             if _o:
-                                _already = await db.stock_movements.find_one({"order_id": _o.get("id"), "type": "order_cancelled"}, {"_id": 1})
+                                from routes.orders import _stock_delta_for_order, _RESTORE_MOVE_TYPES
+                                # B4: guard'ı TÜM restore hareketlerine genişlet (kısmi iade
+                                # sonrası tam-iptal çift-restock'unu engelle).
+                                _already = await db.stock_movements.find_one({"order_id": _o.get("id"), "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1})
                                 if not _already:
-                                    from routes.orders import _stock_delta_for_order
                                     _moves = await _stock_delta_for_order(_o, +1)
                                     await db.stock_movements.insert_one({
                                         "id": str(uuid.uuid4()), "type": "order_cancelled",

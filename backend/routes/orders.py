@@ -2692,7 +2692,13 @@ async def reconcile_stock_backfill(
     Ticimax stok senkronu ile ALAKASI YOKTUR — sadece sipariş bazlı stok düşer/ekler."""
     skips = set(s.strip() for s in (skip_status or "").split(",") if s.strip())
     delta = -1 if action == "decrement" else 1
-    guard_types = ["manual_decrement", "order_imported", "backfill_decrement"]
+    # B10: guard'ı action'a göre seç. DÜŞÜMde site siparişleri 'order_created' tipiyle
+    # yazıldığından bu tip listede OLMALI — yoksa zaten-düşülmüş site siparişi bulunamayıp
+    # İKİNCİ kez düşülüyordu. ARTIŞ tarafında da _RESTORE_MOVE_TYPES ile çift-iade engellenir.
+    if delta < 0:
+        guard_types = ["order_created", "manual_decrement", "order_imported", "backfill_decrement"]
+    else:
+        guard_types = _RESTORE_MOVE_TYPES
     q = {"platform": platform, "created_at": {"$gte": start_date}}
     total = 0
     applied = 0

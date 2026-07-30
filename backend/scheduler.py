@@ -339,11 +339,14 @@ async def _update_existing_trendyol_order(_db, existing, data, number, restock_s
     _flipped = (_new_status == "cancelled" and _prev_status != "cancelled")
     if _flipped and existing.get("id"):
         try:
+            from routes.orders import _stock_delta_for_order, _RESTORE_MOVE_TYPES
+            # B4: guard'ı TÜM restore hareketlerine genişlet. Yalnız 'order_cancelled' aramak,
+            # sipariş önceden kısmi iade (return_restock/order_returned) ile geri stoklanmışsa
+            # bunu göremeyip TÜM siparişi İKİNCİ kez +stokluyordu.
             _already = await _db.stock_movements.find_one(
-                {"order_id": existing.get("id"), "type": "order_cancelled"}, {"_id": 1}
+                {"order_id": existing.get("id"), "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1}
             )
             if not _already:
-                from routes.orders import _stock_delta_for_order
                 _moves = await _stock_delta_for_order(existing, +1)
                 await _db.stock_movements.insert_one({
                     "id": str(uuid.uuid4()), "type": "order_cancelled",

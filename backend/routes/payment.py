@@ -694,20 +694,33 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
         # callback ile GERÇEKTEN ödendiği ortaya çıktıysa (para çekilmiş), stoğu TEKRAR düş —
         # aksi halde create(-1)+restock(+1)+confirm(0) = net 0 kalıp ürün fiilen sevk edilirken
         # stok fazla görünüyordu (oversell). İdempotent: bir kez düşer.
-        try:
-            _o2 = await db.orders.find_one(
-                {"id": order_id, "_restocked_by_autocancel": True,
-                 "_redecremented_after_reconcile": {"$ne": True}}, {"_id": 0})
-            if _o2:
-                from .orders import _stock_delta_for_order
+        # B9: ATOMİK claim-then-act — bayrağı ÖNCE koşullu kap. callback_3ds ve reconcile
+        # cron'u eşzamanlı çalışabildiğinden, find→act→set sırası ikisinin de bayrağı unset
+        # görüp stoğu İKİ kez düşürmesine yol açıyordu. Yalnız claim'i kazanan (modified_count==1)
+        # düşümü uygular.
+        _claim = await db.orders.update_one(
+            {"id": order_id, "_restocked_by_autocancel": True,
+             "_redecremented_after_reconcile": {"$ne": True}},
+            {"$set": {"_redecremented_after_reconcile": True},
+             "$unset": {"_restocked_by_autocancel": ""}})
+        if _claim.modified_count == 1:
+            try:
+                _o2 = await db.orders.find_one({"id": order_id}, {"_id": 0})
+                from .orders import _stock_delta_for_order, _RESTORE_MOVE_TYPES
                 _moves = await _stock_delta_for_order(_o2, -1)
+                # B6: auto-cancel'in yazdığı BAYAT restore hareketini SİL. Aksi halde sonraki
+                # GERÇEK iptal _restock_order_once guard'ına takılıp (mevcut restore hareketi
+                # görülüp) stoğu ASLA iade etmiyordu → paid siparişin envanteri kalıcı kilitli.
+                await db.stock_movements.delete_many(
+                    {"order_id": order_id, "type": {"$in": _RESTORE_MOVE_TYPES}})
+                logger.info(f"[reconcile] restock sonrası tekrar-ödendi → stok yeniden düşüldü order_id={order_id} moves={len(_moves or [])}")
+            except Exception as _rse:
+                # Düşüm/temizlik başarısızsa claim'i GERİ AL — sonraki denemede tekrar işlensin.
                 await db.orders.update_one(
                     {"id": order_id},
-                    {"$set": {"_redecremented_after_reconcile": True},
-                     "$unset": {"_restocked_by_autocancel": ""}})
-                logger.info(f"[reconcile] restock sonrası tekrar-ödendi → stok yeniden düşüldü order_id={order_id} moves={len(_moves or [])}")
-        except Exception as _rse:
-            logger.warning(f"[reconcile] tekrar-stok-düşümü hatası order_id={order_id}: {_rse}")
+                    {"$set": {"_restocked_by_autocancel": True},
+                     "$unset": {"_redecremented_after_reconcile": ""}})
+                logger.warning(f"[reconcile] tekrar-stok-düşümü hatası order_id={order_id}: {_rse}")
     else:
         # Y1: ZATEN ödenmiş bir siparişi 'failed'a düşürme (replay / sahte failure koruması).
         update["payment_status"] = "failed"
