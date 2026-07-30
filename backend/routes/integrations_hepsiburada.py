@@ -3363,6 +3363,62 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
         + (" · stok düşümü: AÇIK" if decrement_stock else " · stok düşümü: kapalı"))
 
 
+@router.post("/hepsiburada/_diag/cargo_backfill2907")
+async def _diag_hb_cargo_backfill2907(payload: dict = Body(default=None)):
+    """GEÇİCİ (key-korumalı) — shipped/delivered paketlerden kargo (firma+takip no) çekip
+    geçmiş HB siparişlerine yazar + bir örnek satır anahtarlarını döndürür (doğrulama).
+    Kullanımdan sonra KALDIRILACAK. payload:{key, days}"""
+    if (payload or {}).get("key") != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    import asyncio as _aio
+    from datetime import datetime, timezone, timedelta
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        return {"ok": False, "error": err}
+    days = int((payload or {}).get("days") or 45)
+    now_ = datetime.now(timezone.utc)
+    sample_keys = None
+    matched = updated = pkgs = 0
+    for label, fn in (("shipped", client.get_packages_shipped), ("delivered", client.get_packages_delivered)):
+        for d in range(days):
+            end = now_ - timedelta(days=d); begin = end - timedelta(days=1)
+            b, e = begin.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
+            off = 0
+            for _pg in range(6):
+                try:
+                    resp = await _aio.to_thread(fn, off, 50, b, e)
+                except Exception:
+                    break
+                rows_ = _hb_normalize_lines(resp) or []
+                if not rows_:
+                    break
+                for _r in rows_:
+                    if not isinstance(_r, dict):
+                        continue
+                    pkgs += 1
+                    if sample_keys is None:
+                        sample_keys = sorted([str(k) for k in _r.keys()])
+                    _ns = _r.get("OrderNumbers") if isinstance(_r.get("OrderNumbers"), list) else []
+                    _n1 = _deep_find(_r, _ORDNO_KEYS)
+                    _all = [str(x or "").strip() for x in ([_n1] + _ns) if str(x or "").strip()]
+                    _no = str(_hb_g(_r, "cargoTrackingNumber", "trackingNumber", "cargoTrackingCode", "packageBarcode", "barcode") or "")
+                    _nm = str(_hb_g(_r, "cargoCompany", "cargoProviderName", "cargoCompanyName", "cargoCompanyShortName", "shippingCompany") or "")
+                    if (_no or _nm) and _all:
+                        _cset = {}
+                        if _no: _cset["cargo_tracking_number"] = _no
+                        if _nm: _cset["cargo_provider_name"] = _nm
+                        _hbn = list({*_all, *[(x if x.upper().startswith("HB") else f"HB{x}") for x in _all]})
+                        r = await db.orders.update_many({"order_number": {"$in": _hbn}, "platform": "hepsiburada"}, {"$set": _cset})
+                        matched += 1; updated += r.modified_count
+                if len(rows_) < 50:
+                    break
+                off += 50
+            await _aio.sleep(0.15)
+    return {"ok": True, "packages_seen": pkgs, "cargo_rows": matched, "orders_updated": updated,
+            "sample_package_keys": sample_keys}
+
+
 @router.post("/hepsiburada/backfill")
 async def hb_backfill(payload: Optional[dict] = Body(default=None),
                       current_user: dict = Depends(require_admin)):
