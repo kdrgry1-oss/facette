@@ -3197,7 +3197,7 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
 
     # (2) Paketler + (3) İptaller — 24 saatlik dilimler (bugünden geriye)
     now_ = datetime.now(timezone.utc)
-    pkg_imp = pkg_upd = cn_imp = cn_upd = 0
+    pkg_imp = pkg_upd = cn_imp = cn_upd = cargo_upd = 0
     detail_numbers: set = set()  # shipped/delivered künyelerinden toplanan sipariş noları
 
     def _flatten_pkg_lines(rows):
@@ -3300,10 +3300,29 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
                                 continue
                             _ns = _r.get("OrderNumbers") if isinstance(_r.get("OrderNumbers"), list) else []
                             _n1 = _deep_find(_r, _ORDNO_KEYS)
-                            for _n in ([_n1] + _ns):
-                                _n = str(_n or "").strip()
-                                if _n:
-                                    detail_numbers.add(_n)
+                            _all_ns = [str(x or "").strip() for x in ([_n1] + _ns) if str(x or "").strip()]
+                            for _n in _all_ns:
+                                detail_numbers.add(_n)
+                            # KARGO (geçmiş siparişlerde de göster): shipped/delivered paket satırı
+                            # kargo firması + takip no taşır → eşleşen sipariş kayıtlarına yaz.
+                            _cg_no = str(_hb_g(_r, "cargoTrackingNumber", "trackingNumber", "cargoTrackingCode",
+                                               "packageBarcode", "barcode") or "")
+                            _cg_nm = str(_hb_g(_r, "cargoCompany", "cargoProviderName", "cargoCompanyName",
+                                               "cargoCompanyShortName", "shippingCompany") or "")
+                            if (_cg_no or _cg_nm) and _all_ns:
+                                _cset = {}
+                                if _cg_no:
+                                    _cset["cargo_tracking_number"] = _cg_no
+                                if _cg_nm:
+                                    _cset["cargo_provider_name"] = _cg_nm
+                                _hbnums = list({*(_all_ns), *[(x if x.upper().startswith("HB") else f"HB{x}") for x in _all_ns]})
+                                try:
+                                    await db.orders.update_many(
+                                        {"order_number": {"$in": _hbnums}, "platform": "hepsiburada"},
+                                        {"$set": _cset})
+                                    cargo_upd += 1
+                                except Exception:
+                                    pass
                     else:
                         lines = _flatten_pkg_lines(rows_)
                         i, u = await _upsert_groups(_hb_orders_from_response(lines))
@@ -3340,7 +3359,7 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
     await log_integration_event(
         "hepsiburada", "backfill", "job", "", "success",
         f"HB {days} gün backfill bitti — açık: +{tot_imp}/{tot_upd} · paket: +{pkg_imp}/{pkg_upd} · "
-        f"iptal: +{cn_imp}/{cn_upd} · iade: {claims.get('synced', 0)}"
+        f"iptal: +{cn_imp}/{cn_upd} · iade: {claims.get('synced', 0)} · kargo yazılan: {cargo_upd}"
         + (" · stok düşümü: AÇIK" if decrement_stock else " · stok düşümü: kapalı"))
 
 
