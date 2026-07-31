@@ -7144,11 +7144,19 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
     paid_total = _charged if _charged > base_total + 0.01 else base_total
 
     if returned_net_override not in (None, ""):
-        # KISMİ İADE → panelde seçili kalemlerin net toplamı.
-        returned_net = _round2(returned_net_override)
+        # KISMİ İADE → panelde seçili kalemlerin net toplamı (ürün tutarı).
+        returned_net_products = _round2(returned_net_override)
         orig_cart = _round2(order.get("subtotal") or order.get("total") or 0)
-        kept_cart = _round2(max(0.0, orig_cart - returned_net))
+        kept_cart = _round2(max(0.0, orig_cart - returned_net_products))
         is_partial = kept_cart > 0.01
+        # VADE FARKI (kullanıcı isteği): müşteri taksitli ödediyse iade edilen ürünlerin
+        # vade farkı PAYINI da geri almalı (yalnız ürün tutarı değil). Toplam vade farkını
+        # (_vf) iade edilen ürün oranıyla orantılı dağıt → iade tutarına EKLE. Tam iadede
+        # zaten paidPrice (vade farkı dahil) baz alındığından burada değil, yalnız kısmide eklenir.
+        vade_farki_refunded = 0.0
+        if _vf > 0.005 and orig_cart > 0.005:
+            vade_farki_refunded = _round2(_vf * (returned_net_products / orig_cart))
+        returned_net = _round2(returned_net_products + vade_farki_refunded)
     else:
         # TAM İADE → müşteriye ödediği tutar iade edilir (ürün + ödenmiş kargo AYRI kalemler;
         # kusur müşterideyse kargo düşülür). Kargo AYRI gösterilir (Kadir: 'kargoyu ayrı göster').
@@ -7157,6 +7165,8 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
         orig_cart = returned_net
         kept_cart = 0.0
         is_partial = False  # tam iadede kalan 0 → kampanya (ücretsiz-kargo) mahsubu uygulanmaz
+        # Tam iadede vade farkının TAMAMI zaten returned_net (paidPrice) içinde iade edilir.
+        vade_farki_refunded = round(_vf, 2)
 
     # --- Ücretsiz-kargo iptali (Karar #2): kısmi iade sonrası KALAN sepet, vitrindeki
     #     ücretsiz-kargo eşiğinin altına düşerse — ve SADECE müşteri kusurunda —
@@ -7205,7 +7215,9 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
         "return_cargo_fee": return_cargo_fee,
         "auto_refund": auto_refund,
         "vade_farki": round(_vf, 2),
+        "vade_farki_refunded": round(vade_farki_refunded, 2),  # bu iadede geri verilen vade farkı payı
         "installment": int(_inst or 1),
+        "returned_products_net": _round2(returned_net_override) if returned_net_override not in (None, "") else returned_net,
     }
 
 

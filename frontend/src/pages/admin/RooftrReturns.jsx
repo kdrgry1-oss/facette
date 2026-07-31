@@ -447,10 +447,11 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       // hesap SADECE tiklenen kalemlere göre olur (Kadir talebi).
       const _base = Number(r.subtotal) || 0;
       const _dr = (_base > 0 && Number(r.discount) > 0) ? Math.min(1, Number(r.discount) / _base) : 0;
-      // TAKSİT vade farkı payı da eklenir (net/total) → refund = gider pusulası neti (İrem Kılıç 2488,67).
-      const _vadeRatio = (Number(r.vade_farki) > 0 && Number(r.total) > 0) ? Number(r.vade_farki) / Number(r.total) : 0;
+      // VADE FARKI burada EKLENMEZ — backend (_compute_refund_breakdown) iade edilen ürün
+      // oranında orantılı vade farkını TEK KAYNAKTAN ekler (çift sayım önlenir). Buradan yalnız
+      // ürün neti gönderilir; initial-approve akışıyla (satır ~349) birebir aynı formül.
       const selAmount = isPartialSelection ? Math.round(selIdx.reduce(
-        (a, i) => a + (Number(r.items[i].qty) || 1) * (Number(r.items[i].price) || 0) * (1 - _dr) * (1 + _vadeRatio), 0
+        (a, i) => a + (Number(r.items[i].qty) || 1) * (Number(r.items[i].price) || 0) * (1 - _dr), 0
       ) * 100) / 100 : null;
       const selIdents = selIdx.map((i) => r.items[i]).filter(Boolean)
         .map((it) => ({ barcode: it.barcode || "", name: it.name || "", size: it.size || "", color: it.color || "" }));
