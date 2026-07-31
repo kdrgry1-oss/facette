@@ -3309,8 +3309,12 @@ async def _diag_invoice_fix2907(key: str = Query(...), order_number: str = Query
             from dogan_client import DoganClient
             from fastapi.concurrency import run_in_threadpool
             cli = DoganClient(username=ds["username"], password=ds["password"], is_test=ds.get("is_test", True))
-            st = await run_in_threadpool(cli.get_invoice_status, uuid_)
-            info["dogan_status"] = st
+            # Doğan giden kutusunda belge var mı? (varsa fatura GERÇEKTEN kesilmiş)
+            pdf = await run_in_threadpool(cli.get_efatura_pdf, uuid_, "")
+            info["dogan_document_found"] = bool(pdf.get("success"))
+            info["dogan_doc_kind"] = pdf.get("kind")
+            info["dogan_doc_error"] = pdf.get("error")
+            info["dogan_ops"] = pdf.get("available_operations")
         except Exception as e:
             info["dogan_status"] = {"error": str(e)}
         return info
