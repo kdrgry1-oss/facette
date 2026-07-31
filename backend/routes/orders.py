@@ -3377,7 +3377,17 @@ async def _diag_invoice2907(key: str = Query(...), order_number: str = Query("")
         nums.sort()
         issued[pf] = {"count": len(nums), "min": (nums[0] if nums else None),
                       "max": (nums[-1] if nums else None), "son8": nums[-8:]}
-    return {"order": o, "dogan_settings": ds_safe, "counters": counters, "issued_this_year": issued}
+    # Sistemik teşhis: son e-Fatura hataları + gönderici alias ayarı
+    recent_errors = []
+    async for _e in db.orders.find(
+            {"invoice_last_error": {"$regex": "e-Fatura", "$options": "i"}},
+            {"_id": 0, "order_number": 1, "invoice_last_error": 1, "invoice_last_error_at": 1}
+    ).sort("invoice_last_error_at", -1).limit(8):
+        recent_errors.append(_e)
+    ds_safe["sender_unit_alias"] = ds.get("sender_unit_alias") or "(YOK → default: urn:mail:defaultgb@facette.com)"
+    ds_safe["sender_alias"] = ds.get("sender_alias") or "(YOK)"
+    return {"order": o, "dogan_settings": ds_safe, "counters": counters,
+            "issued_this_year": issued, "recent_efatura_errors": recent_errors}
 
 
 @router.post("/{order_id}/reset-invoice")
