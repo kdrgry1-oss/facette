@@ -3285,57 +3285,6 @@ async def mark_order_invoiced(
 #
 # FRONTEND: Orders.jsx handleGenerateInvoice + handleBulkGenerateInvoice.
 # ---------------------------------------------------------------------------
-@router.post("/_diag/invoice_fix2907")
-async def _diag_invoice_fix2907(key: str = Query(...), order_number: str = Query(""),
-                                mode: str = Query("status")):
-    """GEÇİCİ, key-gated. mode=status → siparişin faturasının Doğan'daki durumunu sorar
-    (get_invoice_status). mode=reissue38 → panel kaydını sıfırlar + DOĞRU çağrıyla (invoice_type
-    string) e-Fatura'yı YENİDEN keser (gap-fill → 38). reissue YALNIZ Doğan'da fatura yoksa
-    çağrılmalı (çift fatura riski). Kullanımdan sonra kaldırılacak."""
-    if key != "fcttdiag2907":
-        raise HTTPException(status_code=403, detail="forbidden")
-    o = await db.orders.find_one({"order_number": order_number}, {"_id": 0})
-    if not o:
-        return {"error": "sipariş yok"}
-    ds = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
-    if mode == "status":
-        uuid_ = o.get("invoice_uuid") or ""
-        info = {"invoice_number": o.get("invoice_number"), "invoice_uuid": uuid_,
-                "invoice_issued": o.get("invoice_issued"), "invoice_dogan_id": o.get("invoice_dogan_id")}
-        if not uuid_ or not (ds.get("username") and ds.get("password")):
-            info["dogan_status"] = "sorgulanamadı (uuid veya ayar yok)"
-            return info
-        try:
-            from dogan_client import DoganClient
-            from fastapi.concurrency import run_in_threadpool
-            cli = DoganClient(username=ds["username"], password=ds["password"], is_test=ds.get("is_test", True))
-            # Doğan giden kutusunda belge var mı? (varsa fatura GERÇEKTEN kesilmiş)
-            pdf = await run_in_threadpool(cli.get_efatura_pdf, uuid_, "")
-            info["dogan_document_found"] = bool(pdf.get("success"))
-            info["dogan_doc_kind"] = pdf.get("kind")
-            info["dogan_doc_error"] = pdf.get("error")
-            info["dogan_ops"] = pdf.get("available_operations")
-        except Exception as e:
-            info["dogan_status"] = {"error": str(e)}
-        return info
-    if mode == "reissue38":
-        await db.orders.update_one({"id": o["id"]}, {
-            "$set": {"invoice_issued": False},
-            "$unset": {"invoice_number": "", "invoice_uuid": "", "invoice_type": "",
-                       "invoice_provider": "", "invoice_provider_response": "", "invoice_intl_txn_id": "",
-                       "invoice_dogan_id": "", "invoice_pdf_url": "", "invoice_issued_at": "",
-                       "invoice_issued_by": "", "invoice_last_error": "", "invoice_in_progress": ""}})
-        try:
-            res = await create_invoice_for_order(o["id"], "e-fatura", {"email": "diag2907@facette"})
-            return {"reissued": True, "result": res}
-        except HTTPException as he:
-            return {"reissued": False, "http_status": he.status_code, "detail": str(he.detail)}
-        except Exception as e:
-            import traceback
-            return {"reissued": False, "exception": str(e), "trace": traceback.format_exc()[-1500:]}
-    return {"error": "bilinmeyen mode"}
-
-
 @router.post("/{order_id}/reset-invoice")
 async def reset_invoice_for_order(order_id: str, current_user: dict = Depends(require_admin)):
     """Sipariş fatura kaydını panelde sıfırlar (yeniden kesilebilsin diye).
