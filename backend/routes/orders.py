@@ -3285,6 +3285,63 @@ async def mark_order_invoiced(
 #
 # FRONTEND: Orders.jsx handleGenerateInvoice + handleBulkGenerateInvoice.
 # ---------------------------------------------------------------------------
+@router.post("/_diag/invoice_diag2907")
+async def _diag_invoice2907(key: str = Query(...), order_number: str = Query("")):
+    """GEÇİCİ, key-gated, SALT-OKUNUR e-fatura teşhisi (KALDIRILACAK).
+    Verilen siparişin fatura durumu + son hata + sayaçlar + Doğan ayarları (maskeli) +
+    bu yıl kesilen FCE/FCT numaraları. 'Neden 38 kesilmiyor' sorusunu kanıtla yanıtlar."""
+    if key != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    o = {}
+    if order_number:
+        o = await db.orders.find_one(
+            {"order_number": order_number},
+            {"_id": 0, "order_number": 1, "platform": 1, "status": 1, "total": 1,
+             "invoice_issued": 1, "invoice_number": 1, "invoice_type": 1,
+             "invoice_last_error": 1, "invoice_provider": 1, "invoice_issued_at": 1,
+             "billing_address": 1, "billing_info": 1, "trendyol_identity_number": 1,
+             "is_micro_export": 1}) or {}
+        # PII maskesi: kimlik numarasını kısalt
+        for _p in ("billing_address", "billing_info"):
+            b = o.get(_p) or {}
+            for _k in ("tax_number", "tax_no", "vkn"):
+                if b.get(_k):
+                    b[_k] = f"...{str(b[_k])[-4:]} (var, {len(str(b[_k]))} hane)"
+        if o.get("trendyol_identity_number"):
+            _t = str(o["trendyol_identity_number"])
+            o["trendyol_identity_number"] = f"...{_t[-4:]} ({len(_t)} hane)"
+    ds = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+    ds_safe = {
+        "enabled": ds.get("enabled"), "is_test": ds.get("is_test"),
+        "has_username": bool(ds.get("username")), "has_password": bool(ds.get("password")),
+        "earchive_prefix": ds.get("earchive_prefix"), "einvoice_prefix": ds.get("einvoice_prefix"),
+        "earchive_start_number": ds.get("earchive_start_number"), "earchive_start_year": ds.get("earchive_start_year"),
+        "einvoice_start_number": ds.get("einvoice_start_number"), "einvoice_start_year": ds.get("einvoice_start_year"),
+    }
+    year = datetime.now(timezone.utc).strftime("%Y")
+    counters = {}
+    for pf in ("FCE", "FCT", ds.get("earchive_prefix") or "", ds.get("einvoice_prefix") or ""):
+        if not pf:
+            continue
+        c = await db.counters.find_one({"_id": f"invoice_seq_{pf}{year}"}, {"_id": 0, "seq": 1})
+        counters[f"invoice_seq_{pf}{year}"] = (c or {}).get("seq")
+    # Bu yıl kesilmiş numaralar (prefix bazında min/max/adet + son 8)
+    issued = {}
+    for pf in set([p for p in ("FCE", "FCT", ds.get("earchive_prefix"), ds.get("einvoice_prefix")) if p]):
+        nums = []
+        async for _u in db.orders.find(
+                {"invoice_issued": True, "invoice_number": {"$regex": f"^{pf}{year}"}},
+                {"_id": 0, "invoice_number": 1}):
+            try:
+                nums.append(int(str(_u.get("invoice_number"))[len(pf) + 4:]))
+            except Exception:
+                pass
+        nums.sort()
+        issued[pf] = {"count": len(nums), "min": (nums[0] if nums else None),
+                      "max": (nums[-1] if nums else None), "son8": nums[-8:]}
+    return {"order": o, "dogan_settings": ds_safe, "counters": counters, "issued_this_year": issued}
+
+
 @router.post("/{order_id}/reset-invoice")
 async def reset_invoice_for_order(order_id: str, current_user: dict = Depends(require_admin)):
     """Sipariş fatura kaydını panelde sıfırlar (yeniden kesilebilsin diye).
