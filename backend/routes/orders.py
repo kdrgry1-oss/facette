@@ -3285,6 +3285,44 @@ async def mark_order_invoiced(
 #
 # FRONTEND: Orders.jsx handleGenerateInvoice + handleBulkGenerateInvoice.
 # ---------------------------------------------------------------------------
+@router.post("/_diag/invoice_checkuser2907")
+async def _diag_invoice_checkuser2907(key: str = Query(...), order_number: str = Query("")):
+    """GEÇİCİ, key-gated, SALT-OKUNUR. Siparişin müşteri VKN/TCKN'sini Doğan'a CheckUser ile
+    sorar → e-Fatura mükellefi mi, alias var mı. VKN'yi DÖNDÜRMEZ (yalnız son 4 + sonuç)."""
+    if key != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    o = await db.orders.find_one({"order_number": order_number}, {"_id": 0}) or {}
+    if not o:
+        return {"error": "sipariş yok"}
+    bill = dict(o.get("billing_address") or {})
+    binfo = o.get("billing_info") or {}
+    for _bk in ("tax_number", "tax_office", "company_name"):
+        if not bill.get(_bk) and binfo.get(_bk):
+            bill[_bk] = binfo.get(_bk)
+    vkn = (bill.get("tax_number") or bill.get("tax_no") or bill.get("vkn") or "").strip().replace(" ", "")
+    if not vkn:
+        vkn = str(o.get("trendyol_identity_number") or "").strip().replace(" ", "")
+    if not vkn:
+        return {"error": "VKN/TCKN yok"}
+    ds = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+    if not (ds.get("username") and ds.get("password")):
+        return {"error": "Doğan ayarı eksik"}
+    try:
+        from dogan_client import DoganClient
+        from fastapi.concurrency import run_in_threadpool
+        cli = DoganClient(username=ds["username"], password=ds["password"], is_test=ds.get("is_test", True))
+        chk = await run_in_threadpool(cli.check_user, vkn)
+    except Exception as e:
+        return {"vkn_last4": vkn[-4:], "vkn_len": len(vkn), "error": f"CheckUser hata: {e}"}
+    return {
+        "vkn_last4": vkn[-4:], "vkn_len": len(vkn),
+        "is_efatura_mukellef": chk.get("is_efatura"),
+        "has_invoice_alias": bool(chk.get("invoice_alias")),
+        "raw_keys": list(chk.keys()) if isinstance(chk, dict) else str(type(chk)),
+        "message": chk.get("message") if isinstance(chk, dict) else "",
+    }
+
+
 @router.post("/_diag/invoice_diag2907")
 async def _diag_invoice2907(key: str = Query(...), order_number: str = Query("")):
     """GEÇİCİ, key-gated, SALT-OKUNUR e-fatura teşhisi (KALDIRILACAK).
