@@ -3285,6 +3285,29 @@ async def mark_order_invoiced(
 #
 # FRONTEND: Orders.jsx handleGenerateInvoice + handleBulkGenerateInvoice.
 # ---------------------------------------------------------------------------
+@router.post("/_diag/invoice_try2907")
+async def _diag_invoice_try2907(key: str = Query(...), order_number: str = Query(""),
+                                invoice_type: str = Query("e-fatura")):
+    """GEÇİCİ, key-gated. Siparişe GERÇEK fatura oluşturma akışını çalıştırır (create-invoice
+    ile aynı). Başarılıysa fatura kesilir; başarısızsa TAM Doğan hatasını döndürür (teşhis)."""
+    if key != "fcttdiag2907":
+        raise HTTPException(status_code=403, detail="forbidden")
+    o = await db.orders.find_one({"order_number": order_number}, {"_id": 0, "id": 1, "invoice_issued": 1})
+    if not o:
+        return {"error": "sipariş yok"}
+    if o.get("invoice_issued"):
+        return {"error": "zaten faturalı — reset gerekir"}
+    try:
+        res = await create_invoice_for_order(o["id"], {"invoice_type": invoice_type},
+                                             {"email": "diag2907@facette"})
+        return {"success": True, "result": res}
+    except HTTPException as he:
+        return {"success": False, "http_status": he.status_code, "detail": str(he.detail)}
+    except Exception as e:
+        import traceback
+        return {"success": False, "exception": str(e), "trace": traceback.format_exc()[-1500:]}
+
+
 @router.post("/_diag/invoice_checkuser2907")
 async def _diag_invoice_checkuser2907(key: str = Query(...), order_number: str = Query("")):
     """GEÇİCİ, key-gated, SALT-OKUNUR. Siparişin müşteri VKN/TCKN'sini Doğan'a CheckUser ile
