@@ -3680,6 +3680,16 @@ async def create_invoice_for_order(
     issue_date = now.strftime("%Y-%m-%d")
     issue_time = now.strftime("%H:%M:%S")
 
+    # HATA DÜZELTME (e-Fatura çökmesi): _is_mp ve _fs_invoice_waived e-Fatura dalında da
+    # kullanılıyor ama YALNIZ e-Arşiv dalında hesaplanıyordu. invoice_type doğrudan/auto ile
+    # "e-fatura" olunca e-Arşiv dalı çalışmaz → UnboundLocalError('_is_mp') → e-Fatura HİÇ
+    # kesilemiyordu. Her iki daldan ÖNCE güvenli varsayılan tanımlanır; e-Arşiv dalı (site
+    # siparişinde) _fs_invoice_waived'ı gerekiyorsa yeniden hesaplar. Pazaryeri e-Fatura'da
+    # zaten kargo kalemi/iskonto olmaz → _fs_invoice_waived=0.0 doğru.
+    _is_mp = (str(order.get("platform") or order.get("marketplace") or "").lower()
+              in ("trendyol", "hepsiburada", "temu"))
+    _fs_invoice_waived = 0.0
+
     # Gerçek Doğan e-Arşiv kesimi
     dogan_result = None
     if dogan_active and invoice_type == "e-arsiv":
