@@ -68,6 +68,7 @@ const statusOptions = [
   { value: "undelivered", label: "Teslim Edilemedi (Şubede)", class: "status-undelivered" },
   { value: "return_requested", label: "İade Talebi Oluşturuldu", class: "status-undelivered" },
   { value: "return_in_transit", label: "İade Kargoda", class: "status-shipped" },
+  { value: "partial_refunded", label: "Kısmi İade", class: "status-undelivered" },
   { value: "returned", label: "İade Tamamlandı", class: "status-cancelled" },
   { value: "refunded", label: "İade Bedeli Ödendi", class: "status-cancelled" },
   { value: "cancel_requested", label: "İptal Talebi Alındı (İade Bekliyor)", class: "status-pending" },
@@ -2024,6 +2025,77 @@ export default function AdminOrders({ unpaidView = false }) {
                   })}
                 </div>
               </div>
+
+              {/* İADE DÖKÜMÜ — hangi kalem iade edildi / müşteride kaldı (ayrı tutarlarla).
+                  Backend get_order.return_breakdown'dan gelir; yalnız iade olan siparişlerde. */}
+              {!editMode && selectedOrder?.return_breakdown && (
+                <div className="border rounded border-amber-300 bg-amber-50/40">
+                  <h3 className="font-medium p-4 border-b border-amber-200 flex items-center gap-2">
+                    <span>İade Dökümü</span>
+                    {selectedOrder.return_breakdown.is_partial && (
+                      <span className="text-xs bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-medium">Kısmi İade</span>
+                    )}
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-amber-200">
+                    {/* İade edilenler */}
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm font-semibold text-[#8b1e3f]">İade Edilen</p>
+                        <p className="text-sm font-semibold text-[#8b1e3f]">{Number(selectedOrder.return_breakdown.returned_total || 0).toFixed(2)} TL</p>
+                      </div>
+                      {(selectedOrder.return_breakdown.returned_items || []).length === 0 ? (
+                        <p className="text-xs text-gray-400">—</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {selectedOrder.return_breakdown.returned_items.map((it, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              {it.image && <img src={it.image} alt="" className="w-10 h-12 object-cover bg-gray-100 rounded shrink-0" />}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{it.name}</p>
+                                <p className="text-xs text-gray-500">
+                                  {it.size ? `Beden: ${it.size} · ` : ""}{it.quantity} adet
+                                </p>
+                              </div>
+                              <p className="text-sm font-medium text-[#8b1e3f] whitespace-nowrap">{Number(it.amount || 0).toFixed(2)} TL</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {selectedOrder.return_breakdown.refund_amount != null && (
+                        <div className="mt-3 pt-2 border-t border-amber-200 flex justify-between text-sm">
+                          <span className="text-gray-600">Müşteriye iade edilen</span>
+                          <span className="font-semibold">{Number(selectedOrder.return_breakdown.refund_amount).toFixed(2)} TL</span>
+                        </div>
+                      )}
+                    </div>
+                    {/* Müşteride kalanlar */}
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm font-semibold text-green-700">Müşteride Kalan</p>
+                        <p className="text-sm font-semibold text-green-700">{Number(selectedOrder.return_breakdown.kept_total || 0).toFixed(2)} TL</p>
+                      </div>
+                      {(selectedOrder.return_breakdown.kept_items || []).length === 0 ? (
+                        <p className="text-xs text-gray-400">Tüm sipariş iade edildi</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {selectedOrder.return_breakdown.kept_items.map((it, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              {it.image && <img src={it.image} alt="" className="w-10 h-12 object-cover bg-gray-100 rounded shrink-0" />}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{it.name}</p>
+                                <p className="text-xs text-gray-500">
+                                  {it.size ? `Beden: ${it.size} · ` : ""}{it.quantity} adet
+                                </p>
+                              </div>
+                              <p className="text-sm font-medium text-green-700 whitespace-nowrap">{Number(it.amount || 0).toFixed(2)} TL</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Müşteri Yolculuğu / Attribution Hunisi — düzenleme modunda gizle */}
               {!editMode && selectedOrder?.id && (

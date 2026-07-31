@@ -793,6 +793,14 @@ async def get_order(
             order.pop(_k, None)
 
     order["items"] = await _enrich_items_with_products(order.get("items") or [])
+    # Kısmi/tam iade dökümü: hangi kalem iade edildi / müşteride kaldı (ayrı tutarlarla).
+    # Yalnız iade kaydı olan siparişlerde alan eklenir; hata olsa bile detay bozulmasın.
+    try:
+        _rb = await _order_return_breakdown(order)
+        if _rb:
+            order["return_breakdown"] = _rb
+    except Exception:
+        pass
     return order
 
 
@@ -7218,6 +7226,111 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
         "vade_farki_refunded": round(vade_farki_refunded, 2),  # bu iadede geri verilen vade farkı payı
         "installment": int(_inst or 1),
         "returned_products_net": _round2(returned_net_override) if returned_net_override not in (None, "") else returned_net,
+    }
+
+
+async def _order_return_breakdown(order: dict):
+    """Sipariş DETAYI için: hangi kalem İADE EDİLDİ (kaç adet, ne tutar) / hangi kalem
+    MÜŞTERİDE KALDI (kaç adet, ne tutar) — ayrı ayrı. Kaynak: customer_returns kayıtları
+    (onaylı iade kalemleri approved_items öncelikli, yoksa items). Adetler sipariş
+    kalemleriyle barkod → ad+beden+renk sırasıyla eşleştirilir. Hiç iade yoksa None döner
+    (get_order bu alanı yalnız iade olan siparişlerde ekler).
+
+    Tutarlar NET birim fiyat (item.price, kalem indirimi düşülmüş) üzerinden hesaplanır;
+    vade farkı/kargo dahil edilmez (onlar refund_amount'ta zaten görünür). refund_amount =
+    onaylı iadelerde müşteriye geri ödenen toplam (varsa)."""
+    oid = order.get("id")
+    order_items = order.get("items") or []
+    if not oid or not order_items:
+        return None
+
+    def _inorm(v):
+        return " ".join(str(v or "").strip().lower().split())
+
+    per_item = []
+    for it in order_items:
+        q = int(it.get("quantity", 1) or 1)
+        unit = _round2(it.get("price") or it.get("unit_price") or 0)
+        per_item.append({
+            "name": it.get("name") or it.get("product_name") or it.get("productName") or "Ürün",
+            "size": it.get("size", "") or "", "color": it.get("color", "") or "",
+            "barcode": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+            "image": it.get("image") or "",
+            "total_qty": q, "returned_qty": 0, "unit_price": unit,
+            "_bar": _inorm(it.get("barcode") or it.get("product_id") or it.get("sku")),
+            "_key": (_inorm(it.get("name") or it.get("product_name") or it.get("productName")),
+                     _inorm(it.get("size")), _inorm(it.get("color"))),
+        })
+
+    total_refund_amount = 0.0
+    return_ids = []
+    found_return = False
+    query = {"$or": [{"order_id": oid}]}
+    if order.get("order_number"):
+        query["$or"].append({"order_number": order.get("order_number")})
+    async for rec in db.customer_returns.find(query, {"_id": 0}):
+        st = (rec.get("status") or "").lower()
+        # İPTAL/RED edilmiş iade talepleri gerçekleşmiş iade DEĞİLDİR — sayma.
+        if st in ("cancelled", "rejected", "return_rejected", "canceled"):
+            continue
+        ret_items = rec.get("approved_items") or rec.get("items") or []
+        if not ret_items:
+            continue
+        found_return = True
+        return_ids.append(rec.get("id"))
+        try:
+            ra = rec.get("refund_amount")
+            if ra not in (None, ""):
+                total_refund_amount += float(ra)
+        except Exception:
+            pass
+        for ri in ret_items:
+            r_bar = _inorm(ri.get("barcode") or ri.get("product_id") or ri.get("sku"))
+            r_key = (_inorm(ri.get("name") or ri.get("product_name")),
+                     _inorm(ri.get("size")), _inorm(ri.get("color")))
+            rq = int(ri.get("quantity", 1) or 1)
+            target = None
+            for pi in per_item:
+                if r_bar and pi["_bar"] and r_bar == pi["_bar"] and pi["returned_qty"] < pi["total_qty"]:
+                    target = pi
+                    break
+            if target is None:
+                for pi in per_item:
+                    if r_key[0] and r_key == pi["_key"] and pi["returned_qty"] < pi["total_qty"]:
+                        target = pi
+                        break
+            if target is None:
+                continue
+            target["returned_qty"] = min(target["total_qty"], target["returned_qty"] + rq)
+
+    if not found_return:
+        return None
+
+    returned_items, kept_items = [], []
+    returned_total = kept_total = 0.0
+    for pi in per_item:
+        rq = pi["returned_qty"]
+        kq = max(0, pi["total_qty"] - rq)
+        base = {"name": pi["name"], "size": pi["size"], "color": pi["color"],
+                "barcode": pi["barcode"], "image": pi["image"], "unit_price": pi["unit_price"]}
+        if rq > 0:
+            amt = _round2(rq * pi["unit_price"])
+            returned_total += amt
+            returned_items.append({**base, "quantity": rq, "amount": amt})
+        if kq > 0:
+            amt = _round2(kq * pi["unit_price"])
+            kept_total += amt
+            kept_items.append({**base, "quantity": kq, "amount": amt})
+
+    is_partial = bool(returned_items) and bool(kept_items)
+    return {
+        "returned_items": returned_items,
+        "kept_items": kept_items,
+        "returned_total": _round2(returned_total),
+        "kept_total": _round2(kept_total),
+        "refund_amount": _round2(total_refund_amount) if total_refund_amount > 0.005 else None,
+        "is_partial": is_partial,
+        "return_ids": return_ids,
     }
 
 
