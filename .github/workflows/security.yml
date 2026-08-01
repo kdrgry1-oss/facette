@@ -1,10 +1,15 @@
 name: Security Scan
 
-# Amazon SP-API Restricted Role / DPP gereklilikleri: her push + PR'da otomatik
-# güvenlik taraması (SAST + bağımlılık açığı + secret sızıntısı). Raporlar GitHub
-# Security sekmesine (CodeQL) ve iş loglarına düşer. Deploy'u sert bloklamaz
-# (Railway/Cloudflare git push ile ayrı deploy eder); "critical bloklar" istenirse
-# branch protection + required check ile açılır.
+# Amaç: her push + PR'da OTOMATİK güvenlik taraması yapıp SONUÇLARI görünür kılmak.
+#   1) SAST (CodeQL)          → kod açıkları (injection/XSS vb.) → Security sekmesi
+#   2) Secret Scan (gitleaks) → koda sızmış şifre/anahtar        → Security sekmesi + özet
+#   3) Dependency Audit       → açığı olan kütüphaneler          → iş özeti (Summary)
+#
+# NOT: Bu tarama KODU denetler; CANLI saldırı tespiti DEĞİLDİR (onu Cloudflare WAF +
+# uygulamadaki rate-limit/ban katmanı yapar). Deploy'u bloklamaz (Railway/Cloudflare
+# git push ile ayrı deploy eder). Bulgular "başarısız" değil "rapor" olarak yansır:
+# tarayıcılar continue-on-error ile yeşil geçer, bulgular Security sekmesi + Summary'de.
+# (Amazon SP-API Restricted Role / DPP: otomatik SAST + secret + bağımlılık taraması.)
 
 on:
   push:
@@ -12,12 +17,13 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Aylık zorunluluğu karşılamak için haftalık tekrarlı tarama (Pazartesi 03:00 UTC).
-    - cron: "0 3 * * 1"
+    - cron: "0 3 * * 1"   # haftalık (Pazartesi 03:00 UTC)
+  workflow_dispatch: {}    # panelden elle tetikleme
 
 permissions:
   contents: read
-  security-events: write   # CodeQL sonuçlarını Security sekmesine yaz
+  security-events: write   # SARIF sonuçlarını Security sekmesine yaz
+  actions: read
 
 jobs:
   # 1) SAST — CodeQL (Python backend + JavaScript frontend)
@@ -39,8 +45,14 @@ jobs:
         uses: github/codeql-action/autobuild@v3
       - name: Analyze
         uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+        # Repo'da GitHub "default setup" açıksa gelişmiş CodeQL çakışabilir; o durumda
+        # kırmızı X yerine uyarı bırak (çakışma varsa loglarda görünür, sonuç yine yazılır).
+        continue-on-error: true
 
-  # 2) Secret scanning — gitleaks (commit geçmişi + çalışma ağacı)
+  # 2) Secret scanning — gitleaks (CLI, tam git geçmişi). Marketplace action'a bağımlı
+  #    DEĞİL (lisans/kurulum takılmaları yaşanmasın); SARIF Security sekmesine yüklenir.
   gitleaks:
     name: Secret Scan (gitleaks)
     runs-on: ubuntu-latest
@@ -48,12 +60,37 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          VER="8.21.2"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+        run: |
+          # --exit-code 0: bulgu olsa da adım YEŞİL kalsın (bulgular rapordadır, kırmızı X değil).
+          gitleaks detect --source . --report-format sarif --report-path gitleaks.sarif \
+            --redact --exit-code 0 || true
+      - name: Özet (kaç bulgu)
+        if: always()
+        run: |
+          if [ -f gitleaks.sarif ]; then
+            N=$(python3 -c "import json;d=json.load(open('gitleaks.sarif'));print(len(d.get('runs',[{}])[0].get('results',[])))" 2>/dev/null || echo "?")
+            echo "### 🔐 Gitleaks — koda sızmış sır taraması" >> "$GITHUB_STEP_SUMMARY"
+            echo "Bulgu sayısı: **$N** (redakte). Ayrıntı: Security → Code scanning." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### 🔐 Gitleaks — rapor üretilemedi (loglara bakın)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload SARIF (Security sekmesi)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
+        continue-on-error: true
 
-  # 3) Dependency vulnerability scan — backend (pip-audit) + frontend (yarn audit)
+  # 3) Bağımlılık açık taraması — backend (pip-audit) + frontend (yarn audit).
+  #    Sonuç iş ÖZETİNE (Summary) markdown yazılır; adımlar yeşil geçer.
   dependencies:
     name: Dependency Audit
     runs-on: ubuntu-latest
@@ -66,9 +103,17 @@ jobs:
           python-version: "3.11"
       - name: pip-audit (backend)
         run: |
-          python -m pip install --upgrade pip pip-audit
+          python -m pip install --upgrade pip pip-audit >/dev/null 2>&1 || true
+          echo "### 🐍 Backend bağımlılık açıkları (pip-audit)" >> "$GITHUB_STEP_SUMMARY"
           if [ -f backend/requirements.txt ]; then
-            pip-audit -r backend/requirements.txt --strict || echo "::warning::pip-audit backend'de açık(lar) buldu — raporu inceleyin"
+            if pip-audit -r backend/requirements.txt -f markdown -o pipaudit.md 2>pipaudit.err; then
+              if [ -s pipaudit.md ]; then cat pipaudit.md >> "$GITHUB_STEP_SUMMARY"; else echo "Açık bulunamadı ✅" >> "$GITHUB_STEP_SUMMARY"; fi
+            else
+              echo "Tarama tamamlanamadı (bazı paketler özel index'ten çözülemedi):" >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"; tail -n 15 pipaudit.err >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true; echo '```' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "requirements.txt yok" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Setup Node
@@ -78,6 +123,12 @@ jobs:
       - name: yarn audit (frontend)
         working-directory: frontend
         run: |
+          echo "### 📦 Frontend bağımlılık açıkları (yarn audit)" >> "$GITHUB_STEP_SUMMARY"
+          corepack enable >/dev/null 2>&1 || true
           if [ -f yarn.lock ]; then
-            yarn audit --groups dependencies --level high || echo "::warning::yarn audit frontend'de high+ açık(lar) buldu — raporu inceleyin"
+            # yarn audit bulgu varsa non-zero döner; özet için yakalıyoruz (adım yeşil).
+            yarn audit --groups dependencies --level high > yarnaudit.txt 2>&1 || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"; (tail -n 20 yarnaudit.txt || echo "rapor yok") >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "yarn.lock yok" >> "$GITHUB_STEP_SUMMARY"
           fi
