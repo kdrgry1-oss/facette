@@ -39,7 +39,10 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          language: ${{ matrix.language }}
+          # DİKKAT: girdi adı 'languages' (çoğul). 'language' (tekil) yok sayılır →
+          # CodeQL TÜM dilleri otomatik algılar (repodaki Swift dahil) ve Swift Linux
+          # runner'da desteklenmediği için init "configuration error" ile çöker.
+          languages: ${{ matrix.language }}
           queries: security-extended
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
