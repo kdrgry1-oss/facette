@@ -207,7 +207,13 @@ def _payment_matches_order(data: dict, order: dict) -> bool:
         # (charged < total) reddedilir; böylece "1 TL'ye pahalı ürün" engellenir ama meşru
         # indirimli/tam ödemeler geçer.
         charged = paid if paid is not None else price
-        if charged is not None and charged + 0.02 < total:
+        # SAVUNMA (fail-closed): tutar alanı hiç yoksa (paidPrice VE price boş) eşleşmeyi REDDET.
+        # Tutarı doğrulanamayan bir yanıt "ödendi" sayılmamalı. Gerçek iyzico başarı yanıtı her
+        # zaman paidPrice taşır; bu yalnız derinlemesine-savunma (bozuk/eksik yanıt) içindir.
+        if charged is None:
+            logger.warning(f"[ODEME DOGRULAMA] tutar alani yok (paidPrice/price bos) → red. siparis_total={total}")
+            return False
+        if charged + 0.02 < total:
             logger.warning(f"[ODEME DOGRULAMA] eksik tahsilat: tahsil={charged} < siparis_total={total}")
             return False
         return True
@@ -300,7 +306,7 @@ def _build_initialize_payload(order: dict, callback_url: str) -> dict:
 
     shipping_cost = float(order.get("shipping_cost") or 0)
     gift_price = float(order.get("gift_wrap_price") or 0)
-    cod_fee = 10.0 if order.get("payment_method") == "cash_on_delivery" else 0.0
+    cod_fee = float(order.get("cod_fee") or 0)  # create_order İşletme Kuralı'ndan yazar (hardcode değil)
 
     # Sipariş-seviyesi indirim = tam sepet − ödenen (order.total). Kargoya/ekstralara DEĞİL,
     # yalnız ürün satırlarına dağıtılır.

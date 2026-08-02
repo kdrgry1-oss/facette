@@ -1207,10 +1207,31 @@ async def create_order(
     if _thr is not None:
         order["free_shipping_threshold"] = _thr
 
-    # Toplam = subtotal - kupon indirimi - havale indirimi + kargo + hediye paketi.
-    _gift = max(0.0, float(order.get("gift_wrap_price", 0) or 0))
+    # Hediye paketi ücreti — SUNUCU-otoriter (K1): istemcinin gönderdiği gift_wrap_price'a
+    # GÜVENİLMEZ (gift_wrap_price=0 gönderip bedava paket alınabiliyordu). Yalnız gift_wrap
+    # seçiliyse İşletme Kuralı'ndaki ücret uygulanır (frontend Checkout da aynı kuralı okur).
+    _gift = 0.0
+    if order.get("gift_wrap"):
+        try:
+            from business_rules import get_rule as _gw_rule
+            _gift = max(0.0, float(await _gw_rule(db, "product.gift_wrap_price", 130) or 0))
+        except Exception:
+            _gift = 0.0
     order["gift_wrap_price"] = round(_gift, 2)
-    order["total"] = round(_subtotal - _server_discount - _pm_disc + _shipping + _gift, 2)
+
+    # Kapıda ödeme hizmet bedeli — İşletme Kuralı'ndan (hardcode DEĞİL), yalnız COD siparişte.
+    # Eskiden order.total'a HİÇ eklenmiyordu → her COD siparişinde hizmet bedeli sessizce kayıptı.
+    _cod_fee = 0.0
+    if _pm0 in ("cash_on_delivery", "kapida", "kapida_odeme", "cod"):
+        try:
+            from business_rules import get_rule as _cod_rule
+            _cod_fee = max(0.0, float(await _cod_rule(db, "shipping.cod_fee", 10) or 0))
+        except Exception:
+            _cod_fee = 0.0
+    order["cod_fee"] = round(_cod_fee, 2)
+
+    # Toplam = subtotal - kupon indirimi - havale indirimi + kargo + hediye paketi + kapıda ödeme.
+    order["total"] = round(_subtotal - _server_discount - _pm_disc + _shipping + _gift + _cod_fee, 2)
 
     # ⭐ PUAN KULLANIMI (C3) — sunucu-otoriter: tavan (ara toplam - indirim) *
     # payment.points_redeem_max_pct; bakiye ATOMİK düşülür (loyalty.spend_points_for_order).

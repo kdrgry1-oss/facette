@@ -22,6 +22,7 @@ import os
 import base64
 import hashlib
 import random
+import uuid
 import json
 from datetime import datetime, timezone
 import httpx
@@ -172,23 +173,14 @@ async def iyzico_refund(payload: dict, current_user: dict = Depends(require_perm
     if net_refund <= 0:
         raise HTTPException(status_code=400, detail="Kargo kesintisi sonrası iade tutarı 0 ya da negatif")
 
-    # GÜVENLİK: TUTAR SINIRI + IDEMPOTENCY — toplam iade, tahsil edilen tutarı AŞAMAZ
-    # (aksi halde aşırı/tekrarlı iade ile para sızdırılabiliyordu).
+    # GÜVENLİK: TUTAR SINIRI + IDEMPOTENCY — toplam iade, tahsil edilen tutarı AŞAMAZ.
+    # Cap kontrolü + rezervasyon ATOMİK yapılır (aşağıda, iyzico çağrısından ÖNCE). Eski
+    # "önce oku, sonra yaz" deseni iki eşzamanlı istekte (çift-tık / iki operatör) çift iade
+    # çağrısına yol açabiliyordu.
     try:
         _charged = float(order.get("total") or order.get("total_amount") or 0)
     except Exception:
         _charged = 0.0
-    _already = 0.0
-    for _r in (order.get("refunds") or []):
-        try:
-            _already += float(_r.get("net_refund") or _r.get("amount") or 0)
-        except Exception:
-            pass
-    if _charged > 0 and round(_already + net_refund, 2) > round(_charged + 0.02, 2):
-        raise HTTPException(
-            status_code=400,
-            detail=f"İade tutarı tahsil edilen toplamı aşıyor (tahsil={_charged:.2f}, önceki iade={_already:.2f}, istenen={net_refund:.2f})",
-        )
 
     settings = await db.settings.find_one({"id": "iyzico"}, {"_id": 0})
     if not settings or not settings.get("api_key"):
@@ -209,6 +201,56 @@ async def iyzico_refund(payload: dict, current_user: dict = Depends(require_perm
         "reason": reason,
     }
     uri = "/payment/refund"
+
+    # ATOMİK CLAIM + REZERVASYON: mevcut iade toplamı (net_refund/amount) + bu iade, tahsil
+    # edilen tutarı AŞMIYORSA 'pending' iade kalemi tek atomik işlemde PUSH edilir. İki eşzamanlı
+    # istekten yalnız BİRİ geçer (ikincisi ilkinin pending kaydını sayıp reddedilir) → çift iade
+    # imkânsız. iyzico başarısız/hata olursa rezervasyon $pull ile geri alınır (hediye çeki
+    # iadesindeki refund_gift_card_once atomik-claim deseninin nakit karşılığı).
+    _claim_id = uuid.uuid4().hex
+    _pending_entry = {
+        "amount": amount,
+        "shipping_deduction": shipping_deduction,
+        "net_refund": net_refund,
+        "reason": reason,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "refunded_by": current_user.get("email", ""),
+        "provider": "iyzico",
+        "payment_id": pid,
+        "claim_id": _claim_id,
+        "status": "pending",
+    }
+    if _charged > 0:
+        _cap = round(_charged + 0.02, 2)
+        _claim = await db.orders.find_one_and_update(
+            {"id": order_id, "$expr": {"$lte": [
+                {"$add": [
+                    {"$sum": {"$map": {
+                        "input": {"$ifNull": ["$refunds", []]},
+                        "as": "r",
+                        "in": {"$toDouble": {"$ifNull": ["$$r.net_refund", {"$ifNull": ["$$r.amount", 0]}]}},
+                    }}},
+                    net_refund,
+                ]}, _cap]}},
+            {"$push": {"refunds": _pending_entry}},
+        )
+        if not _claim:
+            _o2 = await db.orders.find_one({"id": order_id}, {"_id": 0, "refunds": 1}) or {}
+            _already = 0.0
+            for _r in (_o2.get("refunds") or []):
+                try:
+                    _already += float(_r.get("net_refund") or _r.get("amount") or 0)
+                except Exception:
+                    pass
+            raise HTTPException(
+                status_code=400,
+                detail=f"İade tutarı tahsil edilen toplamı aşıyor (tahsil={_charged:.2f}, önceki iade={_already:.2f}, istenen={net_refund:.2f})",
+            )
+    else:
+        # Tahsil tutarı bilinemiyorsa cap uygulanamaz; kalem yine de rezerve edilir (idempotency izi).
+        await db.orders.update_one({"id": order_id}, {"$push": {"refunds": _pending_entry}})
+
+    ok = False
     try:
         async with httpx.AsyncClient(timeout=30) as c:
             headers, body_str = _iyzico_auth_header(settings, uri, body)
@@ -226,19 +268,17 @@ async def iyzico_refund(payload: dict, current_user: dict = Depends(require_perm
             {"response": data, "request": body},
         )
         if ok:
+            # Rezervasyonu KESİNLEŞTİR (pending → done) + refunded_at yaz.
             await db.orders.update_one(
-                {"id": order_id},
-                {"$push": {"refunds": {
-                    "amount": amount,
-                    "shipping_deduction": shipping_deduction,
-                    "net_refund": net_refund,
-                    "reason": reason,
-                    "refunded_at": datetime.now(timezone.utc).isoformat(),
-                    "refunded_by": current_user.get("email", ""),
-                    "provider": "iyzico",
-                    "payment_id": pid,
-                }}}
+                {"id": order_id, "refunds.claim_id": _claim_id},
+                {"$set": {
+                    "refunds.$.status": "done",
+                    "refunds.$.refunded_at": datetime.now(timezone.utc).isoformat(),
+                }},
             )
+        else:
+            # BAŞARISIZ: rezervasyonu geri al ki cap kilitlenmesin ve tutar 'iade edildi' sanılmasın.
+            await db.orders.update_one({"id": order_id}, {"$pull": {"refunds": {"claim_id": _claim_id}}})
         return {
             "success": ok,
             "net_refund": net_refund,
@@ -246,5 +286,12 @@ async def iyzico_refund(payload: dict, current_user: dict = Depends(require_perm
             "provider_response": data,
         }
     except Exception as e:
+        # Ağ/işleme hatası. iyzico onayı ALINMADIYSA (ok=False) rezervasyonu geri al — güvenli
+        # taraf: çift iade değil, iade blokajı. Onay alındıysa kaydı KORU (para hareket etti).
+        if not ok:
+            try:
+                await db.orders.update_one({"id": order_id}, {"$pull": {"refunds": {"claim_id": _claim_id}}})
+            except Exception:
+                pass
         logger.error(f"Iyzico refund error: {e}")
         raise HTTPException(status_code=500, detail=f"Iyzico iade hatası: {e}")
