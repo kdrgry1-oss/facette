@@ -50,6 +50,9 @@ RULE_CATALOG = [
     {"group": "Sipariş & İptal", "key": "order.max_qty_per_item", "label": "Kalem başı azami sipariş adedi",
      "type": "number", "default": 50, "unit": "adet", "options": [10, 20, 50, 100, 500],
      "help": "Tek bir üründen tek siparişte istenebilecek azami adet. Kötü niyetli dev miktarlı siparişlere karşı koruma; aşılırsa sipariş reddedilir."},
+    {"group": "Sipariş & İptal", "key": "order.enforce_total_match", "label": "Onaylanan tutarla eşleşme zorunlu",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "Açıkken, müşterinin kasada onayladığı tutar ile sunucunun hesapladığı tutar uyuşmazsa sipariş REDDEDİLİR (ödeme alınmaz). Müşteriden onaylamadığı bir tutarın çekilmesini engeller. Kapatmak yalnızca acil durumda önerilir: kapalıyken uyuşmazlık log'lanır ama sunucunun hesapladığı tutar çekilir."},
 
     # ---- Kargo & Teslimat ----
     {"group": "Kargo & Teslimat", "key": "shipping.cod_fee", "label": "Kapıda ödeme ücreti",

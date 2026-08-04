@@ -276,7 +276,12 @@ export default function Checkout() {
     ? 0 : baseShipFee;
   const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
   const codFee = paymentMethod === "cash_on_delivery" ? COD_FEE : 0;
-  const pointsDeduction = usePoints ? Math.min(userPoints, total * (POINTS_MAX_PCT / 100)) : 0;
+  // Puan tavanı SUNUCUYLA aynı tabandan hesaplanır: (ara toplam − kupon/kampanya indirimi).
+  // Eskiden indirimSİZ `total` baz alınıyordu → istemci sunucudan fazla puan düşüyor, ödenecek
+  // tutar ekranda farklı çıkıyordu (onaylanan ≠ çekilen).
+  const pointsDeduction = usePoints
+    ? Math.min(userPoints, Math.max(0, total - discount) * (POINTS_MAX_PCT / 100))
+    : 0;
   // Havale/EFT indirimi — kupon indiriminden SONRAKİ tutar üzerinden (sunucu ile aynı mantık).
   const isBankTransfer = paymentMethod === "bank_transfer";
   const bankTransferDiscount = (isBankTransfer && bankPct > 0)
@@ -736,6 +741,9 @@ export default function Checkout() {
         discount, coupon_code: appliedCoupon?.code || "",
         gift_card_code: giftCardApplied?.code || "",
         applied_promotions: appliedPromotions,
+        // Müşterinin "×" ile kaldırdığı kampanyalar SUNUCUYA da bildirilmeli; aksi halde
+        // sunucu bu kampanyaları yeniden uygulayıp onaylanandan FARKLI tutar çekiyordu.
+        excluded_ids: excludedIds,
         gift_note: giftNote || "", gift_wrap: giftWrap, gift_wrap_price: giftWrapTotal,
         use_points: usePoints, points_used: pointsDeduction,
         use_3d_secure: use3DSecure,

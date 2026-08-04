@@ -1151,6 +1151,16 @@ async def create_order(
             "qty": int(it.get("quantity", it.get("qty", 1)) or 1),
             "price": float(it.get("price", 0) or 0),
         } for it in _items]
+        # KRİTİK: Müşterinin kasada "×" ile KALDIRDIĞI kampanyalar (excluded_ids) motora
+        # AKTARILMALI. Aktarılmadığında sunucu, ekranda GÖSTERİLMEYEN kampanyaları da üst üste
+        # uygulayıp müşterinin onayladığından FARKLI (düşük) tutarı bankadan çekiyordu
+        # (3240 onaylandı → 2916,90 çekildi). excluded_ids yalnız indirim AZALTIR; istemci bunu
+        # kendi lehine kullanamaz (daha çok indirim aldıramaz), bu yüzden güvenle onurlandırılır.
+        _excl = order_data.get("excluded_ids") or []
+        if not isinstance(_excl, list):
+            _excl = []
+        _excl = [str(x) for x in _excl if x]
+        order["excluded_promotion_ids"] = _excl
         _ev = await _eval_promos(
             cart_total=_subtotal,
             items=_eng_items,
@@ -1158,6 +1168,7 @@ async def create_order(
             email=(order.get("shipping_address") or {}).get("email", ""),
             entered_code=order.get("coupon_code", ""),
             payment_method=order.get("payment_method", ""),
+            excluded_ids=_excl,
         )
         _server_discount = round(float(_ev.get("total_discount", 0) or 0), 2)
         _free_shipping = bool(_ev.get("free_shipping"))
@@ -1282,6 +1293,53 @@ async def create_order(
             order["status"] = "confirmed"
             order["paid_with_gift_card_only"] = True
             order["paid_at"] = datetime.now(timezone.utc).isoformat()
+
+    # ==================== ONAY-TUTARI DOĞRULAMASI (ödeme standardı) ====================
+    # DEĞİŞMEZ: Müşteriden, kasada GÖRÜP ONAYLADIĞI tutardan BAŞKA bir tutar ASLA çekilmez.
+    # Sunucu fiyat otoritesidir (istemcinin tutarı KULLANILMAZ), ancak istemcinin gösterdiği
+    # tutar bir ONAY KANITI olarak karşılaştırılır. Uyuşmuyorsa sipariş REDDEDİLİR — sessizce
+    # farklı tutar çekilmez. Böylece bugünkü olay (ekran 3240,00 → bankaya 2.916,90 gitti)
+    # ve gelecekteki HER sapma kaynağı (kampanya seti, puan tavanı, kargo kuralı, üye-grubu/
+    # ödeme-tipi indirimi…) sessiz yanlış tahsilat yerine görünür hataya dönüşür.
+    # Yön farketmez: eksik tahsilat = gelir kaybı, fazla tahsilat = müşteri mağduriyeti.
+    # İstemci tutar göndermiyorsa (eski mobil sürüm) kontrol atlanır — sunucu yine otoriterdir.
+    try:
+        from business_rules import get_rule as _tm_rule
+        _enforce_match = await _tm_rule(db, "order.enforce_total_match", True) is not False
+    except Exception:
+        _enforce_match = True
+    try:
+        _client_total = float(order_data.get("total") or 0)
+    except Exception:
+        _client_total = 0.0
+    _server_total = round(float(order["total"] or 0), 2)
+    if _client_total > 0 and abs(_client_total - _server_total) > 0.02:
+        logger.error(
+            "[TUTAR-UYUSMAZLIGI] istemci=%.2f sunucu=%.2f fark=%.2f | subtotal=%.2f indirim=%.2f "
+            "havale=%.2f kargo=%.2f hediye_paketi=%.2f kapida=%.2f puan=%.2f hediye_ceki=%.2f "
+            "kampanyalar=%s excluded=%s",
+            _client_total, _server_total, round(_client_total - _server_total, 2),
+            _subtotal, _server_discount, _pm_disc, _shipping, _gift, _cod_fee,
+            float(order.get("points_used") or 0), float((order.get("gift_card") or {}).get("amount") or 0),
+            [(_a.get("code"), _a.get("discount")) for _a in (order.get("applied_promotions") or [])],
+            order.get("excluded_promotion_ids") or [],
+        )
+        if _enforce_match:
+            # Rezerve edilen bakiyeleri (puan / hediye çeki) geri ver — sipariş açılmıyor.
+            try:
+                if order.get("points_used"):
+                    from .loyalty import refund_points_once
+                    await refund_points_once(order)
+                if order.get("gift_card"):
+                    from .gift_cards import refund_gift_card_once
+                    await refund_gift_card_once(order)
+            except Exception as _rb_err:
+                logger.error(f"[TUTAR-UYUSMAZLIGI] bakiye geri alınamadı: {_rb_err}")
+            raise HTTPException(
+                status_code=409,
+                detail="Sepet tutarı güncellendi (kampanya/indirim değişmiş olabilir). "
+                       "Güvenliğiniz için ödeme alınmadı. Lütfen sepetinizi yenileyip tekrar deneyin.",
+            )
 
     # 🧾 İNDİRİM DÖKÜMÜ — müşteri VE admin siparişte her indirimi AYRI AYRI görsün.
     # Her kampanya/kupon ayrı satır (hoşgeldin, otomatik %10, kod…), havale ayrı satır.
