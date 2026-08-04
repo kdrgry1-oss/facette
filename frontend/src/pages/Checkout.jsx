@@ -410,7 +410,12 @@ export default function Checkout() {
         cart_total: total,
         items: items.map((it) => ({ product_id: it.productId, category_id: it.categoryId, price: it.price, qty: it.quantity })),
         user_id: user?.id || null,
-        email: user?.email || "",
+        // KRİTİK: Sunucu (create_order) uygunluğu shipping_address.email ile değerlendirir.
+        // Burada sadece user?.email gönderilince MİSAFİR müşteride ayrışma oluyordu: forma
+        // e-postasını yazan misafir için istemci "ilk siparişe özel" kampanyayı uygun görmüyor
+        // (ekranda görünmüyor), sunucu görüyor ve uyguluyordu → ekrandaki tutar ile bankadan
+        // çekilen tutar farklı çıkıyordu. Aynı e-posta gönderilerek iki taraf hizalanır.
+        email: shippingAddress?.email || user?.email || "",
         code: code || "",
         payment_method: paymentMethod,
         excluded_ids: excludedIds,
@@ -484,7 +489,9 @@ export default function Checkout() {
     if (items.length === 0) { setAppliedPromotions([]); setEligiblePromotions([]); setDiscount(0); return; }
     recalcPromotions(appliedCoupon?.code || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, total, user?.id, appliedCoupon?.code, paymentMethod, excludedIds]);
+    // shippingAddress.email DEP: misafir e-postasını yazınca uygunluk (ilk-siparişe-özel
+    // kampanyalar) sunucudaki ile aynı şekilde yeniden değerlendirilsin.
+  }, [items, total, user?.id, appliedCoupon?.code, paymentMethod, excludedIds, shippingAddress?.email]);
 
   // Payment callback — iyzico → backend → storefront'a ?status=success|fail&order=.. ile döner
   useEffect(() => {
