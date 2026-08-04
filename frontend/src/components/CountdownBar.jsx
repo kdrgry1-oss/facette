@@ -149,7 +149,7 @@ export default function CountdownBar() {
     return (
       <div className="bg-black text-white py-1.5 md:py-2" data-testid="topbar-static">
         <Marquee items={messages} fg="#ffffff"
-          className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold" />
+          className="text-[12px] md:text-[15px] tracking-[0.2em] uppercase font-bold" />
       </div>
     );
   }
@@ -161,7 +161,7 @@ export default function CountdownBar() {
       <div className="py-1.5 md:py-2" style={{ backgroundColor: bg, color: fg }}
            data-testid="topbar-fallback">
         <Marquee items={messages} fg={fg}
-          className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold" />
+          className="text-[12px] md:text-[15px] tracking-[0.2em] uppercase font-bold" />
       </div>
     );
   }
@@ -181,7 +181,7 @@ export default function CountdownBar() {
       <div className="max-w-screen-2xl mx-auto px-3 md:px-6 flex items-center justify-center md:justify-between gap-3 flex-wrap">
         {currentMsg && (
           <Rotator idx={msgIdx} text={currentMsg} multi={multi}
-             className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold flex-shrink-0" />
+             className="text-[12px] md:text-[15px] tracking-[0.2em] uppercase font-bold flex-shrink-0" />
         )}
         <div className="flex items-center gap-2 md:gap-3">
           {timerLbl && (
