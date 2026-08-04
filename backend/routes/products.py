@@ -1464,20 +1464,61 @@ async def _auto_campaigns_for_badges() -> list:
     except Exception:
         pass
     now_iso = datetime.now(timezone.utc).isoformat()
-    q = {
-        "is_active": True, "auto_apply": True, "type": "percent",
-        "$and": [
-            {"$or": [{"start_at": None}, {"start_at": {"$lte": now_iso}}, {"start_at": {"$exists": False}}]},
-            {"$or": [{"end_at": None}, {"end_at": {"$gte": now_iso}}, {"end_at": {"$exists": False}}]},
-        ],
-    }
+    # KÖK SEBEP (rozet-var/indirim-yok): tarih penceresi eskiden MONGO'da ham karşılaştırmayla
+    # süzülüyordu. Mongo'nun string/BSON-Date karşılaştırması ile motorun Python kontrolü
+    # (coupons._evaluate_single) AYNI sonucu vermiyor → SÜRESİ DOLMUŞ kampanya rozet olarak
+    # görünmeye devam ediyor, sepet ise indirimi uygulamıyordu (müşteri %10 görüp tam fiyat
+    # ödüyor). Artık tarih/limit kontrolleri Mongo'da DEĞİL, motorun mantığıyla BİREBİR aynı
+    # şekilde Python'da yapılır → rozet ⊆ motorun uygulayacağı indirim.
+    q = {"is_active": True, "auto_apply": True, "type": "percent"}
     rows = await db.coupons.find(q, {"_id": 0, "id": 1, "name": 1, "code": 1, "value": 1,
                                      "categories": 1, "products": 1,
-                                     "min_cart_total": 1, "first_order_only": 1}).to_list(50)
-    rows = [r for r in rows
+                                     "min_cart_total": 1, "first_order_only": 1,
+                                     "start_at": 1, "end_at": 1,
+                                     "usage_limit": 1, "min_quantity": 1}).to_list(200)
+
+    def _as_str(v):
+        """BSON Date / datetime de gelebilir → karşılaştırılabilir ISO string'e çevir."""
+        if v is None:
+            return ""
+        if isinstance(v, datetime):
+            return v.isoformat()
+        return str(v)
+
+    def _window_ok(c: dict) -> bool:
+        # coupons._evaluate_single ile AYNI mantık (L1 dahil: yalnız-tarih end_at → gün SONU).
+        _start = _as_str(c.get("start_at"))
+        if _start and _start > now_iso:
+            return False
+        _end = _as_str(c.get("end_at"))
+        if _end:
+            if len(_end) == 10 and "T" not in _end:
+                _end = f"{_end}T23:59:59+00:00"
+            if _end < now_iso:
+                return False
+        return True
+
+    _pre = [r for r in rows
             if not r.get("first_order_only")
             and float(r.get("min_cart_total") or 0) <= 0
-            and float(r.get("value") or 0) > 0]
+            and float(r.get("value") or 0) > 0
+            # Rozet tek ürün kartında gösterilir; çok-adet koşullu kampanya yanıltıcı olur.
+            and int(r.get("min_quantity") or 0) <= 1
+            and _window_ok(r)]
+
+    # Kullanım limiti dolmuş kampanya da motorda uygulanmaz → rozeti gösterilmemeli.
+    rows = []
+    for r in _pre:
+        if r.get("usage_limit"):
+            try:
+                from .coupons import _coupon_used_count
+                # Otomatik kampanya: in-flight sayılmaz (motorla aynı çağrı).
+                if await _coupon_used_count(r["id"], r.get("code", ""), count_inflight=False) >= r["usage_limit"]:
+                    continue
+            except Exception as _ue:
+                logger.warning(f"Kampanya kullanım sayımı yapılamadı ({r.get('code')}): {_ue}")
+        rows.append(r)
+
     _CAMP_BADGE_CACHE["t"] = _time.time()
     _CAMP_BADGE_CACHE["rows"] = rows
     return rows

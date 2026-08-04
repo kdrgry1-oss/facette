@@ -136,10 +136,15 @@ export default function AdminCampaigns() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      // Tarihler GÜN olarak (YYYY-MM-DD) gönderilir. Eskiden new Date(...).toISOString()
+      // ile "günün BAŞI 00:00Z"a çevriliyordu → seçilen bitiş günü TAMAMEN kayboluyor,
+      // bitiş olarak BUGÜN seçilince kampanya ANINDA "süresi dolmuş" sayılıyordu (rozet
+      // %10 görünüp sepette indirim uygulanmaması bunun sonucuydu). Backend zaten
+      // yalnız-tarih end_at'i o günün SONUNA (23:59:59) normalize eder (coupons L1).
       const data = {
         ...formData,
-        start_date: new Date(formData.start_date).toISOString(),
-        end_date: new Date(formData.end_date).toISOString(),
+        start_date: formData.start_date || null,
+        end_date: formData.end_date || null,
       };
       if (editingId) {
         await axios.put(`${API}/campaigns/${editingId}`, data);
