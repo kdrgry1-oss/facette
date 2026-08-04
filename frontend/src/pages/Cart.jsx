@@ -61,8 +61,6 @@ export default function Cart() {
   }, [searchParams]);
   const { shippingFee, freeShippingThreshold } = useShipping();
   const freeShippingLimit = freeShippingThreshold || 0;
-  const remaining = freeShippingThreshold != null ? Math.max(0, freeShippingThreshold - total) : 0;
-  const shippingCost = (freeShippingThreshold != null && total >= freeShippingThreshold) ? 0 : shippingFee;
 
   // Madde 4 — Kampanya motoru: sepet sayfası da checkout ile AYNI motoru çağırır.
   // Önceden sadece Checkout.jsx çağırıyordu; bu yüzden "sepette otomatik %10" kampanyaları
@@ -90,6 +88,14 @@ export default function Cart() {
     return () => { cancel = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, total, user?.id]);
+
+  // ÜCRETSİZ KARGO EŞİĞİ — sunucunun kararıyla AYNI taban: İNDİRİM SONRASI sepet tutarı
+  // (orders.create_order: (_subtotal - _server_discount) >= eşik). Eskiden indirimSİZ ara
+  // toplam baz alınıyordu → hem "X TL daha" yazısı yanlış çıkıyor hem de sepet ekranı
+  // "ücretsiz kargo" gösterip siparişte kargo ücreti ekleniyordu (tutarsızlık).
+  const netTotal = Math.max(0, total - promoDiscount);
+  const remaining = freeShippingThreshold != null ? Math.max(0, freeShippingThreshold - netTotal) : 0;
+  const shippingCost = (freeShippingThreshold != null && netTotal >= freeShippingThreshold) ? 0 : shippingFee;
 
   // Ürün-seviyesi indirim (sale_price + otomatik kampanya) — satırlarla birebir tutarlı özet.
   const listSum = items.reduce((s, it) => s + cartLineView(it).listUnit * it.quantity, 0);
@@ -194,7 +200,7 @@ export default function Cart() {
                   <div className="h-[2px] bg-black/10 overflow-hidden">
                     <div
                       className="h-full bg-black transition-all duration-700 ease-out"
-                      style={{ width: `${Math.min(100, (total / freeShippingLimit) * 100)}%` }}
+                      style={{ width: `${Math.min(100, (netTotal / freeShippingLimit) * 100)}%` }}
                     />
                   </div>
                 </div>

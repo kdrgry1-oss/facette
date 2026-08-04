@@ -28,13 +28,20 @@ export default function CartDrawer() {
   const { items, isOpen, setIsOpen, removeItem, updateQuantity, addItem, total, itemCount } = useCart();
   const { shippingFee, freeShippingThreshold } = useShipping();
   const freeShippingLimit = freeShippingThreshold || 0;
-  const remaining = freeShippingThreshold != null ? Math.max(0, freeShippingThreshold - total) : 0;
 
   const [suggestions, setSuggestions] = useState([]);
   const [bestsellers, setBestsellers] = useState([]);
   // Kampanya/kupon indirimi — Sepet SAYFASI ile AYNI motor (evaluate). Önceden çekmece
   // indirimi hiç hesaplamıyor, ürünleri tam fiyatla gösteriyordu ("sepete ekleyince ilk fiyat").
   const [promoDiscount, setPromoDiscount] = useState(0);
+
+  // ÜCRETSİZ KARGO EŞİĞİ — sunucunun kararıyla AYNI taban: İNDİRİM SONRASI sepet tutarı
+  // (orders.create_order: (_subtotal - _server_discount) >= eşik). Eskiden indirimSİZ ara
+  // toplam baz alınıyordu; 3490 TL'lik sepette "510 TL daha" deniyor ama 510 TL'lik ürün
+  // eklenince indirim de büyüdüğü için net tutar eşiğin altında kalıp kargo yine ücretli
+  // çıkıyordu (müşteriye tutmayan söz). Artık bar ödenecek tutarı baz alır.
+  const netTotal = Math.max(0, total - promoDiscount);
+  const remaining = freeShippingThreshold != null ? Math.max(0, freeShippingThreshold - netTotal) : 0;
   useEffect(() => {
     if (!isOpen || items.length === 0) { setPromoDiscount(0); return; }
     let cancel = false;
@@ -108,7 +115,7 @@ export default function CartDrawer() {
             <div className="h-[2px] bg-black/10 overflow-hidden">
               <div
                 className="h-full bg-black transition-all duration-700 ease-out"
-                style={{ width: `${Math.min(100, (total / freeShippingLimit) * 100)}%` }}
+                style={{ width: `${Math.min(100, (netTotal / freeShippingLimit) * 100)}%` }}
               />
             </div>
           </div>

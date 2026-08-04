@@ -268,7 +268,12 @@ export default function Checkout() {
   // yazsa da tutara kargo ekleniyordu). Eşik ya da kupon → kargo bedava.
   const hasFreeShippingPromo = (appliedPromotions || []).some((p) => p && p.free_shipping);
   const baseShipFee = ruleShipCost != null ? ruleShipCost : shippingFee;
-  const shippingCost = (hasFreeShippingPromo || (freeShippingThreshold != null && total >= freeShippingThreshold)) ? 0 : baseShipFee;
+  // Eşik tabanı sunucuyla AYNI: İNDİRİM SONRASI tutar (orders.create_order:
+  // (_subtotal - _server_discount) >= eşik). Eskiden indirimsiz `total` bakılıyordu →
+  // checkout "ücretsiz kargo" gösterip sunucu kargo ücreti ekleyebiliyordu.
+  const shippingCost = (hasFreeShippingPromo
+    || (freeShippingThreshold != null && Math.max(0, total - discount) >= freeShippingThreshold))
+    ? 0 : baseShipFee;
   const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
   const codFee = paymentMethod === "cash_on_delivery" ? COD_FEE : 0;
   const pointsDeduction = usePoints ? Math.min(userPoints, total * (POINTS_MAX_PCT / 100)) : 0;
