@@ -147,9 +147,9 @@ export default function CountdownBar() {
   // Hiç blok yok → orijinal statik metin, vatkali tarzı SÜREKLİ kayan marquee.
   if (!block) {
     return (
-      <div className="bg-black text-white py-1.5 md:py-2" data-testid="topbar-static">
+      <div className="bg-black text-white py-2 md:py-2.5" data-testid="topbar-static">
         <Marquee items={messages} fg="#ffffff"
-          className="text-[12px] md:text-[15px] tracking-[0.2em] uppercase font-bold" />
+          className="text-[13px] md:text-[17px] tracking-[0.1em] uppercase font-extrabold" />
       </div>
     );
   }
@@ -158,10 +158,10 @@ export default function CountdownBar() {
     // Bar pasif (planlanmış ya da süresi dolmuş) → fallback metin (kayan marquee)
     if (!messages.length) return null; // tamamen gizle
     return (
-      <div className="py-1.5 md:py-2" style={{ backgroundColor: bg, color: fg }}
+      <div className="py-2 md:py-2.5" style={{ backgroundColor: bg, color: fg }}
            data-testid="topbar-fallback">
         <Marquee items={messages} fg={fg}
-          className="text-[12px] md:text-[15px] tracking-[0.2em] uppercase font-bold" />
+          className="text-[13px] md:text-[17px] tracking-[0.1em] uppercase font-extrabold" />
       </div>
     );
   }
@@ -181,7 +181,7 @@ export default function CountdownBar() {
       <div className="max-w-screen-2xl mx-auto px-3 md:px-6 flex items-center justify-center md:justify-between gap-3 flex-wrap">
         {currentMsg && (
           <Rotator idx={msgIdx} text={currentMsg} multi={multi}
-             className="text-[12px] md:text-[15px] tracking-[0.2em] uppercase font-bold flex-shrink-0" />
+             className="text-[13px] md:text-[17px] tracking-[0.1em] uppercase font-extrabold flex-shrink-0" />
         )}
         <div className="flex items-center gap-2 md:gap-3">
           {timerLbl && (
