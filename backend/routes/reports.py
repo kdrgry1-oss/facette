@@ -345,7 +345,12 @@ async def sales(
                                           "date": {"$dateFromString": {"dateString": "$created_at"}}}},
                 "orders": {"$sum": 1},
                 "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
-                "items": {"$sum": {"$size": {"$ifNull": ["$items", []]}}},
+                # ADET = kalem adetleri toplamı. Eskiden $size (KALEM SAYISI) idi: aynı üründen
+                # 3 adet alan sipariş 1 sayılıyordu → pazaryeri raporlarıyla mutabakatta
+                # sistematik eksik. Trendyol "Brüt Satış Adedi" ile aynı birim.
+                "items": {"$sum": {"$reduce": {
+                    "input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$max": [1, {"$ifNull": ["$$this.quantity", 1]}]}]}}}},
             }
         },
         {"$sort": {"_id": 1}},
@@ -469,37 +474,13 @@ async def _split_maps(order_numbers: list, order_ids: list) -> tuple:
     return closed, open_
 
 
-@router.get("/sales-breakdown")
-async def sales_breakdown(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
-    current_user: dict = Depends(require_admin),
-):
-    """Ciro kırılımı — 4 kademe + adet + açık-iade projeksiyonu:
-      ① included = İptal + İade DAHİL toplam (net + iptal + iade)
-      ② cancels  = iptal edilen tutar (kaybedilen)
-      ③ returns  = iade edilen tutar — KISMİ iadede yalnız iade edilen ürünlerin payı
-      ④ net      = elimizde kalan net ciro (kısmi iadede kalan ürünler burada kalır)
-      ⑤ pending_returns = henüz onaylanmamış iade talepleri; onaylanırsa net'ten düşecek
-      ⑥ projected_net    = ④ − ⑤ (açık iadeler onaylanırsa oluşacak net)
+def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
+    """İptal/iade kovalarını KALEM BAZINDA hesaplayan TEK kaynak.
 
-    Her kovada `units` = ÜRÜN ADEDİ (kalem adetleri toplamı) — pazaryeri raporlarıyla
-    (Trendyol 'Brüt Satış Adedi') aynı birim. `orders` = sipariş sayısı.
-    Tarih aralığı TR yerel gün, kaynak filtreli."""
-    s, e = _iso_range(start_date, end_date)
-    base = {"created_at": {"$gte": s, "$lte": e}}
-    sc = _source_cond(source)
-    if sc:
-        base.update(sc)
-
-    proj = {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
-            "items.quantity": 1, "partial_cancel_amount": 1, "partial_cancel_units": 1}
-    orders = [o async for o in db.orders.find(base, proj)]
-    onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
-    oids = list({str(o.get("id")) for o in orders if o.get("id")})
-    closed, open_ = await _split_maps(onums, oids)
-
+    sales_breakdown (ciro kartları) ve cancel_return_by_source (kanal tablosu) aynı
+    ekranda göründüğü için ikisi de bu fonksiyonu kullanır — aksi halde aynı sayfada
+    iki farklı "İade" rakamı çıkıyordu (biri sipariş-bütünü, biri kalem bazlı).
+    """
     def _blank():
         return {"revenue": 0.0, "orders": 0, "units": 0}
 
@@ -602,6 +583,81 @@ async def sales_breakdown(
     return {"included": included, "cancels": cancels, "returns": returns, "net": net,
             "pending_returns": pending, "projected_net": projected_net,
             "partial_split_orders": partial_split}
+
+
+async def _returned_barcode_qty(order_numbers: list) -> dict:
+    """{order_number: {barcode: iade_adedi}} — hangi KALEMİN kaç adedi iade edildi.
+
+    products/top ve cancel-return-products eskiden iade statüsündeki siparişin TÜM
+    kalemlerini iade sayıyordu; 3 ürünlük siparişten 1 ürün iade edilse ürün raporunda
+    3 iade + 0 net satış görünüyordu. Bu harita ile yalnız gerçekten iade edilen kalem
+    İade'ye yazılır, kalanlar satışa geri döner. Kalem bilgisi YOKSA sipariş için hiç
+    kayıt dönmez ve çağıran taraf eski (tüm sipariş iade) davranışına düşer — güvenli.
+    """
+    out: dict = {}
+    if not order_numbers:
+        return out
+
+    def _put(onum: str, bc: str, q: int):
+        if not onum or not bc or q <= 0:
+            return
+        d = out.setdefault(str(onum), {})
+        d[str(bc)] = d.get(str(bc), 0) + int(q)
+
+    for i in range(0, len(order_numbers), 5000):
+        chunk = order_numbers[i:i + 5000]
+        async for c in db.trendyol_claims.find(
+                {"order_number": {"$in": chunk}, "claim_status": "Accepted",
+                 "claim_type": {"$ne": "CANCEL"}},
+                {"_id": 0, "order_number": 1, "items": 1}):
+            for it in (c.get("items") or []):
+                _put(c.get("order_number"), (it or {}).get("barcode"),
+                     max(1, int((it or {}).get("quantity") or 1)))
+        async for r in db.customer_returns.find(
+                {"order_number": {"$in": chunk}},
+                {"_id": 0, "order_number": 1, "status": 1, "approved_items": 1, "items": 1}):
+            if str(r.get("status") or "").lower() in ("cancelled", "canceled", "rejected", "return_rejected"):
+                continue
+            for it in (r.get("approved_items") or r.get("items") or []):
+                _put(r.get("order_number"),
+                     (it or {}).get("barcode") or (it or {}).get("sku"),
+                     max(1, int((it or {}).get("quantity") or 1)))
+    return out
+
+
+@router.get("/sales-breakdown")
+async def sales_breakdown(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
+    current_user: dict = Depends(require_admin),
+):
+    """Ciro kırılımı — 4 kademe + adet + açık-iade projeksiyonu:
+      ① included = İptal + İade DAHİL toplam (net + iptal + iade)
+      ② cancels  = iptal edilen tutar (kaybedilen)
+      ③ returns  = iade edilen tutar — KISMİ iadede yalnız iade edilen ürünlerin payı
+      ④ net      = elimizde kalan net ciro (kısmi iadede kalan ürünler burada kalır)
+      ⑤ pending_returns = henüz onaylanmamış iade talepleri; onaylanırsa net'ten düşecek
+      ⑥ projected_net    = ④ − ⑤ (açık iadeler onaylanırsa oluşacak net)
+
+    Her kovada `units` = ÜRÜN ADEDİ (kalem adetleri toplamı) — pazaryeri raporlarıyla
+    (Trendyol 'Brüt Satış Adedi') aynı birim. `orders` = sipariş sayısı.
+    Tarih aralığı TR yerel gün, kaynak filtreli."""
+    s, e = _iso_range(start_date, end_date)
+    base = {"created_at": {"$gte": s, "$lte": e}}
+    sc = _source_cond(source)
+    if sc:
+        base.update(sc)
+
+    proj = {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
+            "items.quantity": 1, "partial_cancel_amount": 1, "partial_cancel_units": 1}
+    orders = [o async for o in db.orders.find(base, proj)]
+    onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
+    oids = list({str(o.get("id")) for o in orders if o.get("id")})
+    closed, open_ = await _split_maps(onums, oids)
+
+    return _bucket_orders(orders, closed, open_)
+
 
 
 @router.get("/products/export-xlsx")
@@ -846,8 +902,13 @@ async def top_products(
                             "pid": {"$toString": {"$ifNull": ["$items.product_id", ""]}},
                             "nm": {"$ifNull": ["$items.name", {"$ifNull": ["$items.product_name", ""]}]},
                             "sz": {"$toString": {"$ifNull": ["$items.size", ""]}},
+                            # Kısmi iade ayrıştırması sipariş bazında yapılır → grup anahtarına
+                            # sipariş no eklendi (hangi kalemin iade edildiği siparişe bağlı).
+                            "on": {"$toString": {"$ifNull": ["$order_number", ""]}},
                             "kind": "$_kind", "plat": "$_plat"},
-                    "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}}}},
+                    "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+                    "rev": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]},
+                                                   {"$ifNull": ["$items.quantity", 1]}]}}}},
     ]
     import unicodedata as _ud3
     _cr_rows = [r async for r in db.orders.aggregate(_cr_pipe)]
@@ -873,24 +934,68 @@ async def top_products(
             for v in (p.get("variants") or []):
                 if v.get("barcode"):
                     by_bc.setdefault(str(v["barcode"]), _inf)
+    # KISMİ İADE AYRIŞTIRMASI: iade statüsündeki siparişin yalnız GERÇEKTEN iade edilen
+    # kalemleri İade'ye yazılır; müşteride kalan kalemler satış tarafına geri eklenir.
+    _ret_onums = list({r["_id"].get("on") for r in _cr_rows
+                       if r["_id"].get("kind") == "return" and r["_id"].get("on")})
+    _ret_bc = await _returned_barcode_qty(_ret_onums)
     cr_map: dict = {}
+    keep_map: dict = {}   # kısmi iadede müşteride KALAN kalemler → satışa geri döner
     for r in _cr_rows:
         i = r["_id"]
         pm = by_bc.get(i.get("bc") or "") or by_id.get(i.get("pid") or "") or {}
         _cname = pm.get("name") or i.get("nm") or "(isimsiz ürün)"
         gk = pm.get("id") or (i.get("pid") or None) or f"nm:{_ud3.normalize('NFC', _cname).strip().lower()}"
+        qty = int(r["qty"])
+        rev = float(r.get("rev") or 0)
+        keep_q, keep_r = 0, 0.0
+        if i["kind"] == "return":
+            _rb = _ret_bc.get(i.get("on") or "")
+            if _rb:  # kalem bilgisi VAR → böl. Yoksa eski davranış (tüm sipariş iade).
+                _bc = str(i.get("bc") or "")
+                _allowed = int(_rb.get(_bc, 0))
+                _ret_q = min(qty, _allowed)
+                _rb[_bc] = _allowed - _ret_q          # aynı barkod başka satırda tekrar sayılmasın
+                keep_q = qty - _ret_q
+                if keep_q > 0 and qty > 0:
+                    keep_r = rev * (keep_q / qty)
+                qty = _ret_q
+        if keep_q > 0:
+            k = keep_map.setdefault(gk, {"qty": 0, "revenue": 0.0, "sizes": {}, "plats": {}})
+            k["qty"] += keep_q
+            k["revenue"] += keep_r
+            _ksz = (i.get("sz") or "").strip() or "—"
+            k["sizes"][_ksz] = k["sizes"].get(_ksz, 0) + keep_q
+            _kpl = i.get("plat") or "site"
+            k["plats"][_kpl] = k["plats"].get(_kpl, 0) + keep_q
+        if qty <= 0:
+            continue
         d = cr_map.setdefault(gk, {"cancel": 0, "return": 0, "by_plat": {}, "by_size": {}})
-        d[i["kind"]] += int(r["qty"])
+        d[i["kind"]] += qty
         bp = d["by_plat"].setdefault((i.get("plat") or "site"), {"cancel": 0, "return": 0})
-        bp[i["kind"]] += int(r["qty"])
+        bp[i["kind"]] += qty
         bs = d["by_size"].setdefault(((i.get("sz") or "").strip() or "—"), {"cancel": 0, "return": 0})
-        bs[i["kind"]] += int(r["qty"])
+        bs[i["kind"]] += qty
 
     out = []
     for gkey, m in merged.items():
         _sizes = sorted(m.pop("_sizes").items(), key=lambda x: -x[1])
         _plats = sorted(m.pop("_plats").items(), key=lambda x: -x[1])
         _cr = cr_map.get(m.get("product_id") or gkey) or cr_map.get(gkey) or {}
+        # Kısmi iadede müşteride kalan kalemler satış tarafına geri eklenir (satış
+        # pipeline'ı iade statüsündeki siparişin TAMAMINI dışladığı için burada telafi).
+        _kp = keep_map.get(m.get("product_id") or gkey) or keep_map.get(gkey)
+        if _kp:
+            m["qty"] = int(m.get("qty") or 0) + int(_kp["qty"])
+            m["revenue"] = float(m.get("revenue") or 0) + float(_kp["revenue"])
+            _sd = dict(_sizes)
+            for _sk, _sv in _kp["sizes"].items():
+                _sd[_sk] = _sd.get(_sk, 0) + _sv
+            _sizes = sorted(_sd.items(), key=lambda x: -x[1])
+            _pd = dict(_plats)
+            for _pk, _pv in _kp["plats"].items():
+                _pd[_pk] = _pd.get(_pk, 0) + _pv
+            _plats = sorted(_pd.items(), key=lambda x: -x[1])
         out.append({
             **m,
             "revenue": round(m["revenue"], 2),
@@ -1278,7 +1383,10 @@ async def cancel_return_products(
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
         {"$group": {
             "_id": {"name": {"$ifNull": ["$items.name", {"$ifNull": ["$items.product_name", "Ürün"]}]},
-                    "plat": "$_plat", "kind": "$_kind"},
+                    "plat": "$_plat", "kind": "$_kind",
+                    # Kısmi iade ayrıştırması sipariş+barkod bazında yapılır.
+                    "on": {"$toString": {"$ifNull": ["$order_number", ""]}},
+                    "bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}}},
             "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
             # DENETİM HATA-3: unit_price İSKONTO ÖNCESİ liste fiyatı — tutarlar %11-14 şişiyordu.
             # Önce items.price (ödenen net birim), yoksa unit_price kullanılır (by-source ile eşitlenir).
@@ -1289,7 +1397,13 @@ async def cancel_return_products(
     ]
     _SRC = {"site": "Site", "facette": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu"}
     rows: dict = {}
-    async for r in db.orders.aggregate(pipeline):
+    _agg = [r async for r in db.orders.aggregate(pipeline)]
+    # KISMİ İADE: yalnız gerçekten iade edilen kalem İade'ye yazılır (ürün raporunun
+    # ana tablosuyla aynı mantık — aksi halde aynı ekranda iki farklı iade adedi çıkar).
+    _ret_bc = await _returned_barcode_qty(
+        list({r["_id"].get("on") for r in _agg
+              if r["_id"].get("kind") == "return" and r["_id"].get("on")}))
+    for r in _agg:
         # 'facette' etiketi de Site'dır (DENETİM HATA-3 eki) — aynı ürünün iki satırı birleşsin
         _pl = "site" if (r["_id"]["plat"] or "site") in ("site", "facette") else r["_id"]["plat"]
         key = (r["_id"]["name"], _pl)
@@ -1297,12 +1411,24 @@ async def cancel_return_products(
                                   "platform": _SRC.get(_pl, _pl or "Site"),
                                   "cancel_qty": 0, "cancel_total": 0.0,
                                   "return_qty": 0, "return_total": 0.0})
+        _q = int(r["qty"])
+        _t = float(r["total"] or 0)
         if r["_id"]["kind"] == "cancel":
-            d["cancel_qty"] += int(r["qty"])
-            d["cancel_total"] += float(r["total"] or 0)
+            d["cancel_qty"] += _q
+            d["cancel_total"] += _t
         else:
-            d["return_qty"] += int(r["qty"])
-            d["return_total"] += float(r["total"] or 0)
+            _rb = _ret_bc.get(r["_id"].get("on") or "")
+            if _rb:  # kalem bilgisi VAR → böl; yoksa eski davranış (tüm sipariş iade)
+                _bc = str(r["_id"].get("bc") or "")
+                _allowed = int(_rb.get(_bc, 0))
+                _rq = min(_q, _allowed)
+                _rb[_bc] = _allowed - _rq
+                _t = _t * (_rq / _q) if _q else 0.0
+                _q = _rq
+            if _q <= 0:
+                continue
+            d["return_qty"] += _q
+            d["return_total"] += _t
     out = sorted(rows.values(), key=lambda x: -(x["cancel_qty"] + x["return_qty"]))[:800]
     for d in out:
         d["cancel_total"] = round(d["cancel_total"], 2)
@@ -1316,39 +1442,54 @@ async def cancel_return_by_source(
     end_date: Optional[str] = None,
     current_user: dict = Depends(require_admin),
 ):
-    """Pazaryerlerine göre iade ve iptal durumları: Site / Trendyol / Hepsiburada / Temu
-    başına iptal + iade sipariş sayısı ve tutarı."""
+    """Kanal (Site/Trendyol/Hepsiburada/Temu) bazında satış · iptal · iade.
+
+    Ciro kartlarıyla (sales-breakdown) AYNI `_bucket_orders` mantığını kullanır:
+    kısmi iadede yalnız iade edilen kalemin tutarı/adedi İade'ye yazılır, kalan
+    ürünler Net'te kalır. Eskiden bu uç siparişin TAMAMINI iadeye yazdığı için
+    aynı ekranda kartlarla çelişen bir "İade Tutarı" gösteriyordu.
+
+    Her kanal için: sipariş · ADET · tutar (net/iptal/iade) + açık iade projeksiyonu.
+    """
     s, e = _iso_range(start_date, end_date)
-    _RETURN_ST = ["return_requested", "return_approved", "return_in_transit",
-                  "returned", "refunded", "partial_refunded"]
-    _CANCEL_ST = ["cancelled", "cancel_refunded"]
-    _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", ""]}]}}
-    pipeline = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e},
-                    "status": {"$in": _RETURN_ST + _CANCEL_ST}}},
-        {"$group": {
-            "_id": {"src": {"$cond": [{"$in": [_plat, ["trendyol", "hepsiburada", "temu"]]}, _plat, "site"]},
-                    "kind": {"$cond": [{"$in": ["$status", _CANCEL_ST]}, "cancel", "return"]}},
-            "orders": {"$sum": 1},
-            "total": {"$sum": {"$ifNull": ["$total", 0]}}}},
-    ]
+    proj = {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
+            "items.quantity": 1, "partial_cancel_amount": 1, "partial_cancel_units": 1,
+            "platform": 1, "marketplace": 1}
+    orders = [o async for o in db.orders.find({"created_at": {"$gte": s, "$lte": e}}, proj)]
+    onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
+    oids = list({str(o.get("id")) for o in orders if o.get("id")})
+    closed, open_ = await _split_maps(onums, oids)
+
     _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu"}
-    rows: dict = {}
-    async for r in db.orders.aggregate(pipeline):
-        src = _SRC.get(r["_id"]["src"], r["_id"]["src"])
-        d = rows.setdefault(src, {"source": src, "cancel_orders": 0, "cancel_total": 0.0,
-                                  "return_orders": 0, "return_total": 0.0})
-        if r["_id"]["kind"] == "cancel":
-            d["cancel_orders"] += r["orders"]
-            d["cancel_total"] += float(r["total"] or 0)
-        else:
-            d["return_orders"] += r["orders"]
-            d["return_total"] += float(r["total"] or 0)
-    out = sorted(rows.values(), key=lambda x: -(x["cancel_total"] + x["return_total"]))
-    for d in out:
-        d["cancel_total"] = round(d["cancel_total"], 2)
-        d["return_total"] = round(d["return_total"], 2)
-    return {"items": out}
+    by_ch: dict = {}
+    for o in orders:
+        plat = str(o.get("platform") or o.get("marketplace") or "").strip().lower()
+        key = plat if plat in _MARKETPLACES else "site"
+        by_ch.setdefault(key, []).append(o)
+
+    items = []
+    for key, rows in by_ch.items():
+        b = _bucket_orders(rows, closed, open_)
+        items.append({
+            "source": _SRC.get(key, key or "Site"),
+            # Net (elde kalan) — kanal tablosunun "Sipariş / Ciro" sütunları
+            "orders": b["net"]["orders"], "units": b["net"]["units"], "revenue": b["net"]["revenue"],
+            # İptal
+            "cancel_orders": b["cancels"]["orders"], "cancel_units": b["cancels"]["units"],
+            "cancel_total": b["cancels"]["revenue"],
+            # İade (kalem bazlı)
+            "return_orders": b["returns"]["orders"], "return_units": b["returns"]["units"],
+            "return_total": b["returns"]["revenue"],
+            # Toplam + açık iade projeksiyonu
+            "total_orders": b["included"]["orders"], "total_units": b["included"]["units"],
+            "total_revenue": b["included"]["revenue"],
+            "pending_orders": b["pending_returns"]["orders"],
+            "pending_units": b["pending_returns"]["units"],
+            "pending_total": b["pending_returns"]["revenue"],
+            "projected_revenue": b["projected_net"]["revenue"],
+        })
+    items.sort(key=lambda x: -x["total_revenue"])
+    return {"items": items}
 
 
 @router.get("/cargo")
@@ -1620,7 +1761,12 @@ async def sales_by_location(
             "_id": gid,
             "orders": {"$sum": 1},
             "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
-            "items": {"$sum": {"$size": {"$ifNull": ["$items", []]}}},
+            # ADET = kalem adetleri toplamı. Eskiden $size (KALEM SAYISI) idi: aynı üründen
+                # 3 adet alan sipariş 1 sayılıyordu → pazaryeri raporlarıyla mutabakatta
+                # sistematik eksik. Trendyol "Brüt Satış Adedi" ile aynı birim.
+                "items": {"$sum": {"$reduce": {
+                    "input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$max": [1, {"$ifNull": ["$$this.quantity", 1]}]}]}}}},
         }},
         {"$sort": {"revenue": -1}},
         {"$limit": limit},

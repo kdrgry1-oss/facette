@@ -61,13 +61,9 @@ export function SalesReport() {
     // İl/İlçe & Kanal (eski ayrı sekme buraya taşındı — kullanıcı isteği)
     axios.get(`${API}/admin/reports/by-location`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group: "city", source, limit: 100 } })
       .then((r) => setLocData(r.data.rows || [])).catch(() => {});
-    // Kanal = yalnız Site + pazaryerleri (Instagram/Google trafik kaynakları değil)
-    axios.get(`${API}/admin/reports/sales-by-platform`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
-      .then((r) => setSrcData(r.data.rows || [])).catch(() => {});
   };
   const [cancelRet, setCancelRet] = useState([]);
   const [locData, setLocData] = useState([]);
-  const [srcData, setSrcData] = useState([]);
 
   // ── KESİN DOĞRULAMA (Trendyol ↔ panel mutabakatı) ──────────────────────────
   // Trendyol'un satış raporu ADET sayar, bizim panel SİPARİŞ sayar; bu yüzden
@@ -196,7 +192,7 @@ export function SalesReport() {
       </div>
 
       {/* 🏬 Pazaryerine Göre Satış · İptal · İade — TEK tablo (eski iki ayrı blok birleştirildi) */}
-      {(srcData.length > 0 || cancelRet.length > 0) && (
+      {cancelRet.length > 0 && (
         <div className="bg-white border rounded-xl p-4" data-testid="channel-combined">
           <h2 className="text-sm font-bold uppercase tracking-wider mb-2">Pazaryerine Göre Satış · İptal · İade</h2>
           <div className="overflow-x-auto">
@@ -205,6 +201,7 @@ export function SalesReport() {
                 <tr>
                   <th className="text-left p-2">Kanal</th>
                   <th className="text-right p-2">Sipariş</th>
+                  <th className="text-right p-2">Adet</th>
                   <th className="text-right p-2">Ciro</th>
                   <th className="text-right p-2">İptal</th>
                   <th className="text-right p-2">İptal Tutarı</th>
@@ -212,38 +209,40 @@ export function SalesReport() {
                   <th className="text-right p-2">İade</th>
                   <th className="text-right p-2">İade Tutarı</th>
                   <th className="text-right p-2">İade %</th>
+                  <th className="text-right p-2">Açık İade</th>
                 </tr>
               </thead>
               <tbody>
-                {(() => {
-                  // Satış (sales-by-platform) + iptal/iade (by-source) kanal adına göre birleşir
-                  const crBy = Object.fromEntries(cancelRet.map(r => [r.source, r]));
-                  const names = [...new Set([...srcData.map(r => r.channel), ...cancelRet.map(r => r.source)])];
-                  return names.map(nm => {
-                    const s = srcData.find(r => r.channel === nm) || { orders: 0, revenue: 0 };
-                    const c = crBy[nm] || { cancel_orders: 0, cancel_total: 0, return_orders: 0, return_total: 0 };
-                    const tot = (s.orders || 0) + (c.cancel_orders || 0) + (c.return_orders || 0);
-                    const cp = tot ? (100 * (c.cancel_orders || 0)) / tot : 0;
-                    const rp = tot ? (100 * (c.return_orders || 0)) / tot : 0;
-                    return (
-                      <tr key={nm} className="border-t">
-                        <td className="p-2 font-medium">{nm}</td>
-                        <td className="p-2 text-right tabular-nums">{s.orders || 0}</td>
-                        <td className="p-2 text-right tabular-nums font-semibold">{tl(s.revenue)}</td>
-                        <td className="p-2 text-right tabular-nums">{c.cancel_orders || 0}</td>
-                        <td className="p-2 text-right tabular-nums text-rose-600">{tl(c.cancel_total)}</td>
-                        <td className={`p-2 text-right tabular-nums text-xs ${cp >= 10 ? "text-rose-600 font-bold" : "text-gray-500"}`}>{cp ? `%${cp.toFixed(1)}` : ""}</td>
-                        <td className="p-2 text-right tabular-nums">{c.return_orders || 0}</td>
-                        <td className="p-2 text-right tabular-nums text-amber-600">{tl(c.return_total)}</td>
-                        <td className={`p-2 text-right tabular-nums text-xs ${rp >= 15 ? "text-rose-600 font-bold" : "text-gray-500"}`}>{rp ? `%${rp.toFixed(1)}` : ""}</td>
-                      </tr>
-                    );
-                  });
-                })()}
+                {/* TEK KAYNAK: cancel-return-by-source artık satış+iptal+iade+adet+açık
+                    iadeyi ciro kartlarıyla AYNI kalem-bazlı mantıkla döndürür. Eskiden
+                    burası sales-by-platform ile birleştiriliyordu ve iade tutarı
+                    kartlarla çelişiyordu (sipariş-bütünü vs kalem bazlı). */}
+                {cancelRet.map((c) => {
+                  const totU = c.total_units || 0;
+                  const cp = totU ? (100 * (c.cancel_units || 0)) / totU : 0;
+                  const rp = totU ? (100 * (c.return_units || 0)) / totU : 0;
+                  return (
+                    <tr key={c.source} className="border-t">
+                      <td className="p-2 font-medium">{c.source}</td>
+                      <td className="p-2 text-right tabular-nums">{c.orders || 0}</td>
+                      <td className="p-2 text-right tabular-nums font-semibold">{c.units || 0}</td>
+                      <td className="p-2 text-right tabular-nums font-semibold">{tl(c.revenue)}</td>
+                      <td className="p-2 text-right tabular-nums">{c.cancel_units || 0}</td>
+                      <td className="p-2 text-right tabular-nums text-rose-600">{tl(c.cancel_total)}</td>
+                      <td className={`p-2 text-right tabular-nums text-xs ${cp >= 10 ? "text-rose-600 font-bold" : "text-gray-500"}`}>{cp ? `%${cp.toFixed(1)}` : ""}</td>
+                      <td className="p-2 text-right tabular-nums">{c.return_units || 0}</td>
+                      <td className="p-2 text-right tabular-nums text-amber-600">{tl(c.return_total)}</td>
+                      <td className={`p-2 text-right tabular-nums text-xs ${rp >= 15 ? "text-rose-600 font-bold" : "text-gray-500"}`}>{rp ? `%${rp.toFixed(1)}` : ""}</td>
+                      <td className="p-2 text-right tabular-nums text-xs text-amber-700">
+                        {c.pending_units ? `${c.pending_units} adet · ${tl(c.pending_total)}` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          <p className="text-[10px] text-gray-400 mt-1">Oranlar o kanalın toplam siparişine (satış + iptal + iade) göredir.</p>
+          <p className="text-[10px] text-gray-400 mt-1">Sipariş = sipariş sayısı, Adet = ürün adedi (pazaryeri raporlarıyla aynı birim). İptal/İade oranları ADET üzerinden, o kanalın toplam adedine (satış + iptal + iade) göredir. Kısmi iadede yalnız iade edilen ürün İade'ye yazılır.</p>
         </div>
       )}
 

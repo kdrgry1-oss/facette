@@ -51,7 +51,11 @@ async def get_dashboard_stats(
 
         # Ciro/sipariş sayımı: iptal/başarısız/iade edilmiş siparişler GELİR DEĞİL → dışla
         # (denetim: total_revenue eskiden iptal+ödenmemişi de topluyordu, ciro şişiyordu).
-        _NON_REVENUE = ["cancelled", "payment_failed", "refunded"]
+        # Raporlar modülüyle AYNI liste kullanılır — eskiden burada 3 statü vardı
+        # (cancel_refunded / returned / partial_refunded / iade-sürecindekiler /
+        # ödenmemişler eksikti) ve Dashboard cirosu Raporlar'daki net ciroyla asla
+        # tutmuyordu. Tek kaynak: reports._EXCLUDED_STATUSES.
+        from routes.reports import _EXCLUDED_STATUSES as _NON_REVENUE
         async def _sum_range(dt_from, dt_to=None):
             dtq = {"$gte": dt_from}
             if dt_to:
