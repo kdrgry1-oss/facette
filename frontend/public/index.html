@@ -246,13 +246,44 @@
                     var r = document.getElementById("root");
                     return !!(r && r.children && r.children.length > 0);
                 }
+                // Tazeleme denendi ama uygulama yine açılmadı → SESSİZ BEYAZ EKRAN BIRAKMA.
+                // Sebep genelde ÇOK ESKİ TARAYICI (bundle'daki modern sözdizimi parse edilemez)
+                // ya da JS'i engelleyen bir eklenti/kurumsal filtredir; ikisi de reload ile
+                // düzelmez. Kullanıcı en azından ne olduğunu görsün ve destek için tarayıcı
+                // bilgisini iletebilsin. NOT: Bu blok ESKİ tarayıcıda da çalışmalı → sadece ES5
+                // (var / function / string birleştirme; ok fonksiyonu, const, template literal YOK).
+                function showFallback() {
+                    try {
+                        var r = document.getElementById("root");
+                        if (!r || (r.children && r.children.length > 0)) return;
+                        var ua = (navigator && navigator.userAgent) ? navigator.userAgent : "";
+                        r.innerHTML =
+                            '<div style="min-height:70vh;display:flex;flex-direction:column;align-items:center;' +
+                            'justify-content:center;gap:14px;padding:24px;text-align:center;' +
+                            'font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif">' +
+                            '<div style="font-size:18px;font-weight:700;color:#111">Sayfa yüklenemedi</div>' +
+                            '<div style="font-size:14px;color:#666;max-width:380px;line-height:1.5">' +
+                            'Tarayıcınız bu sayfayı açamadı. Lütfen tarayıcınızı güncelleyin ya da ' +
+                            'Chrome/Edge/Safari\'nin güncel bir sürümüyle deneyin. Reklam engelleyici ' +
+                            'veya kurumsal güvenlik filtresi de sayfayı engelliyor olabilir.</div>' +
+                            '<button id="fct-retry" style="padding:10px 22px;background:#111;color:#fff;' +
+                            'border:none;border-radius:2px;font-size:13px;cursor:pointer">Tekrar dene</button>' +
+                            '<div style="font-size:10px;color:#bbb;max-width:380px;word-break:break-all">' + ua + '</div>' +
+                            '</div>';
+                        var b = document.getElementById("fct-retry");
+                        if (b) b.onclick = function () {
+                            try { sessionStorage.removeItem("__heal"); } catch (e) {}
+                            location.replace(location.pathname);
+                        };
+                    } catch (e) {}
+                }
                 function check() {
                     try {
                         if (appMounted() && cssApplied()) {
                             try { sessionStorage.removeItem("__heal"); } catch (e) {}
                             return; // her şey yolunda
                         }
-                        if (healedAlready()) return; // bir kez denendi; kalıcı hata reload'la çözülmez → döngü YOK
+                        if (healedAlready()) { showFallback(); return; } // bir kez denendi; döngü YOK → sessiz beyaz ekran yerine MESAJ
                         try { sessionStorage.setItem("__heal", "1"); } catch (e) {}
                         var u = location.pathname +
                             (location.search ? location.search + "&" : "?") + "_r=" + Date.now() +
