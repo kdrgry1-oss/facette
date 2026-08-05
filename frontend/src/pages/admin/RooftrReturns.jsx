@@ -851,8 +851,15 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                       ? Math.min(1, Number(r.discount) / Number(r.subtotal)) : 0;
                                     const dShare = g * dr;
                                     const netAfterDisc = g - dShare;
-                                    const vadeRatio = (Number(r.vade_farki) > 0 && Number(r.total) > 0)
-                                      ? Number(r.vade_farki) / Number(r.total) : 0;
+                                    // TABAN, backend ile BİREBİR AYNI olmalı (orders._compute_refund_breakdown
+                                    // ve gider pusulası): ürünlerin NET toplamı = subtotal − indirim.
+                                    // Eskiden r.total kullanılıyordu; kargo order.total'ın içinde olduğundan
+                                    // kargolu siparişte pay küçük çıkıp panel ile onay modalı ayrışıyordu.
+                                    const vadeBase = (Number(r.subtotal) > 0)
+                                      ? Math.max(0, Number(r.subtotal) - (Number(r.discount) || 0))
+                                      : Number(r.total) || 0;
+                                    const vadeRatio = (Number(r.vade_farki) > 0 && vadeBase > 0)
+                                      ? Number(r.vade_farki) / vadeBase : 0;
                                     const vadeShare = netAfterDisc * vadeRatio;
                                     const net = netAfterDisc + vadeShare;
                                     const hasDisc = dr > 0.0001, hasVade = vadeShare > 0.005;
@@ -863,7 +870,10 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                         {hasDisc && <span className="text-gray-400 line-through">{fmtTL(g)}</span>}
                                         {hasDisc && <span className="text-orange-600">−{fmtTL(dShare)} <span className="text-[10px]">(%{(dr * 100).toFixed(0)})</span></span>}
                                         {hasVade && <span className="text-amber-600">+{fmtTL(vadeShare)} <span className="text-[10px]">vade</span></span>}
+                                        {/* Taksitli siparişte kalem tutarı vade farkını İÇERİR — operatör
+                                            "bu rakama vade farkı dahil mi?" diye tereddüt etmesin. */}
                                         <span className="font-semibold text-gray-900">{fmtTL(net)}</span>
+                                        {hasVade && <span className="text-[10px] text-amber-700">vade farkı dahil</span>}
                                       </span>
                                     );
                                   })()}
@@ -923,7 +933,9 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                 </span>
                               )}
                               {Number(r.vade_farki) > 0 && (
-                                <span className="text-[10px] font-normal text-amber-600">taksitli: vade farkı payı gider pusulasında eklenir</span>
+                                /* Eski metin "gider pusulasında eklenir" diyordu; oysa vade farkı payı
+                                   bu tutarın İÇİNDE. Yanlış anlaşılıp elle tekrar eklenmesin. */
+                                <span className="text-[10px] font-normal text-amber-600">taksitli — vade farkı payı bu tutara dahildir</span>
                               )}
                             </div>
                           );
