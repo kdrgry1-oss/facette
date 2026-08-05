@@ -360,6 +360,115 @@ async def sales(
     return {"rows": rows, "totals": {"orders": total_orders, "revenue": total_revenue, "aov": aov}}
 
 
+_CANCEL_STATUSES = ["cancelled", "cancel_refunded"]
+# İade grubu (return_rejected HARİÇ — satış geçerli sayılır, ciroda kalır)
+_RETURN_STATUSES_BD = ["return_requested", "return_approved", "return_in_transit",
+                       "returned", "refunded", "partial_refunded"]
+# Pazaryeri iade talebi AÇIK (henüz onaylanmamış) sayılan claim durumları. Trendyol'un
+# satış raporu bu adetleri ANINDA "İade"ye yazar; biz yalnız Accepted olanı siparişe
+# yansıtıyoruz (integrations_trendyol.py:3951). Aradaki fark bu kovadır.
+_OPEN_CLAIM_STATUSES = ["Created", "WaitingInAction", "InAnalysis"]
+
+
+def _order_units(o: dict) -> int:
+    """Siparişteki ÜRÜN ADEDİ (kalem adetleri toplamı). Trendyol'un 'Brüt Satış Adedi'
+    ile aynı birim — sipariş sayısı değil. Kalem yoksa 1 kabul edilir."""
+    items = o.get("items") or []
+    if not items:
+        return 1
+    n = 0
+    for it in items:
+        try:
+            n += max(1, int(it.get("quantity") or 1))
+        except Exception:
+            n += 1
+    return n or 1
+
+
+async def _split_maps(order_numbers: list, order_ids: list) -> tuple:
+    """Sipariş no listesi için KALEM BAZLI iade tutarlarını toplar.
+
+    Döner: (kapali, acik) — her biri {order_number: {"amount": float, "qty": int}}
+      kapali = onaylanmış (Accepted) pazaryeri iadeleri + site'de onaylı iade kalemleri
+      acik   = henüz sonuçlanmamış (Created/WaitingInAction/InAnalysis) iade talepleri
+
+    Neden kalem bazlı: 3 ürünlü siparişten 1 ürün iade edildiğinde siparişin TAMAMI
+    iadeye yazılıyordu (apply_accepted_claims_to_orders sipariş statüsünü komple
+    'returned' yapar). Trendyol adet bazlı saydığı için tutarlar tutmuyordu.
+    """
+    closed: dict = {}
+    open_: dict = {}
+    if not order_numbers:
+        return closed, open_
+
+    def _acc(bucket: dict, onum: str, amount: float, qty: int):
+        d = bucket.setdefault(onum, {"amount": 0.0, "qty": 0})
+        d["amount"] += max(0.0, float(amount or 0))
+        d["qty"] += max(0, int(qty or 0))
+
+    # ① Pazaryeri (Trendyol/Hepsiburada) iade talepleri — refund_amount kalem NET
+    #    fiyatlarının toplamıdır (integrations_trendyol.py:3866), yani tam da iade
+    #    edilen ürünlerin parası.
+    for i in range(0, len(order_numbers), 5000):
+        chunk = order_numbers[i:i + 5000]
+        async for c in db.trendyol_claims.find(
+                {"order_number": {"$in": chunk}, "claim_type": {"$ne": "CANCEL"}},
+                {"_id": 0, "order_number": 1, "claim_status": 1,
+                 "refund_amount": 1, "items": 1}):
+            st = str(c.get("claim_status") or "")
+            onum = str(c.get("order_number") or "")
+            if not onum:
+                continue
+            qty = sum(max(1, int((it or {}).get("quantity") or 1))
+                      for it in (c.get("items") or [])) or 1
+            amt = c.get("refund_amount")
+            try:
+                amt = float(amt or 0)
+            except Exception:
+                amt = 0.0
+            if st == "Accepted":
+                _acc(closed, onum, amt, qty)
+            elif st in _OPEN_CLAIM_STATUSES:
+                _acc(open_, onum, amt, qty)
+            # Rejected/Cancelled/Unresolved → iade GERÇEKLEŞMEDİ, satış geçerli.
+
+    # ② Site iadeleri — customer_returns kalemleri (onaylı kalemler öncelikli).
+    #    Site siparişlerinde statü zaten iade grubuna düşüyor; buradan yalnız KISMİ
+    #    iadenin tutarını çıkarıyoruz ki kalan ürünler satışta kalsın.
+    if order_ids:
+        for i in range(0, len(order_ids), 5000):
+            chunk = order_ids[i:i + 5000]
+            async for r in db.customer_returns.find(
+                    {"order_id": {"$in": chunk}},
+                    {"_id": 0, "order_id": 1, "order_number": 1, "status": 1,
+                     "approved_items": 1, "items": 1, "refund_amount": 1}):
+                st = str(r.get("status") or "").lower()
+                if st in ("cancelled", "canceled", "rejected", "return_rejected"):
+                    continue
+                onum = str(r.get("order_number") or "")
+                if not onum:
+                    continue
+                its = r.get("approved_items") or r.get("items") or []
+                qty = sum(max(1, int((it or {}).get("quantity") or 1)) for it in its)
+                amt = 0.0
+                for it in its:
+                    try:
+                        amt += float((it or {}).get("price") or (it or {}).get("unit_price") or 0) \
+                               * max(1, int((it or {}).get("quantity") or 1))
+                    except Exception:
+                        pass
+                if amt <= 0:
+                    try:
+                        amt = float(r.get("refund_amount") or 0)
+                    except Exception:
+                        amt = 0.0
+                # Site tarafında "onaylı" = terminal statüler; gerisi açık talep.
+                tgt = closed if st in ("returned", "refunded", "partial_refunded",
+                                       "return_approved", "approved", "completed") else open_
+                _acc(tgt, onum, amt, qty)
+    return closed, open_
+
+
 @router.get("/sales-breakdown")
 async def sales_breakdown(
     start_date: Optional[str] = None,
@@ -367,41 +476,132 @@ async def sales_breakdown(
     source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
     current_user: dict = Depends(require_admin),
 ):
-    """Ciro kırılımı — 4 kademe:
-      ① included = İptal + İade DAHİL toplam ciro (net + iptal + iade)
-      ② cancels  = sadece iptal edilen siparişlerin tutarı (kaybedilen)
-      ③ returns  = sadece iade edilen siparişlerin tutarı (kaybedilen)
-      ④ net      = iptal & iade HARİÇ net ciro (elimizde kalan)
-    Tutar = order.total toplamı. Tarih aralığı TR yerel gün, kaynak filtreli."""
+    """Ciro kırılımı — 4 kademe + adet + açık-iade projeksiyonu:
+      ① included = İptal + İade DAHİL toplam (net + iptal + iade)
+      ② cancels  = iptal edilen tutar (kaybedilen)
+      ③ returns  = iade edilen tutar — KISMİ iadede yalnız iade edilen ürünlerin payı
+      ④ net      = elimizde kalan net ciro (kısmi iadede kalan ürünler burada kalır)
+      ⑤ pending_returns = henüz onaylanmamış iade talepleri; onaylanırsa net'ten düşecek
+      ⑥ projected_net    = ④ − ⑤ (açık iadeler onaylanırsa oluşacak net)
+
+    Her kovada `units` = ÜRÜN ADEDİ (kalem adetleri toplamı) — pazaryeri raporlarıyla
+    (Trendyol 'Brüt Satış Adedi') aynı birim. `orders` = sipariş sayısı.
+    Tarih aralığı TR yerel gün, kaynak filtreli."""
     s, e = _iso_range(start_date, end_date)
     base = {"created_at": {"$gte": s, "$lte": e}}
     sc = _source_cond(source)
     if sc:
         base.update(sc)
-    _CANCEL = ["cancelled", "cancel_refunded"]
-    # İade grubu (return_rejected HARİÇ — satış geçerli sayılır, ciroda kalır)
-    _RETURN = ["return_requested", "return_approved", "return_in_transit",
-               "returned", "refunded", "partial_refunded"]
 
-    async def _sum(status_cond):
-        m = dict(base)
-        if status_cond is not None:
-            m["status"] = status_cond
-        pipe = [{"$match": m}, {"$group": {"_id": None,
-                "revenue": {"$sum": {"$ifNull": ["$total", 0]}}, "orders": {"$sum": 1}}}]
-        async for r in db.orders.aggregate(pipe):
-            return {"revenue": round(float(r["revenue"]), 2), "orders": int(r["orders"])}
-        return {"revenue": 0.0, "orders": 0}
+    proj = {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
+            "items.quantity": 1, "partial_cancel_amount": 1, "partial_cancel_units": 1}
+    orders = [o async for o in db.orders.find(base, proj)]
+    onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
+    oids = list({str(o.get("id")) for o in orders if o.get("id")})
+    closed, open_ = await _split_maps(onums, oids)
 
-    cancels = await _sum({"$in": _CANCEL})
-    returns = await _sum({"$in": _RETURN})
-    net = await _sum({"$nin": _EXCLUDED_STATUSES})
-    # DAHİL = net + iptal + iade (içsel tutarlı: pending/ödeme-bekleyen gürültüsü katılmaz)
+    def _blank():
+        return {"revenue": 0.0, "orders": 0, "units": 0}
+
+    cancels, returns, net, pending = _blank(), _blank(), _blank(), _blank()
+    partial_split = 0  # kaç siparişte kısmi ayrıştırma uygulandı (şeffaflık)
+
+    for o in orders:
+        st = str(o.get("status") or "")
+        if st in _EXCLUDED_STATUSES and st not in _CANCEL_STATUSES and st not in _RETURN_STATUSES_BD:
+            continue  # ödenmemiş grubu (awaiting_payment/pending/failed) — ciroya girmez
+        try:
+            total = float(o.get("total") or 0)
+        except Exception:
+            total = 0.0
+        units = _order_units(o)
+        onum = str(o.get("order_number") or "")
+
+        if st in _CANCEL_STATUSES:
+            cancels["revenue"] += total
+            cancels["orders"] += 1
+            cancels["units"] += units
+            continue
+
+        # KISMİ İPTAL: sipariş bizde AKTİF kalır (aktif paket var) ama Trendyol iptal
+        # edilen kalemi 'İptal' sayar. Mutabakat bu tutarı/adedi iptale yazar.
+        # Tutar VE adet siparişten DÜŞÜLÜR — yoksa aynı kalem hem iptalde hem nette
+        # sayılıp toplam adedi şişirir.
+        try:
+            pc = float(o.get("partial_cancel_amount") or 0)
+        except Exception:
+            pc = 0.0
+        pc = min(max(0.0, pc), total)
+        if pc > 0:
+            try:
+                pc_u = max(1, int(o.get("partial_cancel_units") or 1))
+            except Exception:
+                pc_u = 1
+            pc_u = min(pc_u, max(0, units - 1))  # en az 1 adet aktif kalmalı
+            cancels["revenue"] += pc
+            cancels["units"] += pc_u
+            total -= pc
+            units -= pc_u
+
+        c = closed.get(onum)
+        if st in _RETURN_STATUSES_BD:
+            # İade edilmiş sipariş — kalem bazlı tutar varsa YALNIZ o kadarı iadeye gider.
+            r_amt = min(float(c["amount"]), total) if (c and c["amount"] > 0.005) else total
+            r_qty = min(int(c["qty"]), units) if (c and c["qty"] > 0) else units
+            returns["revenue"] += r_amt
+            returns["orders"] += 1
+            returns["units"] += r_qty
+            kept = round(total - r_amt, 2)
+            kept_u = units - r_qty
+            if kept > 0.005 or kept_u > 0:
+                partial_split += 1
+                net["revenue"] += max(0.0, kept)
+                net["units"] += max(0, kept_u)
+                # Sipariş sayısı çift sayılmasın: kısmi iadede sipariş İADE'de sayılır.
+            continue
+
+        # ONAYLI İADE var ama sipariş statüsü henüz senkronlanmamış (claims-sync gecikmesi
+        # veya kısmi iadede statünün değişmemesi). Rapor kendi kendini onarır: iade edilen
+        # kalemin payı İade'ye gider, kalan ürünler satışta kalır.
+        if c and (c["amount"] > 0.005 or c["qty"] > 0):
+            r_amt = min(float(c["amount"]), total)
+            r_qty = min(int(c["qty"]) or 1, units)
+            returns["revenue"] += r_amt
+            returns["units"] += r_qty
+            total = round(total - r_amt, 2)
+            units -= r_qty
+            if total <= 0.005 and units <= 0:
+                returns["orders"] += 1
+                continue
+            partial_split += 1
+
+        # Aktif satış
+        net["revenue"] += max(0.0, total)
+        net["orders"] += 1
+        net["units"] += max(0, units)
+        op = open_.get(onum)
+        if op and (op["amount"] > 0.005 or op["qty"] > 0):
+            pending["revenue"] += min(float(op["amount"]), total)
+            pending["orders"] += 1
+            pending["units"] += min(int(op["qty"]) or 1, units)
+
+    def _fin(d):
+        return {"revenue": round(d["revenue"], 2), "orders": d["orders"], "units": d["units"]}
+
+    cancels, returns, net, pending = _fin(cancels), _fin(returns), _fin(net), _fin(pending)
     included = {
         "revenue": round(net["revenue"] + cancels["revenue"] + returns["revenue"], 2),
         "orders": net["orders"] + cancels["orders"] + returns["orders"],
+        "units": net["units"] + cancels["units"] + returns["units"],
     }
-    return {"included": included, "cancels": cancels, "returns": returns, "net": net}
+    projected_net = {
+        "revenue": round(net["revenue"] - pending["revenue"], 2),
+        "orders": net["orders"] - pending["orders"],
+        "units": net["units"] - pending["units"],
+    }
+    return {"included": included, "cancels": cancels, "returns": returns, "net": net,
+            "pending_returns": pending, "projected_net": projected_net,
+            "partial_split_orders": partial_split}
 
 
 @router.get("/products/export-xlsx")

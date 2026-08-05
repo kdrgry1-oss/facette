@@ -2608,7 +2608,7 @@ async def get_trendyol_batch_status_v2(batch_id: str, current_user: dict = Depen
     except Exception as e:
         logger.error(f"Error fetching batch status: {str(e)}")
         raise HTTPException(status_code=500, detail="Batch durumu alınamadı.")
-async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen_cancel=True, statuses=("Cancelled", "Returned", "UnDelivered")):
+async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen_cancel=True, statuses=("Cancelled", "UnSupplied", "Returned", "UnDelivered")):
     """İptal/iade/teslim edilemedi gibi durum değişikliklerini ayrı status
     sorgularıyla yakalar; yalnızca MEVCUT siparişlerin status alanını günceller
     (kaydı baştan ezmez). Trendyol orders ucu ~2 haftalık pencereyle sınırlıdır;
@@ -2616,13 +2616,14 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
     from datetime import datetime, timezone, timedelta
     updated = 0
     _logged_sample = False
+    _CANCEL_PASS = ("Cancelled", "UnSupplied")
     for st in statuses:
         # İptaller daha GENİŞ pencerede taranır: Trendyol startDate/endDate sipariş
         # TARİHİNE göre filtreler → 14 günden eski bir sipariş sonradan iptal olursa dar
         # pencereye girmez ve İptaller'e hiç düşmezdi ("bazıları düşmemiş" kök nedeni).
         # Cancelled için pencereyi 45 güne kadar geriye çek.
         _start = start_date_ms
-        if st == "Cancelled" and widen_cancel:
+        if st in _CANCEL_PASS and widen_cancel:
             _wide = int((datetime.now(timezone.utc) - timedelta(days=45)).timestamp() * 1000)
             _start = min(start_date_ms, _wide) if start_date_ms else _wide
         try:
@@ -2649,7 +2650,7 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                     # GERÇEK SEBEP ARAYIŞI — ground truth için: iptal kaydının HAM yapısını
                     # her taramada BİR KEZ logla; Trendyol'un sebebi hangi alanda verdiğini
                     # (varsa) buradan kesin görürüz.
-                    if st == "Cancelled" and not _logged_sample:
+                    if st in _CANCEL_PASS and not _logged_sample:
                         try:
                             import json as _json
                             _lines0 = (t_order.get("lines") or [{}])[0]
@@ -2676,7 +2677,7 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                     if isinstance(_reason, dict):
                         _reason = _reason.get("name") or _reason.get("text") or _reason.get("reason") or ""
                     _reason = str(_reason or "").strip()
-                    if not _reason and st == "Cancelled":
+                    if not _reason and st in _CANCEL_PASS:
                         # Yedek: müşteri iade/iptal claim'i varsa oradaki sebep.
                         try:
                             _cl = await db.trendyol_claims.find_one(
@@ -2689,7 +2690,7 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                         except Exception:
                             pass
                     if not _reason:
-                        _reason = ("Trendyol iptali" if st == "Cancelled"
+                        _reason = ("Trendyol iptali" if st in _CANCEL_PASS
                                    else ("Teslim edilemedi (Trendyol)" if st == "UnDelivered"
                                          else "Trendyol iadesi"))
                     # ── KISMİ İPTAL KORUMASI ───────────────────────────────────────────
@@ -2700,7 +2701,7 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                     # Trendyol'dan çek: AKTİF (iptal/iade/teslim-edilemedi OLMAYAN) paket varsa
                     # siparişi İPTAL ETME → aktif paketin kalem/tutar/durumuna çek (kısmi iptal).
                     # Tamamen defensive: herhangi bir hata olursa eski (tam-iptal) akışa düşer.
-                    if st == "Cancelled":
+                    if st in _CANCEL_PASS:
                         _active_pkg = None
                         try:
                             _allp = await client.get_orders(
@@ -2748,7 +2749,7 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                         "trendyol_status_raw": _raw_status,
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
-                    if st == "Cancelled":
+                    if st in _CANCEL_PASS:
                         _set["cancel_reason"] = _reason
                         _set["cancel_source"] = "trendyol"
                     # İADE KORUMASI (kök neden): bu sweep bir siparişi ASLA terminal (iade/iptal)
@@ -2773,7 +2774,7 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                             mapped["id"] = generate_id()
                             mapped["created_at"] = _ms_to_iso(t_order.get("orderDate")) or datetime.now(timezone.utc).isoformat()
                             mapped["trendyol_status_raw"] = _raw_status
-                            if st == "Cancelled":
+                            if st in _CANCEL_PASS:
                                 mapped["cancel_reason"] = _reason
                                 mapped["cancel_source"] = "trendyol"
                             await db.orders.insert_one(mapped)
@@ -2783,7 +2784,7 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                     # İptal senkronu → stoğu BİR KEZ geri ekle (idempotent; manuel iptalle aynı
                     # order_cancelled guard). YENİ eklenen kayıtta stok geri EKLENMEZ: bu sipariş
                     # bizde hiç olmadığı için stok daha önce DÜŞÜLMEDİ → +1 yanlış olurdu.
-                    if st == "Cancelled" and not _was_new:
+                    if st in _CANCEL_PASS and not _was_new:
                         try:
                             _o = await db.orders.find_one({"order_number": onum, "platform": "trendyol"}, {"_id": 0, "id": 1, "items": 1})
                             if _o:
@@ -2893,6 +2894,7 @@ def map_trendyol_order(t_order: dict) -> dict:
     # geri döndü, satış tamamlanmadı → ciro dışı "cancelled".
     status_map = {
         "Cancelled": "cancelled",
+        "UnSupplied": "cancelled",   # Tedarik Edilemedi — Trendyol da iptal sayar
         "Returned": "returned",
         "UnDeliveredAndReturned": "cancelled",
     }
@@ -3990,6 +3992,253 @@ async def apply_returns_to_orders_endpoint(
     dry_run=true (varsayılan) yalnız sayar, YAZMAZ. Uygulamak için ?dry_run=false."""
     plats = [platform.strip().lower()] if platform.strip() else None
     return await apply_accepted_claims_to_orders(platforms=plats, dry_run=dry_run)
+
+
+# ── KESİN DOĞRULAMA (MUTABAKAT) ───────────────────────────────────────────────
+# Trendyol'un kendi sipariş listesiyle bizim panelin SİPARİŞ / ADET / TUTAR bazında
+# birebir karşılaştırması. "Trendyol 1.700 diyor, bizde 1.560 görünüyor" tipi soruyu
+# tahminle değil ham veriyle kapatır: 1.700 = ADET, 1.560 = SİPARİŞ.
+_TY_DEAD_CANCEL = ("Cancelled", "UnSupplied")
+
+
+def _ty_pkg_status(pkg: dict) -> str:
+    return str(pkg.get("shipmentPackageStatus") or pkg.get("status") or "")
+
+
+def _ty_pkg_totals(pkg: dict) -> tuple:
+    """Bir Trendyol paketinin (adet, net tutar) toplamı. Satır alanları BİRİM'dir
+    (bkz. map_trendyol_order); 'price' = indirim düşülmüş birim fiyat."""
+    units = 0
+    amount = 0.0
+    for ln in (pkg.get("lines") or []):
+        try:
+            q = max(1, int(ln.get("quantity") or 1))
+        except Exception:
+            q = 1
+        try:
+            p = float(ln.get("price") if ln.get("price") is not None else ln.get("lineUnitPrice") or 0)
+        except Exception:
+            p = 0.0
+        units += q
+        amount += p * q
+    return units, round(amount, 2)
+
+
+async def _ty_fetch_orders_range(client, start_ms: int, end_ms: int) -> dict:
+    """Aralıktaki TÜM Trendyol paketlerini sipariş numarasına göre toplar.
+    Trendyol orders ucu ~14 günlük pencereye izin verdiğinden aralık bölünür."""
+    _WIN = 14 * 24 * 3600 * 1000
+    by_order: dict = {}
+    win_s = start_ms
+    while win_s < end_ms:
+        win_e = min(win_s + _WIN, end_ms)
+        page = 0
+        guard = 0
+        while guard < 400:
+            guard += 1
+            resp = await client.get_orders(start_date_ms=win_s, end_date_ms=win_e,
+                                           size=200, page=page)
+            chunk = resp.get("content", []) or []
+            for pkg in chunk:
+                onum = str(pkg.get("orderNumber") or "")
+                if not onum:
+                    continue
+                pid = str(pkg.get("id") or "")
+                d = by_order.setdefault(onum, {
+                    "order_date": pkg.get("orderDate"), "packages": {},
+                })
+                # Aynı paket birden çok sayfada gelebilir → id ile tekilleştir.
+                d["packages"][pid] = pkg
+                if pkg.get("orderDate") and (not d.get("order_date") or pkg["orderDate"] < d["order_date"]):
+                    d["order_date"] = pkg["orderDate"]
+            total_pages = int(resp.get("totalPages") or 1)
+            page += 1
+            if page >= total_pages or not chunk:
+                break
+        win_s = win_e
+    # Paket sözlüğünü özete indir
+    out = {}
+    for onum, d in by_order.items():
+        u_c = a_c = 0
+        u_a = 0
+        a_a = 0.0
+        for pkg in d["packages"].values():
+            u, a = _ty_pkg_totals(pkg)
+            if _ty_pkg_status(pkg) in _TY_DEAD_CANCEL:
+                u_c += u
+                a_c += a
+            else:
+                u_a += u
+                a_a += a
+        out[onum] = {
+            "order_date": d["order_date"],
+            "units_cancelled": u_c, "amount_cancelled": round(float(a_c), 2),
+            "units_active": u_a, "amount_active": round(a_a, 2),
+            "units": u_c + u_a, "amount": round(float(a_c) + a_a, 2),
+            "fully_cancelled": (u_a == 0 and u_c > 0),
+            "partially_cancelled": (u_a > 0 and u_c > 0),
+        }
+    return out
+
+
+@router.get("/trendyol/reconcile")
+async def trendyol_reconcile(
+    start_date: str = Query(..., description="YYYY-MM-DD — TR yerel gün (dahil)"),
+    end_date: str = Query(..., description="YYYY-MM-DD — TR yerel gün (dahil)"),
+    apply: bool = Query(False, description="true → tespit edilen İPTAL farklarını DÜZELTİR"),
+    list_limit: int = Query(300, ge=0, le=3000, description="Dönen sipariş no listesi üst sınırı"),
+    current_user: dict = Depends(require_admin),
+):
+    """Trendyol ↔ panel KESİN MUTABAKAT (sipariş no bazında).
+
+    Karşılaştırır: sipariş sayısı · ÜRÜN ADEDİ · tutar; ve farkları sipariş no
+    listesiyle verir:
+      missing_in_panel  — Trendyol'da var, bizde YOK
+      extra_in_panel    — bizde var, Trendyol'un o aralıktaki listesinde YOK
+      cancel_mismatch   — Trendyol'da TAMAMEN iptal, bizde hâlâ aktif
+      partial_cancel    — Trendyol'da kalemin bir kısmı iptal, sipariş aktif
+
+    apply=true YALNIZ statü/iz alanlarına dokunur (CLAUDE.md değişmez #6): iptali
+    yansıtır ve stoğu BİR KEZ (idempotent guard) geri ekler. Ödeme/kupon/puan
+    alanlarına DOKUNMAZ, sipariş oluşturma yolunu kullanmaz.
+    """
+    from .deps import tr_range_to_utc
+    config = await get_trendyol_config()
+    if not config.get("is_active"):
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(supplier_id=config["supplier_id"], api_key=config["api_key"],
+                            api_secret=config["api_secret"], mode=config["mode"])
+
+    s_iso, e_iso = tr_range_to_utc(start_date, end_date)
+    start_ms = int(datetime.fromisoformat(s_iso).timestamp() * 1000)
+    end_ms = int(datetime.fromisoformat(e_iso).timestamp() * 1000)
+    if end_ms <= start_ms:
+        raise HTTPException(status_code=400, detail="Bitiş tarihi başlangıçtan sonra olmalı")
+    # Trendyol ucu 14 günlük pencerelerle sayfalanır; çok uzun aralık Cloudflare'in
+    # 100 sn isteği sınırına takılıp SESSİZCE yarım sonuç döndürür. Açıkça reddet.
+    _days = (end_ms - start_ms) / 86400000.0
+    if _days > 62:
+        raise HTTPException(status_code=400,
+                            detail=f"Mutabakat aralığı en fazla 62 gün olabilir (seçilen: {int(_days)} gün). "
+                                   f"Ay ay çalıştırın.")
+
+    ty = await _ty_fetch_orders_range(client, start_ms, end_ms)
+
+    # Bizim taraf — aynı TR yerel aralık, Trendyol kaynaklı siparişler
+    ours: dict = {}
+    async for o in db.orders.find(
+            {"created_at": {"$gte": s_iso, "$lte": e_iso},
+             "$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]},
+            {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
+             "items.quantity": 1, "partial_cancel_amount": 1}):
+        onum = str(o.get("order_number") or "")
+        if onum:
+            ours[onum] = o
+
+    def _units(o):
+        its = o.get("items") or []
+        if not its:
+            return 1
+        n = 0
+        for it in its:
+            try:
+                n += max(1, int(it.get("quantity") or 1))
+            except Exception:
+                n += 1
+        return n or 1
+
+    _CANCELLED_LOCAL = ("cancelled", "cancel_refunded")
+    missing, extra, cancel_mm, partial_mm = [], [], [], []
+    for onum, t in ty.items():
+        o = ours.get(onum)
+        if not o:
+            missing.append({"order_number": onum, "units": t["units"], "amount": t["amount"],
+                            "fully_cancelled": t["fully_cancelled"]})
+            continue
+        st = str(o.get("status") or "")
+        if t["fully_cancelled"] and st not in _CANCELLED_LOCAL:
+            cancel_mm.append({"order_number": onum, "id": o.get("id"), "local_status": st,
+                              "units": t["units"], "amount": t["amount"]})
+        elif t["partially_cancelled"]:
+            try:
+                already = float(o.get("partial_cancel_amount") or 0)
+            except Exception:
+                already = 0.0
+            if abs(already - t["amount_cancelled"]) > 0.01:
+                partial_mm.append({"order_number": onum, "id": o.get("id"),
+                                   "cancelled_units": t["units_cancelled"],
+                                   "cancelled_amount": t["amount_cancelled"],
+                                   "recorded": round(already, 2)})
+    for onum, o in ours.items():
+        if onum not in ty:
+            extra.append({"order_number": onum, "status": o.get("status"),
+                          "units": _units(o), "amount": round(float(o.get("total") or 0), 2)})
+
+    applied = {"cancelled": 0, "partial_recorded": 0, "restocked": 0}
+    if apply:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for row in cancel_mm:
+            try:
+                res = await db.orders.update_one(
+                    {"id": row["id"], "status": {"$nin": list(_CANCELLED_LOCAL)}},
+                    {"$set": {"status": "cancelled",
+                              "cancel_reason": "Trendyol iptali (mutabakat)",
+                              "cancel_source": "trendyol_reconcile",
+                              "updated_at": now_iso},
+                     "$push": {"status_history": {"status": "cancelled", "at": now_iso,
+                                                  "by": "reconcile",
+                                                  "note": "Trendyol mutabakatı: sipariş Trendyol'da iptal"}}})
+                if not res.modified_count:
+                    continue
+                applied["cancelled"] += 1
+                # Stok BİR KEZ geri eklenir — manuel iptalle aynı idempotent guard.
+                _o = await db.orders.find_one({"id": row["id"]}, {"_id": 0, "id": 1, "items": 1})
+                if _o:
+                    from routes.orders import _stock_delta_for_order, _RESTORE_MOVE_TYPES
+                    _already = await db.stock_movements.find_one(
+                        {"order_id": _o["id"], "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1})
+                    if not _already:
+                        _moves = await _stock_delta_for_order(_o, +1)
+                        await db.stock_movements.insert_one({
+                            "id": str(uuid.uuid4()), "type": "order_cancelled",
+                            "order_id": _o["id"], "order_number": row["order_number"],
+                            "items": _moves, "source": "trendyol_reconcile",
+                            "created_at": now_iso})
+                        applied["restocked"] += 1
+            except Exception as _ce:
+                logger.error(f"[reconcile cancel {row['order_number']}] {_ce}")
+        for row in partial_mm:
+            try:
+                await db.orders.update_one(
+                    {"id": row["id"]},
+                    {"$set": {"partial_cancel_amount": row["cancelled_amount"],
+                              "partial_cancel_units": row["cancelled_units"],
+                              "partial_cancelled": True, "updated_at": now_iso}})
+                applied["partial_recorded"] += 1
+            except Exception as _pe:
+                logger.error(f"[reconcile partial {row['order_number']}] {_pe}")
+
+    ty_units = sum(t["units"] for t in ty.values())
+    ty_amount = round(sum(t["amount"] for t in ty.values()), 2)
+    our_units = sum(_units(o) for o in ours.values())
+    our_amount = round(sum(float(o.get("total") or 0) for o in ours.values()), 2)
+    return {
+        "range": {"start": start_date, "end": end_date},
+        "trendyol": {"orders": len(ty), "units": ty_units, "amount": ty_amount},
+        "panel": {"orders": len(ours), "units": our_units, "amount": our_amount},
+        "diff": {
+            "orders": len(ours) - len(ty),
+            "units": our_units - ty_units,
+            "amount": round(our_amount - ty_amount, 2),
+            "amount_pct": round(100 * (our_amount - ty_amount) / ty_amount, 3) if ty_amount else 0,
+        },
+        "missing_in_panel": {"count": len(missing), "items": missing[:list_limit]},
+        "extra_in_panel": {"count": len(extra), "items": extra[:list_limit]},
+        "cancel_mismatch": {"count": len(cancel_mm), "items": cancel_mm[:list_limit]},
+        "partial_cancel": {"count": len(partial_mm), "items": partial_mm[:list_limit]},
+        "applied": applied if apply else None,
+    }
 
 
 @router.get("/trendyol/claims/sync")
