@@ -15,7 +15,14 @@ ENDPOINTS:
   GET     /api/admin/email-marketing/audience     — rıza vermiş aktif abone sayısı
   POST    /api/admin/email-marketing/campaigns     — kampanya oluştur + arka planda gönder
   GET     /api/admin/email-marketing/campaigns     — kampanya geçmişi
+  GET     /api/admin/email-marketing/suppressions — kara liste (bounce/şikâyet)
+  POST    /api/email-marketing/ses-webhook        — Public: AWS SNS bounce/şikâyet bildirimi
   GET     /api/email-marketing/unsubscribe        — Public: abonelikten çık (link)
+
+GÖNDERİM SAĞLIĞI (SES hesabını korur): AWS, bounce oranı %5'i veya şikâyet oranı
+%0,1'i aşan hesapların gönderimini ASKIYA ALIR. Bu yüzden SNS'ten gelen kalıcı
+bounce/şikâyet adresleri `email_suppressions` kara listesine yazılır ve bir daha
+ASLA maillenmez; abone kaydı da pasifleştirilir.
 =============================================================================
 """
 import asyncio
@@ -37,6 +44,42 @@ _SECRET_MASK = "********"
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+# ── SUPPRESSION (kara liste) ──────────────────────────────────────────────────
+# NEDEN ZORUNLU: AWS SES, gönderen hesabın BOUNCE oranı %5'i veya ŞİKÂYET (spam
+# işaretleme) oranı %0,1'i aşarsa önce uyarır, sonra gönderim yetkisini ASKIYA ALIR.
+# Kalıcı bounce veren (kapanmış/yanlış) adreslere göndermeye devam etmek hesabı yakar.
+# Bu yüzden bounce/şikâyet gelen adres bir daha ASLA maillenmez.
+async def _suppress(email: str, reason: str, detail: str = "") -> None:
+    email = (email or "").strip().lower()
+    if not email:
+        return
+    await db.email_suppressions.update_one(
+        {"email": email},
+        {"$set": {"email": email, "reason": reason, "detail": (detail or "")[:300],
+                  "updated_at": _now()},
+         "$setOnInsert": {"created_at": _now()}},
+        upsert=True,
+    )
+    # Aboneyi de pasifleştir: kitle sayısı ve gelecekteki kampanyalar doğru olsun.
+    try:
+        await db.newsletter_subscribers.update_one(
+            {"email": email}, {"$set": {"active": False, "suppressed_reason": reason,
+                                        "suppressed_at": _now()}})
+    except Exception:
+        pass
+
+
+async def _suppressed_set() -> set:
+    """Kampanya başında kara listeyi TEK sorguda çeker (alıcı başına sorgu atmamak için —
+    hem hız hem MongoDB veri transferi maliyeti)."""
+    try:
+        rows = await db.email_suppressions.find({}, {"_id": 0, "email": 1}).to_list(100000)
+        return {(r.get("email") or "").strip().lower() for r in rows if r.get("email")}
+    except Exception as e:
+        logger.warning(f"[email-marketing] suppression listesi okunamadı: {e}")
+        return set()
 
 
 async def _site_base() -> str:
@@ -106,7 +149,12 @@ async def audience(current_user: dict = Depends(require_admin)):
     """Ticari e-posta gönderilebilecek kitle = aktif + açık rıza (consent)."""
     total = await db.newsletter_subscribers.count_documents({})
     eligible = await db.newsletter_subscribers.count_documents({"active": {"$ne": False}, "consent": True})
-    return {"total": total, "eligible": eligible}
+    # Kara liste (bounce/şikâyet) sayısı — panelde görünsün ki gönderim sağlığı izlenebilsin.
+    try:
+        suppressed = await db.email_suppressions.count_documents({})
+    except Exception:
+        suppressed = 0
+    return {"total": total, "eligible": eligible, "suppressed": suppressed}
 
 
 def _wrap(subject: str, body_html: str, unsub_url: str) -> str:
@@ -138,14 +186,30 @@ async def _run_campaign(campaign_id: str):
     base = await _site_base()
     subject = camp.get("subject") or ""
     body = camp.get("html") or ""
-    await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {"status": "sending", "started_at": _now()}})
-    sent = 0
-    failed = 0
-    n = 0
-    cur = db.newsletter_subscribers.find({"active": {"$ne": False}, "consent": True}, {"_id": 0, "email": 1, "id": 1})
+    # MÜKERRER GÖNDERİM KORUMASI: kampanya yarıda kesilirse (deploy/yeniden başlatma)
+    # baştan başlayıp HERKESE tekrar mail atılıyordu. Artık ilerleme `cursor` ile
+    # (son işlenen abone id'si) saklanır; devam eden çalışma kaldığı yerden sürer.
+    _resume = camp.get("cursor") or ""
+    sent = int(camp.get("sent") or 0)
+    failed = int(camp.get("failed") or 0)
+    n = int(camp.get("total_processed") or 0)
+    await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+        "status": "sending", "started_at": camp.get("started_at") or _now()}})
+
+    suppressed = await _suppressed_set()
+    skipped = int(camp.get("skipped") or 0)
+
+    _q = {"active": {"$ne": False}, "consent": True}
+    if _resume:
+        _q["id"] = {"$gt": _resume}          # kaldığı yerden (id sırası deterministik)
+    cur = db.newsletter_subscribers.find(_q, {"_id": 0, "email": 1, "id": 1}).sort("id", 1)
     async for s in cur:
         email = (s.get("email") or "").strip()
         if not email:
+            continue
+        # Kara listedeki adrese ASLA gönderme (SES itibarını korur).
+        if email.lower() in suppressed:
+            skipped += 1
             continue
         n += 1
         unsub_url = f"{base}/api/email-marketing/unsubscribe?e={email}&t={s.get('id','')}"
@@ -159,11 +223,18 @@ async def _run_campaign(campaign_id: str):
         except Exception as e:
             failed += 1
             logger.warning(f"[email-marketing] gönderim hata {email}: {e}")
+        # cursor HER kalemde yazılır ki yarıda kesilme en fazla 1 mükerrer mail versin.
         if n % 20 == 0:
-            await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {"sent": sent, "failed": failed}})
+            await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+                "sent": sent, "failed": failed, "skipped": skipped,
+                "total_processed": n, "cursor": s.get("id") or ""}})
+        else:
+            await db.email_campaigns.update_one({"id": campaign_id},
+                                                {"$set": {"cursor": s.get("id") or ""}})
         await asyncio.sleep(0.05)  # SES kota dostu nazik hız
     await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
-        "status": "sent", "sent": sent, "failed": failed, "total": n, "finished_at": _now(),
+        "status": "sent", "sent": sent, "failed": failed, "skipped": skipped,
+        "total": n, "total_processed": n, "finished_at": _now(),
     }})
     logger.info(f"[email-marketing] kampanya {campaign_id} bitti: {sent} gönderildi, {failed} hata / {n}")
 
@@ -197,6 +268,85 @@ async def list_campaigns(limit: int = 50, current_user: dict = Depends(require_a
     limit = max(1, min(limit, 200))
     rows = await db.email_campaigns.find({}, {"_id": 0, "html": 0}).sort("created_at", -1).to_list(limit)
     return {"campaigns": rows}
+
+
+# ── SES BOUNCE / ŞİKÂYET BİLDİRİMİ (AWS SNS webhook) ──────────────────────────
+# AWS kurulumu: SES → Configuration set → Event destination → SNS topic →
+#   Subscription: HTTPS → https://api.facette.com.tr/api/email-marketing/ses-webhook?key=<SECRET>
+# SECRET: ortam değişkeni SES_WEBHOOK_SECRET ya da settings.email_ses.webhook_secret.
+# GÜVENLİK fail-closed: secret yoksa/yanlışsa 403. (Aksi halde herkes sahte bounce
+# gönderip abonelerinizi kara listeye attırabilirdi.)
+@public_router.post("/ses-webhook")
+async def ses_webhook(payload: dict, request: Request):
+    import os as _os, hmac as _hmac, json as _json
+    _secret = (_os.environ.get("SES_WEBHOOK_SECRET", "") or "").strip()
+    if not _secret:
+        _cfg = await db.settings.find_one({"id": "email_ses"}, {"_id": 0, "webhook_secret": 1}) or {}
+        _secret = str(_cfg.get("webhook_secret") or "").strip()
+    _given = (request.query_params.get("key") or request.headers.get("X-Webhook-Secret") or "").strip()
+    if not _secret or not _given or not _hmac.compare_digest(_given, _secret):
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    _type = (payload or {}).get("Type") or ""
+
+    # 1) Abonelik onayı: SNS ilk kurulumda SubscribeURL gönderir; GET ile onaylanır.
+    if _type == "SubscriptionConfirmation":
+        _url = (payload or {}).get("SubscribeURL") or ""
+        if _url:
+            try:
+                import httpx as _hx
+                async with _hx.AsyncClient(timeout=20) as _c:
+                    await _c.get(_url)
+                logger.info("[email-marketing] SNS aboneliği onaylandı")
+            except Exception as e:
+                logger.warning(f"[email-marketing] SNS onay hatası: {e}")
+        return {"ok": True}
+
+    # 2) Bildirim: Message alanı JSON string'dir.
+    msg = (payload or {}).get("Message")
+    if isinstance(msg, str):
+        try:
+            msg = _json.loads(msg)
+        except Exception:
+            msg = {}
+    msg = msg or {}
+    kind = (msg.get("notificationType") or msg.get("eventType") or "").lower()
+    handled = 0
+
+    if kind == "bounce":
+        b = msg.get("bounce") or {}
+        # YALNIZ kalıcı (Permanent) bounce kara listeye alınır. Geçici (Transient — kutu
+        # dolu, sunucu meşgul) adresler sağlıklıdır; onları silmek kitleyi boşuna eritir.
+        _perm = (b.get("bounceType") or "").lower() == "permanent"
+        for r in (b.get("bouncedRecipients") or []):
+            _em = (r.get("emailAddress") or "").strip()
+            if not _em:
+                continue
+            if _perm:
+                await _suppress(_em, "bounce", f"{b.get('bounceType')}/{b.get('bounceSubType')}")
+                handled += 1
+    elif kind == "complaint":
+        c = msg.get("complaint") or {}
+        for r in (c.get("complainedRecipients") or []):
+            _em = (r.get("emailAddress") or "").strip()
+            if not _em:
+                continue
+            # Şikâyet = "spam" işareti. En ağır sinyal; şartsız kara liste.
+            await _suppress(_em, "complaint", c.get("complaintFeedbackType") or "")
+            handled += 1
+
+    if handled:
+        logger.info(f"[email-marketing] SES {kind}: {handled} adres kara listeye alındı")
+    return {"ok": True, "type": kind, "handled": handled}
+
+
+@admin_router.get("/suppressions")
+async def list_suppressions(limit: int = 200, current_user: dict = Depends(require_admin)):
+    """Kara liste (bounce/şikâyet) — hangi adrese neden gönderilmiyor."""
+    limit = max(1, min(limit, 1000))
+    rows = await db.email_suppressions.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    total = await db.email_suppressions.count_documents({})
+    return {"total": total, "items": rows}
 
 
 # ── Public: abonelikten çık ────────────────────────────────────────────────────
