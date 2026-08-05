@@ -19,6 +19,7 @@ export default function AdminInstagram() {
   const [auto, setAuto] = useState({ app_id: "", app_secret: "", short_token: "", ig_user_id: "" });
   const [autoBusy, setAutoBusy] = useState(false);
   const [showTokenFlow, setShowTokenFlow] = useState(false); // alternatif (token yapıştırma) akışı
+  const [showAdvanced, setShowAdvanced] = useState(false);   // gelişmiş: manuel Graph API formu
 
   // TEK TIK: App ID+Secret kaydedilir → Facebook onay ekranına yönlendirilir → dönüşte
   // backend code'u token'a çevirir, IG hesabını bulur, senkronlar (token yapıştırmak GEREKMEZ).
@@ -287,13 +288,44 @@ export default function AdminInstagram() {
         )}
       </div>
 
-      {/* Token / Ayarlar */}
+      {/* Token / Ayarlar — TEK YOL sadeleştirmesi: yukarıdaki "Facebook ile Bağlan" zaten token
+          alma + 60 güne uzatma + Instagram hesabını bulma + ilk senkronu KENDİ yapıyor. Bu manuel
+          form yan yana durunca "hangisini kullanacağım?" karışıklığı yaratıyordu → varsayılan
+          KAPALI bir "Gelişmiş" alanına alındı. Sık kullanılan iki şey (senkron açık/kapalı ve
+          Bağlantıyı Kes) dışarıda, her zaman görünür kaldı. */}
       <div className="bg-white border rounded-xl p-4 mb-4">
-        <h2 className="text-sm font-bold uppercase tracking-wider mb-1">Graph API Bağlantısı</h2>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.auto_sync}
+              onChange={(e) => { const v = e.target.checked; setForm({ ...form, auto_sync: v }); }} />
+            Otomatik senkron (her 30 dk)
+          </label>
+          <div className="flex gap-2">
+            <button onClick={saveSettings} disabled={busy}
+              className="flex items-center gap-1.5 px-4 py-2 bg-black text-white rounded-lg text-sm disabled:opacity-50">
+              <Save size={14} /> Kaydet
+            </button>
+            {settings.token_set && (
+              <button onClick={disconnect} disabled={busy}
+                className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
+                <Unplug size={14} /> Bağlantıyı Kes
+              </button>
+            )}
+          </div>
+        </div>
+        <button type="button" onClick={() => setShowAdvanced(v => !v)}
+          className="mt-3 text-xs text-gray-500 underline">
+          {showAdvanced ? "Gelişmiş ayarları gizle" : "Gelişmiş: token'ı elle gir / kaynak seç"}
+        </button>
+      </div>
+
+      {showAdvanced && (
+      <div className="bg-white border rounded-xl p-4 mb-4">
+        <h2 className="text-sm font-bold uppercase tracking-wider mb-1">Graph API Bağlantısı (gelişmiş)</h2>
         <p className="text-xs text-gray-500 mb-3">
-          Instagram <b>Business/Creator</b> hesabı + Facebook sayfası gereklidir. Meta Developers'tan alınan uzun
-          ömürlü <b>Access Token</b> ve <b>Instagram User ID</b>'yi girin. “Etiketli gönderiler” için hesabın
-          <b> tags</b> iznine sahip token gerekir.
+          <b>Normalde buraya dokunmanıza gerek yok</b> — yukarıdaki “Facebook ile Bağlan” token'ı kendisi alır,
+          60 güne uzatır ve Instagram hesabını bulur. Bu alan yalnızca elinizde hazır bir token varsa ya da
+          kaynağı değiştirmek istediğinizde kullanılır. “Etiketli gönderiler” için token'ın <b>tags</b> izni olmalıdır.
         </p>
         <div className="grid md:grid-cols-2 gap-3">
           <div>
@@ -315,22 +347,14 @@ export default function AdminInstagram() {
               <option value="tags">Etiketlendiğim Gönderiler (tags)</option>
             </select>
           </div>
-          <label className="flex items-center gap-2 mt-6 text-sm">
-            <input type="checkbox" checked={form.auto_sync} onChange={(e) => setForm({ ...form, auto_sync: e.target.checked })} />
-            Otomatik senkron (her 30 dk)
-          </label>
         </div>
         <div className="flex gap-2 mt-4">
           <button onClick={saveSettings} disabled={busy} className="flex items-center gap-1.5 px-4 py-2 bg-black text-white rounded-lg text-sm disabled:opacity-50">
             <Save size={14} /> Kaydet
           </button>
-          {settings.token_set && (
-            <button onClick={disconnect} disabled={busy} className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
-              <Unplug size={14} /> Bağlantıyı Kes
-            </button>
-          )}
         </div>
       </div>
+      )}
 
       {/* Elle gönderi ekle */}
       <div className="bg-white border rounded-xl p-4 mb-4">
