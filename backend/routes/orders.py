@@ -1335,10 +1335,14 @@ async def create_order(
                     await refund_gift_card_once(order)
             except Exception as _rb_err:
                 logger.error(f"[TUTAR-UYUSMAZLIGI] bakiye geri alınamadı: {_rb_err}")
+            # Sunucunun hesapladığı tutar mesaja YAZILIR: (a) müşteri neyi onaylayacağını görür,
+            # (b) sapma teşhisi log erişimi olmadan da yapılabilir. Bu müşterinin KENDİ sepet
+            # tutarıdır — gizli bilgi değildir.
             raise HTTPException(
                 status_code=409,
-                detail="Sepet tutarı güncellendi (kampanya/indirim değişmiş olabilir). "
-                       "Güvenliğiniz için ödeme alınmadı. Lütfen sepetinizi yenileyip tekrar deneyin.",
+                detail=(f"Sepet tutarı güncellendi: ödenecek tutar {_server_total:.2f} TL "
+                        f"(ekranda {_client_total:.2f} TL görünüyordu). Güvenliğiniz için ödeme "
+                        f"alınmadı. Lütfen sepetinizi yenileyip tekrar deneyin."),
             )
 
     # 🧾 İNDİRİM DÖKÜMÜ — müşteri VE admin siparişte her indirimi AYRI AYRI görsün.
