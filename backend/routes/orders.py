@@ -7252,8 +7252,21 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
         # (_vf) iade edilen ürün oranıyla orantılı dağıt → iade tutarına EKLE. Tam iadede
         # zaten paidPrice (vade farkı dahil) baz alındığından burada değil, yalnız kısmide eklenir.
         vade_farki_refunded = 0.0
-        if _vf > 0.005 and orig_cart > 0.005:
-            vade_farki_refunded = _round2(_vf * (returned_net_products / orig_cart))
+        if _vf > 0.005:
+            # ORANTI TABANI DÜZELTMESİ (kritik): pay ile payda AYNI tabanda olmalı.
+            # returned_net_products = seçili kalemlerin İNDİRİMLİ (net) toplamı. Payda eskiden
+            # order.subtotal (İNDİRİMSİZ brüt) idi → vade farkı payı olduğundan AZ hesaplanıyor,
+            # müşteriye eksik iade çıkıyordu.
+            #   W10727: 169,98 × (1935,90 / 5680,00) = 57,93  ✗   (panel 71,52 gösteriyordu)
+            #   doğrusu: 169,98 × (1935,90 / 4600,80) = 71,52  ✓
+            # Ayrıca payda = TÜM kalemlerin net toplamı olduğundan, sipariş kalem kalem tamamen
+            # iade edilirse dağıtılan vade farkı toplamı _vf'ye BİREBİR eşitlenir (kayıp/fazla yok).
+            _net_base = _round2(max(0.0, _round2(order.get("subtotal") or 0)
+                                    - _round2(order.get("discount") or 0)))
+            if _net_base <= 0.005:      # eski/pazaryeri siparişi: indirim alanı yoksa brüte düş
+                _net_base = orig_cart
+            if _net_base > 0.005:
+                vade_farki_refunded = _round2(_vf * (returned_net_products / _net_base))
         returned_net = _round2(returned_net_products + vade_farki_refunded)
     else:
         # TAM İADE → müşteriye ödediği tutar iade edilir (ürün + ödenmiş kargo AYRI kalemler;
@@ -8052,14 +8065,24 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         # iadeyle aynı mantık, yalnız iade payına düşen kısmı. (Önceden kısmi iadede HİÇ eklenmiyordu.)
         _vf_r, _charged_r, _inst_r = _order_vade_farki(order)
         alloc_vade = 0.0
-        if _vf_r >= 0.01 and order_total > 0.009:
-            _ret_share = base_net / order_total
-            if _ret_share > 1:
-                _ret_share = 1.0
-            alloc_vade = _round2(_vf_r * _ret_share)
+        if _vf_r >= 0.01:
+            # TABAN, iade hesabıyla (_compute_refund_breakdown) BİREBİR AYNI olmalı: ürünlerin
+            # NET toplamı (subtotal − indirim). Eskiden order.total kullanılıyordu; kargo ücreti
+            # order.total'ın içinde olduğundan, kargolu siparişte pay küçük çıkıyor ve sipariş
+            # kalem kalem tamamen iade edilse bile vade farkının tamamı geri verilmiyordu.
+            _vf_base = _round2(max(0.0, _round2(order.get("subtotal") or 0)
+                                   - _round2(order.get("discount") or 0)))
+            if _vf_base <= 0.009:
+                _vf_base = order_total          # eski/pazaryeri kaydı → eski davranışa düş
+            if _vf_base > 0.009:
+                _ret_share = base_net / _vf_base
+                if _ret_share > 1:
+                    _ret_share = 1.0
+                alloc_vade = _round2(_vf_r * _ret_share)
         net_total = _round2(max(0.0, base_net + alloc_vade - (cargo_amount if deduct_cargo else 0.0)))
         total_gross = _round2(prod_gross + (alloc_vade if alloc_vade >= 0.01 else 0.0))
         total_discount = _round2(max(0.0, total_gross - net_total))
+        # Vade farkı AYRI SATIR (pusulada "ürün + vade farkı" olarak görünür).
         if alloc_vade >= 0.01:
             vade_line = {"name": f"Vade Farkı (Taksit x{_inst_r})", "net_price": alloc_vade, "qty": 1}
         if deduct_cargo:
