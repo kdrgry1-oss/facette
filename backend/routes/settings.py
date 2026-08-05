@@ -7,6 +7,57 @@ from .deps import db, require_admin
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
+
+# =============================================================================
+# KARGO ÜCRETİ / ÜCRETSİZ KARGO EŞİĞİ — TEK KAYNAK
+# -----------------------------------------------------------------------------
+# KÖK SEBEP (kritik): Storefront bu uçtan kargo ücretini "seçili kargo firmasının
+# ücreti" (cargo_fees[default_cargo_company], ör. 99 TL) olarak alıyordu; sipariş
+# oluşturma (orders.create_order) ise DOĞRUDAN settings.shipping_fee (ör. 90 TL)
+# okuyordu. İki taraf farklı kargo ücreti kullandığı için müşterinin ONAYLADIĞI
+# tutar ile bankadan ÇEKİLEN tutar 9 TL farklı çıkıyordu. Aynı şekilde eşik de
+# istemcide kampanyadan, sunucuda ayardan geliyordu. Artık HER İKİ taraf da bu
+# fonksiyonları çağırır → ayrışma imkânsız.
+# =============================================================================
+def resolve_shipping_fee(settings: dict) -> float:
+    """Geçerli kargo ücreti: seçili kargo firmasının ücreti, yoksa genel shipping_fee."""
+    s = settings or {}
+    cargo_fees = s.get("cargo_fees") or {}
+    default_company = s.get("default_cargo_company") or ""
+    if default_company and isinstance(cargo_fees, dict) and cargo_fees.get(default_company) not in (None, ""):
+        try:
+            return float(cargo_fees.get(default_company)) or 0.0
+        except Exception:
+            pass
+    try:
+        return float(s.get("shipping_fee") or 0) or 0.0
+    except Exception:
+        return 0.0
+
+
+async def resolve_free_shipping_threshold(settings: dict):
+    """Ücretsiz kargo eşiği: aktif 'otomatik' free_shipping kampanyalarının EN DÜŞÜK
+    min tutarı; kampanya yoksa ayardaki free_shipping_threshold. None = eşik yok."""
+    threshold = None
+    try:
+        async for _c in db.coupons.find({"is_active": True, "free_shipping": True, "auto_apply": True},
+                                        {"_id": 0, "min_cart_total": 1}):
+            mc = _c.get("min_cart_total")
+            if mc in (None, ""):
+                continue
+            mc = float(mc)
+            if threshold is None or mc < threshold:
+                threshold = mc
+    except Exception:
+        threshold = None
+    if threshold is None:
+        try:
+            _t = (settings or {}).get("free_shipping_threshold")
+            threshold = float(_t) if _t not in (None, "") else None
+        except Exception:
+            threshold = None
+    return threshold
+
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 @router.post("/maintenance/notify")
@@ -78,34 +129,9 @@ async def get_settings():
         }
         await db.settings.insert_one(settings.copy())
 
-    # Storefront kargo bilgisi (sabit kod yerine ayardan)
-    cargo_fees = settings.get("cargo_fees") or {}
-    default_company = settings.get("default_cargo_company") or ""
-    fee = None
-    if default_company and isinstance(cargo_fees, dict) and cargo_fees.get(default_company) not in (None, ""):
-        try:
-            fee = float(cargo_fees.get(default_company))
-        except Exception:
-            fee = None
-    if fee is None:
-        try:
-            fee = float(settings.get("shipping_fee"))
-        except Exception:
-            fee = 0.0
-    settings["shipping_fee"] = fee or 0.0
-    # Ucretsiz kargo esigi -- aktif "otomatik" free_shipping kampanyalarindan (en dusuk min tutar)
-    threshold = None
-    try:
-        async for _c in db.coupons.find({"is_active": True, "free_shipping": True, "auto_apply": True}, {"_id": 0, "min_cart_total": 1}):
-            mc = _c.get("min_cart_total")
-            if mc in (None, ""):
-                continue
-            mc = float(mc)
-            if threshold is None or mc < threshold:
-                threshold = mc
-    except Exception:
-        threshold = None
-    settings["free_shipping_threshold"] = threshold
+    # Storefront kargo bilgisi (sabit kod yerine ayardan) — TEK KAYNAK (bkz. resolve_shipping_fee)
+    settings["shipping_fee"] = resolve_shipping_fee(settings)
+    settings["free_shipping_threshold"] = await resolve_free_shipping_threshold(settings)
 
     return settings
 

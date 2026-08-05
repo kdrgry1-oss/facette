@@ -1199,10 +1199,17 @@ async def create_order(
 
     # Kargo: sunucu ayarından (ücretsiz kargo eşiği VEYA kupon free_shipping). Y25 de burada çözülür.
     try:
+        # TEK KAYNAK: storefront (/api/settings) ile BİREBİR aynı çözümleme. Eskiden burada
+        # doğrudan settings.shipping_fee (90) okunuyor, storefront ise seçili kargo firmasının
+        # ücretini (99) gösteriyordu → müşterinin onayladığı tutar ile çekilen tutar 9 TL
+        # farklı çıkıyordu. Eşik de aynı şekilde iki ayrı kaynaktan geliyordu.
+        from .settings import resolve_shipping_fee as _res_fee, resolve_free_shipping_threshold as _res_thr
         _sset = await db.settings.find_one(
-            {"id": "main"}, {"_id": 0, "shipping_fee": 1, "free_shipping_threshold": 1}) or {}
-        _ship_fee = float(_sset.get("shipping_fee") or 0)
-        _thr = _sset.get("free_shipping_threshold")
+            {"id": "main"},
+            {"_id": 0, "shipping_fee": 1, "free_shipping_threshold": 1,
+             "cargo_fees": 1, "default_cargo_company": 1}) or {}
+        _ship_fee = float(_res_fee(_sset) or 0)
+        _thr = await _res_thr(_sset)
         _thr = float(_thr) if _thr not in (None, "") else None
     except Exception:
         _ship_fee, _thr = 0.0, None
