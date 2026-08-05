@@ -488,9 +488,9 @@ export default function Checkout() {
   useEffect(() => {
     if (items.length === 0) { setAppliedPromotions([]); setEligiblePromotions([]); setDiscount(0); return; }
     recalcPromotions(appliedCoupon?.code || "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     // shippingAddress.email DEP: misafir e-postasını yazınca uygunluk (ilk-siparişe-özel
     // kampanyalar) sunucudaki ile aynı şekilde yeniden değerlendirilsin.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, total, user?.id, appliedCoupon?.code, paymentMethod, excludedIds, shippingAddress?.email]);
 
   // Payment callback — iyzico → backend → storefront'a ?status=success|fail&order=.. ile döner
