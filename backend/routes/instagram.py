@@ -563,11 +563,45 @@ async def auto_sync_instagram():
         token = decrypt(s.get("access_token"))
         total, per, _tags_err = await _do_sync(token, s.get("ig_user_id"), 100)
         await db.settings.update_one(
-            {"id": "instagram"}, {"$set": {"last_sync": _now().isoformat(), "last_error": ""}})
+            {"id": "instagram"}, {"$set": {"last_sync": _now().isoformat(), "last_error": "",
+                                           "fail_since": None, "alerted_at": None}})
         logger.info("[instagram] auto-sync ok — media=%d tagged=%d", per.get("media", 0), per.get("tagged", 0))
     except Exception as e:
         logger.warning("[instagram] auto-sync hata: %s", e)
         try:
-            await db.settings.update_one({"id": "instagram"}, {"$set": {"last_error": str(e)}})
+            # SESSİZ ÖLÜM KORUMASI: 28 Tem'de token süresi dolduğunda senkron 9 GÜN boyunca
+            # sessizce başarısız oldu; kimse fark etmedi ve vitrindeki akış boş kutulara döndü.
+            # Artık ilk hatada zaman damgası tutulur; arıza 3 saati aşarsa admin'e PUSH gider.
+            # Tekrar bildirim en fazla GÜNDE BİR (spam yok). Başarılı senkronda sayaç sıfırlanır.
+            _now_dt = _now()
+            _prev = await db.settings.find_one({"id": "instagram"},
+                                               {"_id": 0, "fail_since": 1, "alerted_at": 1}) or {}
+            _fail_since = _prev.get("fail_since") or _now_dt.isoformat()
+            await db.settings.update_one({"id": "instagram"},
+                                         {"$set": {"last_error": str(e), "fail_since": _fail_since}})
+
+            def _age_h(iso):
+                try:
+                    d = datetime.fromisoformat(str(iso))
+                    if d.tzinfo is None:
+                        d = d.replace(tzinfo=timezone.utc)
+                    return (_now_dt - d).total_seconds() / 3600.0
+                except Exception:
+                    return 0.0
+
+            _alerted = _prev.get("alerted_at")
+            if _age_h(_fail_since) >= 3 and (not _alerted or _age_h(_alerted) >= 24):
+                try:
+                    from .push import send_push_to_admins
+                    await send_push_to_admins(
+                        "⚠️ Instagram akışı durdu",
+                        "Bağlantı yenilenmeli — anasayfadaki akış güncellenmiyor. "
+                        f"Hata: {str(e)[:90]}",
+                        {"type": "instagram_sync_failed"},
+                    )
+                    await db.settings.update_one({"id": "instagram"},
+                                                 {"$set": {"alerted_at": _now_dt.isoformat()}})
+                except Exception as _pe:
+                    logger.warning("[instagram] uyarı push'u gönderilemedi: %s", _pe)
         except Exception:
             pass
