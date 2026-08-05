@@ -246,6 +246,37 @@
                     var r = document.getElementById("root");
                     return !!(r && r.children && r.children.length > 0);
                 }
+                // ?_r= KULLANICIYA GÖSTERİLMEZ. Bu parametre yalnızca önbellek atlatma + sonsuz
+                // döngü guard'ıdır; adres çubuğunda kalması gereksiz ve profesyonelce değil
+                // (hiçbir normal site böyle bir iz bırakmaz). Uygulama BAŞARIYLA açıldığı anda
+                // history.replaceState ile sessizce silinir — sayfa yeniden yüklenmez, geçmiş
+                // kirlenmez. Başarısızlıkta SİLİNMEZ, çünkü orada döngü guard'ı olarak gerekli.
+                function stripHealParam() {
+                    try {
+                        if (location.search.indexOf("_r=") === -1) return;
+                        if (!window.history || !history.replaceState) return;
+                        var parts = location.search.replace(/^\?/, "").split("&");
+                        var keep = [];
+                        for (var i = 0; i < parts.length; i++) {
+                            if (parts[i] && parts[i].indexOf("_r=") !== 0) keep.push(parts[i]);
+                        }
+                        var s = keep.length ? "?" + keep.join("&") : "";
+                        history.replaceState(null, "", location.pathname + s + location.hash);
+                    } catch (e) {}
+                }
+                // Mount olur olmaz temizle (check() 3.5 sn beklediğinden parametre o kadar süre
+                // görünür kalmasın). En fazla ~12 sn dener, sonra bırakır.
+                (function () {
+                    if (location.search.indexOf("_r=") === -1) return;
+                    var tries = 0;
+                    var t = setInterval(function () {
+                        tries++;
+                        var r = document.getElementById("root");
+                        if (r && r.children && r.children.length > 0) { stripHealParam(); clearInterval(t); }
+                        else if (tries > 60) clearInterval(t);
+                    }, 200);
+                })();
+
                 // Tazeleme denendi ama uygulama yine açılmadı → SESSİZ BEYAZ EKRAN BIRAKMA.
                 // Sebep genelde ÇOK ESKİ TARAYICI (bundle'daki modern sözdizimi parse edilemez)
                 // ya da JS'i engelleyen bir eklenti/kurumsal filtredir; ikisi de reload ile
@@ -281,6 +312,7 @@
                     try {
                         if (appMounted() && cssApplied()) {
                             try { sessionStorage.removeItem("__heal"); } catch (e) {}
+                            stripHealParam(); // URL temizlensin — kullanıcı ?_r= görmesin
                             return; // her şey yolunda
                         }
                         if (healedAlready()) { showFallback(); return; } // bir kez denendi; döngü YOK → sessiz beyaz ekran yerine MESAJ
