@@ -22,6 +22,7 @@ import os
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 from datetime import datetime, timezone
 
@@ -116,6 +117,40 @@ def _sanitize_products(raw) -> list:
     return out
 
 
+async def _mirror_image(post_id: str, ig_url: str) -> str:
+    """Instagram görselini kendi depomuza (R2/CDN) kopyalar ve KALICI adresi döndürür.
+
+    NEDEN: Instagram CDN adresleri imzalı + süreli (oe= ~2 gün). Saklanan adres bayatlayınca
+    403 döner ve vitrindeki akış boş kutulara düşer. Kopya bizde olunca akış, senkron dursa
+    bile çalışmaya devam eder.
+
+    Idempotent: aynı gönderi daha önce aynalandıysa tekrar indirilmez.
+    Güvenli: R2 kapalıysa veya indirme/yükleme başarısızsa ORİJİNAL adres döndürülür
+    (regresyon yok — en kötü ihtimalle bugünkü davranış korunur).
+    """
+    try:
+        from services import r2_storage
+        if not r2_storage.is_enabled():
+            return ig_url
+        key = f"instagram/{post_id}.jpg"
+        # Zaten aynalanmışsa (kayıtlı adres bizim CDN'imizi gösteriyorsa) tekrar indirme.
+        prev = await db.instagram_posts.find_one({"id": post_id}, {"_id": 0, "image": 1, "image_mirrored": 1})
+        if prev and prev.get("image_mirrored") and str(prev.get("image") or "").endswith(key):
+            return prev["image"]
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as c:
+            r = await c.get(ig_url)
+        if r.status_code != 200 or not r.content:
+            logger.warning("[instagram] görsel indirilemedi (%s) post=%s", r.status_code, post_id)
+            return ig_url
+        ctype = r.headers.get("content-type", "image/jpeg").split(";")[0].strip() or "image/jpeg"
+        url = await run_in_threadpool(r2_storage.put_object, key, r.content, ctype)
+        await db.instagram_posts.update_one({"id": post_id}, {"$set": {"image_mirrored": True}})
+        return url or ig_url
+    except Exception as e:
+        logger.warning("[instagram] görsel aynalanamadı post=%s: %s", post_id, e)
+        return ig_url
+
+
 async def _do_sync(token: str, ig_user_id: str, max_each: int = 100) -> tuple:
     """Kendi gönderiler (media) + etiketli (tags) çekilir; kind ile ayrı ayrı upsert edilir.
     active/products KORUNUR (yalnız ilk eklemede default atanır) → admin seçimleri bozulmaz.
@@ -137,8 +172,16 @@ async def _do_sync(token: str, ig_user_id: str, max_each: int = 100) -> tuple:
             img = _media_image(it)
             if not img:
                 continue
+            _pid = it.get("id") or generate_id()
+            # DAYANIKLILIK: Instagram'ın CDN adresleri İMZALI ve SÜRELİDİR (~2 gün, oe=
+            # parametresi). Bu adresi olduğu gibi saklarsak, senkron herhangi bir sebeple
+            # dursa (token süresi dolar, API değişir) görseller 2 gün içinde 403 verip
+            # anasayfadaki "Get The Look" bölümü boş kutulara döner — nitekim döndü.
+            # Çözüm: görseli BİR KEZ kendi depomuza (R2/CDN) kopyala ve kalıcı adresi sakla.
+            # Idempotent: daha önce aynayan gönderi tekrar indirilmez.
+            img = await _mirror_image(_pid, img)
             base = {
-                "id": it.get("id") or generate_id(),
+                "id": _pid,
                 "image": img,
                 "permalink": it.get("permalink") or "",
                 "caption": (it.get("caption") or "")[:500],
