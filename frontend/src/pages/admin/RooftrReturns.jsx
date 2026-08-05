@@ -1187,8 +1187,21 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                     Kargo: {wf.fault === "customer" ? <b className="text-amber-700">müşteriden kesildi</b> : <b className="text-gray-700">mağazadan (tam iade)</b>}
                   </div>
                   <div className="space-y-1 text-xs text-gray-600">
-                    {wf.preview.vade_farki > 0 && <div className="flex justify-between text-emerald-700"><span>Taksit farkı dahil ({wf.preview.installment} taksit)</span><b>+ {fmtTL(wf.preview.vade_farki)}</b></div>}
-                    <div className="flex justify-between"><span>İade edilen ürün tutarı</span><b>{fmtTL(wf.preview.returned_net)}</b></div>
+                    {/* Eskiden burada TÜM SİPARİŞİN vade farkı (ör. 2 ürün için +169,98) ayrı satır
+                        olarak yazılıyordu; oysa kısmi iadede yalnız SEÇİLİ ürün iade ediliyor →
+                        operatör "neden 2 ürünün taksit farkını görüyorum?" diye tereddüt ediyordu.
+                        Satır kaldırıldı: zaten aşağıdaki "İade edilen ürün tutarı" bu iadeye DÜŞEN
+                        vade farkı payını içeriyor (returned_net = ürün neti + vade farkı payı).
+                        Taksitli siparişte etiket "(taksit dahil)" ile açıkça belirtilir. */}
+                    <div className="flex justify-between">
+                      <span>
+                        İade edilen ürün tutarı
+                        {wf.preview.vade_farki_refunded > 0 && (
+                          <span className="text-emerald-700"> (taksit dahil{wf.preview.installment > 1 ? ` · ${wf.preview.installment} taksit` : ""})</span>
+                        )}
+                      </span>
+                      <b>{fmtTL(wf.preview.returned_net)}</b>
+                    </div>
                     {wf.preview.campaign_deduction > 0 && <div className="flex justify-between text-amber-700"><span>Kargo bedeli (müşteriden tahsil)</span><b>− {fmtTL(wf.preview.campaign_deduction)}</b></div>}
                     {wf.preview.return_cargo_fee > 0 && <div className="flex justify-between text-amber-700"><span>İade kargo bedeli</span><b>− {fmtTL(wf.preview.return_cargo_fee)}</b></div>}
                     <div className="flex justify-between pt-1 border-t mt-1 text-gray-900"><span>Otomatik iade tutarı</span><b>{fmtTL(wf.preview.auto_refund)}</b></div>
