@@ -106,13 +106,18 @@ async def get_settings(current_user: dict = Depends(require_admin)):
         "from_email": cfg.get("from_email", ""),
         "from_name": cfg.get("from_name", ""),
         "configuration_set": cfg.get("configuration_set", ""),
+        "reply_to": cfg.get("reply_to", ""),
         "configured": is_configured(await get_ses_config(db)),
     }
 
 
 @admin_router.put("/settings")
 async def save_settings(payload: dict, current_user: dict = Depends(require_admin)):
-    allowed = {"enabled", "region", "access_key", "secret_key", "from_email", "from_name", "configuration_set"}
+    # reply_to: görünen gönderen (from_email) gerçek bir posta kutusu OLMAYABİLİR
+    # (ör. club@facette.com.tr yalnız gönderim için). Müşteri maili yanıtlarsa yanıtın
+    # kaybolmaması için okunan bir adrese yönlendirilir.
+    allowed = {"enabled", "region", "access_key", "secret_key", "from_email", "from_name",
+               "configuration_set", "reply_to"}
     update = {k: v for k, v in (payload or {}).items() if k in allowed}
     # Secret: maske geldiyse DOKUNMA; yeni değer geldiyse ŞİFRELE (at-rest).
     if "secret_key" in update:
@@ -138,7 +143,7 @@ async def send_test(payload: dict, current_user: dict = Depends(require_admin)):
     if not is_configured(cfg):
         raise HTTPException(status_code=400, detail="SES ayarları eksik/pasif. Bölge, anahtarlar ve gönderen adresi girip aktifleştirin.")
     html = _wrap("Facette — SES Test", "<p>Bu bir <b>AWS SES</b> test e-postasıdır. Bu mail size ulaştıysa pazarlama kanalı çalışıyor. 🎉</p>", unsub_url="")
-    r = await send_ses_email(cfg, to, "Facette — SES Test", html)
+    r = await send_ses_email(cfg, to, "Facette — SES Test", html, cfg.get("reply_to") or "")
     if not r.get("success"):
         raise HTTPException(status_code=400, detail=f"Gönderilemedi: {r.get('error') or 'bilinmeyen hata'}")
     return {"success": True, "message_id": r.get("message_id", "")}
@@ -215,7 +220,7 @@ async def _run_campaign(campaign_id: str):
         unsub_url = f"{base}/api/email-marketing/unsubscribe?e={email}&t={s.get('id','')}"
         html = _wrap(subject, body, unsub_url)
         try:
-            r = await send_ses_email(cfg, email, subject, html)
+            r = await send_ses_email(cfg, email, subject, html, cfg.get("reply_to") or "")
             if r.get("success"):
                 sent += 1
             else:
