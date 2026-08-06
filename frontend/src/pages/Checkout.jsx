@@ -12,6 +12,7 @@ import { cartLineView } from "../lib/price";
 import { useAuth } from "../context/AuthContext";
 import { trackInitiateCheckout, trackPurchase, trackAddPaymentInfo, trackAddShippingInfo } from "../utils/pixelEvents";
 import { collectClickIds } from "../lib/dataLayer";
+import { getSessionId } from "../lib/attribution";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -554,7 +555,9 @@ export default function Checkout() {
       country: shippingAddress.country || "TR",
       zipcode: shippingAddress.zipcode || shippingAddress.postal_code || "",
       street: shippingAddress.address || "",
-      external_id: user?.id || "",
+      // Üye → user id; misafir → stabil first-party visitor id (facette_sid).
+      // Aynı değer server-side Purchase'ta da external_id olur → browser↔server dedup + external_id coverage.
+      external_id: user?.id || getSessionId() || "",
     };
     trackPurchase({
       order_id: orderNumber,
@@ -846,7 +849,9 @@ export default function Checkout() {
           country: shippingAddress.country || "TR",
           zipcode: shippingAddress.zipcode || shippingAddress.postal_code || "",
           street: shippingAddress.address || "",
-          external_id: user?.id || "",
+          // Üye → user id; misafir → stabil first-party visitor id (facette_sid).
+      // Aynı değer server-side Purchase'ta da external_id olur → browser↔server dedup + external_id coverage.
+      external_id: user?.id || getSessionId() || "",
         };
         trackPurchase({
           order_id: orderRes.data.order_number, total: grandTotal,

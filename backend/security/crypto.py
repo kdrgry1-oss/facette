@@ -1,10 +1,23 @@
 """
-AES-256-GCM symmetric encryption for sensitive fields (API keys, passwords,
+Authenticated symmetric encryption for sensitive fields (API keys, passwords,
 tokens) stored in MongoDB.
+
+Primitive: Fernet (cryptography library) — AES-128 in CBC mode for
+confidentiality + HMAC-SHA256 for integrity/authentication, with per-message
+random IVs. This is NOT AES-256-GCM; do not describe it as such in any
+compliance/security statement. If AES-256-GCM is ever required, switch the
+primitive to `cryptography.hazmat.primitives.ciphers.aead.AESGCM` and migrate
+(re-encrypt) all existing rows — the two ciphertext formats are not
+interchangeable.
 
 Master key resolution order:
   1. SECRETS_MASTER_KEY env var (preferred — 32 bytes base64url, Fernet format)
   2. Derived from JWT_SECRET via HKDF (graceful fallback so previews keep working)
+
+NOTE: the HKDF `info` label below is the literal string "aes256-gcm-master".
+It is a legacy misnomer kept ONLY because it is an input to key derivation —
+changing the bytes would change the derived key and make every already-encrypted
+row undecryptable. It does not reflect the actual primitive (Fernet, above).
 
 Rotate the master key by re-encrypting each row with `rotate_secret()`.
 """

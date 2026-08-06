@@ -113,6 +113,9 @@ async def _send_one(db, px: dict, *, event_name: str, event_id: str,
             "fbp": bool(_ud.get("fbp")), "fbc": bool(_ud.get("fbc")),
             "ttclid": bool(_ud.get("ttclid")), "ttp": bool(_ud.get("ttp")),
             "ip": bool(_ud.get("client_ip_address")), "ua": bool(_ud.get("client_user_agent")),
+            # ip_version: Meta IPv6/IPv4 uyuşmazlığı teşhisi (§ Meta plan). Ham IP YAZILMAZ, yalnız sürüm.
+            "ip_version": (6 if ":" in (_ud.get("client_ip_address") or "")
+                           else (4 if (_ud.get("client_ip_address") or "") else None)),
         },
         "created_at": datetime.now(timezone.utc).isoformat(),
     })

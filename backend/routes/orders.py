@@ -1808,6 +1808,19 @@ async def dispatch_purchase_capi(order_id: str, source: str = "") -> bool:
                                 cids["ttclid"] = _tt
                 except Exception:
                     pass
+        # external_id: üye → customer/user id; misafir → stabil first-party visitor id
+        # (attribution session_id = tarayıcıdaki facette_sid). Tarayıcı Purchase'ı da AYNI
+        # değeri external_id yaptığından browser↔server eşleşir ve external_id coverage yükselir.
+        # marketing.capi_guest_external_id flag'i (varsayılan AÇIK) ile misafir fallback'i kapatılabilir.
+        _ext_id = order_doc.get("customer_id") or order_doc.get("user_id")
+        if not _ext_id:
+            try:
+                from business_rules import get_rule as _get_rule_ext
+                if bool(await _get_rule_ext(db, "marketing.capi_guest_external_id", True)):
+                    _ext_id = (order_doc.get("attribution_session_id")
+                               or (order_doc.get("attribution") or {}).get("session_id"))
+            except Exception:
+                pass
         user_data = build_user_data(
             email=addr.get("email") or order_doc.get("email"),
             phone=addr.get("phone") or order_doc.get("phone"),
@@ -1818,7 +1831,7 @@ async def dispatch_purchase_capi(order_id: str, source: str = "") -> bool:
             country=addr.get("country") or "TR",
             zipcode=addr.get("zipcode") or addr.get("postal_code"),
             street=addr.get("address") or addr.get("address_line1"),
-            external_id=order_doc.get("customer_id") or order_doc.get("user_id"),
+            external_id=_ext_id,
             client_ip=order_doc.get("customer_ip"),
             user_agent=order_doc.get("user_agent"),
             ttclid=cids.get("ttclid"), ttp=cids.get("ttp"),
