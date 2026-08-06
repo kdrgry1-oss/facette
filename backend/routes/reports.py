@@ -485,7 +485,9 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
         return {"revenue": 0.0, "orders": 0, "units": 0}
 
     cancels, returns, net, pending = _blank(), _blank(), _blank(), _blank()
-    partial_split = 0  # kaç siparişte kısmi ayrıştırma uygulandı (şeffaflık)
+    partial_split = 0      # kısmi ayrıştırma uygulanan toplam sipariş (iade + iptal)
+    partial_returns = 0    # bunların KISMİ İADE olanı — "465 iade, 43'ü kısmi" notu için
+    partial_cancels = 0
 
     for o in orders:
         st = str(o.get("status") or "")
@@ -519,6 +521,7 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
             except Exception:
                 pc_u = 1
             pc_u = min(pc_u, max(0, units - 1))  # en az 1 adet aktif kalmalı
+            partial_cancels += 1
             cancels["revenue"] += pc
             cancels["units"] += pc_u
             total -= pc
@@ -536,6 +539,7 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
             kept_u = units - r_qty
             if kept > 0.005 or kept_u > 0:
                 partial_split += 1
+                partial_returns += 1
                 net["revenue"] += max(0.0, kept)
                 net["units"] += max(0, kept_u)
                 # Sipariş sayısı çift sayılmasın: kısmi iadede sipariş İADE'de sayılır.
@@ -555,6 +559,7 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
                 returns["orders"] += 1
                 continue
             partial_split += 1
+            partial_returns += 1
 
         # Aktif satış
         net["revenue"] += max(0.0, total)
@@ -569,6 +574,7 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
     def _fin(d):
         return {"revenue": round(d["revenue"], 2), "orders": d["orders"], "units": d["units"]}
 
+
     cancels, returns, net, pending = _fin(cancels), _fin(returns), _fin(net), _fin(pending)
     included = {
         "revenue": round(net["revenue"] + cancels["revenue"] + returns["revenue"], 2),
@@ -580,9 +586,15 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
         "orders": net["orders"] - pending["orders"],
         "units": net["units"] - pending["units"],
     }
+    # Kısmi iade sayısı İADE kovasının içine de konur: kanal tablosu ve kart altı
+    # notu ("465 iade · 43'ü kısmi") tek yerden beslensin.
+    returns["partial_orders"] = partial_returns
+    cancels["partial_orders"] = partial_cancels
     return {"included": included, "cancels": cancels, "returns": returns, "net": net,
             "pending_returns": pending, "projected_net": projected_net,
-            "partial_split_orders": partial_split}
+            "partial_split_orders": partial_split,
+            "partial_return_orders": partial_returns,
+            "partial_cancel_orders": partial_cancels}
 
 
 async def _returned_barcode_qty(order_numbers: list) -> dict:
@@ -1480,6 +1492,9 @@ async def cancel_return_by_source(
             # İade (kalem bazlı)
             "return_orders": b["returns"]["orders"], "return_units": b["returns"]["units"],
             "return_total": b["returns"]["revenue"],
+            # Kaç iade siparişi KISMİ (siparişin bir kısmı iade, kalanı satışta)
+            "return_partial_orders": b["returns"].get("partial_orders", 0),
+            "cancel_partial_orders": b["cancels"].get("partial_orders", 0),
             # Toplam + açık iade projeksiyonu
             "total_orders": b["included"]["orders"], "total_units": b["included"]["units"],
             "total_revenue": b["included"]["revenue"],

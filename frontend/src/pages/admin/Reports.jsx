@@ -121,8 +121,8 @@ export function SalesReport() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { lbl: "İptal & İade DAHİL Ciro", d: brk?.included, c: "from-slate-900 to-slate-700", sub: "Toplam (her şey dahil)" },
-          { lbl: "Sadece İptaller", d: brk?.cancels, c: "from-rose-600 to-rose-500", sub: "Kaybedilen (iptal)" },
-          { lbl: "Sadece İadeler", d: brk?.returns, c: "from-amber-600 to-amber-500", sub: "Kaybedilen (iade)" },
+          { lbl: "Sadece İptaller", d: brk?.cancels, c: "from-rose-600 to-rose-500", sub: "Kaybedilen (iptal)", partialNote: "kalan ürünler satışta" },
+          { lbl: "Sadece İadeler", d: brk?.returns, c: "from-amber-600 to-amber-500", sub: "Kaybedilen (iade)", partialNote: "kalan ürünler satışta" },
           { lbl: "İptal & İade HARİÇ (Net)", d: brk?.net, c: "from-emerald-600 to-emerald-500", sub: "Elimizde kalan net ciro" },
         ].map((k) => (
           <div key={k.lbl} className={`bg-gradient-to-br ${k.c} text-white rounded-xl p-5`}>
@@ -134,6 +134,14 @@ export function SalesReport() {
             <div className="text-[11px] opacity-75 mt-1">
               {k.d?.orders ?? 0} sipariş · <span className="font-semibold">{k.d?.units ?? 0} adet</span>
             </div>
+            {/* KISMİ notu: "465 iade · 43'ü kısmi" — kısmi iadede siparişin yalnız bir
+                kısmı iade edildi, kalan ürünler Net ciroda duruyor. Sipariş sayısı ile
+                adet sayısı arasındaki farkı bu açıklar. */}
+            {k.d?.partial_orders > 0 && (
+              <div className="text-[10px] opacity-90 font-semibold">
+                {k.d.partial_orders} tanesi kısmi ({k.partialNote})
+              </div>
+            )}
             <div className="text-[10px] opacity-60">{k.sub}</div>
           </div>
         ))}
@@ -176,9 +184,13 @@ export function SalesReport() {
         </div>
       )}
       {brk?.partial_split_orders > 0 && (
-        <p className="text-[11px] text-gray-400 -mt-2">
-          {brk.partial_split_orders} siparişte <b>kısmi iade</b> var — yalnız iade edilen ürünlerin
-          tutarı İadeler'e, müşteride kalan ürünlerin tutarı Net ciroya yazıldı.
+        <p className="text-[11px] text-gray-500 -mt-2 leading-relaxed">
+          <b>Kısmi ayrıştırma:</b> {brk.partial_return_orders || 0} siparişte kısmi iade,
+          {" "}{brk.partial_cancel_orders || 0} siparişte kısmi iptal var. Bu siparişlerde yalnız
+          iade/iptal edilen <b>ürünlerin</b> tutarı ve adedi ilgili kutuya, müşteride kalan
+          ürünler Net ciroya yazıldı — Trendyol da adet bazlı böyle sayar.
+          {" "}Bu yüzden bir sipariş hem İadeler'de hem Net'te pay sahibi olabilir; <b>sipariş
+          sayıları toplanmaz, adetler toplanır.</b>
         </p>
       )}
       {/* Ortalama Sepet — belirgin kart (kullanıcı isteği) */}
@@ -230,7 +242,12 @@ export function SalesReport() {
                       <td className="p-2 text-right tabular-nums">{c.cancel_units || 0}</td>
                       <td className="p-2 text-right tabular-nums text-rose-600">{tl(c.cancel_total)}</td>
                       <td className={`p-2 text-right tabular-nums text-xs ${cp >= 10 ? "text-rose-600 font-bold" : "text-gray-500"}`}>{cp ? `%${cp.toFixed(1)}` : ""}</td>
-                      <td className="p-2 text-right tabular-nums">{c.return_units || 0}</td>
+                      <td className="p-2 text-right tabular-nums">
+                        {c.return_units || 0}
+                        {c.return_partial_orders > 0 && (
+                          <div className="text-[10px] text-gray-400 font-normal">{c.return_partial_orders} kısmi</div>
+                        )}
+                      </td>
                       <td className="p-2 text-right tabular-nums text-amber-600">{tl(c.return_total)}</td>
                       <td className={`p-2 text-right tabular-nums text-xs ${rp >= 15 ? "text-rose-600 font-bold" : "text-gray-500"}`}>{rp ? `%${rp.toFixed(1)}` : ""}</td>
                       <td className="p-2 text-right tabular-nums text-xs text-amber-700">
