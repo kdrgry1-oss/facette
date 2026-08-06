@@ -2904,6 +2904,70 @@ async def fix_negative_stock(current_user: dict = Depends(require_admin)):
     return {"fixed_count": len(fixed), "fixed": fixed[:50]}
 
 
+@router.post("/reconcile-stock-desync")
+async def reconcile_stock_desync(
+    dry_run: bool = Query(True),
+    current_user: dict = Depends(require_admin),
+):
+    """TEŞHİS + İDEMPOTENT ONARIM — parent `stock` ile Σvaryant.stock ayrışması (desync).
+
+    Varyantlı üründe parent `stock` HER ZAMAN Σvaryant olmalıdır (kaynak-doğru = varyant;
+    bkz. create/update save-fix ~L2155 + sipariş düşüm/iade yolları orders.py). Bu ayrışma iki
+    yönde müşteriye yansır:
+      • phantom_sold_out (parent>0 ama Σvaryant=0): admin'de "stok var" görünür, STOREFRONT
+        efektif stoğu (=Σvaryant) 0 hesaplayıp **TÜKENDİ** gösterir. (WhatsApp'ta bildirilen durum.)
+      • phantom_stock (parent=0 ama Σvaryant>0): tersi.
+    Save/sipariş DIŞI yollardan (ör. pazaryeri/Ticimax stok senkronu) gelen drift burada yakalanır.
+
+    dry_run=True (VARSAYILAN): yalnız RAPOR — hiçbir şey YAZILMAZ.
+    dry_run=False: parent := Σvaryant olarak sabitler. OVERSELL RİSKİ YOK (parent türetilmiş alandır;
+    satılabilirlik varyanttan hesaplanır) ve tekrar çalıştırılabilir (idempotent). Otomatik değildir —
+    rapor gözden geçirildikten sonra admin bilinçli tetikler.
+    """
+    drifted = []
+    pipeline = [
+        {"$match": {"variants.0": {"$exists": True}}},  # en az 1 varyant
+        {"$addFields": {"_vsum": {"$sum": {"$map": {
+            "input": {"$ifNull": ["$variants", []]}, "as": "v",
+            "in": {"$max": [0, {"$toInt": {"$ifNull": ["$$v.stock", 0]}}]},
+        }}}}},
+        {"$match": {"$expr": {"$ne": [{"$toInt": {"$ifNull": ["$stock", 0]}}, "$_vsum"]}}},
+        {"$project": {"_id": 0, "id": 1, "name": 1, "stock_code": 1,
+                      "parent_stock": {"$toInt": {"$ifNull": ["$stock", 0]}},
+                      "variant_sum": "$_vsum"}},
+    ]
+    async for p in db.products.aggregate(pipeline, allowDiskUse=True):
+        _ps = int(p.get("parent_stock") or 0)
+        _vs = int(p.get("variant_sum") or 0)
+        drifted.append({
+            "id": p.get("id"), "name": p.get("name"), "stock_code": p.get("stock_code"),
+            "parent_stock": _ps, "variant_sum": _vs,
+            "phantom_sold_out": bool(_ps > 0 and _vs == 0),
+            "phantom_stock": bool(_ps == 0 and _vs > 0),
+        })
+    applied = 0
+    if not dry_run:
+        for d in drifted:
+            await db.products.update_one(
+                {"id": d["id"]},
+                [{"$set": {"stock": {"$sum": {"$map": {
+                    "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                    "in": {"$max": [0, {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}]},
+                }}}, "updated_at": datetime.now(timezone.utc).isoformat()}}],
+            )
+            applied += 1
+    # En kritikler (phantom_sold_out = müşteriye TÜKENDİ) en üstte
+    drifted.sort(key=lambda x: (not x["phantom_sold_out"], not x["phantom_stock"], x.get("name") or ""))
+    return {
+        "dry_run": dry_run,
+        "desync_count": len(drifted),
+        "phantom_sold_out_count": sum(1 for d in drifted if d["phantom_sold_out"]),
+        "phantom_stock_count": sum(1 for d in drifted if d["phantom_stock"]),
+        "applied": applied,
+        "items": drifted[:200],
+    }
+
+
 @router.post("/bulk-update-vat")
 async def bulk_update_vat(
     payload: dict,
