@@ -15,7 +15,8 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  *   host     = api.zeptomail.com | api.zeptomail.eu (bölge)
  */
 export default function EmailSettings() {
-  const [cfg, setCfg] = useState({ enabled: true, username: "", from_name: "FACETTE" });
+  const [cfg, setCfg] = useState({ enabled: true, username: "", from_name: "FACETTE",
+    order_from_email: "", order_from_name: "", order_reply_to: "" });
   const [region, setRegion] = useState("com"); // com | eu
   const [token, setToken] = useState("");
   const [tokenSet, setTokenSet] = useState(false);
@@ -34,6 +35,9 @@ export default function EmailSettings() {
           enabled: d.enabled !== false,
           username: d.username || "",
           from_name: d.from_name || "FACETTE",
+          order_from_email: d.order_from_email || "",
+          order_from_name: d.order_from_name || "",
+          order_reply_to: d.order_reply_to || "",
         });
         setRegion(((d.host || "").toLowerCase().includes("eu")) ? "eu" : "com");
         setTokenSet(!!d.password_set);
@@ -54,6 +58,9 @@ export default function EmailSettings() {
         enabled: cfg.enabled,
         username: cfg.username.trim(),
         from_name: cfg.from_name,
+        order_from_email: (cfg.order_from_email || "").trim(),
+        order_from_name: (cfg.order_from_name || "").trim(),
+        order_reply_to: (cfg.order_reply_to || "").trim(),
         host: region === "eu" ? "api.zeptomail.eu" : "api.zeptomail.com",
       };
       if (token.trim()) payload.password = token.trim();
@@ -147,6 +154,40 @@ export default function EmailSettings() {
             <p className="text-[11px] text-gray-400">
               ZeptoMail hesabını <code>zeptomail.zoho.eu</code> üzerinden açtıysan Avrupa'yı seç; aksi halde Global doğrudur.
             </p>
+          </div>
+
+          {/* Sipariş maillerinin AYRI gönderen kimliği. Boş bırakılırsa sipariş mailleri
+              de yukarıdaki varsayılan gönderenden gider (davranış değişmez). */}
+          <div className="bg-white border rounded-xl p-5">
+            <div className="text-sm font-semibold mb-1">Sipariş Maili Göndereni (opsiyonel)</div>
+            <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
+              Sipariş yaşam-döngüsü mailleri (onay, kargo, teslim, iptal, iade, havale) bu adresten gider.
+              Şifre sıfırlama, üyelik ve pazarlama mailleri <b>etkilenmez</b>. Boş bırakırsan sipariş
+              mailleri de yukarıdaki adresten gider. <br/>
+              <b>Not:</b> Adres doğrulanmış domaine ait olmalı (<code>@facette.com.tr</code> zaten doğrulu).
+              Yanıt adresini takip ettiğin bir kutuya (ör. <code>info@…</code>) ayarla — müşteri sipariş
+              mailine cevap yazarsa oraya düşer.
+            </p>
+            <div className="grid md:grid-cols-3 gap-4">
+              <div>
+                <label className={lbl}>Sipariş Gönderen E-posta</label>
+                <input className={field} placeholder="siparis@facette.com.tr" autoComplete="off"
+                  value={cfg.order_from_email}
+                  onChange={(e) => setCfg({ ...cfg, order_from_email: e.target.value.trim() })} />
+              </div>
+              <div>
+                <label className={lbl}>Sipariş Gönderen Adı</label>
+                <input className={field} placeholder="FACETTE Sipariş"
+                  value={cfg.order_from_name}
+                  onChange={(e) => setCfg({ ...cfg, order_from_name: e.target.value })} />
+              </div>
+              <div>
+                <label className={lbl}>Sipariş Yanıt Adresi (Reply-To)</label>
+                <input className={field} placeholder="info@facette.com.tr" autoComplete="off"
+                  value={cfg.order_reply_to}
+                  onChange={(e) => setCfg({ ...cfg, order_reply_to: e.target.value.trim() })} />
+              </div>
+            </div>
           </div>
 
           <div className="bg-gray-50 border rounded-xl p-5">

@@ -46,7 +46,8 @@ def _auth_header(token: str) -> str:
 
 
 async def send_smtp_email(db, to: str, subject: str, html: str,
-                          from_name=None, reply_to=None, text=None, wrap=True) -> dict:
+                          from_name=None, reply_to=None, text=None, wrap=True,
+                          from_email=None) -> dict:
     """Tek aliciya ZeptoMail API ile mail. Doner: {success, response}.
     wrap=True (varsayilan): HTML markali FACETTE kabuguna (logo + sosyal footer) sarilir.
     Zaten markaliysa tekrar sarilmaz (idempotent). Boylece sistemden cikan TUM mailler
@@ -70,7 +71,12 @@ async def send_smtp_email(db, to: str, subject: str, html: str,
         except Exception:
             pass  # sarma basarisiz olursa ham HTML ile devam (mail asla bloklanmaz)
 
-    sender = cfg.get("username")
+    # from_email: çağrı bazında gönderen adresini geçersiz kılar (ör. sipariş mailleri
+    # siparis@... adresinden gitsin diye). Boşsa varsayılan yapılandırılmış gönderen
+    # (cfg.username) kullanılır → mevcut davranış korunur. ZeptoMail'de gönderilen adres
+    # DOĞRULANMIŞ domaine ait olmalıdır (facette.com.tr doğrulandığı için @facette.com.tr
+    # adresleri çalışır).
+    sender = (str(from_email).strip() if from_email else "") or cfg.get("username")
     name = from_name or cfg.get("from_name") or "FACETTE"
     payload = {
         "from": {"address": sender, "name": name},

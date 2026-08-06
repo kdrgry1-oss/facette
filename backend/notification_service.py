@@ -279,10 +279,41 @@ async def _whatsapp_send(cfg: Dict, to: str, message: str, template_name: Option
 # EMAIL (RESEND)
 # =============================================================================
 
-async def _email_send(db, to: str, subject: str, html: str) -> Dict:
-    """Kurumsal SMTP (Zoho) üzerinden tek alıcıya mail."""
+async def _email_send(db, to: str, subject: str, html: str,
+                      from_email: Optional[str] = None,
+                      from_name: Optional[str] = None,
+                      reply_to: Optional[str] = None) -> Dict:
+    """Kurumsal SMTP (Zoho) üzerinden tek alıcıya mail.
+    from_email verilirse gönderen adresi geçersiz kılınır (ör. sipariş mailleri
+    siparis@... adresinden). Boşsa varsayılan yapılandırılmış gönderen kullanılır."""
     from email_smtp import send_smtp_email
-    return await send_smtp_email(db, to, subject, html)
+    return await send_smtp_email(db, to, subject, html,
+                                 from_email=from_email, from_name=from_name,
+                                 reply_to=reply_to)
+
+
+async def _order_sender(db, event: str) -> Dict:
+    """Sipariş yaşam-döngüsü maillerinin (order_*) gönderen kimliğini çözer.
+    Panelden (Ayarlar → E-posta) ayarlanan `order_from_email` doluysa sipariş
+    mailleri o adresten gider (ör. siparis@facette.com.tr); pazarlama/işlemsel
+    itibar ayrımı korunur. Boşsa varsayılan gönderen kullanılır (davranış değişmez).
+    Yalnız `order_` ile başlayan MÜŞTERİ olayları için; admin/şifre/pazarlama hariç."""
+    if not str(event or "").startswith("order_"):
+        return {}
+    try:
+        s = await db.settings.find_one(
+            {"id": "email_smtp"},
+            {"_id": 0, "order_from_email": 1, "order_from_name": 1, "order_reply_to": 1}) or {}
+    except Exception:
+        return {}
+    oe = str(s.get("order_from_email") or "").strip()
+    if not oe:
+        return {}
+    return {
+        "from_email": oe,
+        "from_name": (str(s.get("order_from_name") or "").strip() or None),
+        "reply_to": (str(s.get("order_reply_to") or "").strip() or None),
+    }
 
 
 # =============================================================================
@@ -404,7 +435,8 @@ async def send_notification(
             subj = render_template(tpl.get("subject", ""), variables) or f"Bildirim: {event}"
             html = render_template(tpl.get("body", ""), variables) or f"<p>{event}</p>"
             try:
-                res = await _email_send(db, to_email, subj, html)
+                _snd = await _order_sender(db, event)
+                res = await _email_send(db, to_email, subj, html, **_snd)
                 results["email"] = res
                 await _log_event(db, event=event, channel="email", to=to_email,
                                  status="success" if res.get("success") else "failed",

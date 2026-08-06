@@ -369,6 +369,12 @@ async def get_email_smtp(current_user: dict = Depends(require_admin)):
         "secure": s.get("secure", "ssl"),
         "username": s.get("username", ""),
         "from_name": s.get("from_name", "FACETTE"),
+        # Sipariş maillerinin ayrı gönderen kimliği (ör. siparis@...). Boşsa sipariş
+        # mailleri de varsayılan gönderenden gider. Pazarlama (SES) ile işlemsel (Zoho)
+        # itibar ayrımının tamamlayıcısı: sipariş mailleri şifre/pazarlamadan ayrışır.
+        "order_from_email": s.get("order_from_email", ""),
+        "order_from_name": s.get("order_from_name", ""),
+        "order_reply_to": s.get("order_reply_to", ""),
         "password_set": bool(s.get("password")),
     }
 
@@ -385,6 +391,10 @@ async def save_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(
         "secure": (str(payload.get("secure") or "ssl")).strip().lower(),
         "username": (str(payload.get("username") or "")).strip(),
         "from_name": (str(payload.get("from_name") or "FACETTE")).strip(),
+        # Sipariş maili gönderen kimliği (opsiyonel; boş → varsayılan gönderen).
+        "order_from_email": (str(payload.get("order_from_email") or "")).strip(),
+        "order_from_name": (str(payload.get("order_from_name") or "")).strip(),
+        "order_reply_to": (str(payload.get("order_reply_to") or "")).strip(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     # Şifre yalnızca yeni değer girildiyse güncellenir; boş bırakılırsa mevcut korunur.
