@@ -52,6 +52,43 @@ SELLERCENTRAL_CONSENT = {
 }
 
 
+# ── İlk Faz PII/Restricted guard (Amazon DPP §1) ────────────────────────────
+# Restricted Role alınana kadar PII döndüren / RDT gerektiren yollar KAPALI.
+# Açmak için: env AMAZON_ALLOW_RESTRICTED=1 (Restricted Role onaylanınca).
+RESTRICTED_ALLOWED = os.environ.get("AMAZON_ALLOW_RESTRICTED", "0") == "1"
+# PII döndürebilen / RDT gerektiren SP-API yol işaretleri — flag kapalıyken çağrı ENGELLENİR.
+_RESTRICTED_PATH_MARKERS = ("/buyerinfo", "buyerinfo", "/address", "shippingaddress",
+                            "/tokens", "restricted")
+# Yanıtta BEKLENMEDİK şekilde gelirse tamamen SÖKÜLECEK PII container anahtarları
+# (defense-in-depth: ilk fazda PII beklenmez; gelirse saklanmadan/loglanmadan atılır).
+_PII_KEYS = {
+    "buyerinfo", "buyeremail", "buyername", "buyercompanyname",
+    "buyertaxinfo", "buyertaxinformation", "shippingaddress", "billingaddress",
+    "defaultshipfromlocationaddress", "buyercustomizedinformation",
+}
+
+
+def _assert_restricted_allowed(path: str) -> None:
+    """Restricted/PII yol çağrısını flag kapalıyken 403 ile engeller (§1)."""
+    if RESTRICTED_ALLOWED:
+        return
+    low = (path or "").lower()
+    if any(m in low for m in _RESTRICTED_PATH_MARKERS):
+        raise HTTPException(
+            status_code=403,
+            detail="Restricted/PII SP-API yolu ilk fazda kapalıdır (AMAZON_ALLOW_RESTRICTED=0).",
+        )
+
+
+def _scrub_pii(obj):
+    """Yanıttan beklenmedik PII container'larını özyinelemeli SÖKER (§1). Değer saklanmaz."""
+    if isinstance(obj, dict):
+        return {k: _scrub_pii(v) for k, v in obj.items() if str(k).lower() not in _PII_KEYS}
+    if isinstance(obj, list):
+        return [_scrub_pii(x) for x in obj]
+    return obj
+
+
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -144,6 +181,8 @@ async def get_valid_access_token() -> tuple[str, str, str]:
 
 
 async def _spapi_get(path: str, params: dict = None) -> dict:
+    # §1: Restricted/PII yol ise (flag kapalı) çağrıyı hiç yapma.
+    _assert_restricted_allowed(path)
     access_token, endpoint, _ = await get_valid_access_token()
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.get(
@@ -159,6 +198,8 @@ async def _spapi_get(path: str, params: dict = None) -> dict:
             data = r.json()
         except Exception:
             data = {"raw": r.text[:500]}
+        # §1 defense-in-depth: beklenmedik PII container'ları saklanmadan/loglanmadan SÖKÜLÜR.
+        data = _scrub_pii(data)
         _ok = 200 <= r.status_code < 300
         # PII'siz çağrı logu (yalnız path + durum) — parametreler/gövde loglanmaz.
         await _log_spapi_call(f"GET {path}", r.status_code, _ok)
