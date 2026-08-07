@@ -5278,11 +5278,17 @@ async def trendyol_shipment_probe(order_number: str = "", current_user: dict = D
     orderNumber'ı ile sorgular ve paket durum/satır alanlarını döndürür. Amaç: talep vs
     kargoya-verilen ayrımı için kullanılabilir bir 'shipped/returned' sinyali var mı görmek.
     """
-    headers = await get_trendyol_headers()
-    if not headers:
-        raise HTTPException(status_code=400, detail="Trendyol kimliği yapılandırılmamış")
     config = await get_trendyol_config()
-    base = config["base_url"]
+    if not config.get("api_key") or not config.get("supplier_id"):
+        raise HTTPException(status_code=400, detail="Trendyol kimliği yapılandırılmamış")
+    # O10: Order V2 geçişi — legacy `/sapigw/suppliers/{sid}/orders` (Order V1) 15 Ekim 2026'da
+    # kapanıyor. Elle V1 URL kurmak yerine zaten V2 (apigw.trendyol.com/integration/order/
+    # sellers/{sid}/orders) olan TrendyolClient.get_orders'ı kullan — tek kaynak, test edilmiş.
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(
+        supplier_id=config["supplier_id"], api_key=config["api_key"],
+        api_secret=config["api_secret"], mode=config["mode"],
+    )
     sid = config["supplier_id"]
     probed = []
     # order_number verilmezse birkaç açık (Created) claim üzerinde dene
@@ -5295,14 +5301,8 @@ async def trendyol_shipment_probe(order_number: str = "", current_user: dict = D
             if on:
                 targets.append(on)
     for on in targets:
-        url = f"{base}/sapigw/suppliers/{sid}/orders?orderNumber={on}"
         try:
-            async with httpx.AsyncClient(timeout=30) as cx:
-                r = await cx.get(url, headers=headers)
-            try:
-                data = r.json()
-            except Exception:
-                data = {"_text": r.text[:500]}
+            data = await client.get_orders(order_number=on)
             pkgs = []
             for pkg in (data.get("content") or [])[:5]:
                 pkgs.append({
@@ -5327,10 +5327,10 @@ async def trendyol_shipment_probe(order_number: str = "", current_user: dict = D
                     } for l in (pkg.get("lines") or [])],
                     "top_keys": list(pkg.keys()),
                 })
-            probed.append({"order_number": on, "http": r.status_code, "package_count": len(data.get("content") or []), "packages": pkgs})
+            probed.append({"order_number": on, "http": 200, "package_count": len(data.get("content") or []), "packages": pkgs})
         except Exception as e:
             probed.append({"order_number": on, "error": str(e)[:200]})
-    return {"base": base, "supplier_id": sid, "probed": probed}
+    return {"base": client.base_url, "supplier_id": sid, "probed": probed}
 @router.get("/trendyol/claims/issue-reasons")
 async def get_trendyol_issue_reasons(current_user: dict = Depends(require_admin)):
     """Fetch claim issue reasons from Trendyol"""
