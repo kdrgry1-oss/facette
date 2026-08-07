@@ -151,8 +151,8 @@ export function SalesReport() {
               <thead className="bg-gray-50 text-xs uppercase text-gray-500">
                 <tr>
                   <th className="text-left p-2">Kanal</th>
-                  <th className="text-right p-2">Sipariş</th>
-                  <th className="text-right p-2">Adet</th>
+                  <th className="text-right p-2">Sipariş Adeti</th>
+                  <th className="text-right p-2">Ürün Adeti</th>
                   <th className="text-right p-2">Ciro</th>
                   <th className="text-right p-2">İptal</th>
                   <th className="text-right p-2">İptal Tutarı</th>
