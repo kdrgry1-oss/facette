@@ -41,7 +41,7 @@ logger = logging.getLogger("instagram")
 public_router = APIRouter(prefix="/instagram", tags=["instagram-public"])
 admin_router = APIRouter(prefix="/admin/instagram", tags=["instagram-admin"])
 
-_GRAPH = "https://graph.facebook.com/v19.0"
+_GRAPH = "https://graph.facebook.com/v23.0"
 # OAuth (tek tık bağlantı) — kullanıcı token'ı Graph Explorer'dan almak zorunda kalmaz:
 # panel "Facebook ile Bağlan" der → Facebook onay ekranı → bu callback'e döner →
 # code'u token'a çeviren, IG hesabını bulan ve senkronu başlatan sunucudur.

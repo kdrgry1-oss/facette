@@ -248,7 +248,7 @@ async def facebook_login(req: FacebookLoginReq):
     async with httpx.AsyncClient(timeout=15) as client:
         # Code → access_token
         r = await client.get(
-            "https://graph.facebook.com/v20.0/oauth/access_token",
+            "https://graph.facebook.com/v23.0/oauth/access_token",
             params={
                 "client_id": s["facebook_app_id"],
                 "client_secret": s["facebook_app_secret"],
@@ -265,7 +265,7 @@ async def facebook_login(req: FacebookLoginReq):
 
         # access_token → user profile
         u = await client.get(
-            "https://graph.facebook.com/v20.0/me",
+            "https://graph.facebook.com/v23.0/me",
             params={"fields": "id,name,email", "access_token": access_token},
         )
         if u.status_code != 200:

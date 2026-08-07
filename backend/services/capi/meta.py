@@ -4,7 +4,7 @@ Doc: https://developers.facebook.com/docs/marketing-api/conversions-api
 
 Sends server-side events with PII hashed to: Meta Pixel.
 Endpoint:
-  POST https://graph.facebook.com/v18.0/{pixel_id}/events?access_token={token}
+  POST https://graph.facebook.com/v23.0/{pixel_id}/events?access_token={token}
 
 Required event fields:
   - event_name (e.g. "Purchase", "AddToCart", "InitiateCheckout", "ViewContent")
@@ -20,7 +20,10 @@ from typing import List, Optional
 from datetime import datetime, timezone
 
 
-META_GRAPH_VERSION = "v18.0"
+# NOT: Meta Graph sürümleri ~2 yılda expire olur. v18.0 (26 Oca 2026) ve v19.0 (21 May 2026)
+# EXPIRED — o yollar hata döndürür. Güncel destekli pencere v20–v25. Haftalık entegrasyon
+# taraması bunu güncel tutar; sürüm yükseltirken CAPI payload'ı sürümler arası uyumludur.
+META_GRAPH_VERSION = "v23.0"
 META_BASE = f"https://graph.facebook.com/{META_GRAPH_VERSION}"
 
 # Map of our internal event name → Meta standard event name.

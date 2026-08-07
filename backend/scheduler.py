@@ -1922,7 +1922,7 @@ async def _refresh_instagram_token():
         app_secret = decrypt(app_secret_enc)
         import httpx
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.get("https://graph.facebook.com/v19.0/oauth/access_token", params={
+            r = await client.get("https://graph.facebook.com/v23.0/oauth/access_token", params={
                 "grant_type": "fb_exchange_token", "client_id": app_id,
                 "client_secret": app_secret, "fb_exchange_token": cur_token})
         if r.status_code == 200 and (r.json() or {}).get("access_token"):
