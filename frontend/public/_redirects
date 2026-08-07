@@ -3,3 +3,11 @@
 # :splat = * ile eşleşen kısım (orderNumber). SEO: tek canonical, çift içerik yok.
 # NOT: Sadece açık 301 satırı; SPA fallback (index.html 200) Cloudflare tarafından otomatik korunur.
 /siparis-tamamlandi/*  /order-success/:splat  301
+
+# KÖK-NEDEN FIX (site-down): Bayat index.html eski/silinmiş hash'li bundle'a referans
+# verince Cloudflare bugün 200 text/html (SPA fallback) döndürüyor → tarayıcı HTML'i JS
+# olarak çalıştıramıyor → React HİÇ mount olmuyor → "Sayfa yüklenemedi". Bu kural, GERÇEKTEN
+# yok olan /static/* yollarını 404'e çevirir (tarayıcı HTML'i parse etmez; self-heal temiz
+# kurtarır). Var olan gerçek asset'ler Cloudflare tarafından ÖNCELİKLE servis edilir (200);
+# bu kural yalnız mevcut-olmayan /static/* yollarına uygulanır.
+/static/*  /404.html  404
