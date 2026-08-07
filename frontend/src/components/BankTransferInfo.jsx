@@ -1,28 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Copy, Check, Building2, Upload } from "lucide-react";
 import { toast } from "sonner";
+import axios from "axios";
 
 /**
  * BankTransferInfo — Havale/EFT ile ödenecek siparişlerde müşteriye gösterilen
  * KOPYALANABİLİR banka hesap bilgileri kartı + "Ödeme Bildirimi Yap" butonu.
  *
- * Her satırın yanında kopyala butonu var. Sipariş numarası havale açıklamasına
- * yazılması için vurgulanır. Ödeme yapıldıysa müşteri dekont yükleme (ödeme bildirimi)
- * sayfasına yönlendirilir.
+ * BEYAZ ETİKET: Banka bilgisi KODA GÖMÜLÜ DEĞİL — /settings/public/bank-default
+ * (admin > Ödeme Ayarları > varsayılan banka) uçundan okunur. Böylece yeni firma
+ * yalnız ayardan kendi IBAN'ını girer; kod değişmez. Ayar boşsa kart gizlenir
+ * (yanlış/başka firmanın hesabı ASLA gösterilmez).
  *
  * Props: orderNumber (string)
  */
 
-// Facette resmî hesap bilgileri
-const BANK = {
-  holder: "FACETTE DIŞ TİCARET A.Ş.",
-  bank: "Türkiye İş Bankası",
-  currency: "TRY",
-  branch: "ESENYURT",
-  branchCode: "1454",
-  iban: "TR86 0006 4000 0011 4540 1414 67",
-};
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 function CopyRow({ label, value, mono = false, strong = false }) {
   const [copied, setCopied] = useState(false);
@@ -57,6 +51,29 @@ function CopyRow({ label, value, mono = false, strong = false }) {
 }
 
 export default function BankTransferInfo({ orderNumber }) {
+  const [bank, setBank] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    axios
+      .get(`${API}/settings/public/bank-default`, { timeout: 8000 })
+      .then((r) => { if (alive) setBank(r?.data?.bank || null); })
+      .catch(() => {})
+      .finally(() => { if (alive) setLoaded(true); });
+    return () => { alive = false; };
+  }, []);
+
+  // Ayar henüz yüklenmedi → sabit yükseklikli boşluk (layout kaymasın)
+  if (!loaded) {
+    return <div className="mb-12" style={{ minHeight: 120 }} data-testid="bank-transfer-loading" aria-hidden="true" />;
+  }
+
+  // Banka ayarlanmamış → kartı hiç gösterme (yanlış hesap riski yok).
+  if (!bank || !bank.iban) return null;
+
+  const bankLine = [bank.bank_name, bank.branch].filter(Boolean).join(" · ");
+
   return (
     <div className="border border-black/80 mb-12" data-testid="bank-transfer-info">
       <div className="bg-black text-white px-5 sm:px-8 py-4 flex items-center gap-2.5">
@@ -70,9 +87,9 @@ export default function BankTransferInfo({ orderNumber }) {
       </div>
 
       <div className="px-5 sm:px-8 py-4">
-        <CopyRow label="Alıcı" value={BANK.holder} />
-        <CopyRow label="Banka" value={`${BANK.bank} · ${BANK.currency} · ${BANK.branch} Şube (${BANK.branchCode})`} />
-        <CopyRow label="IBAN" value={BANK.iban} mono strong />
+        {bank.account_holder && <CopyRow label="Alıcı" value={bank.account_holder} />}
+        {bankLine && <CopyRow label="Banka" value={bankLine} />}
+        <CopyRow label="IBAN" value={bank.iban} mono strong />
         {orderNumber && (
           <CopyRow label="Açıklama (sipariş no)" value={orderNumber} mono />
         )}
