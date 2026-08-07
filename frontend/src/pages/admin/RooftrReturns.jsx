@@ -898,9 +898,16 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           const _base = Number(r.subtotal);
                           const dr = (_base > 0 && Number(r.discount) > 0)
                             ? Math.min(1, Number(r.discount) / _base) : 0;
-                          // TAKSİT vade farkı payı seçili kaleme ORANSAL eklenir (net/total).
-                          const vadeRatio = (Number(r.vade_farki) > 0 && Number(r.total) > 0)
-                            ? Number(r.vade_farki) / Number(r.total) : 0;
+                          // TAKSİT vade farkı payı seçili kaleme ORANSAL eklenir.
+                          // TABAN backend (_compute_refund_breakdown _net_base) VE ürün satırıyla BİREBİR:
+                          // net = subtotal − indirim (kargo HARİÇ). Eskiden r.total (kargo DAHİL) idi →
+                          // kargolu taksitli siparişte İade net tutarı ürün satırından/gerçek iadeden DÜŞÜK
+                          // çıkıyordu (panel önizlemesi ile gerçekte iade edilen tutar ayrışması).
+                          const _vadeBase = (Number(r.subtotal) > 0)
+                            ? Math.max(0, Number(r.subtotal) - (Number(r.discount) || 0))
+                            : Number(r.total) || 0;
+                          const vadeRatio = (Number(r.vade_farki) > 0 && _vadeBase > 0)
+                            ? Number(r.vade_farki) / _vadeBase : 0;
                           let selNet = 0, selN = 0;
                           (r.items || []).forEach((it, i) => {
                             if (!selItems[`${r.id}::${i}`]) return;
@@ -966,8 +973,10 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           // vade farkı payı DAHİL) → 'İade edilecek' kargo düşülünce doğru çıksın.
                           const _base = Number(r.subtotal);
                           const dr = (_base > 0 && Number(r.discount) > 0) ? Math.min(1, Number(r.discount) / _base) : 0;
-                          const vadeRatio = (Number(r.vade_farki) > 0 && Number(r.total) > 0)
-                            ? Number(r.vade_farki) / Number(r.total) : 0;
+                          // Vade farkı payı tabanı backend/ürün satırıyla BİREBİR: subtotal − indirim (kargo HARİÇ).
+                          const _vadeBase = (_base > 0) ? Math.max(0, _base - (Number(r.discount) || 0)) : Number(r.total) || 0;
+                          const vadeRatio = (Number(r.vade_farki) > 0 && _vadeBase > 0)
+                            ? Number(r.vade_farki) / _vadeBase : 0;
                           let retNet = 0, anySel = false;
                           (r.items || []).forEach((it, i) => {
                             if (selItems[`${r.id}::${i}`]) { anySel = true; retNet += ((Number(it.qty) || 1) * (Number(it.price) || 0)) * (1 - dr) * (1 + vadeRatio); }
