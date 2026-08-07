@@ -169,6 +169,17 @@ export default function ProductDetail() {
     }).catch(() => {});
   }, []);
   useEffect(() => { const t = setInterval(() => _tickShip((n) => n + 1), 60000); return () => clearInterval(t); }, []);
+
+  // İade ve Değişim akordiyonu — merchant'ın 'iade-kosullari' sayfasını DİNAMİK gösterir
+  // (sayfa güncellenince akordiyon da güncellenir). Fetch başarısızsa sabit kısa metne düşer.
+  const [returnPolicyHtml, setReturnPolicyHtml] = useState("");
+  useEffect(() => {
+    let alive = true;
+    axios.get(`${API}/pages/iade-kosullari`)
+      .then((r) => { if (alive) setReturnPolicyHtml(r?.data?.content || ""); })
+      .catch(() => { /* sessiz — fallback metin gösterilir */ });
+    return () => { alive = false; };
+  }, []);
   // Üyenin boy/kilosuna göre önerilen beden (harf) — beden butonunda rozet gösterilir.
   const recLetter = user ? recommendLetterSize(user.height_cm, user.weight_kg) : null;
   const [product, setProduct] = useState(null);
@@ -1133,34 +1144,9 @@ export default function ProductDetail() {
                 {expandedSections.description && (
                   <div className="pb-3">
                     <div className="text-xs text-gray-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.description) || "Ürün açıklaması bulunmamaktadır." }} />
-                    {/* Materyal / İçerik + müşteri-ilgili özellikler (attributes) — daha önce hiç gösterilmiyordu */}
-                    {(() => {
-                      const raw = product.attributes;
-                      const pairs = Array.isArray(raw) ? raw.map((a) => [a?.name, a?.value])
-                        : (raw && typeof raw === "object") ? Object.entries(raw) : [];
-                      const HIDE = ["persona", "kutu durumu", "performans", "sürdürülebilirlik detayı", "surdurulebilirlik detayi",
-                        "sürdürülebilirlik", "surdurulebilirlik", "ek özellik", "ek ozellik", "ortam", "yaş grubu", "yas grubu",
-                        "menşei", "mensei", "gtin", "barkod", "stok kodu", "marka", "cinsiyet"];
-                      const rows = pairs
-                        .map(([k, v]) => [String(k || "").trim(), String(v || "").trim()])
-                        .filter(([k, v]) => k && v && !["yok", "hayır", "hayir", "-"].includes(v.toLowerCase()) && !HIDE.includes(k.toLocaleLowerCase("tr")));
-                      if (!rows.length) return null;
-                      const PRIO = ["ürün i̇çerik bilgisi", "ürün içerik bilgisi", "urun icerik bilgisi", "materyal", "kumaş tipi", "kumas tipi"];
-                      const _p = (k) => { const i = PRIO.indexOf(k.toLocaleLowerCase("tr")); return i < 0 ? 99 : i; };
-                      rows.sort((a, b) => _p(a[0]) - _p(b[0]));
-                      return (
-                        <table className="mt-3 w-full text-[11px]">
-                          <tbody>
-                            {rows.map(([k, v]) => (
-                              <tr key={k} className="border-b border-gray-100 last:border-0">
-                                <td className="py-1.5 pr-3 text-gray-500 align-top w-2/5">{k}</td>
-                                <td className="py-1.5 text-gray-800">{v}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      );
-                    })()}
+                    {/* Ürün ÖZELLİK tablosu (attributes: Materyal, Kumaş Tipi, Kalıp vb.) müşteri
+                        tarafında GÖSTERİLMEZ (merchant kararı). Admin ürün formunda görünmeye devam
+                        eder — bu yalnız storefront gösterimidir, veri silinmez. */}
                   </div>
                 )}
               </div>
@@ -1192,7 +1178,10 @@ export default function ProductDetail() {
                   {expandedSections.returns ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                 </button>
                 {expandedSections.returns && (
-                  <p className="pb-3 text-xs text-gray-600">14 gün içinde iade ve değişim hakkınız bulunmaktadır.</p>
+                  returnPolicyHtml
+                    ? <div className="pb-3 text-xs text-gray-600 leading-relaxed [&_ul]:list-disc [&_ul]:pl-4 [&_li]:mb-0.5 [&_p]:mb-1.5 [&_h1]:font-semibold [&_h1]:text-gray-800 [&_h1]:mt-2 [&_h2]:font-semibold [&_h2]:text-gray-800 [&_h2]:mt-2 [&_h3]:font-semibold [&_h3]:text-gray-800 [&_h3]:mt-2 [&_strong]:font-semibold [&_a]:underline"
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(returnPolicyHtml) }} />
+                    : <p className="pb-3 text-xs text-gray-600">14 gün içinde iade ve değişim hakkınız bulunmaktadır.</p>
                 )}
               </div>
             </div>

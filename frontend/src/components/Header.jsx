@@ -375,8 +375,8 @@ export default function Header({ hideMenu = false }) {
                       const isAccent = tab.style === "accent";
                       const isSale = tab.style === "sale";
                       const cls = isAccent
-                        ? "group relative text-[11px] xl:text-xs font-medium tracking-[0.16em] xl:tracking-[0.28em] uppercase py-4 leading-none flex items-center gap-1.5 whitespace-nowrap"
-                        : `text-[11px] xl:text-xs font-normal tracking-[0.1em] xl:tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60 whitespace-nowrap${isSale ? " text-red-700" : ""}`;
+                        ? "group relative text-[11px] xl:text-xs font-bold tracking-[0.16em] xl:tracking-[0.28em] uppercase py-4 leading-none flex items-center gap-1.5 whitespace-nowrap"
+                        : `text-[11px] xl:text-xs font-semibold tracking-[0.1em] xl:tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60 whitespace-nowrap${isSale ? " text-red-700" : ""}`;
                       const inner = (
                         <>
                           {isAccent && <span className="inline-block w-[5px] h-[5px] rotate-45 bg-current opacity-55 group-hover:opacity-100 transition-opacity duration-300" aria-hidden="true" />}
