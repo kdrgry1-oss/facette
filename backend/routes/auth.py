@@ -31,7 +31,13 @@ _PW_MAX_AGE_DAYS = 365         # max ömür: 365 gün (login'de flag)
 
 def _parse_iso_dt(s):
     try:
-        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        # KRİTİK: naive (tz'siz) timestamp'i UTC-aware'e çevir. Aksi halde
+        # `datetime.now(timezone.utc) - dt` TypeError atıp login'i 500'e düşürüyordu
+        # (eski password_changed_at/updated_at kayıtları tz'siz olabiliyor).
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
     except Exception:
         return None
 
@@ -373,11 +379,15 @@ async def login(request: Request):
                           ip=ip, user_agent=ua, success=True)
 
     # Amazon DPP §7: personel/admin şifresi 365 günden eskiyse flag (bloklamaz — panel değişim ister).
+    # Bu bilgilendirme flag'i HİÇBİR koşulda login'i kıramaz → tamamen try/except'te.
     _pw_expired = False
-    if user.get("is_admin"):
-        _pcd = _parse_iso_dt(user.get("password_changed_at") or user.get("password_updated_at"))
-        if _pcd and (datetime.now(timezone.utc) - _pcd).days > _PW_MAX_AGE_DAYS:
-            _pw_expired = True
+    try:
+        if user.get("is_admin"):
+            _pcd = _parse_iso_dt(user.get("password_changed_at") or user.get("password_updated_at"))
+            if _pcd and (datetime.now(timezone.utc) - _pcd).days > _PW_MAX_AGE_DAYS:
+                _pw_expired = True
+    except Exception:
+        _pw_expired = False
 
     return {
         "token": token,
