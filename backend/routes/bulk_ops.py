@@ -223,6 +223,17 @@ async def apply_upload(file: UploadFile = File(...),
                             {"id": product["id"]},
                             {"$set": {f"variants.{target_idx}.stock": new_stock, "updated_at": now}}
                         )
+                        # KÖK-NEDEN FIX (desync): varyant stoğu yazıldıktan sonra parent 'stock'
+                        # HER ZAMAN Σvaryant'a eşitlenir — create/update/sipariş yollarındaki AYNI
+                        # invariant (products.py:2159, orders.py). Aksi halde admin'de "stok var"
+                        # görünürken storefront (efektif stok = Σvaryant) TÜKENDİ gösterir.
+                        await db.products.update_one(
+                            {"id": product["id"]},
+                            [{"$set": {"stock": {"$sum": {"$map": {
+                                "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                                "in": {"$max": [0, {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}]},
+                            }}}}}],
+                        )
                         variant_updated = True
                         # Manuel (toplu Excel) stok düzeltmesi denetimi — hareket kaydı bırak.
                         if new_stock != _old_stock:
@@ -245,7 +256,10 @@ async def apply_upload(file: UploadFile = File(...),
                             except Exception as _me:
                                 logger.error(f"[bulk manual_stock_log {product['id']}] {_me}")
                     else:
-                        root_updates["stock"] = new_stock
+                        # Varyantsız üründe parent stok = kaynak-doğru. Varyantlı üründe eşleşmeyen
+                        # ref'e parent'ı BAĞIMSIZ yazma (desync olur) — atla.
+                        if not variants:
+                            root_updates["stock"] = new_stock
 
             if root_updates:
                 root_updates["updated_at"] = now

@@ -2180,16 +2180,19 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Ticimax site siparişlerini periyodik çek — 6 saatte bir (günde 4 kez)
-    _add(
-        _ticimax_sync_orders,
-        "interval",
-        hours=6,
-        id="ticimax_orders_sync",
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
-        max_instances=1,
-        coalesce=True,
-    )
+    # Ticimax site siparişleri periyodik çekme — KAPALI (kullanıcı kararı: Ticimax ile
+    # aktif senkron yok; Ticimax'tan sipariş çekilmez/stok güncellenmez). Stok senkronu
+    # zaten kapalıydı; sipariş çekme senkronu da bu sistemi etkilemesin diye kapatıldı.
+    # Gerekirse tekrar açmak için aşağıdaki _add(...) bloğunu geri yorumdan çıkarın.
+    # _add(
+    #     _ticimax_sync_orders,
+    #     "interval",
+    #     hours=6,
+    #     id="ticimax_orders_sync",
+    #     next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+    #     max_instances=1,
+    #     coalesce=True,
+    # )
     # Ticimax canlı stok senkronu — KAPALI (Facette stok master'ı; Ticimax stoğu
     # bu sistemi EZMESİN). Kullanıcı kararı: stok yalnızca sipariş/iptal/iade ile
     # Facette içinde yönetilir. Gerekirse settings.ticimax_stock_sync_enabled=true

@@ -26,7 +26,10 @@ async def _size_tables_diag(key: str, q: str = ""):
     """GEÇİCİ TANI (gizli anahtarlı): ölçü tablosu veri kaybını teşhis. Kaç kayıt dolu/boş,
     ne zaman ezilmiş (updated_at günü), kaç tanesi kardeş-senkron (synced_from) ile yazılmış,
     ürünlerde kaç adet render edilmiş 'is_size_table' görsel duruyor (görsel-kurtarma kaynağı)."""
-    if key != (os.environ.get("SIZE_DIAG_KEY") or "fx_sizediag_4k7_TEMP"):
+    # Teşhis anahtarı YALNIZ env SIZE_DIAG_KEY'den (gömülü fallback kaldırıldı). Env yoksa uç kapalı.
+    import hmac as _hmac
+    _sk = (os.environ.get("SIZE_DIAG_KEY") or "").strip()
+    if not _sk or not _hmac.compare_digest(str(key or ""), _sk):
         raise HTTPException(status_code=403, detail="forbidden")
     # İSİMLE TEK ÜRÜN DÖKÜMÜ: kullanıcının "boş" dediği ürünü doğrulamak için.
     if q:

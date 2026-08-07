@@ -4822,13 +4822,14 @@ async def autoheal_hb_invoices(hours: int = None, limit: int = 500) -> dict:
 async def stock_diag(q: str = Query(...), key: str = Query(""), days: int = Query(2)):
     """TEŞHİS (geçici, gizli anahtar korumalı): bir ürünün mevcut stoğu + son N gün stok
     hareketleri (tip/delta/kaynak) + stock_synced_at. Stoğun 0'dan nasıl arttığını gösterir."""
-    import os as _os, hmac as _hmac
-    _sk = (_os.environ.get("HB_DIAG_KEY") or "").strip() or "fx_stkdiag_7c1e9a_TEMP"
-    if not _hmac.compare_digest(str(key or ""), _sk):
+    import os as _os, hmac as _hmac, re as _re
+    # Teşhis anahtarı YALNIZ env HB_DIAG_KEY'den (gömülü fallback kaldırıldı). Env yoksa uç kapalı.
+    _sk = (_os.environ.get("HB_DIAG_KEY") or "").strip()
+    if not _sk or not _hmac.compare_digest(str(key or ""), _sk):
         raise HTTPException(status_code=403, detail="forbidden")
     prod = await db.products.find_one(
         {"$or": [{"id": q}, {"stock_code": q}, {"barcode": q},
-                 {"name": {"$regex": q, "$options": "i"}},
+                 {"name": {"$regex": _re.escape(q), "$options": "i"}},
                  {"variants.barcode": q}]},
         {"_id": 0, "id": 1, "name": 1, "stock": 1, "stock_code": 1, "platform": 1,
          "variants": 1, "stock_synced_at": 1, "updated_at": 1})
