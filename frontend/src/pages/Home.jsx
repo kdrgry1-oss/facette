@@ -869,8 +869,14 @@ function RotatingText({ block }) {
     >
       <span
         key={currentIndex}
-        className="text-[9px] md:text-[10px] tracking-[0.3em] uppercase font-light"
-        style={{ color: fg }}
+        className="text-[10px] md:text-[12px] uppercase"
+        style={{
+          color: fg,
+          fontWeight: 900,
+          letterSpacing: "0.15em",
+          WebkitTextStroke: "0.5px currentColor",
+          paintOrder: "stroke fill",
+        }}
       >
         {texts[currentIndex % texts.length]}
       </span>
