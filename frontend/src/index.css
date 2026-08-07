@@ -1,5 +1,16 @@
 @import url('https://fonts.googleapis.com/css2?family=Mulish:wght@200;300;400;500;600;700;800;900&display=swap');
 
+/* Üst promo barı metnini GERÇEKTEN kalın göster. Yalnız font-weight:900 bazı
+   tarayıcılarda (900 font-face cache/fallback yüzünden yüklenmezse) ince kalıyordu.
+   -webkit-text-stroke harfleri şişirir → font 900 yüklenmese BİLE kalın görünür (dayanıklı).
+   currentColor ile herhangi bir bar renginde çalışır. CountdownBar bu class'ı kullanır. */
+.fct-topbar-heavy {
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  -webkit-text-stroke: 0.4px currentColor;
+  paint-order: stroke fill;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
