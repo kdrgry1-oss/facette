@@ -297,6 +297,16 @@ def client_ip_from_request(request) -> str:
     if not request:
         return ""
     if _edge_trusted(request):
+        # IPv6 uyumu (Meta plan §9): Cloudflare "Pseudo IPv4 = Overwrite headers" modunda
+        # cf-connecting-ip pseudo-IPv4'e çevrilir, GERÇEK client IPv6 'cf-connecting-ipv6'da
+        # gelir. Header MEVCUTSA gerçek IPv6 tercih edilir (browser'la aynı sürüm → Meta
+        # IPv6/IPv4 uyumsuzluğu kalkar). Header yoksa (normal mod) davranış AYNI kalır.
+        # Kapatma: env CAPI_PREFER_CF_IPV6=0.
+        if os.environ.get("CAPI_PREFER_CF_IPV6", "1") == "1":
+            cf_v6 = (request.headers.get("cf-connecting-ipv6")
+                     or request.headers.get("CF-Connecting-IPv6"))
+            if cf_v6 and cf_v6.strip():
+                return cf_v6.strip()
         cf_ip = request.headers.get("cf-connecting-ip") or request.headers.get("CF-Connecting-IP")
         if cf_ip:
             return cf_ip.strip()

@@ -101,10 +101,27 @@ function _adTrackingBlocked() {
   return _marketingConsentGranted() !== true;                  // gate açık → yalnız açık onayda gönder
 }
 
+// ── ViewContent _fbp timing fix (Meta plan §4) ──────────────────────────────
+// ViewContent'te server-mirror, Meta Pixel'in _fbp cookie'sini yazmasıyla YARIŞIR →
+// server event fbp'siz gidebilir (ViewContent fbp coverage %19.98). Çözüm: browser pixel'i
+// ANINDA ateşlenir (GECİKMEZ); yalnız SERVER MIRROR, _fbp için KISA & SINIRLI bekler.
+// Anlık rollback: window.__FCT_VC_FBP_WAIT_MS__ = 0.
+const _VC_FBP_WAIT_MS_DEFAULT = 1200;
+async function _waitForFbpCookie(maxMs) {
+  if (typeof document === "undefined" || !maxMs || maxMs <= 0) return;
+  const step = 120;
+  for (let waited = 0; waited < maxMs; waited += step) {
+    if (readCookie("_fbp")) return;                 // cookie oluştu → hemen çık
+    await new Promise((r) => setTimeout(r, step));
+  }
+}
+
 /** Push to GA4 dataLayer + dispatch native pixels + POST to backend CAPI. */
 async function pushEvent(eventName, eventData, userInfo = {}) {
   const event_id = eventData.event_id || generateEventId();
-  const clickIds = collectClickIds();
+  // event_time gerçek event anında sabitlenir → olası _fbp beklemesi timestamp'i KAYDIRMAZ (§4).
+  const event_time = eventData.event_time || Math.floor(Date.now() / 1000);
+  let clickIds = collectClickIds();
   const isGa4Only = GA4_ONLY_EVENTS.has(eventName);
 
   // 1) GA4 / GTM dataLayer — Enhanced E-commerce schema (kalem kalem ayrı parametre)
@@ -252,12 +269,23 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
   // KVKK gate: gate AÇIK ve pazarlama onayı yoksa server-side CAPI'ye de gönderme.
   if (_adTrackingBlocked()) return event_id;
 
+  // ViewContent (_fbp timing §4): mirror göndermeden önce cookie yoksa KISA/SINIRLI bekle.
+  // Browser pixel zaten ateşlendi; yalnız server mirror beklediğinden UX etkilenmez. Yalnız
+  // ViewContent'e uygulanır (Purchase/checkout'ta _fbp zaten mevcut → gereksiz gecikme yok).
+  if (eventName === "view_item" && !clickIds.fbp && typeof window !== "undefined") {
+    const _wait = Number.isFinite(Number(window.__FCT_VC_FBP_WAIT_MS__))
+      ? Number(window.__FCT_VC_FBP_WAIT_MS__) : _VC_FBP_WAIT_MS_DEFAULT;
+    await _waitForFbpCookie(_wait);
+    const _fbp = readCookie("_fbp");
+    if (_fbp) clickIds = { ...clickIds, fbp: _fbp };
+  }
+
   // 6) Server-side CAPI mirror (non-blocking) — TÜM ENHANCED E-COMMERCE PARAMETRELERİYLE
   try {
     await axios.post(`${API}/capi/event`, {
       event_name: eventName,
       event_id,
-      event_time: Math.floor(Date.now() / 1000),
+      event_time,
       ...userInfo,
       ...clickIds,
       // Genel
