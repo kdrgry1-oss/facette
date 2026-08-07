@@ -872,7 +872,7 @@ function RotatingText({ block }) {
         className="text-[10px] md:text-[12px] uppercase"
         style={{
           color: fg,
-          fontWeight: 600,
+          fontWeight: 500,
           letterSpacing: "0.12em",
         }}
       >
