@@ -23,6 +23,35 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # kullanıcıda da bu sabit dummy hash'e karşı bcrypt.checkpw çalıştırıp süreyi eşitleriz.
 _DUMMY_PW_HASH = "$2b$12$C6UzMDM.H6dfI/f/IKcEeO3G1xIS3vJhWvNqfa5eLPBz3XjE5rLZC"
 
+# ── Amazon DPP §7: personel/admin şifre geçmişi + yaş politikası ─────────────
+_PW_HISTORY_KEEP = 10          # son 10 şifre tekrar kullanılamaz
+_PW_MIN_AGE_HOURS = 24         # min yaş: 1 gün (yalnız kullanıcı-başlatan değişimde)
+_PW_MAX_AGE_DAYS = 365         # max ömür: 365 gün (login'de flag)
+
+
+def _parse_iso_dt(s):
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _enforce_pw_history(user: dict, new_plain: str) -> None:
+    """Yeni şifre mevcut + son geçmiştekilerden biriyle aynıysa 400 (personel/admin)."""
+    _prev = ([user.get("password", "")] + list(user.get("password_history") or []))[:_PW_HISTORY_KEEP]
+    for _oh in _prev:
+        if _oh and verify_password(new_plain, _oh):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Yeni şifre son {_PW_HISTORY_KEEP} şifrenizden biriyle aynı olamaz.",
+            )
+
+
+def _next_pw_history(user: dict) -> list:
+    """Mevcut hash'i geçmişin başına ekleyip son N'e kırpar."""
+    _h = [user.get("password", "")] + list(user.get("password_history") or [])
+    return [h for h in _h if h][:_PW_HISTORY_KEEP]
+
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "") or "49503095707-cahr1ntbc30lqeho6nj1pbggq3tatien.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
@@ -343,9 +372,17 @@ async def login(request: Request):
     await write_audit_log("login", user_id=user["id"], email=email,
                           ip=ip, user_agent=ua, success=True)
 
+    # Amazon DPP §7: personel/admin şifresi 365 günden eskiyse flag (bloklamaz — panel değişim ister).
+    _pw_expired = False
+    if user.get("is_admin"):
+        _pcd = _parse_iso_dt(user.get("password_changed_at") or user.get("password_updated_at"))
+        if _pcd and (datetime.now(timezone.utc) - _pcd).days > _PW_MAX_AGE_DAYS:
+            _pw_expired = True
+
     return {
         "token": token,
         "mfa_setup_required": _mfa_setup_required,
+        "password_expired": _pw_expired,
         "user": {
             "id": user["id"],
             "email": user["email"],
@@ -622,12 +659,24 @@ async def change_password(
             success=False, meta={"reason": "wrong_current_password"},
         )
         raise HTTPException(status_code=400, detail="Mevcut şifre hatalı")
+    # Amazon DPP §7 (personel/admin): son-10 tekrar yasağı + min yaş (24s).
+    if user.get("is_admin"):
+        _enforce_pw_history(user, new)
+        _pca = _parse_iso_dt(user.get("password_changed_at"))
+        if _pca:
+            _age_h = (datetime.now(timezone.utc) - _pca).total_seconds() / 3600.0
+            if 0 <= _age_h < _PW_MIN_AGE_HOURS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Şifre en erken {_PW_MIN_AGE_HOURS} saatte bir değiştirilebilir.",
+                )
     # GÜVENLİK: token_version'ı bump et → çalınmış/eski TÜM oturumlar geçersizleşir.
     new_tv = int(user.get("token_version", 0) or 0) + 1
     await db.users.update_one(
         {"id": current_user["id"]},
         {"$set": {"password": hash_password(new),
                   "password_changed_at": datetime.now(timezone.utc).isoformat(),
+                  "password_history": _next_pw_history(user),
                   "token_version": new_tv}}
     )
     await write_audit_log(
@@ -787,9 +836,17 @@ async def forgot_password_reset(req: OTPResetReq):
     if not user_id:
         raise HTTPException(status_code=400, detail="Kullanıcı bulunamadı")
 
+    # Amazon DPP §7: reset'te de son-10 tekrar yasağı (personel/admin). Min-yaş reset'te UYGULANMAZ (güvenlik).
+    _u = await db.users.find_one({"id": user_id}) or {}
+    if _u.get("is_admin"):
+        _enforce_pw_history(_u, req.new_password)
+    _pw_now_iso = datetime.now(timezone.utc).isoformat()
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {"password": hash_password(req.new_password), "password_updated_at": datetime.now(timezone.utc).isoformat()},
+        {"$set": {"password": hash_password(req.new_password),
+                  "password_updated_at": _pw_now_iso,
+                  "password_changed_at": _pw_now_iso,
+                  "password_history": _next_pw_history(_u)},
          "$inc": {"token_version": 1}},  # GÜVENLİK: sıfırlama tüm eski oturumları geçersiz kılar
     )
     await db.password_reset_otps.delete_one({"_id": rec["_id"]})

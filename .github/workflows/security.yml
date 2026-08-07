@@ -24,6 +24,7 @@ permissions:
   contents: read
   security-events: write   # SARIF sonuçlarını Security sekmesine yaz
   actions: read
+  issues: write            # bulgu varsa SLA takibi için otomatik issue aç/güncelle
 
 jobs:
   # 1) SAST — CodeQL (Python backend + JavaScript frontend)
@@ -90,6 +91,44 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: gitleaks.sarif
+        continue-on-error: true
+
+      # §5/§10: bulgu varsa SLA takibi için otomatik güvenlik issue'su aç/güncelle.
+      # Yalnız main'e push + planlı/elle tetiklemede (PR'larda gürültü yapmaz). Başlıkla dedup edilir.
+      - name: Bulgu varsa güvenlik issue'su (SLA takibi)
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let n = 0;
+            try { n = (JSON.parse(fs.readFileSync('gitleaks.sarif','utf8')).runs[0].results || []).length; } catch (e) {}
+            if (!n) { core.info('gitleaks: bulgu yok, issue açılmadı.'); return; }
+            const { owner, repo } = context.repo;
+            const title = '🔐 Security: gitleaks sır bulgusu (SLA takibi)';
+            const today = new Date().toISOString().slice(0, 10);
+            const body = [
+              `**Discovery date:** ${today}`,
+              `**Affected system:** repository — gitleaks secret scan`,
+              `**Severity:** Critical`,
+              `**Owner:** _atanacak_`,
+              `**Due date (SLA):** Critical → en geç 7 takvim günü`,
+              `**Status:** open`,
+              `**Finding count:** ${n} (redakte — ayrıntı: Security → Code scanning → gitleaks)`,
+              `**Remediation evidence:** _fix sonrası doldurulacak_`,
+              `**Retest result:** _rescan sonrası doldurulacak_`,
+              '',
+              `Run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+            ].join('\n');
+            const open = await github.rest.issues.listForRepo({ owner, repo, state: 'open', labels: 'security', per_page: 50 });
+            const dup = open.data.find(i => i.title === title);
+            if (dup) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: dup.number, body: `Yeni tarama (${today}): **${n}** bulgu.\n\n${body}` });
+              core.info(`Mevcut issue #${dup.number} güncellendi.`);
+            } else {
+              const created = await github.rest.issues.create({ owner, repo, title, body, labels: ['security', 'sla-critical'] });
+              core.info(`Issue #${created.data.number} açıldı.`);
+            }
         continue-on-error: true
 
   # 3) Bağımlılık açık taraması — backend (pip-audit) + frontend (yarn audit).
