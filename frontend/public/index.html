@@ -308,12 +308,29 @@
                         };
                     } catch (e) {}
                 }
+                // CSS 404/bayatsa: mevcut <link>'i cache-bust query ile YENİDEN ekle (tam reload gerekmez).
+                function reinjectMainCss() {
+                    try {
+                        var l = document.querySelector('link[rel="stylesheet"][href*="/static/css/"]');
+                        if (!l) return;
+                        var href = l.getAttribute("href");
+                        if (/[?&]_c=/.test(href)) return;
+                        var n = document.createElement("link");
+                        n.rel = "stylesheet";
+                        n.href = href + (href.indexOf("?") > -1 ? "&" : "?") + "_c=" + Date.now();
+                        document.head.appendChild(n);
+                    } catch (e) {}
+                }
                 function check() {
                     try {
-                        if (appMounted() && cssApplied()) {
+                        // YALNIZ #root GERÇEKTEN boşken reload et. Mount OLMUŞ sayfayı CSS
+                        // yanlış-negatifi (stylesheet DOM'da ama cssRules o an okunamıyor) yüzünden
+                        // ASLA reload etme — gereksiz beyaz flash + scroll sıfırlama olurdu.
+                        if (appMounted()) {
                             try { sessionStorage.removeItem("__heal"); } catch (e) {}
                             stripHealParam(); // URL temizlensin — kullanıcı ?_r= görmesin
-                            return; // her şey yolunda
+                            if (!cssApplied()) reinjectMainCss(); // reload yerine YALNIZ CSS'i tazele
+                            return; // uygulama açık — her şey yolunda
                         }
                         if (healedAlready()) { showFallback(); return; } // bir kez denendi; döngü YOK → sessiz beyaz ekran yerine MESAJ
                         try { sessionStorage.setItem("__heal", "1"); } catch (e) {}

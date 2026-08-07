@@ -4,10 +4,18 @@ import axios from "axios";
 const AuthContext = createContext();
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// Güvenli localStorage — Safari "tüm çerezleri engelle" / partisyonlu depolama / bazı
+// in-app tarayıcılarda localStorage erişimi SecurityError FIRLATIR. Guard'sız kullanım
+// AuthProvider render'ında throw edip TÜM uygulamayı çökertiyordu ("Sayfa yüklenemedi" /
+// ErrorBoundary). CartContext/FavoritesContext zaten guard'lı; Auth eksikti.
+const _lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const _lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage kapalı */ } };
+const _lsDel = (k) => { try { localStorage.removeItem(k); } catch { /* storage kapalı */ } };
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(() => localStorage.getItem("token"));
-  const [loading, setLoading] = useState(() => Boolean(localStorage.getItem("token")));
+  const [token, setToken] = useState(() => _lsGet("token"));
+  const [loading, setLoading] = useState(() => Boolean(_lsGet("token")));
 
   useEffect(() => {
     if (token) {
@@ -35,7 +43,7 @@ export function AuthProvider({ children }) {
                mfaMethod: res.data.mfa_method || "totp", phoneMasked: res.data.phone_masked || "" };
     }
     const { token: newToken, user: userData } = res.data;
-    localStorage.setItem("token", newToken);
+    _lsSet("token", newToken);
     axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
@@ -46,7 +54,7 @@ export function AuthProvider({ children }) {
   // Sosyal giriş (Google) sonrası: backend'den dönen JWT token + user'ı tam olarak yerleştir.
   // localStorage + axios Authorization header + context state hepsi senkron olmalı.
   const loginWithToken = (newToken, userData) => {
-    localStorage.setItem("token", newToken);
+    _lsSet("token", newToken);
     axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
@@ -55,7 +63,7 @@ export function AuthProvider({ children }) {
   const verifyMfa = async (mfaToken, code) => {
     const res = await axios.post(`${API}/auth/mfa/verify`, { mfa_token: mfaToken, code });
     const { token: newToken, user: userData } = res.data;
-    localStorage.setItem("token", newToken);
+    _lsSet("token", newToken);
     axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
@@ -81,7 +89,7 @@ export function AuthProvider({ children }) {
       referral_code: refCode,
     });
     const { token: newToken, user: userData } = res.data;
-    localStorage.setItem("token", newToken);
+    _lsSet("token", newToken);
     axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
@@ -89,7 +97,7 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
-    localStorage.removeItem("token");
+    _lsDel("token");
     delete axios.defaults.headers.common["Authorization"];
     setToken(null);
     setUser(null);
