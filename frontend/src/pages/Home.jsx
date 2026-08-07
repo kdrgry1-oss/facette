@@ -872,10 +872,8 @@ function RotatingText({ block }) {
         className="text-[10px] md:text-[12px] uppercase"
         style={{
           color: fg,
-          fontWeight: 900,
-          letterSpacing: "0.15em",
-          WebkitTextStroke: "0.5px currentColor",
-          paintOrder: "stroke fill",
+          fontWeight: 600,
+          letterSpacing: "0.12em",
         }}
       >
         {texts[currentIndex % texts.length]}
