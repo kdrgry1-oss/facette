@@ -65,31 +65,6 @@ export function SalesReport() {
   const [cancelRet, setCancelRet] = useState([]);
   const [locData, setLocData] = useState([]);
 
-  // ── KESİN DOĞRULAMA (Trendyol ↔ panel mutabakatı) ──────────────────────────
-  // Trendyol'un satış raporu ADET sayar, bizim panel SİPARİŞ sayar; bu yüzden
-  // "1.700 vs 1.560" gibi farklar tahminle tartışılıyordu. Bu ekran sipariş
-  // numarası bazında ham karşılaştırma yapar ve farkı listeler.
-  const [rec, setRec] = useState(null);
-  const [recBusy, setRecBusy] = useState("");
-  const runReconcile = async (apply = false) => {
-    if (apply && !window.confirm(
-      `Trendyol'da iptal olup panelde hâlâ aktif görünen siparişler İPTAL'e çekilecek ` +
-      `ve stokları geri eklenecek (bir kez). Devam edilsin mi?`)) return;
-    setRecBusy(apply ? "apply" : "run");
-    try {
-      const r = await axios.get(`${API}/integrations/trendyol/reconcile`, {
-        headers: authHeaders(), params: { start_date: from, end_date: to, apply }, timeout: 600000,
-      });
-      setRec(r.data);
-      if (apply) {
-        const a = r.data?.applied || {};
-        toast.success(`${a.cancelled || 0} sipariş iptale çekildi · ${a.restocked || 0} stok iadesi · ${a.partial_recorded || 0} kısmi iptal kaydedildi`);
-        load();
-      }
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Mutabakat çalıştırılamadı");
-    } finally { setRecBusy(""); }
-  };
 
   // Saat/Gün analizi + Sipariş Edilen Ürünler (sayfadaki tarih aralığına bağlı)
   const [hourData, setHourData] = useState(null);
@@ -147,42 +122,6 @@ export function SalesReport() {
         ))}
       </div>
 
-      {/* ⏳ AÇIK İADE PROJEKSİYONU — Trendyol iade talebini açılır açılmaz "İade" sayar;
-          biz yalnız ONAYLANAN iadeyi siparişe yansıtırız. Aradaki fark burada görünür:
-          bu talepler onaylanırsa net ciro şu tutara düşecek. */}
-      {brk?.pending_returns?.orders > 0 && (
-        <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4" data-testid="pending-returns-card">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">⏳</span>
-              <div>
-                <div className="text-[11px] uppercase tracking-wider text-amber-700 font-bold">Açıktaki İadeler (henüz onaylanmadı)</div>
-                <div className="text-lg font-bold text-amber-800 tabular-nums">
-                  {tl(brk.pending_returns.revenue)}
-                  <span className="text-xs font-medium text-amber-600 ml-2">
-                    {brk.pending_returns.orders} sipariş · {brk.pending_returns.units} adet
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className="h-10 w-px bg-amber-300 hidden md:block" />
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-amber-700 font-bold">Onaylanırsa net ciro</div>
-              <div className="text-lg font-bold text-emerald-700 tabular-nums">
-                {tl(brk.projected_net?.revenue)}
-                <span className="text-xs font-medium text-rose-600 ml-2">
-                  −{tl(brk.pending_returns.revenue)}
-                </span>
-              </div>
-            </div>
-          </div>
-          <p className="text-[11px] text-amber-700 mt-2 leading-relaxed">
-            Pazaryeri iade talebi açıldığı anda Trendyol raporunda "İade" sayılır; bizde yalnız
-            <b> onaylanan</b> iade satıştan düşülür. Yukarıdaki net ciro bu yüzden iyimserdir —
-            açık talepler kapandıkça <b>{tl(brk.projected_net?.revenue)}</b> seviyesine inecektir.
-          </p>
-        </div>
-      )}
       {brk?.partial_split_orders > 0 && (
         <p className="text-[11px] text-gray-500 -mt-2 leading-relaxed">
           <b>Kısmi ayrıştırma:</b> {brk.partial_return_orders || 0} siparişte kısmi iade,
@@ -262,105 +201,6 @@ export function SalesReport() {
           <p className="text-[10px] text-gray-400 mt-1">Sipariş = sipariş sayısı, Adet = ürün adedi (pazaryeri raporlarıyla aynı birim). İptal/İade oranları ADET üzerinden, o kanalın toplam adedine (satış + iptal + iade) göredir. Kısmi iadede yalnız iade edilen ürün İade'ye yazılır.</p>
         </div>
       )}
-
-      {/* 🔍 KESİN DOĞRULAMA — Trendyol ↔ panel mutabakatı (sipariş no bazında) */}
-      <div className="bg-white border rounded-xl p-4" data-testid="ty-reconcile">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider">Kesin Doğrulama · Trendyol Mutabakatı</h2>
-            <p className="text-[11px] text-gray-400 mt-0.5">
-              Seçili tarih aralığındaki Trendyol siparişleri tek tek çekilip panelle karşılaştırılır.
-              Trendyol <b>adet</b> sayar, panel <b>sipariş</b> sayar — ikisi de ayrı gösterilir.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => runReconcile(false)} disabled={!!recBusy}
-              className="px-3 py-1.5 bg-black text-white text-xs rounded font-semibold hover:bg-gray-800 disabled:opacity-50">
-              {recBusy === "run" ? "Karşılaştırılıyor…" : "Mutabakat yap"}
-            </button>
-            {(rec?.cancel_mismatch?.count > 0 || rec?.partial_cancel?.count > 0) && (
-              <button onClick={() => runReconcile(true)} disabled={!!recBusy}
-                className="px-3 py-1.5 bg-rose-600 text-white text-xs rounded font-semibold hover:bg-rose-700 disabled:opacity-50">
-                {recBusy === "apply" ? "Uygulanıyor…" : `Farkları düzelt (${(rec?.cancel_mismatch?.count || 0) + (rec?.partial_cancel?.count || 0)})`}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {!rec ? (
-          <p className="text-xs text-gray-400">Henüz çalıştırılmadı. Trendyol API'sinden veri çekilir, birkaç dakika sürebilir.</p>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                  <tr>
-                    <th className="text-left p-2">Kaynak</th>
-                    <th className="text-right p-2">Sipariş</th>
-                    <th className="text-right p-2">Adet</th>
-                    <th className="text-right p-2">Tutar</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-t"><td className="p-2 font-medium">Trendyol</td>
-                    <td className="p-2 text-right tabular-nums">{rec.trendyol?.orders}</td>
-                    <td className="p-2 text-right tabular-nums font-semibold">{rec.trendyol?.units}</td>
-                    <td className="p-2 text-right tabular-nums">{tl(rec.trendyol?.amount)}</td></tr>
-                  <tr className="border-t"><td className="p-2 font-medium">Panel</td>
-                    <td className="p-2 text-right tabular-nums">{rec.panel?.orders}</td>
-                    <td className="p-2 text-right tabular-nums font-semibold">{rec.panel?.units}</td>
-                    <td className="p-2 text-right tabular-nums">{tl(rec.panel?.amount)}</td></tr>
-                  <tr className="border-t bg-gray-50 font-semibold">
-                    <td className="p-2">Fark</td>
-                    <td className={`p-2 text-right tabular-nums ${rec.diff?.orders ? "text-rose-600" : "text-emerald-600"}`}>{rec.diff?.orders > 0 ? "+" : ""}{rec.diff?.orders}</td>
-                    <td className={`p-2 text-right tabular-nums ${rec.diff?.units ? "text-rose-600" : "text-emerald-600"}`}>{rec.diff?.units > 0 ? "+" : ""}{rec.diff?.units}</td>
-                    <td className={`p-2 text-right tabular-nums ${Math.abs(rec.diff?.amount_pct || 0) > 1 ? "text-rose-600" : "text-emerald-600"}`}>
-                      {tl(rec.diff?.amount)} <span className="text-[10px] font-normal">(%{rec.diff?.amount_pct})</span>
-                    </td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-3 mt-3">
-              {[
-                // Tailwind sınıfları STATİK olmalı (JIT çalışma-anında birleştirilen adı görmez).
-                { k: "missing_in_panel", lbl: "Trendyol'da var, panelde YOK", hit: "border-rose-300 bg-rose-50" },
-                { k: "cancel_mismatch", lbl: "Trendyol'da iptal, panelde aktif", hit: "border-amber-300 bg-amber-50" },
-                { k: "partial_cancel", lbl: "Kısmi iptal (kalem bazlı)", hit: "border-amber-300 bg-amber-50" },
-                { k: "extra_in_panel", lbl: "Panelde var, Trendyol listesinde YOK", hit: "border-slate-300 bg-slate-50" },
-              ].map((b) => {
-                const d = rec[b.k] || { count: 0, items: [] };
-                return (
-                  <div key={b.k} className={`border rounded-lg p-3 ${d.count ? b.hit : "bg-gray-50"}`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-gray-700">{b.lbl}</span>
-                      <span className={`text-sm font-bold tabular-nums ${d.count ? "text-rose-600" : "text-emerald-600"}`}>{d.count}</span>
-                    </div>
-                    {d.count > 0 && (
-                      <div className="mt-1 max-h-28 overflow-y-auto text-[11px] text-gray-600 font-mono leading-relaxed">
-                        {d.items.map((x) => (
-                          <div key={x.order_number}>
-                            {x.order_number}
-                            {x.units != null ? ` · ${x.units} adet` : ""}
-                            {x.cancelled_units != null ? ` · ${x.cancelled_units} adet iptal` : ""}
-                            {x.local_status ? ` · ${x.local_status}` : ""}
-                          </div>
-                        ))}
-                        {d.count > d.items.length && <div className="text-gray-400">… +{d.count - d.items.length} daha</div>}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">
-              Not: Trendyol'un <b>satış raporundaki</b> "Brüt Satış Adedi" iptalleri de içerir; buradaki
-              Trendyol adedi de öyle. Sipariş sayısı farkı 0'a yakınsa hiçbir sipariş kaçmamış demektir —
-              kalan fark iade/iptal <i>sınıflandırmasından</i> gelir, veri eksikliğinden değil.
-            </p>
-          </>
-        )}
-      </div>
 
       {/* ⏰ Saat Analizi + 📅 Gün Analizi — reklam planlaması için */}
       <div className="grid lg:grid-cols-2 gap-4">
