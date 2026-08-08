@@ -201,6 +201,35 @@ export default function NotificationSettings() {
         </p>
       </section>
 
+      {/* Messenger + Instagram (Meta Messenger Platform) */}
+      <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <MessageSquare size={18} className="text-pink-600" />
+          <h2 className="font-semibold">Messenger + Instagram DM (Meta)</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {[["page_access_token", "Page Access Token (Sayfa + bağlı IG)"], ["verify_token", "Webhook Verify Token (kendin belirle)"], ["app_secret", "App Secret (imza doğrulama, ops.)"], ["page_id", "Page ID (ops.)"]].map(([f, lbl]) => (
+            <div key={f} className={f === "page_access_token" ? "md:col-span-2" : ""}>
+              <label className="block text-xs text-gray-600 mb-1">{lbl}</label>
+              <input value={cfg.providers?.meta_messaging?.[f] || ""}
+                onChange={(e) => setProvField("meta_messaging", f, e.target.value)}
+                className="w-full border border-gray-200 rounded px-3 py-2 text-sm"
+                data-testid={`meta-msg-field-${f}`} />
+            </div>
+          ))}
+        </div>
+        <label className="flex items-center gap-2 text-sm cursor-pointer mt-4 pt-4 border-t border-gray-100">
+          <input type="checkbox"
+            checked={cfg.providers?.meta_messaging?.ai_autoreply === true}
+            onChange={(e) => setProvField("meta_messaging", "ai_autoreply", e.target.checked)}
+            data-testid="meta-msg-ai-autoreply-toggle" />
+          <span><strong>AI otomatik yanıt</strong> — Instagram ve Messenger DM'lerine yapay zekâ, gerçek bir müşteri temsilcisi gibi cevap versin (düşük güvende insana devreder).</span>
+        </label>
+        <p className="text-[11px] text-gray-500 mt-2">
+          Webhook Callback URL: <code>{`${(process.env.REACT_APP_BACKEND_URL||'').replace(/\/$/,'')}/api/meta-messaging/webhook`}</code> — Meta uygulamasında Messenger ve Instagram ürünlerinin Webhooks bölümünde bu URL + Verify Token ile "messages" alanına abone olun. IG hesabı, Sayfa'ya bağlı olmalı.
+        </p>
+      </section>
+
       {/* Email */}
       <section className="bg-white rounded-lg border border-gray-200 p-5">
         <div className="flex items-center justify-between">

@@ -88,7 +88,7 @@ async def get_providers(current_user: dict = Depends(require_admin)):
             "providers": {},
         }
     # Secret alanları maskele (ekranda görünsün ama ham şekilde değil)
-    SECRET_FIELDS = {"password", "auth_token", "api_hash", "api_key", "access_token", "api_secret", "app_secret"}
+    SECRET_FIELDS = {"password", "auth_token", "api_hash", "api_key", "access_token", "api_secret", "app_secret", "page_access_token"}
     masked = dict(cfg)
     prov = {}
     for pkey, fields in (cfg.get("providers") or {}).items():
@@ -110,7 +110,7 @@ async def save_providers(req: ProviderConfigReq, current_user: dict = Depends(re
     # orijinal değeri koru (yani "xx****yy" gönderilmişse değiştirmiyor sayılır).
     existing = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
     existing_provs = existing.get("providers", {})
-    SECRET_FIELDS = {"password", "auth_token", "api_hash", "api_key", "access_token", "api_secret", "app_secret"}
+    SECRET_FIELDS = {"password", "auth_token", "api_hash", "api_key", "access_token", "api_secret", "app_secret", "page_access_token"}
     merged_provs: Dict[str, Dict[str, Any]] = {}
     for pkey, fields in req.providers.items():
         merged = dict(fields or {})
