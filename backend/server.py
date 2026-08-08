@@ -52,6 +52,7 @@ from routes.size_tables import router as size_tables_router, public_router as si
 from routes.manufacturing import router as manufacturing_router, suppliers_router as manufacturing_suppliers_router
 from routes.decision_board import router as decision_board_router
 from routes.ai_chatbot import router as ai_chatbot_router
+from routes.whatsapp_webhook import router as whatsapp_webhook_router
 from routes.ai_assistant import router as ai_assistant_router
 from routes.locations import router as locations_router
 from routes.attribution import router as attribution_router
@@ -721,6 +722,7 @@ api_router.include_router(manufacturing_router)
 api_router.include_router(decision_board_router)
 api_router.include_router(manufacturing_suppliers_router)
 api_router.include_router(ai_chatbot_router)
+api_router.include_router(whatsapp_webhook_router)
 api_router.include_router(ai_assistant_router)
 api_router.include_router(locations_router)
 api_router.include_router(attribution_router)

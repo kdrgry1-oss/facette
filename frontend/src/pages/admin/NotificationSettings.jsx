@@ -179,7 +179,7 @@ export default function NotificationSettings() {
           </label>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {[["phone_number_id", "Phone Number ID"], ["access_token", "Permanent Access Token"], ["api_version", "API Versiyon (ör. v23.0)"]].map(([f, lbl]) => (
+          {[["phone_number_id", "Phone Number ID"], ["access_token", "Permanent Access Token"], ["api_version", "API Versiyon (ör. v23.0)"], ["verify_token", "Webhook Verify Token (kendin belirle)"], ["app_secret", "App Secret (imza doğrulama, ops.)"]].map(([f, lbl]) => (
             <div key={f} className={f === "access_token" ? "md:col-span-2" : ""}>
               <label className="block text-xs text-gray-600 mb-1">{lbl}</label>
               <input value={cfg.providers?.whatsapp_meta?.[f] || ""}
@@ -189,6 +189,16 @@ export default function NotificationSettings() {
             </div>
           ))}
         </div>
+        <label className="flex items-center gap-2 text-sm cursor-pointer mt-4 pt-4 border-t border-gray-100">
+          <input type="checkbox"
+            checked={cfg.providers?.whatsapp_meta?.ai_autoreply === true}
+            onChange={(e) => setProvField("whatsapp_meta", "ai_autoreply", e.target.checked)}
+            data-testid="whatsapp-ai-autoreply-toggle" />
+          <span><strong>AI otomatik yanıt</strong> — gelen WhatsApp mesajlarına yapay zekâ, gerçek bir müşteri temsilcisi gibi cevap versin (düşük güvende insana devreder). Webhook Meta'da tanımlı olmalı.</span>
+        </label>
+        <p className="text-[11px] text-gray-500 mt-2">
+          Webhook Callback URL: <code>{`${(process.env.REACT_APP_BACKEND_URL||'').replace(/\/$/,'')}/api/whatsapp/webhook`}</code> — Meta uygulamasında bu URL + yukarıdaki Verify Token ile "messages" alanına abone olun.
+        </p>
       </section>
 
       {/* Email */}
