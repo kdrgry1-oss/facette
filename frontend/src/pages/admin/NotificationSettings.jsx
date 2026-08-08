@@ -179,7 +179,7 @@ export default function NotificationSettings() {
           </label>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {[["phone_number_id", "Phone Number ID"], ["access_token", "Permanent Access Token"], ["api_version", "API Versiyon (ör. v20.0)"]].map(([f, lbl]) => (
+          {[["phone_number_id", "Phone Number ID"], ["access_token", "Permanent Access Token"], ["api_version", "API Versiyon (ör. v23.0)"]].map(([f, lbl]) => (
             <div key={f} className={f === "access_token" ? "md:col-span-2" : ""}>
               <label className="block text-xs text-gray-600 mb-1">{lbl}</label>
               <input value={cfg.providers?.whatsapp_meta?.[f] || ""}

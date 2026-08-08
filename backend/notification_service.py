@@ -241,7 +241,7 @@ async def _whatsapp_send(cfg: Dict, to: str, message: str, template_name: Option
     """
     pnid = cfg.get("phone_number_id", "")
     token = cfg.get("access_token", "")
-    api_ver = cfg.get("api_version", "v20.0")
+    api_ver = cfg.get("api_version", "v23.0")
     if not pnid or not token:
         return {"success": False, "response": "credentials_missing"}
     url = f"https://graph.facebook.com/{api_ver}/{pnid}/messages"
