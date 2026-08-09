@@ -107,6 +107,28 @@ async def wa_diag(key: str = "", q: str = ""):
         hits = await db.whatsapp_hits.find_one({"_id": "count"}, {"_id": 0}) or {}
     except Exception:
         hits = {}
+    # Token ömrü — Meta debug_token: expires_at=0 => KALICI, tarih => geçici (o an dolar).
+    token_info = {}
+    tok = cfg.get("access_token", "")
+    if tok:
+        try:
+            import httpx as _hx
+            async with _hx.AsyncClient(timeout=10) as _c:
+                _r = await _c.get("https://graph.facebook.com/debug_token",
+                                  params={"input_token": tok, "access_token": tok})
+                _d = (_r.json() or {}).get("data") or {}
+            _exp = _d.get("expires_at")
+            token_info = {
+                "is_valid": _d.get("is_valid"),
+                "type": _d.get("type"),
+                "expires_at": _exp,
+                "kalici_mi": (_exp == 0),
+                "expires_human": ("KALICI (süresiz)" if _exp == 0 else
+                                  (datetime.fromtimestamp(_exp, tz=timezone.utc).isoformat() if _exp else "?")),
+                "scopes": _d.get("scopes"),
+            }
+        except Exception as e:
+            token_info = {"err": str(e)[:150]}
     return {
         "config": {
             "has_phone_id": bool(cfg.get("phone_number_id")),
@@ -123,6 +145,7 @@ async def wa_diag(key: str = "", q: str = ""):
             "has_key": bool(_api_key_for(settings)),
         },
         "inbound": {"processed_count": processed, "recent": recent},
+        "token": token_info,
         "probe": probe,
     }
 
@@ -175,18 +198,28 @@ async def receive_webhook(request: Request, background: BackgroundTasks):
             contacts = {c.get("wa_id"): (c.get("profile") or {}).get("name")
                         for c in (value.get("contacts") or [])}
             for m in (value.get("messages") or []):
-                if m.get("type") != "text":
-                    continue  # sadece metin (medya/konum vb. ilk sürümde atlanır)
                 sender = m.get("from")
                 mid = m.get("id")
-                body = ((m.get("text") or {}).get("body") or "").strip()
-                if not sender or not mid or not body:
+                if not sender or not mid:
                     continue
-                # Arka planda işle (Meta'ya hemen 200 dön)
-                background.add_task(
-                    _handle_inbound, sender=sender, mid=mid, body=body,
-                    name=contacts.get(sender), own_pnid=own_pnid,
-                )
+                mtype = m.get("type")
+                if mtype == "text":
+                    body = ((m.get("text") or {}).get("body") or "").strip()
+                    if not body:
+                        continue
+                    background.add_task(
+                        _handle_inbound, sender=sender, mid=mid, body=body,
+                        name=contacts.get(sender), own_pnid=own_pnid,
+                    )
+                elif mtype == "image":
+                    media_id = (m.get("image") or {}).get("id")
+                    caption = (m.get("image") or {}).get("caption") or ""
+                    if media_id:
+                        background.add_task(
+                            _handle_image, sender=sender, mid=mid, media_id=media_id,
+                            caption=caption, name=contacts.get(sender), own_pnid=own_pnid,
+                        )
+                # diğer türler (ses/konum/döküman) ilk sürümde atlanır
     return {"ok": True}
 
 
@@ -423,6 +456,101 @@ async def _recent_dialog(sender: str, limit: int = 6) -> str:
         if r.get("outbound"):
             lines.append(f"Sen: {str(r['outbound'])[:300]}")
     return "\n".join(lines[-12:])
+
+
+async def _download_wa_media(media_id: str, token: str, api_ver: str = "v23.0"):
+    """WhatsApp medyasını indir: önce media_id -> geçici URL, sonra URL -> bytes (Bearer token)."""
+    import httpx as _hx
+    try:
+        async with _hx.AsyncClient(timeout=30) as c:
+            r = await c.get(f"https://graph.facebook.com/{api_ver}/{media_id}",
+                            headers={"Authorization": f"Bearer {token}"})
+            url = (r.json() or {}).get("url")
+            if not url:
+                return None, None
+            r2 = await c.get(url, headers={"Authorization": f"Bearer {token}"})
+            if r2.status_code != 200:
+                return None, None
+            return r2.content, (r2.headers.get("content-type") or "image/jpeg").split(";")[0]
+    except Exception:
+        return None, None
+
+
+async def _vision_describe(img_bytes: bytes, mime: str, api_key: str, model: str, provider: str) -> str:
+    """Görseli sağlayıcı-bağımsız betimle (Türkçe): tür/renk/desen/ayırt edici özellik + anahtar kelime."""
+    import base64
+    b64 = base64.b64encode(img_bytes).decode()
+    prov = (provider or "openai").strip().lower()
+    prompt = ("Bu bir kadın giyim ürünü fotoğrafı olabilir. Ürünü TÜRKÇE kısaca tanımla: tür "
+              "(elbise/bluz/gömlek/pantolon/etek/takım/triko...), ana renk, desen, kol/yaka/boy gibi "
+              "ayırt edici özellikler. 1-2 cümle yaz, sonuna aramada kullanılacak 3-6 anahtar kelime ekle.")
+    if prov in ("anthropic", "claude"):
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=api_key)
+        msg = await client.messages.create(
+            model=model or "claude-sonnet-4-6", max_tokens=250,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}}]}])
+        return "".join(getattr(b, "text", "") or "" for b in (msg.content or [])).strip()
+    if prov in ("gemini", "google", "google-gemini"):
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        resp = await client.aio.models.generate_content(
+            model=model or "gemini-3.1-flash",
+            contents=[{"role": "user", "parts": [
+                {"text": prompt}, {"inline_data": {"mime_type": mime, "data": b64}}]}])
+        return (getattr(resp, "text", None) or "").strip()
+    # varsayılan: OpenAI vision
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(api_key=api_key)
+    resp = await client.chat.completions.create(
+        model=model or "gpt-5.6-luna",
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}]}],
+        max_completion_tokens=250)
+    return (resp.choices[0].message.content or "").strip()
+
+
+async def _handle_image(sender: str, mid: str, media_id: str, caption: str,
+                        name: Optional[str], own_pnid: Optional[str]):
+    """Görsel mesaj: Meta'dan indir → vision ile betimle → betimlemeyi normal metin akışına
+    ver (ürünü bulup 'bu ürün mü?' linkiyle sorsun). Uydurmaz; bulamazsa devreder."""
+    try:
+        if await _already_processed(mid):
+            return
+        cfg = await _wa_cfg()
+        settings = await get_ai_settings()
+        if not settings.get("enabled", True) or not cfg.get("ai_autoreply", False):
+            return
+        api_key = _api_key_for(settings)
+        if not api_key:
+            await _handoff(sender, "[görsel]", name)
+            return
+        img, mime = await _download_wa_media(media_id, cfg.get("access_token", ""),
+                                             cfg.get("api_version", "v23.0"))
+        if not img:
+            await _handoff(sender, "[görsel indirilemedi]", name)
+            await _log(sender, "[görsel]", "", handoff=True, confidence=0.0, note="media_dl_fail")
+            return
+        try:
+            desc = await _vision_describe(
+                img, mime, api_key,
+                settings.get("fast_model") or settings.get("model"),
+                settings.get("provider", "openai"))
+        except Exception as e:
+            logger.exception("WA vision failed")
+            await _handoff(sender, "[görsel]", name)
+            await _log(sender, "[görsel]", "", handoff=True, confidence=0.0, note=f"vision_err:{str(e)[:80]}")
+            return
+        # Görsel betimlemesini normal akışa ver — ürünü bulup linkle "bu ürün mü?" desin.
+        body = f"[Müşteri bir ürün GÖRSELİ gönderdi] Görseldeki ürün: {desc}"
+        if caption:
+            body += f" | Müşteri notu: {caption}"
+        await _handle_inbound(sender, mid + "_img", body, name, own_pnid)
+    except Exception as e:
+        logger.exception(f"WA image handler error: {e}")
 
 
 async def _handle_inbound(sender: str, mid: str, body: str,
