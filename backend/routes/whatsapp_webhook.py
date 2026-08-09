@@ -633,10 +633,11 @@ async def _handle_inbound(sender: str, mid: str, body: str,
             "KURAL: Yalnızca aşağıda sana verilen bilgilerden cevapla; sipariş/stok/fiyat/"
             "kargo/ölçü gibi bir bilgi verilmemişse UYDURMA — kibarca 'kontrol edip döneyim' de ve "
             "insana devret (HANDOFF: yes).\n"
-            "BEDEN ÖNERİSİ: Müşteri boyunu/kilosunu veya normalde giydiği bedeni söylerse, ürünün "
-            "[Ürün Bilgisi]'ndeki beden tablosu/ölçüleri + KALIP (dar/normal/bol/oversize) + SEZON "
-            "bilgisine göre yorumlayıp uygun bedeni öner ve kısa gerekçe ver. Ölçü/kalıp verisi "
-            "yoksa uydurma; beden tablosuna yönlendir veya insana devret.\n"
+            "BEDEN ÖNERİSİ: Aşağıda [Beden Tablosu / Ölçüler] SANA VERİLDİYSE, müşterinin boy/kilo/"
+            "bedenine göre o ölçülere + manken referansına + KALIP/SEZON bilgisine bakıp UYGUN BEDENİ "
+            "MUTLAKA KENDİN ÖNER, kısa gerekçe ver ve HANDOFF: no yap — bu durumda SAKIN insana "
+            "devretme, 'temsilciye ilettim' DEME. Yalnızca beden tablosu HİÇ verilmediyse kibarca beden "
+            "tablosuna yönlendir. Ölçü uydurma.\n"
             "SOHBET/KONU-DIŞI: Müşteri konu dışı, samimi ya da tuhaf/'saçma' bir şey sorsa bile "
             "robotik reddetme; kısa, sıcak, hafif esprili ama nazik bir insan temsilci gibi cevapla, "
             "sonra kibarca alışverişe/konuya yönlendir. Hakaret/uygunsuzlukta sakin ve profesyonel kal.\n"
@@ -686,6 +687,10 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         if kb_ctx:
             system += f"\n[Bilgi Bankası — önceki onaylı yanıtlar]\n{kb_ctx}\n"
         system += (
+            "\nÖNEMLİ — DEVRETME KURALI: HANDOFF: yes'i SADECE gerçekten ilgili bilgin YOKSA ya da "
+            "işlem (iptal/iade onayı gibi) senin yetkinde değilse kullan. Sana yukarıda VERİLEN bilgiyle "
+            "(sipariş/ürün/beden tablosu/kargo/politika/IBAN) cevaplanabilen HER soruyu SEN cevapla ve "
+            "HANDOFF: no yap. Elinde cevap varken 'temsilciye ilettim' DEME.\n"
             "\nCevabın SONUNA ayrı satırda şu bloğu ekle:\n"
             "---META---\nCONFIDENCE: <0.0-1.0>\nHANDOFF: <yes|no>\n"
         )
