@@ -1069,14 +1069,12 @@ async def get_products(
 
     # Otomatik kampanya rozeti: aktif auto_apply yüzde kampanyaları kapsama giren
     # ürünlere işlenir ki vitrin kartları indirim oranını sepete girmeden gösterebilsin.
+    # KOŞULSUZ uygulanır — kampanya olmasa/eşleşmese bile BAYAT campaign_discount_percent
+    # temizlensin (rozet ⊆ motor; müşteri uygulanmayan sahte %X görmesin — para hatası).
     try:
         camps = await _auto_campaigns_for_badges()
-        if camps:
-            for p in products:
-                pct, label = _campaign_pct_for_product(p, camps)
-                if pct > 0:
-                    p["campaign_discount_percent"] = pct
-                    p["campaign_label"] = label
+        for p in products:
+            _apply_campaign_badge(p, camps)
     except Exception as _ce:
         logger.warning(f"Kampanya rozeti işlenemedi: {_ce}")
 
@@ -1147,12 +1145,8 @@ async def slider_feed(
 
     try:
         camps = await _auto_campaigns_for_badges()
-        if camps:
-            for pp in prods:
-                pct, label = _campaign_pct_for_product(pp, camps)
-                if pct > 0:
-                    pp["campaign_discount_percent"] = pct
-                    pp["campaign_label"] = label
+        for pp in prods:
+            _apply_campaign_badge(pp, camps)   # koşulsuz: bayat rozeti de temizler
     except Exception:
         pass
     # slider-feed PUBLIC bir uçtur → iç alanlar her zaman temizlenir. (Önceki kod tanımsız
@@ -1276,14 +1270,11 @@ async def get_product(product_id: str, request: Request):
     # Varyantları global Beden Havuzu (variant_options) sırasına göre diz —
     # böylece storefront'ta XS, S, M, L, XL... admin'in tanımladığı sırayla görünür.
     product["variants"] = await _sort_variants_by_pool(product.get("variants") or [])
-    # Otomatik kampanya rozeti (vitrin kartlarıyla aynı mantık — detayda da görünsün)
+    # Otomatik kampanya rozeti (vitrin kartlarıyla aynı mantık — detayda da görünsün).
+    # KOŞULSUZ: eşleşmezse bayat değer temizlenir (detay "%X" gösterip sepet uygulamasın).
     try:
         camps = await _auto_campaigns_for_badges()
-        if camps:
-            pct, label = _campaign_pct_for_product(product, camps)
-            if pct > 0:
-                product["campaign_discount_percent"] = pct
-                product["campaign_label"] = label
+        _apply_campaign_badge(product, camps)
     except Exception:
         pass
     if not _is_admin:
@@ -1541,6 +1532,30 @@ def _campaign_pct_for_product(p: dict, camps: list):
     return best, label
 
 
+def _apply_campaign_badge(p: dict, camps: list) -> dict:
+    """Ürüne TAZE otomatik-kampanya rozetini yazar (rozet ⊆ motor garantisi).
+
+    KRİTİK (para): campaign_discount_percent TÜRETİLMİŞ bir alandır — aktif auto_apply
+    kampanyalardan HER OKUMADA yeniden hesaplanmalı. Bazı ürün belgelerinde eski bir
+    kampanyadan KALMIŞ bayat bir değer bulunabiliyor (ör. import/geçmiş kampanya). Eski kod
+    yalnız `pct>0` iken üzerine yazıp 0 olduğunda BAYAT değeri TEMİZLEMİYORDU → vitrin/detay
+    "%10 indirim" gösteriyor ama sepet/sipariş motoru kapsam dışı olduğu için indirimi
+    UYGULAMIYOR (müşteri %10 görüp indirimli fiyatı DEĞİL 'ilk satış fiyatını' ödüyordu).
+    Artık kampanya eşleşmezse alan 0'a çekilir → gösterim ile tahsil BİREBİR tutarlı olur."""
+    try:
+        pct, label = _campaign_pct_for_product(p, camps or [])
+    except Exception:
+        pct, label = 0.0, ""
+    if pct and pct > 0:
+        p["campaign_discount_percent"] = pct
+        p["campaign_label"] = label
+    else:
+        # BAYAT hayalet indirimi temizle (motorun uygulamayacağı sahte %'yi gösterme)
+        p["campaign_discount_percent"] = 0
+        p["campaign_label"] = ""
+    return p
+
+
 async def _attach_campaign_badges(prods: list) -> list:
     """Bir ürün listesine SEPET otomatik kampanya rozetini (campaign_discount_percent +
     campaign_label) ekler — vitrin, arama, kombin, öneri, kasa-önü HER YERDE aynı indirim
@@ -1552,15 +1567,12 @@ async def _attach_campaign_badges(prods: list) -> list:
         camps = await _auto_campaigns_for_badges()
     except Exception:
         camps = []
-    if not camps:
-        return prods
+    # KOŞULSUZ normalize: camps boş olsa da bayat campaign_discount_percent 0'a çekilir
+    # (rozet ⊆ motor — gösterilen indirim sepette MUTLAKA uygulanır).
     for p in prods:
         if not isinstance(p, dict):
             continue
-        pct, label = _campaign_pct_for_product(p, camps)
-        if pct > 0:
-            p["campaign_discount_percent"] = pct
-            p["campaign_label"] = label
+        _apply_campaign_badge(p, camps)
     return prods
 
 

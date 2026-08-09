@@ -82,16 +82,26 @@ async def get_shared_cart(share_id: str):
     if exp and exp < datetime.now(timezone.utc).isoformat():
         raise HTTPException(status_code=404, detail="Paylaşılan sepetin süresi dolmuş")
 
+    # Otomatik kampanya rozetini TAZE hesapla (bayat campaign_discount_percent gösterme).
+    try:
+        from .products import _auto_campaigns_for_badges, _apply_campaign_badge
+        _camps = await _auto_campaigns_for_badges()
+    except Exception:
+        _camps, _apply_campaign_badge = [], None
+
     out = []
     for it in rec.get("items") or []:
         p = await db.products.find_one(
             {"id": it.get("product_id")},
             {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "sale_price": 1,
              "campaign_discount_percent": 1, "images": 1, "thumbnail": 1, "stock": 1,
-             "stock_code": 1, "barcode": 1, "category_id": 1, "variants": 1, "is_active": 1},
+             "stock_code": 1, "barcode": 1, "category_id": 1, "category_ids": 1,
+             "variants": 1, "is_active": 1},
         )
         if not p or p.get("is_active") is False:
             continue  # silinmiş/pasif ürün paylaşılan sepette görünmez
+        if _apply_campaign_badge:
+            _apply_campaign_badge(p, _camps)   # bayat/hayalet indirimi temizle (rozet ⊆ motor)
         # Kapak görseli: dict-form ({url}) veya düz string olabilir
         img = ""
         for im in (p.get("images") or []):
