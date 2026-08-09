@@ -124,6 +124,9 @@ async def _handle(channel: str, sender: str, mid: str, text: str):
         store_name = await _store_name()
 
         system = settings.get("persona") or DEFAULT_PERSONA
+        _er = (settings.get("wa_extra_rules") or "").strip()
+        if _er:
+            system += f"\n\n[MAĞAZA EK KURALLARI — bunlara MUTLAKA uy]\n{_er}\n"
         if store_name:
             system += f"\n\nMağaza adı: {store_name}. Kendini bu mağazanın temsilcisi olarak tanıt."
         chname = "Instagram" if channel == "instagram" else "Messenger"
@@ -222,6 +225,25 @@ async def _log(channel: str, sender: str, inbound: str, outbound: str, *,
         })
     except Exception:
         pass
+    # ADMIN 'Müşteri Soruları' paneli — Instagram/Messenger sohbetleri de görünsün + eğitilebilsin.
+    coll_name = {"instagram": "instagram_messages", "messenger": "messenger_messages"}.get(channel)
+    if coll_name and inbound and inbound != "[opt-out]" and note not in ("history", "human_reply"):
+        try:
+            from .deps import generate_id
+            await db[coll_name].insert_one({
+                "question_id": generate_id(),
+                "question_text": inbound,
+                "answer": (outbound if (not handoff and outbound and outbound != "[opt-out]") else ""),
+                "status": "WAITING_FOR_ANSWER" if handoff else "ANSWERED",
+                "customer_name": f"{channel.capitalize()} • {str(sender)[-4:]}",
+                "customer_phone": sender,
+                "confidence": confidence,
+                "channel": channel,
+                "created_at": _now(),
+                "created_date": _now(),
+            })
+        except Exception:
+            pass
 
 
 async def _store_name() -> str:

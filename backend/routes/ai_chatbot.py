@@ -156,6 +156,7 @@ async def save_ai_chatbot_settings(payload: dict, current_user: dict = Depends(r
     for f in (
         "enabled", "provider", "model", "fast_model", "persona",
         "confidence_threshold", "use_emergent_key", "channels",
+        "wa_extra_rules",   # WhatsApp/sosyal AI'a panelden eklenebilen ek kurallar (düzenlenebilir)
     ):
         if f in payload:
             update[f] = payload[f]

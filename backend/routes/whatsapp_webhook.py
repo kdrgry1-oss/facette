@@ -177,6 +177,51 @@ async def visual_index_build(key: str = "", force: bool = False, limit: int = 0)
             "not": "Arka planda işleniyor. İlerleme için /diag?key=... çağır (visual_index.count)."}
 
 
+@router.post("/backfill-questions")
+async def backfill_questions(key: str = "", limit: int = 5000):
+    """Mevcut WhatsApp konuşma geçmişini admin 'Müşteri Soruları' paneline (whatsapp_messages)
+    aktarır — geçmiş sohbetler de görünsün/eğitilebilsin. verify_token ile korunur, idempotent."""
+    cfg = await _wa_cfg()
+    expected = cfg.get("verify_token") or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
+    if not expected or not hmac.compare_digest(key, expected):
+        return PlainTextResponse("forbidden", status_code=403)
+    from .deps import generate_id
+    n, skip = 0, 0
+    try:
+        cur = db.whatsapp_conversations.find(
+            {"inbound": {"$nin": [None, "", "[opt-out]"]},
+             "note": {"$nin": ["history", "human_reply"]}}
+        ).sort("created_at", -1).limit(int(limit or 5000))
+        async for r in cur:
+            inbound = r.get("inbound") or ""
+            if not inbound:
+                continue
+            ca = r.get("created_at") or _now()
+            exists = await db.whatsapp_messages.find_one(
+                {"customer_phone": r.get("phone"), "question_text": inbound, "created_at": ca},
+                {"_id": 1})
+            if exists:
+                skip += 1
+                continue
+            await db.whatsapp_messages.insert_one({
+                "question_id": r.get("wamid") or generate_id(),
+                "question_text": inbound,
+                "answer": (r.get("outbound") if not r.get("handoff") else ""),
+                "status": "ANSWERED" if not r.get("handoff") else "WAITING_FOR_ANSWER",
+                "customer_name": f"WhatsApp • {str(r.get('phone'))[-4:]}",
+                "customer_phone": r.get("phone"),
+                "confidence": r.get("confidence"),
+                "channel": "whatsapp",
+                "created_at": ca,
+                "created_date": ca,
+            })
+            n += 1
+    except Exception as e:
+        logger.exception("backfill failed")
+        return {"backfilled": n, "error": str(e)[:200]}
+    return {"backfilled": n, "already": skip}
+
+
 def _verify_signature(app_secret: str, raw: bytes, header: str) -> bool:
     if not app_secret:
         return True  # app_secret ayarlı değilse imza kontrolü atlanır (Meta panelinden zorunlu kılınabilir)
@@ -1135,7 +1180,7 @@ async def _handle_image(sender: str, mid: str, media_id: str, caption: str,
                 msg += "\nBu ürün müdür? Değilse birkaç detay verirseniz doğru ürünü bulayım."
             wamid = await _send(cfg, sender, msg)
             await _log(sender, "[görsel]", msg, handoff=False, confidence=0.9,
-                       wamid=wamid, product_id=chosen.get("id"), note="img_match")
+                       wamid=wamid, product_id=chosen.get("id"), note="img_match", name=name)
             # Görselle birlikte bir SORU (caption) geldiyse onu da yanıtla (ürün artık kilitli).
             if cap:
                 await _handle_inbound(sender, mid + "_imgq", cap, name, own_pnid)
@@ -1144,7 +1189,7 @@ async def _handle_image(sender: str, mid: str, media_id: str, caption: str,
         ask = ("Görselinizi aldım 🌸 Ürünü sistemimde net eşleştiremedim — ürünün adını yazar mısınız, "
                "ya da hangi konuda (beden/fiyat/stok/kargo) yardımcı olayım?")
         wamid = await _send(cfg, sender, ask)
-        await _log(sender, "[görsel]", ask, handoff=False, confidence=0.3, wamid=wamid, note="img_nomatch")
+        await _log(sender, "[görsel]", ask, handoff=False, confidence=0.3, wamid=wamid, note="img_nomatch", name=name)
         if cap:
             await _handle_inbound(sender, mid + "_imgq", cap, name, own_pnid)
     except Exception as e:
@@ -1211,6 +1256,10 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         plink = _product_link(product, extra_ctx.get("site_url"), _detect_size(body))
 
         system = settings.get("persona") or DEFAULT_PERSONA
+        # Panelden düzenlenebilir EK KURALLAR (admin AI Ayarları) — kullanıcının kendi ince ayarı.
+        _extra_rules = (settings.get("wa_extra_rules") or "").strip()
+        if _extra_rules:
+            system += f"\n\n[MAĞAZA EK KURALLARI — bunlara MUTLAKA uy]\n{_extra_rules}\n"
         if extra_ctx.get("store_name"):
             if dialog:
                 system += (f"\n\nMağaza: {extra_ctx['store_name']}. Bu DEVAM EDEN bir konuşma — "
@@ -1384,7 +1433,7 @@ async def _handle_inbound(sender: str, mid: str, body: str,
                 final = f"{reply}\n\n{order_msg}"
             reply_wamid = await _send(cfg, sender, final)
             await _log(sender, body, final, handoff=False, confidence=confidence,
-                       wamid=reply_wamid, product_id=(product or {}).get("id"), note="wa_order")
+                       wamid=reply_wamid, product_id=(product or {}).get("id"), note="wa_order", name=name)
             return
 
         threshold = float(settings.get("confidence_threshold", 0.7) or 0.7)
@@ -1394,12 +1443,12 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         # Opt-out ettiyse yine cevaplarız (müşteri-hizmetleri penceresi); pazarlama göndermeyiz.
         if handoff or not reply:
             await _handoff(sender, body, name)
-            await _log(sender, body, reply, handoff=True, confidence=confidence)
+            await _log(sender, body, reply, handoff=True, confidence=confidence, name=name)
             return
 
         reply_wamid = await _send(cfg, sender, reply)
         await _log(sender, body, reply, handoff=False, confidence=confidence,
-                   wamid=reply_wamid, product_id=(product or {}).get("id"))
+                   wamid=reply_wamid, product_id=(product or {}).get("id"), name=name)
     except Exception as e:
         logger.exception(f"WA inbound handler error: {e}")
 
@@ -1613,7 +1662,8 @@ async def _send(cfg: dict, to: str, message: str) -> str:
 
 
 async def _log(phone: str, inbound: str, outbound: str, *, handoff: bool,
-               confidence: float, note: str = "", wamid: str = "", product_id=None):
+               confidence: float, note: str = "", wamid: str = "", product_id=None,
+               name: Optional[str] = None):
     try:
         doc = {
             "phone": phone, "inbound": inbound, "outbound": outbound,
@@ -1625,6 +1675,30 @@ async def _log(phone: str, inbound: str, outbound: str, *, handoff: bool,
         if product_id:
             doc["product_id"] = product_id  # bu turda konuşulan ürün (kilit/alıntı için)
         await db.whatsapp_conversations.insert_one(doc)
+        # ADMIN 'Müşteri Soruları' paneli (whatsapp_messages) — her gerçek soru görünsün + eğitilebilsin.
+        # history/insan-cevabı/opt-out kayıtları soru değildir → atlanır.
+        if inbound and inbound != "[opt-out]" and note not in ("history", "human_reply"):
+            try:
+                from .deps import generate_id
+                pname = ""
+                if product_id:
+                    _p = await db.products.find_one({"id": product_id}, {"_id": 0, "name": 1})
+                    pname = (_p or {}).get("name", "")
+                await db.whatsapp_messages.insert_one({
+                    "question_id": wamid or generate_id(),
+                    "question_text": inbound,
+                    "answer": (outbound if (not handoff and outbound and outbound != "[opt-out]") else ""),
+                    "status": "WAITING_FOR_ANSWER" if handoff else "ANSWERED",
+                    "customer_name": name or f"WhatsApp • {str(phone)[-4:]}",
+                    "customer_phone": phone,
+                    "product_name": pname,
+                    "confidence": confidence,
+                    "channel": "whatsapp",
+                    "created_at": _now(),
+                    "created_date": _now(),
+                })
+            except Exception:
+                pass
     except Exception:
         pass
 

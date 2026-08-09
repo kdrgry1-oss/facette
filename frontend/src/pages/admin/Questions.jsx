@@ -524,6 +524,15 @@ export default function AdminQuestions() {
               </div>
 
               <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Mağaza Ek Kuralları (WhatsApp/Sosyal)</label>
+                <textarea rows={6} value={aiSettings.wa_extra_rules || ""} onChange={e => setAiSettings({ ...aiSettings, wa_extra_rules: e.target.value })}
+                  data-testid="ai-wa-extra-rules-input"
+                  placeholder={"Örn:\n- Beden sorusunda önce boy/kilo iste, sonra öner.\n- İndirim isteyene kampanyaları hatırlat.\n- Kargo süresi 1-3 iş günü de."}
+                  className="w-full border px-3 py-2 rounded text-sm font-mono" />
+                <p className="text-[10px] text-gray-400 mt-1">Buraya yazdığınız kurallar WhatsApp/Instagram/Messenger AI yanıtlarına EKLENİR (persona'yı bozmadan kendi ince ayarlarınızı yapın). Güvenlik/ödeme kuralları kodda korunur.</p>
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-gray-600 mb-2">Aktif Kanallar</label>
                 <div className="grid grid-cols-3 gap-2">
                   {Object.keys(CHANNEL_STYLE).map(ch => (
