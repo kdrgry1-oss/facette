@@ -821,6 +821,7 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         size_ctx = await _size_context(product)
         ord_ctx, ord_count, ord_transit = await _recent_orders_context(sender)
         extra_ctx = await _extra_context()
+        camp_ctx = await _campaigns_context()
         plink = _product_link(product, extra_ctx.get("site_url"), _detect_size(body))
 
         system = settings.get("persona") or DEFAULT_PERSONA
@@ -914,6 +915,15 @@ async def _handle_inbound(sender: str, mid: str, body: str,
                        f"manken referansına göre UYGUN BEDENİ öner, kısa gerekçe ver]\n{size_ctx}\n")
         if plink:
             system += f"\n[Ürün Linki]\n{plink}\n"
+        if camp_ctx:
+            system += (f"\n[Aktif Kampanyalar — 'hangi kampanya/indirim/kupon var' sorulursa BUNLARI anlat]\n{camp_ctx}\n"
+                       "KURAL(kampanya): Kampanya/indirim/kupon sorulursa yukarıdaki AKTİF kampanyaları koşullarıyla "
+                       "(min tutar, ilk sipariş) anlat; otomatik olanları 'sepete ekleyince otomatik uygulanır', kodu "
+                       "olanı kodla söyle. Uygun bir kampanya varsa satışa nazikçe yönlendir. Kampanya/kod ASLA UYDURMA; "
+                       "listede yoksa 'şu an aktif bir kampanya görünmüyor' de. Bu soruda İNSANA DEVRETME (HANDOFF: no).\n")
+        else:
+            system += ("\nKURAL(kampanya): Kampanya/indirim sorulursa ve sana kampanya verilmediyse dürüstçe "
+                       "'şu an aktif bir kampanya görünmüyor' de; kod/kampanya UYDURMA. Bu soruda da HANDOFF: no.\n")
         if extra_ctx.get("bank"):
             system += f"\n[Havale/EFT Hesap Bilgisi]\n{extra_ctx['bank']}\n"
         if extra_ctx.get("company"):
@@ -1238,6 +1248,74 @@ async def _extra_context() -> dict:
     except Exception:
         pass
     return out
+
+
+async def _campaigns_context() -> str:
+    """Aktif (herkese AÇIK) kampanyaları koşullarıyla listeler — 'hangi kampanyalardan
+    faydalanabilirim / indirim var mı' sorusuna AI cevap verebilsin diye. Kişiye ÖZEL
+    (user_id / customer_email hedefli) kuponlar GİZLENİR (KVKK + kod sızıntısı yok)."""
+    now_iso = _now()
+
+    def _win_ok(c):
+        s = c.get("start_at")
+        e = c.get("end_at")
+        if s and str(s) > now_iso:
+            return False
+        if e:
+            es = str(e)
+            if len(es) == 10 and "T" not in es:
+                es = es + "T23:59:59+00:00"
+            if es < now_iso:
+                return False
+        return True
+
+    try:
+        rows = await db.coupons.find(
+            {"is_active": True},
+            {"_id": 0, "code": 1, "title": 1, "name": 1, "type": 1, "value": 1,
+             "min_cart_total": 1, "free_shipping": 1, "auto_apply": 1, "first_order_only": 1,
+             "start_at": 1, "end_at": 1, "usage_limit": 1, "user_id": 1, "customer_email": 1,
+             "buy_quantity": 1, "free_quantity": 1, "min_quantity": 1},
+        ).sort("value", -1).to_list(80)
+    except Exception:
+        return ""
+    lines = []
+    for c in rows:
+        if c.get("user_id") or c.get("customer_email"):
+            continue  # kişiye özel → müşteriye açıklama
+        if not _win_ok(c):
+            continue
+        title = c.get("title") or c.get("name") or c.get("code") or "Kampanya"
+        typ = (c.get("type") or "percent").lower()
+        val = float(c.get("value") or 0)
+        if c.get("free_shipping"):
+            benefit = "ücretsiz kargo"
+        elif typ == "percent" and val > 0:
+            benefit = f"%{val:g} indirim"
+        elif typ == "fixed" and val > 0:
+            benefit = f"{val:g} TL indirim"
+        elif typ == "nth_discount":
+            bq = c.get("buy_quantity") or c.get("min_quantity") or 0
+            fq = c.get("free_quantity") or 1
+            benefit = f"{bq} al {fq} bedava" if bq else "adet kampanyası"
+        else:
+            benefit = "indirim"
+        conds = []
+        mct = float(c.get("min_cart_total") or 0)
+        if mct > 0:
+            conds.append(f"{mct:g} TL üzeri sepette")
+        if c.get("first_order_only"):
+            conds.append("ilk siparişe özel")
+        how = "otomatik uygulanır" if c.get("auto_apply") else (f"kod: {c.get('code')}" if c.get("code") else "")
+        seg = f"• {title}: {benefit}"
+        if conds:
+            seg += " (" + ", ".join(conds) + ")"
+        if how:
+            seg += f" — {how}"
+        lines.append(seg)
+        if len(lines) >= 10:
+            break
+    return "\n".join(lines)
 
 
 def _now() -> str:
