@@ -209,7 +209,15 @@ async def _recent_orders_context(phone: str):
             if nm:
                 prods.append(nm)
         prod_txt = ", ".join(prods) if prods else "ürün bilgisi yok"
-        seg = f"- #{o.get('order_number','?')} | {prod_txt} | durum={o.get('status','?')}"
+        ca = (o.get("created_at") or "")[:10]
+        date_str = ""
+        if len(ca) == 10 and ca[4:5] == "-":
+            y, m, d = ca.split("-")
+            date_str = f"{d}.{m}.{y}"
+        seg = f"- #{o.get('order_number','?')} | {prod_txt}"
+        if date_str:
+            seg += f" | tarih={date_str}"
+        seg += f" | durum={o.get('status','?')}"
         if o.get("payment_status"):
             seg += f", ödeme={o.get('payment_status')}"
         if o.get("tracking_number"):
@@ -283,11 +291,11 @@ async def _handle_inbound(sender: str, mid: str, body: str,
             system += f"\n{ord_ctx}\n"
             if ord_count >= 2:
                 system += ("KURAL(sipariş): Müşterinin BİRDEN FAZLA siparişi var. Sipariş/kargo sorusunda "
-                           "hemen cevaplama; önce hangisini kastettiğini SOR — siparişleri #no + ürün adıyla "
-                           "kısaca listele ve 'Hangi siparişiniz için soruyorsunuz?' de. Seçince ona göre yanıtla.\n")
+                           "hemen cevaplama; önce hangisini kastettiğini SOR — siparişleri #no + ürün adı + "
+                           "TARİH ile kısaca listele ve 'Hangi siparişiniz için soruyorsunuz?' de. Seçince yanıtla.\n")
             elif ord_count == 1:
                 system += ("KURAL(sipariş): Müşterinin TEK siparişi var. Varsaymadan önce "
-                           "'#<no> (<ürün>) siparişiniz için mi soruyorsunuz?' diye TEYİT et; onaylayınca detay ver.\n")
+                           "'#<no> (<ürün>, <tarih>) siparişiniz için mi soruyorsunuz?' diye TEYİT et; onaylayınca detay ver.\n")
         if prod_ctx:
             system += f"\n[Ürün Bilgisi — açıklama/özellik/ölçü]\n{prod_ctx}\n"
         if extra_ctx.get("bank"):
