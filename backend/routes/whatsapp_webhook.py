@@ -61,6 +61,48 @@ async def verify_webhook(request: Request):
     return PlainTextResponse("forbidden", status_code=403)
 
 
+@router.get("/diag")
+async def wa_diag(key: str = ""):
+    """PII'siz teşhis — verify_token ile korunur. Webhook geldi mi, AI anahtarı/config
+    tam mı, gönderim başarılı mı görülür. Mesaj metni DÖNMEZ (yalnız not/durum)."""
+    cfg = await _wa_cfg()
+    expected = cfg.get("verify_token") or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
+    if not expected or not hmac.compare_digest(key, expected):
+        return PlainTextResponse("forbidden", status_code=403)
+    settings = await get_ai_settings()
+    recent = []
+    try:
+        cur = db.whatsapp_conversations.find(
+            {}, {"_id": 0, "note": 1, "handoff": 1, "confidence": 1, "outbound": 1, "created_at": 1}
+        ).sort("created_at", -1).limit(8)
+        async for r in cur:
+            recent.append({
+                "note": r.get("note", ""), "handoff": r.get("handoff"),
+                "confidence": r.get("confidence"), "out_sent": bool(r.get("outbound")),
+                "at": r.get("created_at"),
+            })
+    except Exception as e:
+        recent = [{"err": str(e)[:120]}]
+    try:
+        processed = await db.whatsapp_processed.count_documents({})
+    except Exception:
+        processed = -1
+    return {
+        "config": {
+            "has_phone_id": bool(cfg.get("phone_number_id")),
+            "has_token": bool(cfg.get("access_token")),
+            "ai_autoreply": bool(cfg.get("ai_autoreply")),
+        },
+        "ai": {
+            "enabled": settings.get("enabled", True),
+            "provider": settings.get("provider"),
+            "model": settings.get("fast_model") or settings.get("model"),
+            "has_key": bool(_api_key_for(settings)),
+        },
+        "inbound": {"processed_count": processed, "recent": recent},
+    }
+
+
 def _verify_signature(app_secret: str, raw: bytes, header: str) -> bool:
     if not app_secret:
         return True  # app_secret ayarlı değilse imza kontrolü atlanır (Meta panelinden zorunlu kılınabilir)
@@ -119,32 +161,42 @@ async def _already_processed(mid: str) -> bool:
         return False
 
 
-async def _recent_orders_context(phone: str) -> str:
-    """Müşterinin telefonuna göre son siparişleri (grounded veri) bağlam olarak verir."""
+async def _recent_orders_context(phone: str):
+    """Müşterinin telefonuna göre son siparişleri (grounded veri) + ÜRÜN içeriğiyle
+    bağlam olarak verir. Döner: (metin, sipariş_sayısı)."""
     from notification_service import normalize_phone_tr
     norm = normalize_phone_tr(phone)
-    tail = norm[-10:] if norm else phone[-10:]
-    try:
-        cur = db.orders.find(
-            {"$or": [{"phone": {"$regex": tail + "$"}},
-                     {"shipping_address.phone": {"$regex": tail + "$"}}]},
-            {"_id": 0, "order_number": 1, "status": 1, "payment_status": 1,
-             "total": 1, "created_at": 1, "tracking_number": 1, "cargo_company": 1},
-        ).sort("created_at", -1).limit(3)
-        rows = await cur.to_list(3)
-    except Exception:
-        rows = []
+    tail = (norm or phone or "")[-10:]
+    rows = []
+    if tail:
+        try:
+            cur = db.orders.find(
+                {"$or": [{"phone": {"$regex": tail + "$"}},
+                         {"shipping_address.phone": {"$regex": tail + "$"}}]},
+                {"_id": 0, "order_number": 1, "status": 1, "payment_status": 1,
+                 "total": 1, "created_at": 1, "tracking_number": 1, "cargo_company": 1,
+                 "items": 1},
+            ).sort("created_at", -1).limit(5)
+            rows = await cur.to_list(5)
+        except Exception:
+            rows = []
     if not rows:
-        return ""
-    lines = ["[Müşterinin Son Siparişleri]"]
+        return "", 0
+    lines = ["[Müşterinin Son Siparişleri — sipariş/kargo/ürün bilgisini SADECE buradan ver, uydurma]"]
     for o in rows:
-        seg = f"- Sipariş {o.get('order_number','?')}: durum={o.get('status','?')}"
+        prods = []
+        for it in (o.get("items") or [])[:3]:
+            nm = it.get("name") or it.get("product_name") or it.get("title") or ""
+            if nm:
+                prods.append(nm)
+        prod_txt = ", ".join(prods) if prods else "ürün bilgisi yok"
+        seg = f"- #{o.get('order_number','?')} | {prod_txt} | durum={o.get('status','?')}"
         if o.get("payment_status"):
             seg += f", ödeme={o.get('payment_status')}"
         if o.get("tracking_number"):
-            seg += f", kargo={o.get('cargo_company','')} takip={o.get('tracking_number')}"
+            seg += f", kargo={o.get('cargo_company') or ''} takip={o.get('tracking_number')}"
         lines.append(seg)
-    return "\n".join(lines)
+    return "\n".join(lines), len(rows)
 
 
 async def _handle_inbound(sender: str, mid: str, body: str,
@@ -181,27 +233,45 @@ async def _handle_inbound(sender: str, mid: str, body: str,
             await _log(sender, body, "", handoff=True, confidence=0.0, note="no_api_key")
             return
 
-        # Bağlam topla (grounded): bilgi bankası + ürün + son siparişler + firma
+        # Bağlam topla (grounded): bilgi bankası + ürün(açıklama/ölçü) + son siparişler +
+        # firma/banka/politika. Amaç: müşterinin HER sorusuna sağlanan bilgiyle cevap.
         kb_ctx = await _gather_kb_context(body)
         prod_ctx = await _gather_product_context(body)
-        ord_ctx = await _recent_orders_context(sender)
-        store_name = await _store_name()
+        ord_ctx, ord_count = await _recent_orders_context(sender)
+        extra_ctx = await _extra_context()
 
         system = settings.get("persona") or DEFAULT_PERSONA
-        if store_name:
-            system += f"\n\nMağaza adı: {store_name}. Kendini bu mağazanın temsilcisi olarak tanıt."
+        if extra_ctx.get("store_name"):
+            system += f"\n\nMağaza adı: {extra_ctx['store_name']}. Kendini bu mağazanın kıdemli müşteri temsilcisi olarak tanıt."
         system += (
-            "\n\nKanal: WhatsApp. Kısa, sıcak, gerçek bir insan temsilci gibi yaz "
-            "(1-4 cümle). Müşteri adını uygunsa bir kez kullan. Emin olmadığın "
-            "sipariş/stok/fiyat/iade bilgisini UYDURMA; bilmiyorsan devret.\n"
+            "\n\nKanal: WhatsApp. GÖREV: gerçek bir kıdemli müşteri temsilcisi gibi, müşterinin "
+            "HER sorusuna yardımcı ol — ürün açıklaması/beden-ölçü, stok, fiyat/kampanya, kargo "
+            "takibi, teslimat süresi, iade/değişim, ödeme ve havale/IBAN hesap bilgisi, üyelik vb. "
+            "Kısa, sıcak, samimi yaz (1-4 cümle, gereksiz emoji yok). Müşteri adını uygunsa bir kez "
+            "kullan. KURAL: Yalnızca aşağıda sana verilen bilgilerden cevapla; sipariş/stok/fiyat/"
+            "kargo/ölçü gibi bir bilgi verilmemişse UYDURMA — kibarca 'kontrol edip döneyim' de ve "
+            "insana devret (HANDOFF: yes).\n"
             "--- BİLGİ KAYNAĞI (yalnız bunları kullan) ---\n"
         )
         if ord_ctx:
             system += f"\n{ord_ctx}\n"
+            if ord_count >= 2:
+                system += ("KURAL(sipariş): Müşterinin BİRDEN FAZLA siparişi var. Sipariş/kargo sorusunda "
+                           "hemen cevaplama; önce hangisini kastettiğini SOR — siparişleri #no + ürün adıyla "
+                           "kısaca listele ve 'Hangi siparişiniz için soruyorsunuz?' de. Seçince ona göre yanıtla.\n")
+            elif ord_count == 1:
+                system += ("KURAL(sipariş): Müşterinin TEK siparişi var. Varsaymadan önce "
+                           "'#<no> (<ürün>) siparişiniz için mi soruyorsunuz?' diye TEYİT et; onaylayınca detay ver.\n")
         if prod_ctx:
-            system += f"\n[Ürün Bilgisi]\n{prod_ctx}\n"
+            system += f"\n[Ürün Bilgisi — açıklama/özellik/ölçü]\n{prod_ctx}\n"
+        if extra_ctx.get("bank"):
+            system += f"\n[Havale/EFT Hesap Bilgisi]\n{extra_ctx['bank']}\n"
+        if extra_ctx.get("company"):
+            system += f"\n[Firma & İletişim]\n{extra_ctx['company']}\n"
+        if extra_ctx.get("policy"):
+            system += f"\n[Kargo/İade/Kampanya Kuralları]\n{extra_ctx['policy']}\n"
         if kb_ctx:
-            system += f"\n[Bilgi Bankası]\n{kb_ctx}\n"
+            system += f"\n[Bilgi Bankası — önceki onaylı yanıtlar]\n{kb_ctx}\n"
         system += (
             "\nCevabın SONUNA ayrı satırda şu bloğu ekle:\n"
             "---META---\nCONFIDENCE: <0.0-1.0>\nHANDOFF: <yes|no>\n"
@@ -290,13 +360,55 @@ async def _log(phone: str, inbound: str, outbound: str, *, handoff: bool,
         pass
 
 
-async def _store_name() -> str:
+def _strip_html(h: str) -> str:
+    import re as _r
+    t = _r.sub(r"<[^>]+>", " ", h or "")
+    t = t.replace("&nbsp;", " ").replace("&amp;", "&").replace("&#160;", " ")
+    return _r.sub(r"\s+", " ", t).strip()
+
+
+async def _extra_context() -> dict:
+    """Firma + havale/IBAN + iade/kargo/SSS politikası — 'her soruya cevap' için grounded bilgi."""
+    out = {"store_name": "", "company": "", "bank": "", "policy": ""}
+    # Firma & iletişim
     try:
         import company
         c = await company.get_company(db)
-        return c.get("store_name") or ""
+        out["store_name"] = c.get("store_name") or ""
+        parts = []
+        for label, key in (("Mağaza", "store_name"), ("Site", "site_url"),
+                           ("E-posta", "contact_email"), ("Telefon", "contact_phone"),
+                           ("WhatsApp", "whatsapp"), ("Instagram", "instagram")):
+            v = c.get(key)
+            if v:
+                parts.append(f"{label}: {v}")
+        out["company"] = " | ".join(parts)
     except Exception:
-        return ""
+        pass
+    # Havale/EFT hesabı (settings.payment.bank_accounts)
+    try:
+        pay = await db.settings.find_one({"id": "payment"}, {"_id": 0, "bank_accounts": 1}) or {}
+        banks = pay.get("bank_accounts") or []
+        b = next((x for x in banks if x.get("is_default")), None) or (banks[0] if banks else None)
+        if b:
+            out["bank"] = (f"Alıcı: {b.get('account_holder','')} | Banka: {b.get('bank_name','')} "
+                           f"| Şube: {b.get('branch','')} | IBAN: {b.get('iban','')}")
+    except Exception:
+        pass
+    # İade/kargo/SSS politikaları (db.pages — HTML temizlenir, kısaltılır)
+    try:
+        slugs = ["iade-kosullari", "iade-ve-degisim", "iade", "kargo-ve-teslimat",
+                 "kargo", "teslimat", "sikca-sorulan-sorular", "sss"]
+        chunks = []
+        cur = db.pages.find({"slug": {"$in": slugs}}, {"_id": 0, "title": 1, "content": 1}).limit(4)
+        async for p in cur:
+            txt = _strip_html(p.get("content", ""))[:900]
+            if txt:
+                chunks.append(f"{p.get('title','')}: {txt}")
+        out["policy"] = "\n".join(chunks)[:2500]
+    except Exception:
+        pass
+    return out
 
 
 def _now() -> str:
