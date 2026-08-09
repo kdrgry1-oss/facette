@@ -153,7 +153,28 @@ async def wa_diag(key: str = "", q: str = ""):
         "inbound": {"processed_count": processed, "recent": recent},
         "token": token_info,
         "probe": probe,
+        "visual_index": {
+            "count": await db.product_visual_index.count_documents({}),
+            "state": await db.whatsapp_meta_state.find_one({"_id": "visual_index"}, {"_id": 0}) or {},
+        },
     }
+
+
+@router.post("/visual-index/build")
+async def visual_index_build(key: str = "", force: bool = False, limit: int = 0):
+    """Ürün KAPAK görsellerini parmak-izine çevirip hafızaya alır (görselden ürün tanıma için).
+    verify_token ile korunur. Arka planda çalışır; ilerleme /diag.visual_index'te görünür.
+    force=true tümünü yeniden indeksler; limit>0 yalnız o kadarını işler (test)."""
+    cfg = await _wa_cfg()
+    expected = cfg.get("verify_token") or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
+    if not expected or not hmac.compare_digest(key, expected):
+        return PlainTextResponse("forbidden", status_code=403)
+    import asyncio
+    asyncio.create_task(_run_visual_index_build(force=bool(force), limit=int(limit or 0)))
+    already = await db.product_visual_index.count_documents({})
+    total = await db.products.count_documents({"is_active": True, "is_deleted": {"$ne": True}})
+    return {"started": True, "indexed_so_far": already, "active_products": total,
+            "not": "Arka planda işleniyor. İlerleme için /diag?key=... çağır (visual_index.count)."}
 
 
 def _verify_signature(app_secret: str, raw: bytes, header: str) -> bool:
@@ -629,6 +650,236 @@ async def _vision_describe(img_bytes: bytes, mime: str, api_key: str, model: str
     return (resp.choices[0].message.content or "").strip()
 
 
+# ── GÖRSEL PARMAK İZİ (ürün görsellerini "hafızaya alma" + eşleştirme) ────────
+# Sorun: görseli serbest metne çevirip ürün ADIYLA aramak zayıf (ad markasal, tarif
+# görsel). Çözüm: her ürün görselini AYNI vision modeliyle YAPILANDIRILMIŞ özniteliklere
+# (kategori/renk/yaka/kol/desen/kapama/siluet/detay) çevirip indeksle; müşteri görsel
+# atınca aynı öznitelikleri çıkar, indeksle puanla eşleştir. Aynı şema iki tarafta da
+# üretildiği için eşleşme tutarlı olur. Sonra 'bu ürün mü?' diye TEYİT edilir.
+_VISUAL_ATTR_PROMPT = (
+    "Bu bir KADIN GİYİM ürünü fotoğrafı. Fotoğraftaki KIYAFETİ analiz et ve SADECE aşağıdaki JSON'u "
+    "döndür (Türkçe, küçük harf; emin olmadığın alanı boş string bırak, uydurma):\n"
+    "{\"category\":\"elbise|bluz|gömlek|tişört|body|pantolon|etek|şort|ceket|blazer|mont|kaban|trençkot|"
+    "hırka|kazak|triko|takım|tulum|yelek|eşofman|... içinden EN uygunu\","
+    "\"colors\":[\"siyah|beyaz|ekru|bej|kahve|lacivert|mavi|yeşil|kırmızı|bordo|pembe|mor|gri|...\"],"
+    "\"pattern\":\"düz|çizgili|çiçekli|ekose|puantiye|leopar|zebra|geometrik|desenli\","
+    "\"neckline\":\"halter|boğazlı|balıkçı|v yaka|bisiklet|kayık|gömlek yaka|straplez|kare yaka|hakim yaka\","
+    "\"sleeve\":\"kolsuz|askılı|kısa kol|yarım kol|uzun kol|balon kol\","
+    "\"length\":\"mini|midi|maxi|kısa|uzun|diz üstü|diz altı\","
+    "\"closure\":\"düğme|fermuar|bağcık|kırlangıç düğme|çıtçıt|yok\","
+    "\"silhouette\":\"dar|bodycon|salaş|bol|oversize|kloş|pileli|volanlı|beli kemerli\","
+    "\"details\":[\"çin düğmesi|fırfır|volan|cep|kemer|yırtmaç|büzgü|dantel|taş|nakış|...\"],"
+    "\"keywords\":[\"...\",\"...\"]}"
+)
+
+
+def _norm_fp(d: dict) -> dict:
+    if not isinstance(d, dict):
+        return {}
+    out = {}
+    for k in ("category", "pattern", "neckline", "sleeve", "length", "closure", "silhouette"):
+        v = d.get(k)
+        out[k] = str(v).strip().lower() if v else ""
+    for k in ("colors", "details", "keywords"):
+        v = d.get(k) or []
+        if isinstance(v, str):
+            v = [v]
+        out[k] = [str(x).strip().lower() for x in v if x][:12]
+    return out
+
+
+async def _visual_fingerprint(img_bytes: bytes, mime: str, api_key: str, model: str, provider: str) -> dict:
+    """Görselden yapılandırılmış öznitelik JSON'u çıkarır (sağlayıcı-bağımsız)."""
+    import base64
+    import json as _json
+    b64 = base64.b64encode(img_bytes).decode()
+    prov = (provider or "openai").strip().lower()
+    raw = ""
+    try:
+        if prov in ("anthropic", "claude"):
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=api_key)
+            msg = await client.messages.create(
+                model=model or "claude-sonnet-4-6", max_tokens=450,
+                messages=[{"role": "user", "content": [
+                    {"type": "text", "text": _VISUAL_ATTR_PROMPT},
+                    {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}}]}])
+            raw = "".join(getattr(b, "text", "") or "" for b in (msg.content or []))
+        elif prov in ("gemini", "google", "google-gemini"):
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            resp = await client.aio.models.generate_content(
+                model=model or "gemini-3.1-flash",
+                contents=[{"role": "user", "parts": [
+                    {"text": _VISUAL_ATTR_PROMPT}, {"inline_data": {"mime_type": mime, "data": b64}}]}],
+                config={"response_mime_type": "application/json"})
+            raw = getattr(resp, "text", None) or ""
+        else:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=api_key)
+            resp = await client.chat.completions.create(
+                model=model or "gpt-5.6-luna",
+                messages=[{"role": "user", "content": [
+                    {"type": "text", "text": _VISUAL_ATTR_PROMPT},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}]}],
+                response_format={"type": "json_object"},
+                max_completion_tokens=450)
+            raw = resp.choices[0].message.content or ""
+    except Exception:
+        logger.exception("visual fingerprint extract failed")
+        return {}
+    try:
+        return _norm_fp(_json.loads(raw))
+    except Exception:
+        import re as _r
+        m = _r.search(r"\{.*\}", raw, _r.S)
+        if m:
+            try:
+                return _norm_fp(_json.loads(m.group(0)))
+            except Exception:
+                return {}
+    return {}
+
+
+def _fp_score(q: dict, i: dict) -> float:
+    """İki parmak izi arasındaki benzerlik puanı (renk+kategori ağırlıklı)."""
+    if not q or not i:
+        return 0.0
+    s = 0.0
+    qcat, icat = q.get("category") or "", i.get("category") or ""
+    if qcat and icat:
+        if qcat == icat:
+            s += 3.0
+        elif qcat in icat or icat in qcat:
+            s += 1.5
+    s += 2.0 * len(set(q.get("colors") or []) & set(i.get("colors") or []))
+    for f in ("pattern", "neckline", "sleeve", "length", "closure", "silhouette"):
+        if q.get(f) and i.get(f) and q[f] == i[f]:
+            s += 1.0
+    qd = set((q.get("details") or []) + (q.get("keywords") or []))
+    idd = set((i.get("details") or []) + (i.get("keywords") or []))
+    s += 1.0 * len(qd & idd)
+    return s
+
+
+async def _match_product_by_fingerprint(qa: dict):
+    """Sorgu parmak izini indekse göre eşleştirir → (en_iyi_ürün, adaylar, puan)."""
+    if not qa:
+        return None, [], 0.0
+    cat = (qa.get("category") or "").strip().lower()
+    docs = []
+    if cat:
+        try:
+            docs = await db.product_visual_index.find({"attrs.category": cat}).to_list(400)
+        except Exception:
+            docs = []
+    if not docs:
+        try:
+            docs = await db.product_visual_index.find({}).to_list(700)
+        except Exception:
+            docs = []
+    if not docs:
+        return None, [], 0.0
+    scored = sorted(((_fp_score(qa, d.get("attrs") or {}), d) for d in docs),
+                    key=lambda x: x[0], reverse=True)
+    top_s, top_d = scored[0]
+    cands = [d for s, d in scored[:3] if s > 0]
+    if top_s < 3.0:
+        return None, cands, top_s
+    try:
+        prod = await db.products.find_one({"id": top_d["product_id"]},
+                                          {"_id": 0, "id": 1, "name": 1, "slug": 1})
+    except Exception:
+        prod = None
+    prod = prod or {"id": top_d.get("product_id"), "name": top_d.get("name"), "slug": top_d.get("slug")}
+    return prod, cands, top_s
+
+
+def _primary_image_url(p: dict) -> str:
+    for im in (p.get("images") or []):
+        if isinstance(im, dict):
+            if im.get("is_size_table"):
+                continue
+            u = im.get("url") or im.get("src") or ""
+        else:
+            u = im
+        if u:
+            return u
+    return p.get("thumbnail") or ""
+
+
+async def _download_url_image(url: str):
+    import httpx as _hx
+    try:
+        async with _hx.AsyncClient(timeout=25, follow_redirects=True) as c:
+            r = await c.get(url)
+            if r.status_code != 200:
+                return None, None
+            return r.content, (r.headers.get("content-type") or "image/jpeg").split(";")[0]
+    except Exception:
+        return None, None
+
+
+async def _run_visual_index_build(force: bool = False, limit: int = 0):
+    """Tüm aktif ürünlerin KAPAK görselini parmak-izine çevirip product_visual_index'e yazar.
+    Atımlı/resumable: force değilse zaten indekslenmiş ürünü atlar (yeniden tetiklenince devam)."""
+    settings = await get_ai_settings()
+    api_key = _api_key_for(settings)
+    if not api_key:
+        logger.warning("visual index build: no api key")
+        return
+    model = settings.get("fast_model") or settings.get("model")
+    provider = settings.get("provider", "openai")
+    prods = await db.products.find(
+        {"is_active": True, "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1, "name": 1, "slug": 1, "category_id": 1, "images": 1, "thumbnail": 1}
+    ).to_list(2000)
+    done, skipped, failed = 0, 0, 0
+    for p in prods:
+        pid = p.get("id")
+        if not pid:
+            continue
+        if not force:
+            try:
+                ex = await db.product_visual_index.find_one({"_id": pid}, {"_id": 1, "attrs": 1})
+            except Exception:
+                ex = None
+            if ex and ex.get("attrs"):
+                skipped += 1
+                continue
+        url = _primary_image_url(p)
+        if not url:
+            failed += 1
+            continue
+        img, mime = await _download_url_image(url)
+        if not img:
+            failed += 1
+            continue
+        attrs = await _visual_fingerprint(img, mime, api_key, model, provider)
+        if not attrs:
+            failed += 1
+            continue
+        try:
+            await db.product_visual_index.update_one(
+                {"_id": pid},
+                {"$set": {"product_id": pid, "name": p.get("name"), "slug": p.get("slug"),
+                          "category_id": p.get("category_id"), "attrs": attrs,
+                          "image_url": url, "at": _now()}}, upsert=True)
+            done += 1
+        except Exception:
+            failed += 1
+        if limit and done >= limit:
+            break
+    try:
+        await db.whatsapp_meta_state.update_one(
+            {"_id": "visual_index"},
+            {"$set": {"last_build": _now(), "done": done, "skipped": skipped, "failed": failed}},
+            upsert=True)
+    except Exception:
+        pass
+    logger.info(f"visual index build bitti: yeni={done} atlanan={skipped} başarısız={failed}")
+
+
 async def _transcribe_audio(audio_bytes: bytes, mime: str, api_key: str,
                             model: str, provider: str) -> str:
     """Sesli mesajı Türkçe yazıya çevirir (STT). Sağlayıcıya göre:
@@ -746,18 +997,41 @@ async def _handle_image(sender: str, mid: str, media_id: str, caption: str,
             await _handoff(sender, "[görsel indirilemedi]", name)
             await _log(sender, "[görsel]", "", handoff=True, confidence=0.0, note="media_dl_fail")
             return
+        _model = settings.get("fast_model") or settings.get("model")
+        _prov = settings.get("provider", "openai")
+        # 1) GÖRSEL PARMAK İZİ ile hafızadaki ürüne eşleştir (yüksek doğruluk).
+        matched = None
         try:
-            desc = await _vision_describe(
-                img, mime, api_key,
-                settings.get("fast_model") or settings.get("model"),
-                settings.get("provider", "openai"))
+            qa = await _visual_fingerprint(img, mime, api_key, _model, _prov)
+            matched, cands, score = await _match_product_by_fingerprint(qa)
+        except Exception:
+            logger.exception("WA visual match failed")
+            matched, cands = None, []
+        if matched and matched.get("name"):
+            # Ürünü kilitle; AI 'bu ürün mü?' diye TEYİT etsin (parmak izi %100 değil).
+            await _set_active_product(sender, matched)
+            alt = ", ".join(d.get("name") or "" for d in (cands or [])[1:3] if d.get("name"))
+            body = (f"[Müşteri bir ürün GÖRSELİ gönderdi. Görsel-hafıza eşleşmesiyle EN OLASI ürün: "
+                    f"\"{matched.get('name')}\". Bundan %100 emin DEĞİLSİN — ürün linkini paylaşıp "
+                    f"'Görselinizdeki bu ürün mü? 🌸' diye MUTLAKA SOR; onaylayınca bu ürün üzerinden devam et.")
+            if alt:
+                body += f" (Değilse alternatifler: {alt})"
+            body += "]"
+            if caption:
+                body += f" Müşteri notu: {caption}"
+            await _handle_inbound(sender, mid + "_img", body, name, own_pnid)
+            return
+        # 2) İndeks boş / eşleşme zayıf → eski serbest-metin betim + isim araması (yedek).
+        try:
+            desc = await _vision_describe(img, mime, api_key, _model, _prov)
         except Exception as e:
             logger.exception("WA vision failed")
             await _handoff(sender, "[görsel]", name)
             await _log(sender, "[görsel]", "", handoff=True, confidence=0.0, note=f"vision_err:{str(e)[:80]}")
             return
-        # Görsel betimlemesini normal akışa ver — ürünü bulup linkle "bu ürün mü?" desin.
-        body = f"[Müşteri bir ürün GÖRSELİ gönderdi] Görseldeki ürün: {desc}"
+        body = (f"[Müşteri bir ürün GÖRSELİ gönderdi] Görseldeki ürün: {desc}\n"
+                "(Görselden ürünü kesin tanıyamadın — bir ürün bulursan linkini paylaşıp 'bu ürün mü?' "
+                "diye SOR; bulamazsan hangi ürün olduğunu kibarca sor, RASTGELE ürün önerme.)")
         if caption:
             body += f" | Müşteri notu: {caption}"
         await _handle_inbound(sender, mid + "_img", body, name, own_pnid)
