@@ -1662,54 +1662,110 @@ async def get_color_siblings(product_id: str):
     """Aynı modelin (csv_card_id) farklı renk varyantlarını getir.
     Ürün detay sayfasında "Diğer Renkler" swatch listesi için kullanılır.
     """
+    import re as _re
     p = await db.products.find_one(
         {"$or": [{"id": product_id}, {"slug": product_id}]},
-        {"_id": 0, "id": 1, "csv_card_id": 1, "urun_karti_id": 1}
+        {"_id": 0, "id": 1, "csv_card_id": 1, "urun_karti_id": 1, "name": 1, "color": 1}
     )
     if not p:
         return {"siblings": []}
-    # DENETİM FIX: Ürün Kart ID sisteminin geri kalanında BİRİNCİL alan urun_karti_id
-    # (yedek csv_card_id) — integrations_*/orders ile aynı. Eski hâlde yalnız csv_card_id'ye
-    # bakılıyordu; urun_karti_id dolu ama csv_card_id boş ürünlerde renk kardeşleri HİÇ
-    # gelmiyordu (mobil/masaüstü "diğer renk" görünmüyordu). Artık iki alan da eşleşir.
-    anchor = p.get("urun_karti_id") or p.get("csv_card_id")
-    if not anchor:
-        return {"siblings": []}
-    # int/string tip uyumsuzluğu (2890 vs "2890") iki tarafta da eşleşsin.
-    cands = {anchor, str(anchor)}
-    try:
-        cands.add(int(anchor))
-    except Exception:
-        pass
-    cands = list(cands)
-    siblings = []
-    cursor = db.products.find(
-        {"$or": [{"urun_karti_id": {"$in": cands}}, {"csv_card_id": {"$in": cands}}],
-         "id": {"$ne": p["id"]}, "is_active": True},
-        {"_id": 0, "id": 1, "slug": 1, "name": 1, "thumbnail": 1, "images": 1,
-         "variants": 1, "attributes": 1, "color": 1}
-    ).limit(20)
-    async for s in cursor:
-        # Renk: önce üst-alan color, sonra variants[].color, yoksa attributes Web Color
+    _PROJ = {"_id": 0, "id": 1, "slug": 1, "name": 1, "thumbnail": 1, "images": 1,
+             "variants": 1, "attributes": 1, "color": 1}
+
+    def _row(s):
         color = (s.get("color") or "").strip()
         if not color and s.get("variants"):
             for v in s["variants"]:
                 if v.get("color"):
-                    color = v["color"]
-                    break
+                    color = v["color"]; break
         if not color and isinstance(s.get("attributes"), list):
             for a in s["attributes"]:
                 if (a.get("name") or "").strip().lower() in ("web color", "renk", "color"):
-                    color = a.get("value") or ""
-                    break
-        siblings.append({
-            "id": s["id"],
-            "slug": s.get("slug") or s["id"],
-            "name": s.get("name") or "",
-            "color": color,
+                    color = a.get("value") or ""; break
+        if not color:  # son çare: addan sondaki renk kelimesi
+            color = _trailing_color(s.get("name") or "")
+        return {
+            "id": s["id"], "slug": s.get("slug") or s["id"],
+            "name": s.get("name") or "", "color": color,
             "image": (s.get("images") or [s.get("thumbnail")] or [None])[0],
-        })
+        }
+
+    siblings = []
+    seen_ids = {p["id"]}
+
+    # 1) AÇIK ANAHTAR: urun_karti_id (birincil) veya csv_card_id (yedek) — sistemin geri
+    #    kalanıyla (integrations_*/orders) tutarlı. int/string tipi iki tarafta da eşleşir.
+    anchor = p.get("urun_karti_id") or p.get("csv_card_id")
+    if anchor:
+        cands = {anchor, str(anchor)}
+        try:
+            cands.add(int(anchor))
+        except Exception:
+            pass
+        cur = db.products.find(
+            {"$or": [{"urun_karti_id": {"$in": list(cands)}}, {"csv_card_id": {"$in": list(cands)}}],
+             "id": {"$ne": p["id"]}, "is_active": True}, _PROJ).limit(20)
+        async for s in cur:
+            if s["id"] in seen_ids:
+                continue
+            seen_ids.add(s["id"]); siblings.append(_row(s))
+
+    # 2) FALLBACK (açık anahtar yok/eşleşmedi): renk varyantları AYRI ürün olarak, farklı
+    #    urun_karti_id ile eklenmiş olabilir (ör. Siyah=2890, Ekru=2889). Tek ortak bağ MODEL
+    #    ADI'dır. Addan sondaki renk kelimesini soyup aynı taban-adlı diğer renkleri bul.
+    if not siblings:
+        base = _strip_trailing_color(p.get("name") or "")
+        if base and len(base) >= 6:
+            rx = "^" + _re.escape(base) + r"(\s|$)"
+            cur = db.products.find(
+                {"name": {"$regex": rx, "$options": "i"}, "id": {"$ne": p["id"]},
+                 "is_active": True}, _PROJ).limit(20)
+            async for s in cur:
+                if s["id"] in seen_ids:
+                    continue
+                seen_ids.add(s["id"]); siblings.append(_row(s))
+
     return {"siblings": siblings}
+
+
+# Türkçe moda renk sözlüğü — ad-tabanlı renk-kardeşi eşleştirmesi için (sondaki renk sözcüğü).
+_TR_COLOR_WORDS = {
+    "siyah", "beyaz", "ekru", "krem", "krem rengi", "bej", "kahverengi", "kahve", "vizon",
+    "camel", "taş", "tas", "gri", "antrasit", "füme", "fume", "lacivert", "mavi", "açık mavi",
+    "koyu mavi", "bebe mavi", "buz mavi", "petrol", "petrol mavisi", "mint", "su yeşili",
+    "yeşil", "yesil", "haki", "koyu yeşil", "açık yeşil", "zümrüt", "benetton", "kırmızı",
+    "kirmizi", "bordo", "pembe", "açık pembe", "koyu pembe", "pudra", "gül kurusu", "fuşya",
+    "fusya", "somon", "mor", "lila", "leylak", "turuncu", "sarı", "sari", "hardal", "altın",
+    "altin", "gold", "gümüş", "gumus", "silver", "metalik", "leopar", "zebra", "yılan",
+    "çok renkli", "desenli", "ebru", "koyu gri", "açık gri", "menekşe", "nar çiçeği",
+}
+
+
+def _strip_trailing_color(name: str) -> str:
+    """Ad sonundaki renk sözcüğünü (1-2 kelime) soyup taban model adını döndürür."""
+    words = (name or "").strip().split()
+    if not words:
+        return ""
+    last1 = words[-1].lower()
+    last2 = " ".join(words[-2:]).lower() if len(words) >= 2 else ""
+    if last2 and last2 in _TR_COLOR_WORDS:
+        return " ".join(words[:-2]).strip()
+    if last1 in _TR_COLOR_WORDS:
+        return " ".join(words[:-1]).strip()
+    return ""  # renk sözcüğü bulunamadı → ada göre gruplama yapma (yanlış eşleşme riski)
+
+
+def _trailing_color(name: str) -> str:
+    """Ad sonundaki renk sözcüğünü (etiket için) döndürür."""
+    words = (name or "").strip().split()
+    if not words:
+        return ""
+    last2 = " ".join(words[-2:]).lower() if len(words) >= 2 else ""
+    if last2 and last2 in _TR_COLOR_WORDS:
+        return " ".join(words[-2:])
+    if words[-1].lower() in _TR_COLOR_WORDS:
+        return words[-1]
+    return ""
 
 async def _expand_category_ids(selected_ids):
     """Seçilen kategori id'lerini atalarıyla birlikte düzleştirir (vitrin category_ids için)."""
