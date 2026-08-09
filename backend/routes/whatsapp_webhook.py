@@ -62,13 +62,29 @@ async def verify_webhook(request: Request):
 
 
 @router.get("/diag")
-async def wa_diag(key: str = ""):
+async def wa_diag(key: str = "", q: str = ""):
     """PII'siz teşhis — verify_token ile korunur. Webhook geldi mi, AI anahtarı/config
-    tam mı, gönderim başarılı mı görülür. Mesaj metni DÖNMEZ (yalnız not/durum)."""
+    tam mı, gönderim başarılı mı görülür. Mesaj metni DÖNMEZ (yalnız not/durum).
+    q verilirse ürün-bulma + beden tablosu probu çalışır (satış/beden teşhisi)."""
     cfg = await _wa_cfg()
     expected = cfg.get("verify_token") or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
     if not expected or not hmac.compare_digest(key, expected):
         return PlainTextResponse("forbidden", status_code=403)
+    probe = {}
+    if q:
+        try:
+            prod = await _find_product(q)
+            sc = await _size_context(prod) if prod else ""
+            pc = await _gather_product_context((prod or {}).get("name") or q)
+            probe = {
+                "keywords": _keywords(q),
+                "product_found": (prod or {}).get("name"),
+                "size_table_len": len(sc or ""),
+                "size_table_head": (sc or "")[:400],
+                "product_ctx_len": len(pc or ""),
+            }
+        except Exception as e:
+            probe = {"err": str(e)[:200]}
     settings = await get_ai_settings()
     recent = []
     try:
@@ -107,6 +123,7 @@ async def wa_diag(key: str = ""):
             "has_key": bool(_api_key_for(settings)),
         },
         "inbound": {"processed_count": processed, "recent": recent},
+        "probe": probe,
     }
 
 
