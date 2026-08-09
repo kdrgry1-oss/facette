@@ -87,12 +87,19 @@ async def wa_diag(key: str = ""):
         processed = await db.whatsapp_processed.count_documents({})
     except Exception:
         processed = -1
+    try:
+        hits = await db.whatsapp_hits.find_one({"_id": "count"}, {"_id": 0}) or {}
+    except Exception:
+        hits = {}
     return {
         "config": {
             "has_phone_id": bool(cfg.get("phone_number_id")),
+            "phone_number_id": (cfg.get("phone_number_id") or "")[-6:],
             "has_token": bool(cfg.get("access_token")),
+            "app_secret_set": bool(cfg.get("app_secret")),
             "ai_autoreply": bool(cfg.get("ai_autoreply")),
         },
+        "raw_hits": hits,
         "ai": {
             "enabled": settings.get("enabled", True),
             "provider": settings.get("provider"),
@@ -116,10 +123,22 @@ def _verify_signature(app_secret: str, raw: bytes, header: str) -> bool:
 @router.post("/webhook")
 async def receive_webhook(request: Request, background: BackgroundTasks):
     raw = await request.body()
+    # HAM POST sayacı — imza kontrolünden ÖNCE (Meta hiç mi göndermiyor, yoksa
+    # gelip imzada mı reddediliyor ayrımı için). Teşhis amaçlı.
+    try:
+        await db.whatsapp_hits.update_one(
+            {"_id": "count"}, {"$inc": {"n": 1}, "$set": {"last": _now()}}, upsert=True)
+    except Exception:
+        pass
     cfg = await _wa_cfg()
     # İmza doğrulama (app_secret varsa)
     if not _verify_signature(cfg.get("app_secret", ""), raw,
                              request.headers.get("x-hub-signature-256", "")):
+        try:
+            await db.whatsapp_hits.update_one(
+                {"_id": "count"}, {"$inc": {"sig_fail": 1}}, upsert=True)
+        except Exception:
+            pass
         return PlainTextResponse("bad signature", status_code=403)
     try:
         data = json.loads(raw.decode("utf-8"))
