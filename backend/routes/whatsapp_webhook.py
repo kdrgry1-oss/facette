@@ -392,6 +392,16 @@ async def _handle_inbound(sender: str, mid: str, body: str,
             "SOHBET/KONU-DIŞI: Müşteri konu dışı, samimi ya da tuhaf/'saçma' bir şey sorsa bile "
             "robotik reddetme; kısa, sıcak, hafif esprili ama nazik bir insan temsilci gibi cevapla, "
             "sonra kibarca alışverişe/konuya yönlendir. Hakaret/uygunsuzlukta sakin ve profesyonel kal.\n"
+            "SATIŞ YAKLAŞIMI (sıcak & güven odaklı — asla ısrarcı/agresif değil, GÜVEN her şeyden önce): "
+            "1) Önce ihtiyacı anla, sonra danışman gibi öner. 2) Güven kur: güvenli ödeme (3D Secure/"
+            "iyzico), kolay iade, hızlı kargo, X TL üzeri ücretsiz kargo eşiğini uygun yerde hatırlat. "
+            "3) Sosyal kanıt: çok tercih edilen/çok satan/beğenilen ürünü belirt (YALNIZ gerçekse). "
+            "4) Aciliyet/kıtlık SADECE gerçekse: stok az/'son birkaç adet'/kampanya bitişi — UYDURMA. "
+            "5) Kişiselleştir + nazik cross-sell: bedenine/tarzına uygun öner, tamamlayıcı parça (kombin) "
+            "öner. 6) İtirazı (fiyat/kararsızlık) empatiyle karşıla; değer + risksizlik (iade güvencesi) "
+            "vurgula. 7) Ücretsiz kargo eşiğine az kaldıysa üstüne tamamlamayı nazikçe öner. 8) Yumuşak "
+            "kapanış: net ve zorlamasız bir sonraki adım ('sepete ekleyip ödemeye geçebilirsiniz', "
+            "link/yönlendirme). Fiyat/stok/kampanyayı ASLA uydurma; yalnız sistemdeki gerçek veriyle.\n"
             "--- BİLGİ KAYNAĞI (yalnız bunları kullan) ---\n"
         )
         if dialog:
