@@ -127,6 +127,22 @@ PERMISSION_TREE = [
         ],
     },
     {
+        "key": "tasarim",
+        "label": "Tasarım / İçerik",
+        "children": [
+            {"key": "tasarim.view", "label": "Görüntüle"},
+            {"key": "tasarim.themes", "label": "Tema Yönetimi"},
+            {"key": "tasarim.banners", "label": "Bannerlar & Sliderlar"},
+            {"key": "tasarim.popups", "label": "Popuplar & Duyurular"},
+            {"key": "tasarim.menu", "label": "Menü Yönetimi"},
+            {"key": "tasarim.page_design", "label": "Sayfa Tasarımı"},
+            {"key": "tasarim.footer", "label": "Footer Tasarımı"},
+            {"key": "tasarim.instagram", "label": "Instagram Akışı"},
+            {"key": "tasarim.email", "label": "E-posta Pazarlama"},
+            {"key": "tasarim.cms", "label": "Sayfalar (CMS)"},
+        ],
+    },
+    {
         "key": "settings",
         "label": "Ayarlar",
         "children": [
