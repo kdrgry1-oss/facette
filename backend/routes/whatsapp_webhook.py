@@ -1106,8 +1106,7 @@ async def _handle_image(sender: str, mid: str, media_id: str, caption: str,
         except Exception:
             logger.exception("WA visual match failed")
             fp_best, cands = None, []
-        # 2) GÖRSELDEN GÖRSELE karşılaştırma — adayların GERÇEK görselleriyle kıyasla
-        #    (renk tonunu ayırt eder). Kesin eşleşme varsa DOĞRUDAN söyle + link (soru sorma).
+        # 2) GÖRSELDEN GÖRSELE karşılaştırma — adayların GERÇEK görselleriyle kıyasla (renk tonu).
         matched = None
         if cands:
             try:
@@ -1115,44 +1114,39 @@ async def _handle_image(sender: str, mid: str, media_id: str, caption: str,
             except Exception:
                 logger.exception("WA vision pick failed")
                 matched = None
-        if matched and matched.get("name"):
-            await _set_active_product(sender, matched)
-            body = (f"[Müşteri bir ürün GÖRSELİ gönderdi. Görselden-görsele karşılaştırma ile ürün KESİN "
-                    f"belirlendi: \"{matched.get('name')}\". Müşteriye DOĞRUDAN 'Görselinizdeki ürün: "
-                    f"{matched.get('name')} 🌸' de ve [Ürün Linki]'ni paylaş. 'Bu ürün mü?' diye SORMA — net "
-                    f"söyle. Ardından müşterinin sorusuna (beden/fiyat/stok vb.) bu ürün üzerinden cevap ver.]")
-            if caption:
-                body += f" Müşteri notu: {caption}"
-            await _handle_inbound(sender, mid + "_img", body, name, own_pnid)
+        # ÜRÜN: kesin görsel eşleşme > güçlü parmak-izi. Yanıtı LLM'in HANDOFF kararına BIRAKMA —
+        # DETERMİNİSTİK gönder (görsele hiç cevap gelmemesi sorununu bitirir).
+        chosen = matched or (fp_best if (fp_best and fp_best.get("name")) else None)
+        _extra = await _extra_context()
+        site_url = _extra.get("site_url")
+        cap = (caption or "").strip()
+        if chosen and chosen.get("name"):
+            await _set_active_product(sender, chosen)
+            link = _product_link(chosen, site_url)
+            if matched:
+                msg = f"Görselinizdeki ürün: *{chosen.get('name')}* 🌸"
+                if link:
+                    msg += f"\n{link}"
+                msg += "\nBeden, fiyat ya da stok sormak isterseniz buradayım 🌸"
+            else:
+                msg = f"Görselinize en yakın ürün: *{chosen.get('name')}* 🌸"
+                if link:
+                    msg += f"\n{link}"
+                msg += "\nBu ürün müdür? Değilse birkaç detay verirseniz doğru ürünü bulayım."
+            wamid = await _send(cfg, sender, msg)
+            await _log(sender, "[görsel]", msg, handoff=False, confidence=0.9,
+                       wamid=wamid, product_id=chosen.get("id"), note="img_match")
+            # Görselle birlikte bir SORU (caption) geldiyse onu da yanıtla (ürün artık kilitli).
+            if cap:
+                await _handle_inbound(sender, mid + "_imgq", cap, name, own_pnid)
             return
-        # 3) Görsel karşılaştırma kesin değil ama parmak-izi güçlü bir aday verdiyse: yine de o ürünü
-        #    öner ama bu belirsiz durumda teyit iste.
-        if fp_best and fp_best.get("name"):
-            await _set_active_product(sender, fp_best)
-            alt = ", ".join(d.get("name") or "" for d in (cands or [])[1:3] if d.get("name"))
-            body = (f"[Müşteri bir ürün GÖRSELİ gönderdi. En olası ürün: \"{fp_best.get('name')}\" ama görsel "
-                    f"karşılaştırması KESİN değil — linki paylaşıp 'Görselinizdeki bu ürün mü? 🌸' diye kısaca teyit et.")
-            if alt:
-                body += f" (Değilse alternatifler: {alt})"
-            body += "]"
-            if caption:
-                body += f" Müşteri notu: {caption}"
-            await _handle_inbound(sender, mid + "_img", body, name, own_pnid)
-            return
-        # 4) İndeks boş / eşleşme yok → eski serbest-metin betim + isim araması (yedek).
-        try:
-            desc = await _vision_describe(img, mime, api_key, _model, _prov)
-        except Exception as e:
-            logger.exception("WA vision failed")
-            await _handoff(sender, "[görsel]", name)
-            await _log(sender, "[görsel]", "", handoff=True, confidence=0.0, note=f"vision_err:{str(e)[:80]}")
-            return
-        body = (f"[Müşteri bir ürün GÖRSELİ gönderdi] Görseldeki ürün: {desc}\n"
-                "(Görselden ürünü kesin tanıyamadın — bir ürün bulursan linkini paylaşıp 'bu ürün mü?' "
-                "diye SOR; bulamazsan hangi ürün olduğunu kibarca sor, RASTGELE ürün önerme.)")
-        if caption:
-            body += f" | Müşteri notu: {caption}"
-        await _handle_inbound(sender, mid + "_img", body, name, own_pnid)
+        # 3) Hiç eşleşme yok → SESSİZ KALMA; müşteriyi nazikçe yönlendir.
+        ask = ("Görselinizi aldım 🌸 Ürünü sistemimde net eşleştiremedim — ürünün adını yazar mısınız, "
+               "ya da hangi konuda (beden/fiyat/stok/kargo) yardımcı olayım?")
+        wamid = await _send(cfg, sender, ask)
+        await _log(sender, "[görsel]", ask, handoff=False, confidence=0.3, wamid=wamid, note="img_nomatch")
+        if cap:
+            await _handle_inbound(sender, mid + "_imgq", cap, name, own_pnid)
     except Exception as e:
         logger.exception(f"WA image handler error: {e}")
 
