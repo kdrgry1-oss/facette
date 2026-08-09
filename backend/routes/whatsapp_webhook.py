@@ -251,6 +251,13 @@ async def _handle_inbound(sender: str, mid: str, body: str,
             "kullan. KURAL: Yalnızca aşağıda sana verilen bilgilerden cevapla; sipariş/stok/fiyat/"
             "kargo/ölçü gibi bir bilgi verilmemişse UYDURMA — kibarca 'kontrol edip döneyim' de ve "
             "insana devret (HANDOFF: yes).\n"
+            "BEDEN ÖNERİSİ: Müşteri boyunu/kilosunu veya normalde giydiği bedeni söylerse, ürünün "
+            "[Ürün Bilgisi]'ndeki beden tablosu/ölçüleri + KALIP (dar/normal/bol/oversize) + SEZON "
+            "bilgisine göre yorumlayıp uygun bedeni öner ve kısa gerekçe ver. Ölçü/kalıp verisi "
+            "yoksa uydurma; beden tablosuna yönlendir veya insana devret.\n"
+            "SOHBET/KONU-DIŞI: Müşteri konu dışı, samimi ya da tuhaf/'saçma' bir şey sorsa bile "
+            "robotik reddetme; kısa, sıcak, hafif esprili ama nazik bir insan temsilci gibi cevapla, "
+            "sonra kibarca alışverişe/konuya yönlendir. Hakaret/uygunsuzlukta sakin ve profesyonel kal.\n"
             "--- BİLGİ KAYNAĞI (yalnız bunları kullan) ---\n"
         )
         if ord_ctx:
