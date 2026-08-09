@@ -137,6 +137,40 @@ async def sales_summary(
                   "returned", "refunded", "partial_refunded"]
     _CANCEL_ST = ["cancelled", "cancel_refunded"]
 
+    # ── İADE için ÖN-ÇEKİM (bir kez): iade ONAY tarihi OTANTİK kaynaktan gelmeli.
+    #    SİTE iadesinde onay tarihi orders.return_approved_at'te DEĞİL (o sadece iade bedeli
+    #    ödenince yazılır) → customer_returns.approval.at otantik kaynaktır (gider pusulası
+    #    raporu / iade sayfası da bunu kullanır). Pazaryeri iadesinde orders.return_approved_at.
+    _DENY_RET = {"return_requested", "created", "pending", "preparing", "shipped",
+                 "return_rejected", "rejected", "cancelled", "canceled", "expired",
+                 "error", "exception", "undelivered", "waitinginaction", "inanalysis", "unresolved"}
+    _ret_meta = {}   # order_number -> {"total", "site", "oa"(pazaryeri onay tarihi)}
+    async for _o in db.orders.find(
+            {"status": {"$in": _RETURN_ST}},
+            {"_id": 0, "order_number": 1, "total": 1, "platform": 1, "marketplace": 1,
+             "return_approved_at": 1, "refund_paid_at": 1, "updated_at": 1}):
+        _on = str(_o.get("order_number") or "")
+        if not _on:
+            continue
+        _pf = str(_o.get("platform") or "").lower()
+        _mk = str(_o.get("marketplace") or "").lower()
+        _ret_meta[_on] = {
+            "total": float(_o.get("total") or 0),
+            "site": _pf not in _MARKETPLACES and _mk not in _MARKETPLACES,
+            "oa": str(_o.get("return_approved_at") or _o.get("refund_paid_at") or _o.get("updated_at") or ""),
+        }
+    _site_appr = {}  # order_number -> otantik onay tarihi (customer_returns.approval.at)
+    async for _cr in db.customer_returns.find(
+            {}, {"_id": 0, "order_number": 1, "status": 1, "approval": 1}):
+        _on = str(_cr.get("order_number") or "")
+        _apd = str((_cr.get("approval") or {}).get("at") or "")
+        if not _on or not _apd:
+            continue  # onaylanmamış iade → "onaylandı" sayılmaz
+        if str(_cr.get("status") or "").lower() in _DENY_RET:
+            continue
+        if _on not in _site_appr or _apd > _site_appr[_on]:  # aynı siparişte birden çok iade → en yeni onay
+            _site_appr[_on] = _apd
+
     async def _agg(s_iso: str, e_iso: str) -> dict:
         _sc = _source_cond(source)
         # ── 1) CİRO (brüt) + net sipariş/adet: SİPARİŞ tarihine göre (satışın gerçekleştiği ay).
@@ -177,19 +211,26 @@ async def sales_summary(
             return float(_x.get("t") or 0), int(_x.get("n") or 0)
 
         cancel_total, _cn = await _sum_by_action(_CANCEL_ST, "cancelled_at", "updated_at")
-        # ── 3) İADE: İADE ONAY tarihine göre (return_approved_at; yoksa refund_paid_at→updated_at).
-        _mr = {"status": {"$in": _RETURN_ST}}
-        if _sc:
-            _mr.update(_sc)
-        _rpipe = [
-            {"$match": _mr},
-            {"$addFields": {"_ad": {"$ifNull": ["$return_approved_at",
-                                    {"$ifNull": ["$refund_paid_at", "$updated_at"]}]}}},
-            {"$match": {"_ad": {"$gte": s_iso, "$lt": e_iso}}},
-            {"$group": {"_id": None, "t": {"$sum": {"$ifNull": ["$total", 0]}}}},
-        ]
-        _rr = await db.orders.aggregate(_rpipe).to_list(1)
-        return_total = float((_rr[0] if _rr else {}).get("t") or 0)
+        # ── 3) İADE: İADE ONAY tarihine göre. SİTE → customer_returns.approval.at (otantik),
+        #    PAZARYERİ → orders.return_approved_at. Sipariş no ile tekilleştirilir; kaynağa göre süzülür.
+        _src = (source or "").lower().strip()
+        return_total = 0.0
+        _ret_cnt = 0
+        for _on, _mt in _ret_meta.items():
+            if _mt["site"]:
+                if _src in ("trendyol", "hepsiburada"):
+                    continue  # site istenmedi
+                _appr = _site_appr.get(_on)
+                if not _appr or not (s_iso <= _appr < e_iso):
+                    continue
+            else:
+                if _src == "site":
+                    continue  # pazaryeri istenmedi
+                _appr = _mt["oa"]
+                if not _appr or not (s_iso <= _appr < e_iso):
+                    continue
+            return_total += _mt["total"]
+            _ret_cnt += 1
 
         # NET = o ayki ciro − o ay İPTAL edilen − o ay İADE onaylanan (eylem tarihine göre).
         net_revenue = revenue_all - cancel_total - return_total
@@ -198,6 +239,8 @@ async def sales_summary(
             "net": round(net_revenue, 2),
             "cancels": round(cancel_total, 2),
             "returns": round(return_total, 2),
+            "cancel_count": int(_cn),      # o ay İPTAL edilen sipariş SAYISI
+            "return_count": int(_ret_cnt), # o ay İADE onaylanan sipariş SAYISI
             "orders": int(d.get("net_orders") or 0),
             "items": int(d.get("items_sold") or 0),
         }
