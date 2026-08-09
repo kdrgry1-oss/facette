@@ -410,7 +410,14 @@ export default function ProductDetail() {
 
         // Varsayılan/ilk uygun bedeni önce belirle — ViewContent'in Meta content_id'si
         // seçili bedenin Ticimax varyant id'si olsun (katalog eşleşmesi için).
+        // ?beden=XL ile gelindiyse (WhatsApp/AI linki) o bedeni ön-seç (stokluysa).
+        let _wantSize = "";
+        try { _wantSize = (new URLSearchParams(window.location.search).get("beden") || "").trim(); } catch { _wantSize = ""; }
+        const _bySize = _wantSize
+          ? (res.data?.variants || []).find((v) => String(v.size || "").toUpperCase() === _wantSize.toUpperCase() && (v.stock || 0) > 0)
+          : null;
         const defaultVariant =
+          _bySize ||
           (res.data?.variants || []).find((v) => (v.stock || 0) > 0) ||
           (res.data?.variants || [])[0] || null;
 

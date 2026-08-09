@@ -257,24 +257,37 @@ def _keywords(text: str):
 
 
 async def _find_product(text: str):
-    """Konuşma metninden (cümlenin içinden) ürünü anahtar-kelime örtüşmesiyle bulur."""
+    """Konuşma metninden ürünü bulur. 'mini/elbise' gibi kelimeler yüzlerce ürüne
+    uyduğundan, aday havuzunu EN AYIRT EDİCİ (en az eşleşen) kelimeyle kurar; böylece
+    'maris' gibi belirleyici kelimedeki ürün havuza girer, sonra TAM örtüşmeyle sıralanır."""
     import re as _r
-    kws = _keywords(text)
+    kws = _keywords(text)[:8]
     if not kws:
         return None
-    ors = [{"name": {"$regex": _r.escape(k), "$options": "i"}} for k in kws[:6]]
+    counts = {}
+    for k in kws:
+        try:
+            c = await db.products.count_documents({"name": {"$regex": _r.escape(k), "$options": "i"}})
+        except Exception:
+            c = 0
+        if c > 0:
+            counts[k] = c
+    if not counts:
+        return None
+    rare = min(counts, key=counts.get)  # en ayırt edici kelime (en az eşleşen)
     try:
-        prods = await db.products.find(
-            {"$or": ors}, {"_id": 0, "id": 1, "name": 1}).limit(15).to_list(15)
+        cands = await db.products.find(
+            {"name": {"$regex": _r.escape(rare), "$options": "i"}},
+            {"_id": 0, "id": 1, "name": 1, "slug": 1}).limit(60).to_list(60)
     except Exception:
         return None
-    if not prods:
+    if not cands:
         return None
     def _score(p):
         nm = (p.get("name") or "").lower()
         return sum(1 for k in kws if k in nm)
-    prods.sort(key=_score, reverse=True)
-    return prods[0] if _score(prods[0]) > 0 else None
+    cands.sort(key=_score, reverse=True)
+    return cands[0] if _score(cands[0]) > 0 else None
 
 
 async def _size_context(product) -> str:
@@ -304,6 +317,29 @@ async def _size_context(product) -> str:
     if mparts:
         block += "\nManken ölçüleri (referans): " + ", ".join(mparts)
     return block
+
+
+_SIZE_TOKENS = {"XS", "S", "M", "L", "XL", "XXL", "XXXL", "2XL", "3XL", "4XL"}
+
+
+def _detect_size(text: str):
+    """Mesaj bir beden mi (XL, M, 38...) — beden ön-seçili link için."""
+    t = (text or "").strip().upper().replace("BEDEN", "").replace("BEDENİ", "").strip()
+    if t in _SIZE_TOKENS:
+        return t
+    if t.isdigit() and len(t) == 2:
+        return t
+    return None
+
+
+def _product_link(product, site_url: str, size=None) -> str:
+    if not product or not site_url:
+        return ""
+    slug = product.get("slug") or product.get("id")
+    url = f"{site_url.rstrip('/')}/urun/{slug}"
+    if size:
+        url += f"?beden={size}"
+    return url
 
 
 async def _recent_dialog(sender: str, limit: int = 6) -> str:
@@ -363,12 +399,16 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         # Bağlam topla (grounded): bilgi bankası + ürün(açıklama/ölçü) + son siparişler +
         # firma/banka/politika. Amaç: müşterinin HER sorusuna sağlanan bilgiyle cevap.
         kb_ctx = await _gather_kb_context(body)
+        dialog = await _recent_dialog(sender)
+        # Ürünü mesajdan bul; kısa/beden yanıtıysa (ör. "XL") KONUŞMADAN çöz.
         product = await _find_product(body)
+        if not product and dialog:
+            product = await _find_product(dialog)
         prod_ctx = await _gather_product_context((product or {}).get("name") or body)
         size_ctx = await _size_context(product)
         ord_ctx, ord_count = await _recent_orders_context(sender)
         extra_ctx = await _extra_context()
-        dialog = await _recent_dialog(sender)
+        plink = _product_link(product, extra_ctx.get("site_url"), _detect_size(body))
 
         system = settings.get("persona") or DEFAULT_PERSONA
         if extra_ctx.get("store_name"):
@@ -419,6 +459,13 @@ async def _handle_inbound(sender: str, mid: str, body: str,
             "vurgula. 7) Ücretsiz kargo eşiğine az kaldıysa üstüne tamamlamayı nazikçe öner. 8) Yumuşak "
             "kapanış: net ve zorlamasız bir sonraki adım ('sepete ekleyip ödemeye geçebilirsiniz', "
             "link/yönlendirme). Fiyat/stok/kampanyayı ASLA uydurma; yalnız sistemdeki gerçek veriyle.\n"
+            "LİNK & SATIŞA GÖTÜRME: [Ürün Linki] verildiyse kullan. (a) Hangi üründen bahsedildiğinden "
+            "EMİN DEĞİLSEN linki paylaş ve 'Emin olmak için soruyorum, bu üründen mi bahsediyoruz? 🌸' de; "
+            "müşteri bundan rahatsız olursa kibarca 'bazı müşterilerimiz ürün adını farklı söyleyebiliyor, "
+            "o yüzden emin olmak istedim' de. (b) Müşteri BİR BEDEN seçtiyse ya da almak istiyorsa ürün "
+            "linkini (beden ön-seçili) paylaş ve 'linke tıklayıp sepete ekleyerek ödemeye geçebilirsiniz' "
+            "diye nazikçe ödemeye yönlendir — bu durumda İNSANA DEVRETME (HANDOFF: no), satışı tamamlamaya "
+            "yardım et.\n"
             "--- BİLGİ KAYNAĞI (yalnız bunları kullan) ---\n"
         )
         if dialog:
@@ -437,6 +484,8 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         if size_ctx:
             system += (f"\n[Beden Tablosu / Ölçüler — müşteri boy/kilo/beden söylerse ölçülere ve "
                        f"manken referansına göre UYGUN BEDENİ öner, kısa gerekçe ver]\n{size_ctx}\n")
+        if plink:
+            system += f"\n[Ürün Linki]\n{plink}\n"
         if extra_ctx.get("bank"):
             system += f"\n[Havale/EFT Hesap Bilgisi]\n{extra_ctx['bank']}\n"
         if extra_ctx.get("company"):
@@ -542,12 +591,13 @@ def _strip_html(h: str) -> str:
 
 async def _extra_context() -> dict:
     """Firma + havale/IBAN + iade/kargo/SSS politikası — 'her soruya cevap' için grounded bilgi."""
-    out = {"store_name": "", "company": "", "bank": "", "policy": ""}
+    out = {"store_name": "", "company": "", "bank": "", "policy": "", "site_url": ""}
     # Firma & iletişim
     try:
         import company
         c = await company.get_company(db)
         out["store_name"] = c.get("store_name") or ""
+        out["site_url"] = (c.get("site_url") or "").rstrip("/")
         parts = []
         for label, key in (("Mağaza", "store_name"), ("Site", "site_url"),
                            ("E-posta", "contact_email"), ("Telefon", "contact_phone"),
