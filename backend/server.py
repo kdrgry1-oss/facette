@@ -675,6 +675,10 @@ api_router = APIRouter(prefix="/api")
 from routes.docs import router as docs_router
 api_router.include_router(docs_router)
 
+# İstemci yüklenme/hata telemetrisi (site açılmıyor teşhisi — cihaz/IP/hata)
+from routes.client_log import router as client_log_router
+api_router.include_router(client_log_router)
+
 from routes.stock_notify import router as stock_notify_router
 api_router.include_router(stock_notify_router)
 

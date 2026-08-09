@@ -2,6 +2,67 @@
 <html lang="tr">
     <head>
     <!-- build-rebuild -->
+        <!-- İstemci yüklenme/hata telemetrisi — EN ÖNCE (bundle çökmesini bile yakalar).
+             Sunucu IP+UA damgalar; admin panelden hangi cihaz/IP açıldı/açılamadı + hata görülür. -->
+        <script>
+            (function () {
+                try {
+                    var API = "%REACT_APP_BACKEND_URL%";
+                    if (!API || API.charAt(0) === "%") {
+                        // white-label fallback: www.<domain> -> api.<domain>
+                        API = location.origin.replace("://www.", "://api.");
+                        if (API === location.origin) API = location.origin.replace("://", "://api.");
+                    }
+                    var SENT = {};
+                    function conn() {
+                        try { var c = navigator.connection; return c ? (c.effectiveType || "") : ""; } catch (e) { return ""; }
+                    }
+                    function beacon(status, extra) {
+                        try {
+                            if (status === "ok" && SENT.ok) return;
+                            if (status === "ok") SENT.ok = 1;
+                            var p = {
+                                status: status, url: location.href, referrer: document.referrer || "",
+                                screen: (window.screen ? (screen.width + "x" + screen.height) : ""), conn: conn()
+                            };
+                            if (extra) { for (var k in extra) { if (extra.hasOwnProperty(k)) p[k] = extra[k]; } }
+                            var body = JSON.stringify(p);
+                            var url = API + "/api/client-log";
+                            // text/plain: CORS 'simple request' → preflight yok; sunucu JSON'u yine ayrıştırır.
+                            if (navigator.sendBeacon) {
+                                navigator.sendBeacon(url, new Blob([body], { type: "text/plain;charset=UTF-8" }));
+                            } else {
+                                var x = new XMLHttpRequest();
+                                x.open("POST", url, true);
+                                x.setRequestHeader("Content-Type", "text/plain;charset=UTF-8");
+                                x.send(body);
+                            }
+                        } catch (e) {}
+                    }
+                    window.__fctBeacon = beacon;
+                    window.addEventListener("error", function (e) {
+                        beacon("error", {
+                            message: (e && e.message) ? String(e.message).slice(0, 500) : "",
+                            source: (e && e.filename) ? String(e.filename).slice(0, 200) : "",
+                            line: (e && e.lineno) || 0, col: (e && e.colno) || 0
+                        });
+                    });
+                    window.addEventListener("unhandledrejection", function (e) {
+                        var m = "";
+                        try { m = (e && e.reason && (e.reason.message || e.reason)) || ""; } catch (x) {}
+                        beacon("unhandledrejection", { message: String(m).slice(0, 500) });
+                    });
+                    // Uygulama mount olursa 'ok' beacon (bir kez). React #root'a çocuk ekleyince.
+                    var okTries = 0;
+                    var okT = setInterval(function () {
+                        okTries++;
+                        var r = document.getElementById("root");
+                        if (r && r.children && r.children.length > 0) { beacon("ok"); clearInterval(okT); }
+                        else if (okTries > 40) clearInterval(okT); // ~8sn sonra bırak (mount_fail'i self-heal atar)
+                    }, 200);
+                } catch (e) {}
+            })();
+        </script>
         <!-- Google Tag Manager -->
         <script>
             // [perf 2026-06-22] dataLayer erken hazir (erken event'ler kuyruga girer);
@@ -287,6 +348,7 @@
                     try {
                         var r = document.getElementById("root");
                         if (!r || (r.children && r.children.length > 0)) return;
+                        try { if (window.__fctBeacon) window.__fctBeacon("mount_fail", { heal: true }); } catch (e) {}
                         var ua = (navigator && navigator.userAgent) ? navigator.userAgent : "";
                         r.innerHTML =
                             '<div style="min-height:70vh;display:flex;flex-direction:column;align-items:center;' +
@@ -334,6 +396,7 @@
                         }
                         if (healedAlready()) { showFallback(); return; } // bir kez denendi; döngü YOK → sessiz beyaz ekran yerine MESAJ
                         try { sessionStorage.setItem("__heal", "1"); } catch (e) {}
+                        try { if (window.__fctBeacon) window.__fctBeacon("heal_reload"); } catch (e) {}
                         var u = location.pathname +
                             (location.search ? location.search + "&" : "?") + "_r=" + Date.now() +
                             location.hash;
