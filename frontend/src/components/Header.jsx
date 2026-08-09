@@ -147,6 +147,7 @@ export default function Header({ hideMenu = false }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
+  const [searchTotal, setSearchTotal] = useState(0);
   const [popularSearches, setPopularSearches] = useState([]);
   const [suggestedProducts, setSuggestedProducts] = useState([]);
   const [activeMenu, setActiveMenu] = useState(null);
@@ -278,11 +279,15 @@ export default function Header({ hideMenu = false }) {
     const timer = setTimeout(async () => {
       if (q.length < 1) {
         setSearchResults([]);
+        setSearchTotal(0);
         return;
       }
       try {
-        const res = await axios.get(`${API}/products?search=${encodeURIComponent(q)}&limit=6`);
+        // Önizleme 12'ye çıkarıldı (6 çok azdı → adında geçse bile ürünler "çıkmıyor" görünüyordu);
+        // toplam sonuç sayısı da alınır ki "Tüm sonuçları gör (N)" ile kalan ürünler belli olsun.
+        const res = await axios.get(`${API}/products?search=${encodeURIComponent(q)}&limit=12`);
         setSearchResults(res.data?.products || []);
+        setSearchTotal(Number(res.data?.total || 0));
       } catch (err) {
         console.error(err);
       }
@@ -735,7 +740,7 @@ export default function Header({ hideMenu = false }) {
                   ))}
                 </div>
                 <button onClick={() => submitSearch()} className="mt-10 text-[11px] tracking-[0.18em] uppercase border-b border-black pb-1 hover:opacity-60 transition-opacity">
-                  Tüm sonuçları gör
+                  {searchTotal > searchResults.length ? `Tüm sonuçları gör (${searchTotal})` : "Tüm sonuçları gör"}
                 </button>
               </div>
             ) : (
