@@ -226,6 +226,69 @@ async def _recent_orders_context(phone: str):
     return "\n".join(lines), len(rows)
 
 
+_KW_STOP = {"ben", "için", "icin", "hangi", "bana", "olur", "boyunda", "boyum", "kiloyum",
+            "kilo", "boy", "cm", "var", "yok", "nasıl", "nasil", "mısın", "misin", "bir", "mi",
+            "mu", "mü", "hakkında", "hakkinda", "bilgi", "almak", "istiyorum", "merhaba", "selam",
+            "acaba", "lütfen", "lutfen", "sipariş", "siparis", "numaram", "numara", "beden",
+            "önerir", "onerir", "misiniz", "musunuz"}
+
+
+def _keywords(text: str):
+    import re as _r
+    toks = _r.findall(r"[a-zçğıöşü0-9]{3,}", (text or "").lower())
+    return [t for t in toks if t not in _KW_STOP]
+
+
+async def _find_product(text: str):
+    """Konuşma metninden (cümlenin içinden) ürünü anahtar-kelime örtüşmesiyle bulur."""
+    import re as _r
+    kws = _keywords(text)
+    if not kws:
+        return None
+    ors = [{"name": {"$regex": _r.escape(k), "$options": "i"}} for k in kws[:6]]
+    try:
+        prods = await db.products.find(
+            {"$or": ors}, {"_id": 0, "id": 1, "name": 1}).limit(15).to_list(15)
+    except Exception:
+        return None
+    if not prods:
+        return None
+    def _score(p):
+        nm = (p.get("name") or "").lower()
+        return sum(1 for k in kws if k in nm)
+    prods.sort(key=_score, reverse=True)
+    return prods[0] if _score(prods[0]) > 0 else None
+
+
+async def _size_context(product) -> str:
+    """Ürünün beden tablosu (beden×ölçü) + manken ölçüleri — boy/kilo/beden önerisi için."""
+    if not product:
+        return ""
+    pid = product.get("id")
+    st = await db.size_tables.find_one({"product_id": pid}, {"_id": 0})
+    if not (st and st.get("sizes")):
+        try:
+            from routes.size_tables import _inherited_size_table
+            st = await _inherited_size_table(pid)
+        except Exception:
+            st = None
+    if not (st and st.get("sizes")):
+        return ""
+    cols = st.get("columns") or []
+    values = st.get("values") or {}
+    rows = ["Beden | " + " | ".join(cols)] if cols else ["Bedenler: " + ", ".join(st.get("sizes") or [])]
+    if cols:
+        for sz in (st.get("sizes") or []):
+            m = values.get(sz) or {}
+            rows.append(f"{sz} | " + " | ".join(str(m.get(c, "-")) for c in cols))
+    block = f"{product.get('name')} — beden tablosu (cm):\n" + "\n".join(rows)
+    mi = st.get("model_info") or {}
+    mparts = [f"{k}: {v}" for k, v in mi.items() if v]
+    if mparts:
+        block += "\nManken ölçüleri (referans): " + ", ".join(mparts)
+    return block
+
+
 async def _recent_dialog(sender: str, limit: int = 6) -> str:
     """Bu müşteriyle son konuşma turlarını (kronolojik) döndürür — AI'nın tekrar
     tanıtmaması ve TUTARLI devam etmesi için. Sadece gerçek soru/cevap turları."""
@@ -283,7 +346,9 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         # Bağlam topla (grounded): bilgi bankası + ürün(açıklama/ölçü) + son siparişler +
         # firma/banka/politika. Amaç: müşterinin HER sorusuna sağlanan bilgiyle cevap.
         kb_ctx = await _gather_kb_context(body)
-        prod_ctx = await _gather_product_context(body)
+        product = await _find_product(body)
+        prod_ctx = await _gather_product_context((product or {}).get("name") or body)
+        size_ctx = await _size_context(product)
         ord_ctx, ord_count = await _recent_orders_context(sender)
         extra_ctx = await _extra_context()
         dialog = await _recent_dialog(sender)
@@ -330,7 +395,10 @@ async def _handle_inbound(sender: str, mid: str, body: str,
                 system += ("KURAL(sipariş): Müşterinin TEK siparişi var. Varsaymadan önce "
                            "'#<no> (<ürün>, <tarih>) siparişiniz için mi soruyorsunuz?' diye TEYİT et; onaylayınca detay ver.\n")
         if prod_ctx:
-            system += f"\n[Ürün Bilgisi — açıklama/özellik/ölçü]\n{prod_ctx}\n"
+            system += f"\n[Ürün Bilgisi — açıklama/özellik(sezon/kalıp)]\n{prod_ctx}\n"
+        if size_ctx:
+            system += (f"\n[Beden Tablosu / Ölçüler — müşteri boy/kilo/beden söylerse ölçülere ve "
+                       f"manken referansına göre UYGUN BEDENİ öner, kısa gerekçe ver]\n{size_ctx}\n")
         if extra_ctx.get("bank"):
             system += f"\n[Havale/EFT Hesap Bilgisi]\n{extra_ctx['bank']}\n"
         if extra_ctx.get("company"):
