@@ -791,16 +791,106 @@ async def _match_product_by_fingerprint(qa: dict):
     scored = sorted(((_fp_score(qa, d.get("attrs") or {}), d) for d in docs),
                     key=lambda x: x[0], reverse=True)
     top_s, top_d = scored[0]
-    cands = [d for s, d in scored[:3] if s > 0]
-    if top_s < 3.0:
-        return None, cands, top_s
-    try:
-        prod = await db.products.find_one({"id": top_d["product_id"]},
-                                          {"_id": 0, "id": 1, "name": 1, "slug": 1})
-    except Exception:
-        prod = None
-    prod = prod or {"id": top_d.get("product_id"), "name": top_d.get("name"), "slug": top_d.get("slug")}
+    # ADAY HAVUZU: görsel-görsel karşılaştırma (renk-tonu) için ilk 8 aday (puanı >0).
+    # Renk vision'da yanlış adlandırılabildiğinden aday havuzunu GENİŞ tutuyoruz;
+    # nihai renk/model kararını _vision_pick_match (görselden görsele) verir.
+    cands = [d for s, d in scored[:8] if s > 0] or [d for _, d in scored[:8]]
+    prod = None
+    if top_s >= 3.0:
+        try:
+            prod = await db.products.find_one({"id": top_d["product_id"]},
+                                              {"_id": 0, "id": 1, "name": 1, "slug": 1})
+        except Exception:
+            prod = None
+        prod = prod or {"id": top_d.get("product_id"), "name": top_d.get("name"), "slug": top_d.get("slug")}
     return prod, cands, top_s
+
+
+async def _vision_pick_match(img_bytes: bytes, mime: str, candidates: list,
+                             api_key: str, model: str, provider: str):
+    """GÖRSELDEN GÖRSELE karşılaştırma: müşteri görseli + aday ürün görselleri modele verilir,
+    AYNI ürün (aynı model + AYNI RENK TONU + detay) seçtirilir. Renk yakınlığını (ekru/bej/beyaz,
+    lacivert/siyah…) ayırt etmek için parmak-izi (isim tabanlı renk) yerine gerçek görsel kıyas.
+    Döner: {id,name,slug} (kesin eşleşme) ya da None."""
+    import base64
+    import json as _json
+    cands = [c for c in (candidates or []) if c.get("image_url")][:6]
+    if not cands:
+        return None
+    prov = (provider or "openai").strip().lower()
+    b64 = base64.b64encode(img_bytes).decode()
+    listing = "\n".join(f"{i + 1}. {c.get('name', '')}" for i, c in enumerate(cands))
+    instr = (
+        "İLK görsel MÜŞTERİNİN sorduğu üründür. Sonraki numaralı görseller mağazadaki ADAY ürünlerdir. "
+        "Müşterinin ürünüyle AYNI ürünü seç: aynı model/kesim + AYNI RENK + aynı detaylar. RENK TONUNU çok "
+        "dikkatli ayırt et (ekru/bej/krem/beyaz, lacivert/siyah, yeşil/haki gibi yakın tonları KARIŞTIRMA). "
+        "Kesin aynı ürün+renk yoksa 0 döndür. SADECE şu JSON: "
+        f"{{\"match\": <1-{len(cands)} arası numara ya da 0>, \"confidence\": <0.0-1.0>}}\n"
+        f"Adaylar:\n{listing}"
+    )
+    raw = ""
+    try:
+        if prov in ("gemini", "google", "google-gemini"):
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            parts = [{"text": instr}, {"inline_data": {"mime_type": mime or "image/jpeg", "data": b64}}]
+            for c in cands:
+                cb, cm = await _download_url_image(c["image_url"])
+                if cb:
+                    parts.append({"inline_data": {"mime_type": cm or "image/jpeg",
+                                                  "data": base64.b64encode(cb).decode()}})
+            resp = await client.aio.models.generate_content(
+                model=model or "gemini-3.1-flash",
+                contents=[{"role": "user", "parts": parts}],
+                config={"response_mime_type": "application/json"})
+            raw = getattr(resp, "text", None) or ""
+        elif prov in ("anthropic", "claude"):
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=api_key)
+            content = [{"type": "text", "text": instr},
+                       {"type": "image", "source": {"type": "base64", "media_type": mime or "image/jpeg", "data": b64}}]
+            for c in cands:
+                cb, cm = await _download_url_image(c["image_url"])
+                if cb:
+                    content.append({"type": "image", "source": {"type": "base64",
+                                                                 "media_type": cm or "image/jpeg",
+                                                                 "data": base64.b64encode(cb).decode()}})
+            msg = await client.messages.create(model=model or "claude-sonnet-4-6", max_tokens=120,
+                                               messages=[{"role": "user", "content": content}])
+            raw = "".join(getattr(b, "text", "") or "" for b in (msg.content or []))
+        else:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=api_key)
+            content = [{"type": "text", "text": instr},
+                       {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}]
+            for c in cands:
+                content.append({"type": "image_url", "image_url": {"url": c["image_url"]}})
+            resp = await client.chat.completions.create(
+                model=model or "gpt-5.6-luna",
+                messages=[{"role": "user", "content": content}],
+                response_format={"type": "json_object"}, max_completion_tokens=120)
+            raw = resp.choices[0].message.content or ""
+    except Exception:
+        logger.exception("vision pick match failed")
+        return None
+    try:
+        d = _json.loads(raw)
+    except Exception:
+        import re as _r
+        m = _r.search(r"\{.*\}", raw, _r.S)
+        try:
+            d = _json.loads(m.group(0)) if m else {}
+        except Exception:
+            d = {}
+    try:
+        idx = int(d.get("match") or 0)
+        conf = float(d.get("confidence") or 0)
+    except Exception:
+        idx, conf = 0, 0.0
+    if 1 <= idx <= len(cands) and conf >= 0.6:
+        c = cands[idx - 1]
+        return {"id": c.get("product_id"), "name": c.get("name"), "slug": c.get("slug")}
+    return None
 
 
 def _primary_image_url(p: dict) -> str:
@@ -1007,21 +1097,41 @@ async def _handle_image(sender: str, mid: str, media_id: str, caption: str,
             return
         _model = settings.get("fast_model") or settings.get("model")
         _prov = settings.get("provider", "openai")
-        # 1) GÖRSEL PARMAK İZİ ile hafızadaki ürüne eşleştir (yüksek doğruluk).
-        matched = None
+        # 1) GÖRSEL PARMAK İZİ ile aday havuzunu daralt (kategori/öznitelik).
+        cands = []
+        fp_best = None
         try:
             qa = await _visual_fingerprint(img, mime, api_key, _model, _prov)
-            matched, cands, score = await _match_product_by_fingerprint(qa)
+            fp_best, cands, score = await _match_product_by_fingerprint(qa)
         except Exception:
             logger.exception("WA visual match failed")
-            matched, cands = None, []
+            fp_best, cands = None, []
+        # 2) GÖRSELDEN GÖRSELE karşılaştırma — adayların GERÇEK görselleriyle kıyasla
+        #    (renk tonunu ayırt eder). Kesin eşleşme varsa DOĞRUDAN söyle + link (soru sorma).
+        matched = None
+        if cands:
+            try:
+                matched = await _vision_pick_match(img, mime, cands, api_key, _model, _prov)
+            except Exception:
+                logger.exception("WA vision pick failed")
+                matched = None
         if matched and matched.get("name"):
-            # Ürünü kilitle; AI 'bu ürün mü?' diye TEYİT etsin (parmak izi %100 değil).
             await _set_active_product(sender, matched)
+            body = (f"[Müşteri bir ürün GÖRSELİ gönderdi. Görselden-görsele karşılaştırma ile ürün KESİN "
+                    f"belirlendi: \"{matched.get('name')}\". Müşteriye DOĞRUDAN 'Görselinizdeki ürün: "
+                    f"{matched.get('name')} 🌸' de ve [Ürün Linki]'ni paylaş. 'Bu ürün mü?' diye SORMA — net "
+                    f"söyle. Ardından müşterinin sorusuna (beden/fiyat/stok vb.) bu ürün üzerinden cevap ver.]")
+            if caption:
+                body += f" Müşteri notu: {caption}"
+            await _handle_inbound(sender, mid + "_img", body, name, own_pnid)
+            return
+        # 3) Görsel karşılaştırma kesin değil ama parmak-izi güçlü bir aday verdiyse: yine de o ürünü
+        #    öner ama bu belirsiz durumda teyit iste.
+        if fp_best and fp_best.get("name"):
+            await _set_active_product(sender, fp_best)
             alt = ", ".join(d.get("name") or "" for d in (cands or [])[1:3] if d.get("name"))
-            body = (f"[Müşteri bir ürün GÖRSELİ gönderdi. Görsel-hafıza eşleşmesiyle EN OLASI ürün: "
-                    f"\"{matched.get('name')}\". Bundan %100 emin DEĞİLSİN — ürün linkini paylaşıp "
-                    f"'Görselinizdeki bu ürün mü? 🌸' diye MUTLAKA SOR; onaylayınca bu ürün üzerinden devam et.")
+            body = (f"[Müşteri bir ürün GÖRSELİ gönderdi. En olası ürün: \"{fp_best.get('name')}\" ama görsel "
+                    f"karşılaştırması KESİN değil — linki paylaşıp 'Görselinizdeki bu ürün mü? 🌸' diye kısaca teyit et.")
             if alt:
                 body += f" (Değilse alternatifler: {alt})"
             body += "]"
@@ -1029,7 +1139,7 @@ async def _handle_image(sender: str, mid: str, media_id: str, caption: str,
                 body += f" Müşteri notu: {caption}"
             await _handle_inbound(sender, mid + "_img", body, name, own_pnid)
             return
-        # 2) İndeks boş / eşleşme zayıf → eski serbest-metin betim + isim araması (yedek).
+        # 4) İndeks boş / eşleşme yok → eski serbest-metin betim + isim araması (yedek).
         try:
             desc = await _vision_describe(img, mime, api_key, _model, _prov)
         except Exception as e:
@@ -1195,7 +1305,9 @@ async def _handle_inbound(sender: str, mid: str, body: str,
                        "KENDİ KENDİNE BAŞKA ürün adı UYDURMA/ÖNERME/DEĞİŞTİRME. AMA mesaj üründen bağımsızsa "
                        "(selam, 'bot musun', teşekkür, kargo/iade, genel soru) bu ürünü ZORLA araya SOKMA, cümlenin "
                        "sonuna 'X ürünüyle ilgili...' diye EKLEME yapma — sadece sorulan şeye doğal cevap ver. "
-                       "Üründen mi bahsedildiğinden emin değilsen [Ürün Linki] paylaşıp 'bu ürün mü?' diye SOR.\n")
+                       "Ürün NET belirlendiyse (ör. görselden kesin eşleşme, ya da müşterinin verdiği ad birebir) "
+                       "'bu ürün mü?' diye SORMA — ürünü DOĞRUDAN söyle ve [Ürün Linki]'ni paylaş. YALNIZ gerçekten "
+                       "belirsizsen linki paylaşıp kısaca teyit iste.\n")
         if prod_ctx:
             system += f"\n[Ürün Bilgisi — açıklama/özellik(sezon/kalıp)]\n{prod_ctx}\n"
         if size_ctx:
