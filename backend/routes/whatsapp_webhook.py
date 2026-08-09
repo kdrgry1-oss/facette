@@ -1204,6 +1204,24 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         else:
             system += ("\nKURAL(kampanya): Kampanya/indirim sorulursa ve sana kampanya verilmediyse dürüstçe "
                        "'şu an aktif bir kampanya görünmüyor' de; kod/kampanya UYDURMA. Bu soruda da HANDOFF: no.\n")
+        if _ordering_allowed(sender, cfg):
+            system += (
+                "\n[WHATSAPP'TAN SİPARİŞ — bu numara için sipariş oluşturma AÇIK]\n"
+                "Müşteri sipariş vermek/ürünü almak isterse ya da sistemden vermekte zorlanıyorsa "
+                "'dilerseniz bilgilerinizi alıp siparişinizi ben oluşturayım' diye YARDIM teklif et. "
+                "TOPLA: ad-soyad, il, ilçe, açık adres, beden, adet; e-posta (sipariş bildirimi için). "
+                "Ödeme ŞİMDİLİK yalnız HAVALE/EFT. E-posta/SMS ile kampanya-bilgilendirme İZNİ ister misiniz "
+                "diye NAZİKÇE sor. KART BİLGİSİNİ (numara/CVV/şifre) ASLA İSTEME. Eksik bilgi varsa tek tek, "
+                "sıcak bir dille tamamlat. Bilgiler tamamlanınca ÖZET göster ve 'onaylıyor musunuz?' diye SOR. "
+                "Müşteri AÇIKÇA ONAYLAYINCA (ve yalnız o zaman) cevabının EN SONUNA şu bloğu ekle "
+                "(müşteri bu JSON'u GÖRMEZ, sistem işleyip siparişi açar):\n"
+                "---SIPARIS---\n"
+                "{\"ad_soyad\":\"\",\"il\":\"\",\"ilce\":\"\",\"adres\":\"\",\"beden\":\"\",\"adet\":1,"
+                "\"odeme\":\"havale\",\"eposta\":\"\",\"izin_eposta\":false,\"izin_sms\":false}\n---SON---\n"
+                "Sipariş ürünü = yukarıdaki [İLGİLİ ÜRÜN]. Onay YOKKEN bu bloğu SAKIN ekleme, boş/eksik "
+                "bilgiyle ekleme. Müşteri kredi kartıyla ödemek isterse 'kart ödemesini birazdan güvenli "
+                "ödeme linkiyle hallederiz 🌸' de; kart bilgisi isteme (kart akışı çok yakında).\n"
+            )
         if extra_ctx.get("bank"):
             system += f"\n[Havale/EFT Hesap Bilgisi]\n{extra_ctx['bank']}\n"
         if extra_ctx.get("company"):
@@ -1236,6 +1254,23 @@ async def _handle_inbound(sender: str, mid: str, body: str,
             return
 
         reply, confidence, handoff = _parse_meta(str(resp or ""))
+        reply, order_info = _parse_order_directive(reply)   # ---SIPARIS--- bloğunu ayıkla
+
+        # SİPARİŞ DİREKTİFİ: müşteri onayladı, AI sipariş bloğu üretti → SUNUCUDA oluştur.
+        if order_info and _ordering_allowed(sender, cfg):
+            try:
+                order_msg = await _execute_wa_order(sender, name, order_info, product, cfg, extra_ctx)
+            except Exception:
+                logger.exception("WA order exec crashed")
+                order_msg = "Siparişinizi şu an oluşturamadım, birazdan tekrar deneyelim 🌸"
+            final = order_msg
+            if reply and len(reply) < 240:   # AI'nın kısa onay cümlesi varsa öne ekle
+                final = f"{reply}\n\n{order_msg}"
+            reply_wamid = await _send(cfg, sender, final)
+            await _log(sender, body, final, handoff=False, confidence=confidence,
+                       wamid=reply_wamid, product_id=(product or {}).get("id"), note="wa_order")
+            return
+
         threshold = float(settings.get("confidence_threshold", 0.7) or 0.7)
         if confidence < threshold:
             handoff = True
@@ -1595,6 +1630,152 @@ async def _campaigns_context() -> str:
         lines.append(seg)
         if len(lines) >= 10:
             break
+    return "\n".join(lines)
+
+
+# ── WHATSAPP'TAN SİPARİŞ ALDIRMA (test-modu kapılı; PARA-KRİTİK) ─────────────
+# Buse müşterinin bilgilerini toplayıp SUNUCU-otoriter create_order çekirdeğinden sipariş
+# oluşturur (fiyat sunucudan, awaiting_payment; değişmezler korunur). KART BİLGİSİ ALINMAZ.
+# v1: HAVALE + misafir. Kart (iyzico linki) + üyelik sonraki adım.
+class _ReqShim:
+    """create_order yalnız IP/user-agent için request kullanır; sahte-güvenli boş shim."""
+    class _H(dict):
+        def get(self, k, d=""):
+            return dict.get(self, k, d)
+
+    def __init__(self):
+        self.headers = _ReqShim._H()
+        self.client = None
+
+
+def _ordering_allowed(sender, cfg: dict) -> bool:
+    """Sipariş aldırma AÇIK mı ve bu numara için geçerli mi?
+    ordering_mode: off (varsayılan) | test | live. test → yalnız izinli/test numaraları."""
+    mode = (cfg.get("ordering_mode") or "off").strip().lower()
+    if mode == "live":
+        return True
+    if mode == "test":
+        import re as _re
+        tails = {_phone_tail(x) for x in _re.split(r"[,;\s]+", cfg.get("ordering_test_phones") or "") if x}
+        at = _admin_tail(cfg)
+        if at:
+            tails.add(at)
+        tails = {t for t in tails if t}
+        return _phone_tail(sender) in tails
+    return False
+
+
+def _parse_order_directive(text: str):
+    """AI yanıtından ---SIPARIS--- JSON bloğunu çıkarır → (temiz_yanıt, sipariş_dict|None)."""
+    import re as _re
+    import json as _json
+    m = _re.search(r"---SIPARIS---\s*(\{.*?\})\s*(?:---SON---)?", text, _re.S | _re.I)
+    if not m:
+        return text, None
+    clean = (text[:m.start()] + text[m.end():]).strip()
+    try:
+        data = _json.loads(m.group(1))
+    except Exception:
+        return clean, None
+    return clean, (data if isinstance(data, dict) else None)
+
+
+async def _execute_wa_order(sender: str, name: Optional[str], info: dict,
+                            product: dict, cfg: dict, extra_ctx: dict) -> str:
+    """Toplanan bilgilerle HAVALE + misafir siparişi oluşturur (create_order çekirdeği).
+    Döner: müşteriye gönderilecek mesaj."""
+    if not product or not product.get("id"):
+        return ("Hangi ürün için sipariş oluşturacağımı netleştirebilir miyiz? Ürünün linkini "
+                "paylaşırsanız hemen ilerleyelim 🌸")
+    try:
+        prod = await db.products.find_one({"id": product.get("id")}, {"_id": 0})
+    except Exception:
+        prod = None
+    if not prod:
+        return "Üründe bir aksilik oldu, birazdan tekrar deneyelim 🌸"
+    beden = str(info.get("beden") or "").strip().upper()
+    try:
+        adet = max(1, int(info.get("adet") or 1))
+    except Exception:
+        adet = 1
+    variant_id = None
+    variants = prod.get("variants") or []
+    if variants:
+        for v in variants:
+            if str(v.get("size", "")).strip().upper() == beden:
+                variant_id = v.get("id")
+                break
+        if not variant_id:
+            mevcut = ", ".join(sorted({str(v.get("size")) for v in variants if v.get("size")}))
+            return (f"{prod.get('name')} için '{beden or '—'}' bedenini bulamadım. "
+                    f"Mevcut bedenler: {mevcut}. Hangisini istersiniz?")
+    # Zorunlu adres alanları
+    full = (info.get("ad_soyad") or name or "").strip()
+    il = (info.get("il") or "").strip()
+    ilce = (info.get("ilce") or "").strip()
+    adres = (info.get("adres") or "").strip()
+    if not (full and il and adres):
+        return ("Siparişi oluşturabilmem için ad-soyad, il/ilçe ve açık adres bilgisi gerekiyor. "
+                "Paylaşırsanız hemen tamamlayayım 🌸")
+    parts = full.split()
+    fn = parts[0] if parts else full
+    ln = " ".join(parts[1:]) if len(parts) > 1 else ""
+    email = (info.get("eposta") or "").strip()
+    order_data = {
+        "items": [{"product_id": prod["id"], "variant_id": variant_id, "quantity": adet}],
+        "shipping_address": {
+            "first_name": fn, "last_name": ln, "full_name": full,
+            "phone": sender, "email": email,
+            "city": il, "district": ilce, "address": adres,
+        },
+        "payment_method": "bank_transfer",
+        "source": "whatsapp_ai",
+    }
+    try:
+        from .orders import create_order as _co
+        _core = getattr(_co, "__wrapped__", _co)   # slowapi limiter'ı atla, çekirdeği çağır
+        res = await _core(order_data, _ReqShim(), None)
+    except Exception as e:
+        detail = getattr(e, "detail", None)
+        logger.exception("WA order create failed")
+        if detail:
+            return f"Siparişi oluştururken bir sorun çıktı: {detail}"
+        return "Siparişinizi şu an oluşturamadım, birazdan tekrar deneyelim 🌸"
+    onum = res.get("order_number")
+    oid = res.get("order_id")
+    total = None
+    try:
+        o = await db.orders.find_one({"id": oid}, {"_id": 0, "total": 1})
+        total = o.get("total") if o else None
+    except Exception:
+        pass
+    # İYS izni (verildiyse) — WhatsApp'tan alınan ticari-ileti onayını bildir
+    try:
+        chans = []
+        if info.get("izin_eposta"):
+            chans.append("EPOSTA")
+        if info.get("izin_sms"):
+            chans.append("MESAJ")
+        if chans:
+            from .iys import record_consent
+            await record_consent(email, sender, chans, status="ONAY",
+                                 source="HS_WEB", order_id=oid)
+    except Exception:
+        logger.exception("WA iys consent failed")
+    bank = extra_ctx.get("bank") or ""
+    lines = ["Siparişinizi oluşturdum 🌸", f"Sipariş No: #{onum}"]
+    seg = f"Ürün: {prod.get('name')}"
+    if variant_id:
+        seg += f" · Beden: {beden}"
+    seg += f" · Adet: {adet}"
+    lines.append(seg)
+    if total is not None:
+        lines.append(f"Tutar: {total} TL")
+    if bank:
+        lines.append(f"\nHavale/EFT ile ödeme:\n{bank}\nAçıklamaya sipariş numaranızı (#{onum}) "
+                     "yazmayı unutmayın. Ödemeniz onaylanınca siparişiniz hazırlanır 🌸")
+    else:
+        lines.append("\nHavale bilgilerini birazdan ileteceğim.")
     return "\n".join(lines)
 
 

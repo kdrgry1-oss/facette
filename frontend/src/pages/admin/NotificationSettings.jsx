@@ -211,6 +211,31 @@ export default function NotificationSettings() {
             cevap verecek temsilcinin kişisel WhatsApp numarası olmalı.
           </p>
         </div>
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          <label className="block text-xs text-gray-600 mb-1">WhatsApp'tan sipariş aldırma</label>
+          <div className="flex flex-col md:flex-row gap-3 md:items-center">
+            <select value={cfg.providers?.whatsapp_meta?.ordering_mode || "off"}
+              onChange={(e) => setProvField("whatsapp_meta", "ordering_mode", e.target.value)}
+              className="border border-gray-200 rounded px-3 py-2 text-sm"
+              data-testid="wa-ordering-mode">
+              <option value="off">Kapalı</option>
+              <option value="test">Test (sadece izinli numaralar)</option>
+              <option value="live">Canlı (tüm müşteriler)</option>
+            </select>
+            <input value={cfg.providers?.whatsapp_meta?.ordering_test_phones || ""}
+              onChange={(e) => setProvField("whatsapp_meta", "ordering_test_phones", e.target.value)}
+              placeholder="Test numaraları (virgülle): +90 5xx…, +90 5yy…"
+              className="flex-1 border border-gray-200 rounded px-3 py-2 text-sm"
+              data-testid="wa-ordering-test-phones" />
+          </div>
+          <p className="text-[11px] text-gray-500 mt-2">
+            Açıkken Buse, müşterinin bilgilerini (ad-soyad, adres, beden, adet, e-posta + izin) alıp
+            <strong> siparişi sizin adınıza oluşturur</strong> (fiyat sunucudan; <strong>kart bilgisi asla istenmez</strong>).
+            Şu an <strong>havale/EFT</strong> siparişi destekleniyor; kart (iyzico ödeme linki) çok yakında.
+            <strong> Test</strong> modunda yalnız buraya yazdığınız numaralar (ve temsilci numarası) sipariş oluşturabilir —
+            canlı müşteriler etkilenmez. E-posta/SMS izinleri İYS'ye bildirilir.
+          </p>
+        </div>
         <p className="text-[11px] text-gray-500 mt-2">
           Webhook Callback URL: <code>{`${(process.env.REACT_APP_BACKEND_URL||'').replace(/\/$/,'')}/api/whatsapp/webhook`}</code> — Meta uygulamasında bu URL + yukarıdaki Verify Token ile "messages" alanına abone olun.
         </p>
