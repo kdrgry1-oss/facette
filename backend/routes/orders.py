@@ -8376,9 +8376,10 @@ async def export_gider_pusulasi_excel(
     seen_claim, seen_return = set(), set()
     records = []
     for gp in all_vouchers:
-        # SÜZGEÇ = İADE ONAY TARİHİ (Kadir isteği). (Eskiden kesilmiş pusulada kesim tarihi
-        # kullanılıyordu; artık tüm satırlar iade onay tarihine göre süzülür.)
-        if not _in_range(_appr_date_for(gp)):
+        # SÜZGEÇ = PUSULANIN KESİLDİĞİ (FATURA) TARİHİ (Kadir isteği): gider pusulası HANGİ AY
+        # kesildiyse Excel'de o ayda görünmeli — sipariş/iptal/iade-onay tarihine göre DEĞİL.
+        # (Filtre = "Fatura Tarihi" kolonuyla AYNI alan → gp.date/created_at.)
+        if not _in_range(gp.get("date") or gp.get("created_at")):
             continue
         # kaynak süzgeci: site pusulası source=site; TY/HB pusulasında claim_id var → platform claim'den
         cid = str(gp.get("claim_id") or "")

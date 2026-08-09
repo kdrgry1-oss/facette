@@ -138,8 +138,9 @@ async def sales_summary(
     _CANCEL_ST = ["cancelled", "cancel_refunded"]
 
     async def _agg(s_iso: str, e_iso: str) -> dict:
-        _m = {"created_at": {"$gte": s_iso, "$lt": e_iso}}
         _sc = _source_cond(source)
+        # ── 1) CİRO (brüt) + net sipariş/adet: SİPARİŞ tarihine göre (satışın gerçekleştiği ay).
+        _m = {"created_at": {"$gte": s_iso, "$lt": e_iso}}
         if _sc:
             _m.update(_sc)
         pipe = [
@@ -147,9 +148,6 @@ async def sales_summary(
             {"$group": {
                 "_id": None,
                 "revenue_all": {"$sum": {"$ifNull": ["$total", 0]}},
-                "cancel_total": {"$sum": {"$cond": [{"$in": ["$status", _CANCEL_ST]}, {"$ifNull": ["$total", 0]}, 0]}},
-                "return_total": {"$sum": {"$cond": [{"$in": ["$status", _RETURN_ST]}, {"$ifNull": ["$total", 0]}, 0]}},
-                "net_revenue": {"$sum": {"$cond": [{"$in": ["$status", _CANCEL_ST + _RETURN_ST]}, 0, {"$ifNull": ["$total", 0]}]}},
                 "net_orders": {"$sum": {"$cond": [{"$in": ["$status", _CANCEL_ST + _RETURN_ST]}, 0, 1]}},
                 "items_sold": {"$sum": {"$cond": [
                     {"$in": ["$status", _CANCEL_ST + _RETURN_ST]}, 0,
@@ -159,11 +157,47 @@ async def sales_summary(
         ]
         r = await db.orders.aggregate(pipe).to_list(1)
         d = r[0] if r else {}
+        revenue_all = float(d.get("revenue_all") or 0)
+
+        # ── 2) İPTAL: İPTALİN YAPILDIĞI tarihe göre (cancelled_at; yoksa updated_at) — sipariş
+        #    hangi ay verilmiş olursa olsun, iptal HANGİ AY yapıldıysa o aya yansır (Kadir isteği).
+        async def _sum_by_action(status_list, date_field, fallback_field):
+            _mm = {"status": {"$in": status_list}}
+            if _sc:
+                _mm.update(_sc)
+            _pipe = [
+                {"$match": _mm},
+                {"$addFields": {"_ad": {"$ifNull": [f"${date_field}", f"${fallback_field}"]}}},
+                {"$match": {"_ad": {"$gte": s_iso, "$lt": e_iso}}},
+                {"$group": {"_id": None, "t": {"$sum": {"$ifNull": ["$total", 0]}},
+                            "n": {"$sum": 1}}},
+            ]
+            _r = await db.orders.aggregate(_pipe).to_list(1)
+            _x = _r[0] if _r else {}
+            return float(_x.get("t") or 0), int(_x.get("n") or 0)
+
+        cancel_total, _cn = await _sum_by_action(_CANCEL_ST, "cancelled_at", "updated_at")
+        # ── 3) İADE: İADE ONAY tarihine göre (return_approved_at; yoksa refund_paid_at→updated_at).
+        _mr = {"status": {"$in": _RETURN_ST}}
+        if _sc:
+            _mr.update(_sc)
+        _rpipe = [
+            {"$match": _mr},
+            {"$addFields": {"_ad": {"$ifNull": ["$return_approved_at",
+                                    {"$ifNull": ["$refund_paid_at", "$updated_at"]}]}}},
+            {"$match": {"_ad": {"$gte": s_iso, "$lt": e_iso}}},
+            {"$group": {"_id": None, "t": {"$sum": {"$ifNull": ["$total", 0]}}}},
+        ]
+        _rr = await db.orders.aggregate(_rpipe).to_list(1)
+        return_total = float((_rr[0] if _rr else {}).get("t") or 0)
+
+        # NET = o ayki ciro − o ay İPTAL edilen − o ay İADE onaylanan (eylem tarihine göre).
+        net_revenue = revenue_all - cancel_total - return_total
         return {
-            "revenue": round(float(d.get("revenue_all") or 0), 2),
-            "net": round(float(d.get("net_revenue") or 0), 2),
-            "cancels": round(float(d.get("cancel_total") or 0), 2),
-            "returns": round(float(d.get("return_total") or 0), 2),
+            "revenue": round(revenue_all, 2),
+            "net": round(net_revenue, 2),
+            "cancels": round(cancel_total, 2),
+            "returns": round(return_total, 2),
             "orders": int(d.get("net_orders") or 0),
             "items": int(d.get("items_sold") or 0),
         }
