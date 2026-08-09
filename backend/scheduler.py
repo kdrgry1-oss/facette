@@ -1940,6 +1940,17 @@ async def _refresh_instagram_token():
         logger.warning(f"[instagram] token refresh hata: {e}")
 
 
+async def _run_visual_index_refresh():
+    """WhatsApp görselden-ürün-tanıma hafızasını OTOMATİK doldurur/günceller.
+    Yalnız EKSİK (indekslenmemiş) aktif ürünleri işler → ilk çalışmada tümünü kurar,
+    sonraki çalışmalarda yeni eklenenleri tamamlar (token/manuel tetik gerekmez)."""
+    try:
+        from routes.whatsapp_webhook import _run_visual_index_build
+        await _run_visual_index_build(force=False)
+    except Exception as e:
+        logger.error(f"[cron] görsel indeks yenileme hatası: {e}")
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -1956,6 +1967,18 @@ def start_scheduler():
         hours=24,
         id="instagram_token_refresh",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+        max_instances=1,
+        coalesce=True,
+    )
+    # WhatsApp görsel hafızası (görselden ürün tanıma) — OTOMATİK doldur/güncelle.
+    # İlk çalışma boot+3dk'da tüm eksikleri kurar; 12 saatte bir yeni ürünleri tamamlar
+    # (yalnız indekslenmemişleri işler → tekrar tarama yapmaz, maliyet düşük).
+    _add(
+        _run_visual_index_refresh,
+        "interval",
+        hours=12,
+        id="wa_visual_index_refresh",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=180),
         max_instances=1,
         coalesce=True,
     )
