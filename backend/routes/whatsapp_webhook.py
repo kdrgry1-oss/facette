@@ -226,9 +226,11 @@ async def receive_webhook(request: Request, background: BackgroundTasks):
                     body = ((m.get("text") or {}).get("body") or "").strip()
                     if not body:
                         continue
+                    # Müşteri bir mesajı ALINTILAYIP yanıtladıysa (WhatsApp reply) → o mesajın id'si
+                    q_id = (m.get("context") or {}).get("id") or ""
                     background.add_task(
                         _handle_inbound, sender=sender, mid=mid, body=body,
-                        name=contacts.get(sender), own_pnid=own_pnid,
+                        name=contacts.get(sender), own_pnid=own_pnid, quoted_id=q_id,
                     )
                 elif mtype == "image":
                     media_id = (m.get("image") or {}).get("id")
@@ -340,7 +342,22 @@ async def _recent_orders_context(phone: str):
         except Exception:
             rows = []
     if not rows:
-        return "", 0
+        return "", 0, 0
+    # Kargo durumu sınıflandırma — "siparişim nerede" için: YOLDA olanlara odaklan,
+    # hepsi teslimse #no+tarihten sor.
+    def _is_delivered(o):
+        s = (o.get("status") or "").lower()
+        return any(k in s for k in ("teslim", "deliver", "tamamlan", "complete"))
+
+    def _is_in_transit(o):
+        s = (o.get("status") or "").lower()
+        if _is_delivered(o):
+            return False
+        if o.get("tracking_number"):
+            return True
+        return any(k in s for k in ("kargo", "transit", "shipped", "yolda", "gonderi", "gönderi", "sevk"))
+
+    in_transit = [o for o in rows if _is_in_transit(o)]
     lines = ["[Müşterinin Son Siparişleri — sipariş/kargo/ürün bilgisini SADECE buradan ver, uydurma]"]
     for o in rows:
         prods = []
@@ -358,12 +375,16 @@ async def _recent_orders_context(phone: str):
         if date_str:
             seg += f" | tarih={date_str}"
         seg += f" | durum={o.get('status','?')}"
+        if _is_in_transit(o):
+            seg += " [KARGODA]"
+        elif _is_delivered(o):
+            seg += " [TESLİM EDİLDİ]"
         if o.get("payment_status"):
             seg += f", ödeme={o.get('payment_status')}"
         if o.get("tracking_number"):
             seg += f", kargo={o.get('cargo_company') or ''} takip={o.get('tracking_number')}"
         lines.append(seg)
-    return "\n".join(lines), len(rows)
+    return "\n".join(lines), len(rows), len(in_transit)
 
 
 _KW_STOP = {"ben", "için", "icin", "hangi", "bana", "olur", "boyunda", "boyum", "kiloyum",
@@ -411,6 +432,73 @@ async def _find_product(text: str):
         return sum(1 for k in kws if k in nm)
     cands.sort(key=_score, reverse=True)
     return cands[0] if _score(cands[0]) > 0 else None
+
+
+# ── ÜRÜN KİLİDİ (konu takibi) ────────────────────────────────────────────────
+# AI'nın müşterinin sorduğu ürünü konuşma boyunca SABİT tutması için. Eskiden ürün
+# her mesajda TÜM diyalogdan (AI'nın kendi önceki tahminleri dahil) yeniden bulunuyor,
+# bu da AI'yı adım adım BAŞKA ürüne kaydırıyordu (görseldeki takım → 'Lumea ceket' →
+# 'Kapri Pantolon'). Artık ürün müşterinin AÇIK niyetinden (bu mesaj / alıntı / görsel)
+# bir kez kilitlenir; ürünsüz mesajlarda (ör. '170 boy 67 kilo') kilit sürdürülür.
+async def _set_active_product(phone: str, product: dict):
+    if not product or not product.get("id"):
+        return
+    try:
+        await db.whatsapp_active_product.update_one(
+            {"_id": phone},
+            {"$set": {"product_id": product.get("id"), "name": product.get("name"),
+                      "slug": product.get("slug"), "at": _now()}},
+            upsert=True)
+    except Exception:
+        pass
+
+
+async def _get_active_product(phone: str, max_age_hours: int = 8):
+    """Kilitli (aktif) ürünü döndür — çok eskiyse (yeni konuşma) yok say."""
+    try:
+        rec = await db.whatsapp_active_product.find_one({"_id": phone})
+    except Exception:
+        rec = None
+    if not rec or not rec.get("product_id"):
+        return None
+    try:
+        at = rec.get("at") or ""
+        if at:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(at)).total_seconds()
+            if age > max_age_hours * 3600:
+                return None
+    except Exception:
+        pass
+    try:
+        p = await db.products.find_one({"id": rec["product_id"]},
+                                       {"_id": 0, "id": 1, "name": 1, "slug": 1})
+        if p:
+            return p
+    except Exception:
+        pass
+    return {"id": rec["product_id"], "name": rec.get("name"), "slug": rec.get("slug")}
+
+
+async def _quoted_context(quoted_id: str):
+    """Müşteri bir mesajı ALINTILAYIP (WhatsApp reply) yazdıysa: alıntılanan mesajın
+    metnini + (varsa o mesajın konuştuğu) ürünü döndür → (ürün, metin)."""
+    if not quoted_id:
+        return None, ""
+    try:
+        row = await db.whatsapp_conversations.find_one({"wamid": quoted_id})
+    except Exception:
+        row = None
+    if not row:
+        return None, ""
+    qtext = row.get("outbound") or row.get("inbound") or ""
+    prod = None
+    pid = row.get("product_id")
+    if pid:
+        try:
+            prod = await db.products.find_one({"id": pid}, {"_id": 0, "id": 1, "name": 1, "slug": 1})
+        except Exception:
+            prod = None
+    return prod, qtext
 
 
 async def _size_context(product) -> str:
@@ -678,7 +766,8 @@ async def _handle_image(sender: str, mid: str, media_id: str, caption: str,
 
 
 async def _handle_inbound(sender: str, mid: str, body: str,
-                          name: Optional[str], own_pnid: Optional[str]):
+                          name: Optional[str], own_pnid: Optional[str],
+                          quoted_id: str = ""):
     try:
         if await _already_processed(mid):
             return
@@ -715,13 +804,22 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         # firma/banka/politika. Amaç: müşterinin HER sorusuna sağlanan bilgiyle cevap.
         kb_ctx = await _gather_kb_context(body)
         dialog = await _recent_dialog(sender)
-        # Ürünü mesajdan bul; kısa/beden yanıtıysa (ör. "XL") KONUŞMADAN çöz.
-        product = await _find_product(body)
-        if not product and dialog:
-            product = await _find_product(dialog)
+        # ÜRÜN KİLİDİ — müşterinin sorduğu ürünü SABİT tut, AI kendi kendine ürün DEĞİŞTİRMESİN.
+        # Öncelik: (1) BU mesajda açıkça geçen ürün → kilitle; (2) müşteri bir mesajı
+        # ALINTILADIYSA o mesajın ürünü; (3) daha önce kilitlenen aktif ürün (drift YOK).
+        quoted_product, quoted_text = await _quoted_context(quoted_id)
+        explicit = await _find_product(body)
+        if explicit:
+            product = explicit
+            await _set_active_product(sender, explicit)
+        elif quoted_product:
+            product = quoted_product
+            await _set_active_product(sender, quoted_product)
+        else:
+            product = await _get_active_product(sender)   # kilitli ürünü sürdür (dialog'dan TÜRETME)
         prod_ctx = await _gather_product_context((product or {}).get("name") or body)
         size_ctx = await _size_context(product)
-        ord_ctx, ord_count = await _recent_orders_context(sender)
+        ord_ctx, ord_count, ord_transit = await _recent_orders_context(sender)
         extra_ctx = await _extra_context()
         plink = _product_link(product, extra_ctx.get("site_url"), _detect_size(body))
 
@@ -786,15 +884,29 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         )
         if dialog:
             system += f"\n[Önceki Konuşma — son mesajlar; buna göre TUTARLI ve tekrarsız devam et]\n{dialog}\n"
+        if quoted_text:
+            system += (f"\n[Müşteri ŞU mesajı ALINTILAYIP yanıtladı — sorusu DOĞRUDAN bununla ilgili, "
+                       f"buna göre cevapla]\n\"{quoted_text[:400]}\"\n")
         if ord_ctx:
             system += f"\n{ord_ctx}\n"
-            if ord_count >= 2:
-                system += ("KURAL(sipariş): Müşterinin BİRDEN FAZLA siparişi var. Sipariş/kargo sorusunda "
-                           "hemen cevaplama; önce hangisini kastettiğini SOR — siparişleri #no + ürün adı + "
-                           "TARİH ile kısaca listele ve 'Hangi siparişiniz için soruyorsunuz?' de. Seçince yanıtla.\n")
+            # KARGO ODAK: "siparişim nerede" için yoldaki siparişe odaklan, hepsi teslimse sor.
+            if ord_transit >= 1:
+                system += ("KURAL(kargo): Müşteride KARGODA (yolda) sipariş VAR. 'Siparişim nerede/kargom' "
+                           "sorusunda YALNIZ [KARGODA] işaretli sipariş(ler) hakkında bilgi ver: kargo firması + "
+                           "takip no + güncel durum. Teslim edilmiş siparişleri KARIŞTIRMA. Birden fazla KARGODA "
+                           "sipariş varsa hangisi olduğunu #no+tarih ile sor.\n")
+            elif ord_count >= 2:
+                system += ("KURAL(sipariş): Müşterinin BİRDEN FAZLA siparişi var ve hepsi teslim/kargoda değil. "
+                           "Sipariş/kargo sorusunda hemen cevaplama; önce hangisini kastettiğini SOR — siparişleri "
+                           "#no + ürün adı + TARİH ile kısaca listele ve 'Hangi siparişiniz için soruyorsunuz?' de.\n")
             elif ord_count == 1:
                 system += ("KURAL(sipariş): Müşterinin TEK siparişi var. Varsaymadan önce "
                            "'#<no> (<ürün>, <tarih>) siparişiniz için mi soruyorsunuz?' diye TEYİT et; onaylayınca detay ver.\n")
+        if product and product.get("name"):
+            system += (f"\n[AKTİF ÜRÜN — müşterinin ŞU AN sorduğu ürün]\n{product.get('name')}\n"
+                       "KURAL(ürün): SADECE bu ürün hakkında konuş. KENDİ KENDİNE başka bir ürün adı UYDURMA/ÖNERME/"
+                       "DEĞİŞTİRME. Müşteri açıkça yeni bir ürün adı vermedikçe ürünü DEĞİŞTİRME. Bu üründen mi "
+                       "bahsedildiğinden emin değilsen [Ürün Linki] paylaşıp 'bu ürün mü?' diye SOR; rastgele ürün ADI UYDURMA.\n")
         if prod_ctx:
             system += f"\n[Ürün Bilgisi — açıklama/özellik(sezon/kalıp)]\n{prod_ctx}\n"
         if size_ctx:
@@ -844,8 +956,9 @@ async def _handle_inbound(sender: str, mid: str, body: str,
             await _log(sender, body, reply, handoff=True, confidence=confidence)
             return
 
-        await _send(cfg, sender, reply)
-        await _log(sender, body, reply, handoff=False, confidence=confidence)
+        reply_wamid = await _send(cfg, sender, reply)
+        await _log(sender, body, reply, handoff=False, confidence=confidence,
+                   wamid=reply_wamid, product_id=(product or {}).get("id"))
     except Exception as e:
         logger.exception(f"WA inbound handler error: {e}")
 
@@ -1059,13 +1172,18 @@ async def _send(cfg: dict, to: str, message: str) -> str:
 
 
 async def _log(phone: str, inbound: str, outbound: str, *, handoff: bool,
-               confidence: float, note: str = ""):
+               confidence: float, note: str = "", wamid: str = "", product_id=None):
     try:
-        await db.whatsapp_conversations.insert_one({
+        doc = {
             "phone": phone, "inbound": inbound, "outbound": outbound,
             "handoff": handoff, "confidence": confidence, "note": note,
             "created_at": _now(),
-        })
+        }
+        if wamid:
+            doc["wamid"] = wamid          # gönderilen AI mesajının Meta id'si (alıntı-yanıt eşleşmesi)
+        if product_id:
+            doc["product_id"] = product_id  # bu turda konuşulan ürün (kilit/alıntı için)
+        await db.whatsapp_conversations.insert_one(doc)
     except Exception:
         pass
 
