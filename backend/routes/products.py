@@ -1664,23 +1664,35 @@ async def get_color_siblings(product_id: str):
     """
     p = await db.products.find_one(
         {"$or": [{"id": product_id}, {"slug": product_id}]},
-        {"_id": 0, "id": 1, "csv_card_id": 1}
+        {"_id": 0, "id": 1, "csv_card_id": 1, "urun_karti_id": 1}
     )
     if not p:
         return {"siblings": []}
-    card_id = p.get("csv_card_id")
-    if not card_id:
+    # DENETİM FIX: Ürün Kart ID sisteminin geri kalanında BİRİNCİL alan urun_karti_id
+    # (yedek csv_card_id) — integrations_*/orders ile aynı. Eski hâlde yalnız csv_card_id'ye
+    # bakılıyordu; urun_karti_id dolu ama csv_card_id boş ürünlerde renk kardeşleri HİÇ
+    # gelmiyordu (mobil/masaüstü "diğer renk" görünmüyordu). Artık iki alan da eşleşir.
+    anchor = p.get("urun_karti_id") or p.get("csv_card_id")
+    if not anchor:
         return {"siblings": []}
+    # int/string tip uyumsuzluğu (2890 vs "2890") iki tarafta da eşleşsin.
+    cands = {anchor, str(anchor)}
+    try:
+        cands.add(int(anchor))
+    except Exception:
+        pass
+    cands = list(cands)
     siblings = []
     cursor = db.products.find(
-        {"csv_card_id": card_id, "id": {"$ne": p["id"]}, "is_active": True},
+        {"$or": [{"urun_karti_id": {"$in": cands}}, {"csv_card_id": {"$in": cands}}],
+         "id": {"$ne": p["id"]}, "is_active": True},
         {"_id": 0, "id": 1, "slug": 1, "name": 1, "thumbnail": 1, "images": 1,
-         "variants": 1, "attributes": 1}
+         "variants": 1, "attributes": 1, "color": 1}
     ).limit(20)
     async for s in cursor:
-        # Renk: önce variants[0].color, yoksa attributes Web Color
-        color = ""
-        if s.get("variants"):
+        # Renk: önce üst-alan color, sonra variants[].color, yoksa attributes Web Color
+        color = (s.get("color") or "").strip()
+        if not color and s.get("variants"):
             for v in s["variants"]:
                 if v.get("color"):
                     color = v["color"]
