@@ -118,8 +118,10 @@ async def save_providers(req: ProviderConfigReq, current_user: dict = Depends(re
         for f in list(merged.keys()):
             if f in SECRET_FIELDS:
                 val = merged[f]
-                # UI'den maskeli/boş geldi → eski değeri koru
-                if not val or (isinstance(val, str) and "****" in val):
+                # UI'den MASKELİ (xx****yy) geldi → dokunulmadı, eski değeri koru.
+                # BOŞ geldi → kullanıcı SİLMEK istedi → boş bırak (eskiyi koruma).
+                # (Eski davranış boş'u da koruyordu → secret alanı hiç temizlenemiyordu.)
+                if isinstance(val, str) and "****" in val:
                     if old.get(f):
                         merged[f] = old[f]
         # __has_ bayraklarını DB'ye yazma
