@@ -190,6 +190,14 @@ def _verify_signature(app_secret: str, raw: bytes, header: str) -> bool:
 @router.post("/webhook")
 async def receive_webhook(request: Request, background: BackgroundTasks):
     raw = await request.body()
+    # API taban URL'sini yakala (kart ödeme linki callback'i için; white-label — host'tan türer).
+    try:
+        base = str(request.base_url).rstrip("/")
+        if base:
+            await db.whatsapp_meta_state.update_one(
+                {"_id": "api_base"}, {"$set": {"url": base, "at": _now()}}, upsert=True)
+    except Exception:
+        pass
     # HAM POST sayacı — imza kontrolünden ÖNCE (Meta hiç mi göndermiyor, yoksa
     # gelip imzada mı reddediliyor ayrımı için). Teşhis amaçlı.
     try:
@@ -1209,18 +1217,20 @@ async def _handle_inbound(sender: str, mid: str, body: str,
                 "\n[WHATSAPP'TAN SİPARİŞ — bu numara için sipariş oluşturma AÇIK]\n"
                 "Müşteri sipariş vermek/ürünü almak isterse ya da sistemden vermekte zorlanıyorsa "
                 "'dilerseniz bilgilerinizi alıp siparişinizi ben oluşturayım' diye YARDIM teklif et. "
-                "TOPLA: ad-soyad, il, ilçe, açık adres, beden, adet; e-posta (sipariş bildirimi için). "
-                "Ödeme ŞİMDİLİK yalnız HAVALE/EFT. E-posta/SMS ile kampanya-bilgilendirme İZNİ ister misiniz "
-                "diye NAZİKÇE sor. KART BİLGİSİNİ (numara/CVV/şifre) ASLA İSTEME. Eksik bilgi varsa tek tek, "
-                "sıcak bir dille tamamlat. Bilgiler tamamlanınca ÖZET göster ve 'onaylıyor musunuz?' diye SOR. "
+                "TOPLA: ad-soyad, il, ilçe, açık adres, beden, adet, ödeme yöntemi (HAVALE/EFT veya KREDİ KARTI), "
+                "e-posta (sipariş bildirimi için; KART ödemesinde ZORUNLU). Üye olmak ister misiniz diye sor "
+                "(isterse üyelik açılır, istemezse üyeliksiz devam). E-posta/SMS ile kampanya-bilgilendirme İZNİ "
+                "ister misiniz diye NAZİKÇE sor. KART BİLGİSİNİ (numara/CVV/şifre) ASLA İSTEME — kart ödemesi "
+                "sipariş oluşunca gönderilecek GÜVENLİ iyzico linkinde, müşteri kendisi girer. Eksik bilgiyi tek "
+                "tek, sıcak dille tamamlat. Bilgiler tamamlanınca ÖZET göster ve 'onaylıyor musunuz?' diye SOR. "
                 "Müşteri AÇIKÇA ONAYLAYINCA (ve yalnız o zaman) cevabının EN SONUNA şu bloğu ekle "
-                "(müşteri bu JSON'u GÖRMEZ, sistem işleyip siparişi açar):\n"
+                "(müşteri bu JSON'u GÖRMEZ; sistem işleyip siparişi açar, havalede banka bilgisi/kartta ödeme "
+                "linki OTOMATİK gönderilir — sen link/hesap no UYDURMA):\n"
                 "---SIPARIS---\n"
                 "{\"ad_soyad\":\"\",\"il\":\"\",\"ilce\":\"\",\"adres\":\"\",\"beden\":\"\",\"adet\":1,"
-                "\"odeme\":\"havale\",\"eposta\":\"\",\"izin_eposta\":false,\"izin_sms\":false}\n---SON---\n"
-                "Sipariş ürünü = yukarıdaki [İLGİLİ ÜRÜN]. Onay YOKKEN bu bloğu SAKIN ekleme, boş/eksik "
-                "bilgiyle ekleme. Müşteri kredi kartıyla ödemek isterse 'kart ödemesini birazdan güvenli "
-                "ödeme linkiyle hallederiz 🌸' de; kart bilgisi isteme (kart akışı çok yakında).\n"
+                "\"odeme\":\"havale|kart\",\"uyelik\":false,\"eposta\":\"\",\"izin_eposta\":false,\"izin_sms\":false}\n"
+                "---SON---\n"
+                "Sipariş ürünü = yukarıdaki [İLGİLİ ÜRÜN]. Onay YOKKEN ya da bilgi eksikken bu bloğu SAKIN ekleme.\n"
             )
         if extra_ctx.get("bank"):
             system += f"\n[Havale/EFT Hesap Bilgisi]\n{extra_ctx['bank']}\n"
@@ -1680,10 +1690,82 @@ def _parse_order_directive(text: str):
     return clean, (data if isinstance(data, dict) else None)
 
 
+async def _wa_get_api_base() -> str:
+    try:
+        st = await db.whatsapp_meta_state.find_one({"_id": "api_base"}) or {}
+        return st.get("url") or ""
+    except Exception:
+        return ""
+
+
+async def _wa_init_payment(order_id: str) -> str:
+    """Kart siparişi için iyzico ÖDEME SAYFASI linki üretir (paymentPageUrl). Boş → başarısız.
+    Mevcut, test edilmiş initialize_payment çekirdeği kullanılır (rate-limiter atlanır)."""
+    api_base = await _wa_get_api_base()
+    if not api_base:
+        return ""
+    callback = f"{api_base}/api/payment/callback"
+    try:
+        from .payment import initialize_payment as _ip
+        _core = getattr(_ip, "__wrapped__", _ip)
+        res = await _core(_ReqShim(), order_id=order_id, callback_url=callback)
+    except Exception:
+        logger.exception("WA payment init failed")
+        return ""
+    if isinstance(res, dict) and res.get("success"):
+        return res.get("paymentPageUrl") or ""
+    return ""
+
+
+async def _wa_upsert_member(email: str, name: str, phone: str):
+    """Üye hesabı bul (e-posta/telefon) ya da oluştur → user dict (yoksa None).
+    Şifre rastgele atanır; müşteri 'Şifremi Unuttum' ile kendi şifresini belirler."""
+    from notification_service import normalize_phone_tr
+    from .deps import generate_id, hash_password
+    email = (email or "").strip().lower()
+    phone_norm = normalize_phone_tr(phone or "")
+    tail = phone_norm[-10:]
+    try:
+        if email:
+            ex = await db.users.find_one({"email": email}, {"_id": 0})
+            if ex:
+                return ex
+        if len(tail) == 10 and tail.isdigit():
+            ex = await db.users.find_one({"phone": {"$regex": tail + "$"}}, {"_id": 0})
+            if ex:
+                return ex
+    except Exception:
+        pass
+    if not email:
+        return None  # üyelik için e-posta zorunlu
+    import secrets as _sec
+    parts = (name or "").split()
+    user = {
+        "id": generate_id(),
+        "email": email,
+        "password": hash_password(_sec.token_urlsafe(18)),
+        "first_name": parts[0] if parts else "",
+        "last_name": " ".join(parts[1:]) if len(parts) > 1 else "",
+        "phone": phone_norm,
+        "is_admin": False,
+        "is_active": True,
+        "email_verified": False,
+        "created_via": "whatsapp_ai",
+        "created_at": _now(),
+    }
+    try:
+        await db.users.insert_one(user)
+    except Exception:
+        logger.exception("WA member create failed")
+        return None
+    return user
+
+
 async def _execute_wa_order(sender: str, name: Optional[str], info: dict,
                             product: dict, cfg: dict, extra_ctx: dict) -> str:
-    """Toplanan bilgilerle HAVALE + misafir siparişi oluşturur (create_order çekirdeği).
-    Döner: müşteriye gönderilecek mesaj."""
+    """Toplanan bilgilerle siparişi SUNUCU-otoriter create_order çekirdeğinden oluşturur.
+    Havale → banka bilgisi; Kart → iyzico ödeme linki. Üyelik istenirse hesap açar.
+    KART BİLGİSİ ALINMAZ. Döner: müşteriye gönderilecek mesaj."""
     if not product or not product.get("id"):
         return ("Hangi ürün için sipariş oluşturacağımı netleştirebilir miyiz? Ürünün linkini "
                 "paylaşırsanız hemen ilerleyelim 🌸")
@@ -1709,7 +1791,6 @@ async def _execute_wa_order(sender: str, name: Optional[str], info: dict,
             mevcut = ", ".join(sorted({str(v.get("size")) for v in variants if v.get("size")}))
             return (f"{prod.get('name')} için '{beden or '—'}' bedenini bulamadım. "
                     f"Mevcut bedenler: {mevcut}. Hangisini istersiniz?")
-    # Zorunlu adres alanları
     full = (info.get("ad_soyad") or name or "").strip()
     il = (info.get("il") or "").strip()
     ilce = (info.get("ilce") or "").strip()
@@ -1721,6 +1802,19 @@ async def _execute_wa_order(sender: str, name: Optional[str], info: dict,
     fn = parts[0] if parts else full
     ln = " ".join(parts[1:]) if len(parts) > 1 else ""
     email = (info.get("eposta") or "").strip()
+    odeme = str(info.get("odeme") or "havale").strip().lower()
+    is_card = odeme in ("kart", "kredi", "kredi karti", "kredi kartı", "credit_card", "card", "creditcard")
+    if is_card and not email:
+        return ("Kredi kartı ile ödemede sipariş ve ödeme bildirimleri için e-posta adresinizi de "
+                "alabilir miyim? 🌸")
+    # Üyelik (istenirse) — e-posta/telefonla hesap bul/oluştur
+    member = None
+    if bool(info.get("uyelik")):
+        try:
+            member = await _wa_upsert_member(email, full, sender)
+        except Exception:
+            logger.exception("WA member upsert failed")
+            member = None
     order_data = {
         "items": [{"product_id": prod["id"], "variant_id": variant_id, "quantity": adet}],
         "shipping_address": {
@@ -1728,13 +1822,13 @@ async def _execute_wa_order(sender: str, name: Optional[str], info: dict,
             "phone": sender, "email": email,
             "city": il, "district": ilce, "address": adres,
         },
-        "payment_method": "bank_transfer",
+        "payment_method": "credit_card" if is_card else "bank_transfer",
         "source": "whatsapp_ai",
     }
     try:
         from .orders import create_order as _co
         _core = getattr(_co, "__wrapped__", _co)   # slowapi limiter'ı atla, çekirdeği çağır
-        res = await _core(order_data, _ReqShim(), None)
+        res = await _core(order_data, _ReqShim(), member)   # üye ise current_user=member, değilse None
     except Exception as e:
         detail = getattr(e, "detail", None)
         logger.exception("WA order create failed")
@@ -1759,10 +1853,10 @@ async def _execute_wa_order(sender: str, name: Optional[str], info: dict,
         if chans:
             from .iys import record_consent
             await record_consent(email, sender, chans, status="ONAY",
-                                 source="HS_WEB", order_id=oid)
+                                 source="HS_WEB", order_id=oid,
+                                 user_id=(member or {}).get("id"))
     except Exception:
         logger.exception("WA iys consent failed")
-    bank = extra_ctx.get("bank") or ""
     lines = ["Siparişinizi oluşturdum 🌸", f"Sipariş No: #{onum}"]
     seg = f"Ürün: {prod.get('name')}"
     if variant_id:
@@ -1771,11 +1865,25 @@ async def _execute_wa_order(sender: str, name: Optional[str], info: dict,
     lines.append(seg)
     if total is not None:
         lines.append(f"Tutar: {total} TL")
-    if bank:
-        lines.append(f"\nHavale/EFT ile ödeme:\n{bank}\nAçıklamaya sipariş numaranızı (#{onum}) "
-                     "yazmayı unutmayın. Ödemeniz onaylanınca siparişiniz hazırlanır 🌸")
+    if is_card:
+        link = await _wa_init_payment(oid)
+        if link:
+            lines.append(f"\nKart ile güvenli ödeme için 👇\n{link}\n"
+                         "Kart bilgileriniz yalnızca iyzico'nun güvenli sayfasında girilir, bize iletilmez. "
+                         "Ödemeniz onaylanınca siparişiniz hazırlanır 🌸")
+        else:
+            lines.append("\nKart ödeme linkini şu an oluşturamadım — dilerseniz havale/EFT ile ilerleyebiliriz "
+                         "ya da birazdan tekrar deneyeyim. 🙏")
     else:
-        lines.append("\nHavale bilgilerini birazdan ileteceğim.")
+        bank = extra_ctx.get("bank") or ""
+        if bank:
+            lines.append(f"\nHavale/EFT ile ödeme:\n{bank}\nAçıklamaya sipariş numaranızı (#{onum}) "
+                         "yazmayı unutmayın. Ödemeniz onaylanınca siparişiniz hazırlanır 🌸")
+        else:
+            lines.append("\nHavale bilgilerini birazdan ileteceğim.")
+    if member:
+        lines.append("\nÜyeliğinizi de oluşturdum 🌸 Giriş şifrenizi belirlemek için giriş sayfasında "
+                     "'Şifremi Unuttum' adımıyla e-postanıza gelecek kodu kullanabilirsiniz.")
     return "\n".join(lines)
 
 

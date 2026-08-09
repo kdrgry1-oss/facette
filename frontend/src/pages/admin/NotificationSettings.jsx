@@ -231,7 +231,8 @@ export default function NotificationSettings() {
           <p className="text-[11px] text-gray-500 mt-2">
             Açıkken Buse, müşterinin bilgilerini (ad-soyad, adres, beden, adet, e-posta + izin) alıp
             <strong> siparişi sizin adınıza oluşturur</strong> (fiyat sunucudan; <strong>kart bilgisi asla istenmez</strong>).
-            Şu an <strong>havale/EFT</strong> siparişi destekleniyor; kart (iyzico ödeme linki) çok yakında.
+            <strong>Havale/EFT</strong> (banka bilgisi otomatik) ve <strong>kredi kartı</strong> (iyzico güvenli ödeme linki —
+            kart yalnız iyzico'da girilir) desteklenir; isteyen müşteriye <strong>üyelik</strong> de açılır.
             <strong> Test</strong> modunda yalnız buraya yazdığınız numaralar (ve temsilci numarası) sipariş oluşturabilir —
             canlı müşteriler etkilenmez. E-posta/SMS izinleri İYS'ye bildirilir.
           </p>
