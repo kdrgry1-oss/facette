@@ -165,6 +165,12 @@ async def receive_webhook(request: Request, background: BackgroundTasks):
     for entry in (data.get("entry") or []):
         for ch in (entry.get("changes") or []):
             value = ch.get("value") or {}
+            # COEXISTENCE HISTORY SYNC — telefon uygulamasındaki eski sohbet geçmişi (~6 ay).
+            # field=history veya value.history varsa: arka planda içe aktar (AI per-müşteri
+            # bağlamı + ham kayıt). Canlı mesaj değil; AI cevabı TETİKLEMEZ.
+            if ch.get("field") == "history" or value.get("history"):
+                background.add_task(_ingest_history, value)
+                continue
             own_pnid = (value.get("metadata") or {}).get("phone_number_id")
             contacts = {c.get("wa_id"): (c.get("profile") or {}).get("name")
                         for c in (value.get("contacts") or [])}
@@ -182,6 +188,62 @@ async def receive_webhook(request: Request, background: BackgroundTasks):
                     name=contacts.get(sender), own_pnid=own_pnid,
                 )
     return {"ok": True}
+
+
+async def _ingest_history(value: dict):
+    """Coexistence history sync payload'ını içe aktarır. Meta'nın history şeması
+    değişebildiğinden SAVUNMACI: ham payload'ı whatsapp_history_raw'a saklar (şema
+    incelemesi için) + mesaj-benzeri kayıtları özyinelemeli çıkarıp whatsapp_conversations'a
+    'history' kaynağıyla yazar → AI o müşteriyle geçmiş konuşmayı bağlamda görür.
+    Bilgi bankası beslemesi ayrı, admin onaylı yapılır (ham geçmişi körlemesine 'doğru
+    cevap' saymayız)."""
+    try:
+        await db.whatsapp_history_raw.insert_one({"value": value, "at": _now()})
+    except Exception:
+        pass
+    own = (value.get("metadata") or {}).get("phone_number_id") or ""
+
+    def _walk(node, out):
+        if isinstance(node, dict):
+            txt = ""
+            t = node.get("text")
+            if isinstance(t, dict):
+                txt = t.get("body") or ""
+            elif isinstance(t, str):
+                txt = t
+            frm = node.get("from") or ""
+            if txt and (frm or node.get("id")):
+                out.append({"from": str(frm), "text": str(txt)[:1000],
+                            "ts": node.get("timestamp") or "", "id": node.get("id") or ""})
+            for v in node.values():
+                _walk(v, out)
+        elif isinstance(node, list):
+            for v in node:
+                _walk(v, out)
+
+    msgs = []
+    try:
+        _walk(value.get("history") or value, msgs)
+    except Exception:
+        return
+    for m in msgs:
+        try:
+            mid = m.get("id") or f"hist_{m.get('from','')}_{m.get('ts','')}_{hash(m.get('text',''))}"
+            if await _already_processed(mid):
+                continue
+            frm = m.get("from") or ""
+            # Yön: bizim numaramızdan gidenler 'Sen' (temsilci), diğerleri 'Müşteri'.
+            outgoing = bool(own) and frm == own
+            peer = own if outgoing else frm
+            await db.whatsapp_conversations.insert_one({
+                "phone": peer,
+                "inbound": "" if outgoing else m.get("text", ""),
+                "outbound": m.get("text", "") if outgoing else "",
+                "handoff": False, "confidence": 1.0, "note": "history",
+                "created_at": _now(),
+            })
+        except Exception:
+            continue
 
 
 async def _already_processed(mid: str) -> bool:
@@ -347,7 +409,8 @@ async def _recent_dialog(sender: str, limit: int = 6) -> str:
     tanıtmaması ve TUTARLI devam etmesi için. Sadece gerçek soru/cevap turları."""
     try:
         cur = db.whatsapp_conversations.find(
-            {"phone": sender, "inbound": {"$nin": [None, ""]}},
+            {"phone": sender,
+             "$or": [{"inbound": {"$nin": [None, ""]}}, {"outbound": {"$nin": [None, ""]}}]},
             {"_id": 0, "inbound": 1, "outbound": 1, "created_at": 1}
         ).sort("created_at", -1).limit(limit)
         rows = await cur.to_list(limit)
