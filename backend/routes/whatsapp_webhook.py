@@ -136,8 +136,14 @@ async def wa_diag(key: str = "", q: str = ""):
             "has_token": bool(cfg.get("access_token")),
             "app_secret_set": bool(cfg.get("app_secret")),
             "ai_autoreply": bool(cfg.get("ai_autoreply")),
+            "handoff_phone_set": bool(_admin_tail(cfg)),
+            "handoff_phone_tail": (_admin_tail(cfg) or "")[-4:],
         },
         "raw_hits": hits,
+        "handoff": {
+            "open": await db.whatsapp_handoffs.count_documents({"status": "open"}),
+            "answered": await db.whatsapp_handoffs.count_documents({"status": "answered"}),
+        },
         "ai": {
             "enabled": settings.get("enabled", True),
             "provider": settings.get("provider"),
@@ -203,6 +209,19 @@ async def receive_webhook(request: Request, background: BackgroundTasks):
                 if not sender or not mid:
                     continue
                 mtype = m.get("type")
+                # TEMSİLCİ (ana) numaradan gelen mesaj = bekleyen handoff'a CEVAP.
+                # AI'a MÜŞTERİ gibi sokulmaz; relay handler'ına gider (metin dışı yok sayılır).
+                if _is_admin(sender, cfg):
+                    if mtype == "text":
+                        body = ((m.get("text") or {}).get("body") or "").strip()
+                        if not body:
+                            continue
+                        ctx_id = (m.get("context") or {}).get("id") or ""
+                        background.add_task(
+                            _handle_admin_reply, sender=sender, mid=mid,
+                            body=body, context_id=ctx_id,
+                        )
+                    continue
                 if mtype == "text":
                     body = ((m.get("text") or {}).get("body") or "").strip()
                     if not body:
@@ -742,28 +761,196 @@ def _parse_meta(text: str):
     return reply, confidence, handoff
 
 
+# ── İNSAN TEMSİLCİYE DEVRET (canlı relay) ───────────────────────────────────
+# AI cevaplayamadığında müşteriye UYDURMA yapmaz; soruyu TEMSİLCİ (ana) numaraya
+# WhatsApp'tan iletir. Temsilci o alarmı YANITLAYIP cevabı yazınca (_handle_admin_reply)
+# cevap otomatik müşteriye gider. Müşteriye bu sırada MESAJ GÖNDERİLMEZ (sessiz bekleme).
+def _phone_tail(p) -> str:
+    """Karşılaştırma için telefon kuyruğu (son 10 hane) — +90/0/905 farklarını yutar."""
+    digits = "".join(ch for ch in str(p or "") if ch.isdigit())
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+def _admin_tail(cfg: dict) -> str:
+    return _phone_tail(cfg.get("handoff_notify_phone") or "")
+
+
+def _is_admin(sender, cfg: dict) -> bool:
+    """Gelen mesaj, panelde tanımlı TEMSİLCİ (ana) numarasından mı? (cevap relay'i için)"""
+    at = _admin_tail(cfg)
+    return bool(at) and _phone_tail(sender) == at
+
+
+def _fmt_phone_display(p) -> str:
+    d = "".join(ch for ch in str(p or "") if ch.isdigit())
+    if len(d) >= 10:
+        t = d[-10:]
+        return f"+90 {t[:3]} {t[3:6]} {t[6:8]} {t[8:]}"
+    return str(p or "")
+
+
 async def _handoff(sender: str, body: str, name: Optional[str]):
-    """İnsan temsilciye devret: kayıt aç + müşteriye kısa bekletme mesajı."""
+    """AI cevaplayamadı → İNSAN temsilciye devret (canlı relay).
+    - whatsapp_handoffs'a 'open' kayıt aç (müşteri no + soru + admin alarm mesaj id'si).
+    - TEMSİLCİ (ana) numarasına WhatsApp'tan alarm gönder (24-saat penceresi açıksa düşer).
+    - Yedek: admin mobil push + firma e-postası (WhatsApp penceresi kapalıysa kaçmasın).
+    - MÜŞTERİYE MESAJ YOK (kullanıcı tercihi: sessiz bekle). Cevabı temsilci iletir.
+    """
     cfg = await _wa_cfg()
+    admin_num = cfg.get("handoff_notify_phone") or ""
+    who = name or "Müşteri"
+    cust_disp = _fmt_phone_display(sender)
+    alert_wamid = ""
+    if _admin_tail(cfg):
+        alert = (
+            "🔴 *Yanıtlayamadığım bir müşteri sorusu var.*\n\n"
+            f"👤 {who} ({cust_disp})\n"
+            f"💬 \"{body[:900]}\"\n\n"
+            "Cevaplamak için *bu mesajı yanıtlayıp* (kaydır/reply) sadece cevabı yazın — "
+            "müşteriye ben ileteceğim. (Alternatif: cevabın başına müşteri numarasını yazın.)"
+        )
+        try:
+            alert_wamid = await _send(cfg, admin_num, alert)
+        except Exception:
+            alert_wamid = ""
     try:
         await db.whatsapp_handoffs.insert_one({
             "phone": sender, "name": name, "question": body,
             "status": "open", "created_at": _now(),
+            "alert_wamid": alert_wamid, "source": "whatsapp",
         })
     except Exception:
         pass
-    await _send(cfg, sender, "Talebinizi müşteri temsilcimize ilettim, en kısa sürede size dönüş yapacağız. 🙏")
+    # Yedek alarm 1 — mobil admin push (panel)
+    try:
+        from .push import send_push_to_admins
+        await send_push_to_admins(
+            "📞 Yanıt bekleyen müşteri",
+            f"{who} ({cust_disp}): {body[:120]}",
+            {"type": "whatsapp_handoff", "phone": sender},
+        )
+    except Exception as e:
+        logger.warning(f"handoff admin push atlandı: {e}")
+    # Yedek alarm 2 — firma e-postası (best-effort)
+    try:
+        import company
+        from notification_service import _email_send
+        c = await company.get_company(db)
+        admin_email = c.get("contact_email") or ""
+        if admin_email:
+            html = (f"<p>WhatsApp AI yanıtlayamadı, bir müşteri yanıt bekliyor:</p>"
+                    f"<p><b>{who}</b> ({cust_disp})</p>"
+                    f"<blockquote>{body[:1500]}</blockquote>"
+                    f"<p>Cevaplamak için WhatsApp'tan temsilci numaranıza gelen alarmı "
+                    f"yanıtlayın; cevap otomatik müşteriye iletilir.</p>")
+            await _email_send(db, admin_email, "📞 WhatsApp'ta yanıt bekleyen müşteri", html)
+    except Exception as e:
+        logger.warning(f"handoff admin email atlandı: {e}")
 
 
-async def _send(cfg: dict, to: str, message: str):
+async def _handle_admin_reply(sender: str, mid: str, body: str, context_id: str = ""):
+    """TEMSİLCİ (ana) numaradan gelen mesaj = bekleyen bir handoff'a CEVAP.
+    Hedef müşteriyi belirle → cevabı müşteriye ilet → handoff'u kapat → temsilciye onay.
+    Hedef bulma sırası: (1) yanıtlanan alarm mesajı (context_id → alert_wamid),
+    (2) mesaj başına yazılan müşteri numarası, (3) tek açık handoff varsa o."""
+    try:
+        if await _already_processed(mid):
+            return
+        cfg = await _wa_cfg()
+        text = (body or "").strip()
+        low = text.lower()
+        # Basit komutlar — açık talepleri listele
+        if low in ("liste", "list", "bekleyenler", "kim var"):
+            cur = db.whatsapp_handoffs.find({"status": "open"}).sort("created_at", -1).limit(10)
+            rows = await cur.to_list(10)
+            if not rows:
+                await _send(cfg, sender, "Şu an bekleyen müşteri yok. ✅")
+            else:
+                lines = ["*Bekleyen müşteriler:*"]
+                for r in rows:
+                    lines.append(f"• {r.get('name') or 'Müşteri'} "
+                                 f"({_fmt_phone_display(r.get('phone'))}): "
+                                 f"{(r.get('question') or '')[:70]}")
+                lines.append("\nCevaplamak için ilgili alarmı yanıtlayın ya da "
+                             "cevabın başına müşteri numarasını yazın.")
+                await _send(cfg, sender, "\n".join(lines))
+            return
+
+        target = None
+        answer = text
+        # (1) Alarm mesajını yanıtladıysa → alert_wamid eşleşmesi (en kesin)
+        if context_id:
+            target = await db.whatsapp_handoffs.find_one(
+                {"alert_wamid": context_id, "status": "open"})
+        # (2) Başına müşteri numarası yazıldıysa
+        if not target:
+            import re as _re
+            mnum = _re.match(r"^[\s@]*(\+?\d[\d\s\-]{8,})[\s:>\-]+(.+)$", text, _re.S)
+            if mnum:
+                cand_tail = _phone_tail(mnum.group(1))
+                rest = (mnum.group(2) or "").strip()
+                if cand_tail and rest:
+                    t = await db.whatsapp_handoffs.find_one(
+                        {"status": "open",
+                         "phone": {"$regex": cand_tail + "$"}},
+                        sort=[("created_at", -1)])
+                    if t:
+                        target, answer = t, rest
+        # (3) Tek açık handoff varsa ona ata
+        if not target:
+            opens = await db.whatsapp_handoffs.find({"status": "open"}).to_list(3)
+            if len(opens) == 1:
+                target = opens[0]
+            elif len(opens) > 1:
+                await _send(cfg, sender,
+                            "Birden fazla müşteri bekliyor — hangisine cevap verdiğinizi "
+                            "belirtmek için ilgili *alarmı yanıtlayın* ya da cevabın başına "
+                            "müşteri numarasını yazın. (Liste için: 'liste')")
+                return
+        if not target:
+            await _send(cfg, sender,
+                        "Şu an cevabınızı iletebileceğim bekleyen bir müşteri bulamadım. "
+                        "(Bekleyenler için: 'liste')")
+            return
+        if not answer:
+            await _send(cfg, sender, "Boş cevap — müşteriye iletebilmem için cevap metni yazın.")
+            return
+
+        cust = target.get("phone")
+        await _send(cfg, cust, answer)
+        try:
+            await db.whatsapp_handoffs.update_one(
+                {"_id": target.get("_id")},
+                {"$set": {"status": "answered", "answer": answer,
+                          "answered_at": _now(), "answered_by": "human"}})
+        except Exception:
+            pass
+        # Diyalog belleğine yaz (AI sonraki mesajda tutarlı devam etsin)
+        await _log(cust, "", answer, handoff=False, confidence=1.0, note="human_reply")
+        await _send(cfg, sender,
+                    f"✅ Cevabınız iletildi → {target.get('name') or 'Müşteri'} "
+                    f"({_fmt_phone_display(cust)})")
+    except Exception as e:
+        logger.warning(f"admin reply relay hata: {e}")
+
+
+async def _send(cfg: dict, to: str, message: str) -> str:
+    """Mesaj gönderir; başarılıysa Meta mesaj id'sini (wamid) döner, yoksa ''.
+    (wamid, temsilci alarmının yanıt-eşleşmesi için handoff kaydına yazılır.)"""
     from notification_service import _whatsapp_send
-    # Opt-out kontrolü (bekletme/opt-out onayı hariç zaten çağrılmaz)
     try:
         res = await _whatsapp_send(cfg, to, message)
         if not res.get("success"):
-            logger.warning(f"WA send failed to {to[-4:]}: {res.get('response')}")
+            logger.warning(f"WA send failed to {str(to)[-4:]}: {res.get('response')}")
+            return ""
+        try:
+            j = json.loads(res.get("response") or "{}")
+            return (((j.get("messages") or [{}])[0]) or {}).get("id") or ""
+        except Exception:
+            return ""
     except Exception as e:
         logger.warning(f"WA send error: {e}")
+        return ""
 
 
 async def _log(phone: str, inbound: str, outbound: str, *, handoff: bool,

@@ -196,6 +196,21 @@ export default function NotificationSettings() {
             data-testid="whatsapp-ai-autoreply-toggle" />
           <span><strong>AI otomatik yanıt</strong> — gelen WhatsApp mesajlarına yapay zekâ, gerçek bir müşteri temsilcisi gibi cevap versin (düşük güvende insana devreder). Webhook Meta'da tanımlı olmalı.</span>
         </label>
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          <label className="block text-xs text-gray-600 mb-1">Temsilci (canlı devir) numarası</label>
+          <input value={cfg.providers?.whatsapp_meta?.handoff_notify_phone || ""}
+            onChange={(e) => setProvField("whatsapp_meta", "handoff_notify_phone", e.target.value)}
+            placeholder="ör. +90 5xx xxx xx xx"
+            className="w-full md:w-1/2 border border-gray-200 rounded px-3 py-2 text-sm"
+            data-testid="wa-field-handoff_notify_phone" />
+          <p className="text-[11px] text-gray-500 mt-2">
+            AI bir soruyu cevaplayamadığında, müşterinin sorusunu <strong>bu numaraya</strong> WhatsApp'tan iletir.
+            O alarm mesajını <strong>yanıtlayıp</strong> (kaydır/reply) cevabı yazdığınızda, cevap otomatik olarak
+            müşteriye gönderilir. (Bu esnada müşteriye mesaj gitmez; sessiz beklenir.) Alarm ulaşmazsa panel push +
+            firma e-postası ile de haber verilir. <strong>Not:</strong> işletme hattının kendi numarası olmamalı;
+            cevap verecek temsilcinin kişisel WhatsApp numarası olmalı.
+          </p>
+        </div>
         <p className="text-[11px] text-gray-500 mt-2">
           Webhook Callback URL: <code>{`${(process.env.REACT_APP_BACKEND_URL||'').replace(/\/$/,'')}/api/whatsapp/webhook`}</code> — Meta uygulamasında bu URL + yukarıdaki Verify Token ile "messages" alanına abone olun.
         </p>
