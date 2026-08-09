@@ -52,6 +52,26 @@
                         try { m = (e && e.reason && (e.reason.message || e.reason)) || ""; } catch (x) {}
                         beacon("unhandledrejection", { message: String(m).slice(0, 500) });
                     });
+                    // React render çökmesi window.onerror'a düşmez → console.error'a gider. Onu da yakala
+                    // (mount_fail'in GERÇEK sebebini görmek için). Yalnız hata-benzeri mesajları beacon'la.
+                    try {
+                        var _ce = console.error;
+                        var _ceSent = 0;
+                        console.error = function () {
+                            try {
+                                if (_ceSent < 4) {
+                                    var a = arguments[0];
+                                    var m = (a && a.stack) ? a.stack : (a && a.message ? a.message : String(a || ""));
+                                    if (arguments[1] && arguments[1].stack) m = m + " :: " + arguments[1].stack;
+                                    if (m && /error|cannot read|undefined is not|null is not|is not a function|not defined|Minified React/i.test(m)) {
+                                        _ceSent++;
+                                        beacon("error", { message: String(m).slice(0, 600), source: "console" });
+                                    }
+                                }
+                            } catch (x) {}
+                            return _ce.apply(console, arguments);
+                        };
+                    } catch (x) {}
                     // Uygulama mount olursa 'ok' beacon (bir kez). React #root'a çocuk ekleyince.
                     var okTries = 0;
                     var okT = setInterval(function () {
@@ -403,8 +423,9 @@
                         location.replace(u); // cache-bust ile TAZE index.html + taze bundle çek
                     } catch (e) {}
                 }
-                // React mount + CSS için cömert süre (yavaş mobil ağda erken/yanlış reload etme).
-                function schedule() { setTimeout(check, 3500); }
+                // React mount + CSS için cömert süre (yavaş mobil ağ / in-app tarayıcıda erken/YANLIŞ
+                // reload etme — 3.5sn çok kısaydı, mount olacakken 'bekleyip redirect' yapıyordu). 6.5sn.
+                function schedule() { setTimeout(check, 6500); }
                 if (document.readyState === "complete") schedule();
                 else window.addEventListener("load", schedule);
             })();
