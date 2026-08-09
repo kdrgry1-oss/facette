@@ -238,7 +238,16 @@ async def receive_webhook(request: Request, background: BackgroundTasks):
                             _handle_image, sender=sender, mid=mid, media_id=media_id,
                             caption=caption, name=contacts.get(sender), own_pnid=own_pnid,
                         )
-                # diğer türler (ses/konum/döküman) ilk sürümde atlanır
+                elif mtype in ("audio", "voice"):
+                    # Sesli mesaj / ses notu → indir + yazıya çevir + AI yazarak cevaplasın.
+                    _a = m.get("audio") or m.get("voice") or {}
+                    media_id = _a.get("id")
+                    if media_id:
+                        background.add_task(
+                            _handle_audio, sender=sender, mid=mid, media_id=media_id,
+                            name=contacts.get(sender), own_pnid=own_pnid,
+                        )
+                # diğer türler (konum/döküman) ilk sürümde atlanır
     return {"ok": True}
 
 
@@ -530,6 +539,102 @@ async def _vision_describe(img_bytes: bytes, mime: str, api_key: str, model: str
             {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}]}],
         max_completion_tokens=250)
     return (resp.choices[0].message.content or "").strip()
+
+
+async def _transcribe_audio(audio_bytes: bytes, mime: str, api_key: str,
+                            model: str, provider: str) -> str:
+    """Sesli mesajı Türkçe yazıya çevirir (STT). Sağlayıcıya göre:
+      - openai (varsayılan): Whisper (whisper-1)
+      - gemini/google: doğrudan ses transkripsiyonu (inline_data)
+      - anthropic/claude (ses girişi DESTEKLEMEZ): OPENAI/GEMINI env anahtarı varsa
+        ona düşer; yoksa boş döner → çağıran insana devreder (uydurmaz).
+    Boş string dönerse çeviri yapılamadı demektir."""
+    prov = (provider or "openai").strip().lower()
+    mm = (mime or "audio/ogg").lower()
+    fname = "audio.ogg"
+    if "mpeg" in mm or "mp3" in mm:
+        fname = "audio.mp3"
+    elif "mp4" in mm or "m4a" in mm or "aac" in mm:
+        fname = "audio.m4a"
+    elif "wav" in mm:
+        fname = "audio.wav"
+    elif "amr" in mm:
+        fname = "audio.amr"
+
+    async def _via_openai(key: str) -> str:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=key)
+        tr = await client.audio.transcriptions.create(
+            model="whisper-1",
+            file=(fname, audio_bytes, mime or "audio/ogg"),
+            language="tr",
+        )
+        return (getattr(tr, "text", "") or "").strip()
+
+    async def _via_gemini(key: str) -> str:
+        from google import genai
+        import base64 as _b64
+        client = genai.Client(api_key=key)
+        gmodel = model if prov in ("gemini", "google", "google-gemini") else "gemini-3.1-flash"
+        resp = await client.aio.models.generate_content(
+            model=gmodel or "gemini-3.1-flash",
+            contents=[{"role": "user", "parts": [
+                {"text": "Bu ses kaydını birebir Türkçe metne dök. SADECE konuşulan metni yaz; "
+                         "yorum, açıklama veya köşeli parantez ekleme."},
+                {"inline_data": {"mime_type": mime or "audio/ogg",
+                                 "data": _b64.standard_b64encode(audio_bytes).decode()}}]}])
+        return (getattr(resp, "text", None) or "").strip()
+
+    try:
+        if prov in ("gemini", "google", "google-gemini"):
+            return await _via_gemini(api_key)
+        if prov in ("anthropic", "claude"):
+            # Claude ses girişi desteklemez → env yedeği (Whisper > Gemini)
+            if os.environ.get("OPENAI_API_KEY"):
+                return await _via_openai(os.environ["OPENAI_API_KEY"])
+            if os.environ.get("GEMINI_API_KEY"):
+                return await _via_gemini(os.environ["GEMINI_API_KEY"])
+            return ""
+        return await _via_openai(api_key)
+    except Exception:
+        logger.exception("WA audio transcribe failed")
+        return ""
+
+
+async def _handle_audio(sender: str, mid: str, media_id: str,
+                        name: Optional[str], own_pnid: Optional[str]):
+    """Sesli mesaj: Meta'dan indir → STT ile yazıya çevir → metni normal AI akışına ver
+    (müşteriye YAZARAK cevap gider). Çeviremezse uydurmaz, insana devreder."""
+    try:
+        if await _already_processed(mid):
+            return
+        cfg = await _wa_cfg()
+        settings = await get_ai_settings()
+        if not settings.get("enabled", True) or not cfg.get("ai_autoreply", False):
+            return
+        api_key = _api_key_for(settings)
+        if not api_key:
+            await _handoff(sender, "[sesli mesaj]", name)
+            return
+        audio, mime = await _download_wa_media(media_id, cfg.get("access_token", ""),
+                                               cfg.get("api_version", "v23.0"))
+        if not audio:
+            await _handoff(sender, "[sesli mesaj indirilemedi]", name)
+            await _log(sender, "[sesli mesaj]", "", handoff=True, confidence=0.0, note="audio_dl_fail")
+            return
+        text = await _transcribe_audio(
+            audio, mime, api_key,
+            settings.get("fast_model") or settings.get("model"),
+            settings.get("provider", "openai"))
+        if not text:
+            await _handoff(sender, "[sesli mesaj — yazıya çevrilemedi]", name)
+            await _log(sender, "[sesli mesaj]", "", handoff=True, confidence=0.0, note="stt_empty")
+            return
+        # Yazıya çevrilen metni normal akışa ver — ürün/sipariş/beden bağlamıyla cevaplasın.
+        body = f"[Müşteri sesli mesaj gönderdi — yazıya çevrildi] {text}"
+        await _handle_inbound(sender, mid + "_aud", body, name, own_pnid)
+    except Exception as e:
+        logger.exception(f"WA audio handler error: {e}")
 
 
 async def _handle_image(sender: str, mid: str, media_id: str, caption: str,
