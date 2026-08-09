@@ -226,6 +226,26 @@ async def _recent_orders_context(phone: str):
     return "\n".join(lines), len(rows)
 
 
+async def _recent_dialog(sender: str, limit: int = 6) -> str:
+    """Bu müşteriyle son konuşma turlarını (kronolojik) döndürür — AI'nın tekrar
+    tanıtmaması ve TUTARLI devam etmesi için. Sadece gerçek soru/cevap turları."""
+    try:
+        cur = db.whatsapp_conversations.find(
+            {"phone": sender, "inbound": {"$nin": [None, ""]}},
+            {"_id": 0, "inbound": 1, "outbound": 1, "created_at": 1}
+        ).sort("created_at", -1).limit(limit)
+        rows = await cur.to_list(limit)
+    except Exception:
+        return ""
+    lines = []
+    for r in reversed(rows):  # eskiden yeniye
+        if r.get("inbound"):
+            lines.append(f"Müşteri: {str(r['inbound'])[:200]}")
+        if r.get("outbound"):
+            lines.append(f"Sen: {str(r['outbound'])[:300]}")
+    return "\n".join(lines[-12:])
+
+
 async def _handle_inbound(sender: str, mid: str, body: str,
                           name: Optional[str], own_pnid: Optional[str]):
     try:
@@ -266,16 +286,27 @@ async def _handle_inbound(sender: str, mid: str, body: str,
         prod_ctx = await _gather_product_context(body)
         ord_ctx, ord_count = await _recent_orders_context(sender)
         extra_ctx = await _extra_context()
+        dialog = await _recent_dialog(sender)
 
         system = settings.get("persona") or DEFAULT_PERSONA
         if extra_ctx.get("store_name"):
-            system += f"\n\nMağaza adı: {extra_ctx['store_name']}. Kendini bu mağazanın kıdemli müşteri temsilcisi olarak tanıt."
+            if dialog:
+                system += (f"\n\nMağaza: {extra_ctx['store_name']}. Bu DEVAM EDEN bir konuşma — "
+                           "kendini TEKRAR tanıtma, tekrar selamlaMA, doğrudan ve tutarlı devam et.")
+            else:
+                system += (f"\n\nMağaza adı: {extra_ctx['store_name']}. Bu ilk mesaj — kısaca selamla ve "
+                           "kendini BİR KEZ kıdemli müşteri temsilcisi olarak tanıt.")
         system += (
             "\n\nKanal: WhatsApp. GÖREV: gerçek bir kıdemli müşteri temsilcisi gibi, müşterinin "
             "HER sorusuna yardımcı ol — ürün açıklaması/beden-ölçü, stok, fiyat/kampanya, kargo "
             "takibi, teslimat süresi, iade/değişim, ödeme ve havale/IBAN hesap bilgisi, üyelik vb. "
             "Kısa, sıcak, samimi yaz (1-4 cümle, gereksiz emoji yok). Müşteri adını uygunsa bir kez "
-            "kullan. KURAL: Yalnızca aşağıda sana verilen bilgilerden cevapla; sipariş/stok/fiyat/"
+            "kullan. KENDİNİ HER MESAJDA TEKRAR TANITMA/SELAMLAMA (devam eden konuşmada doğrudan konuş). "
+            "TUTARLILIK: Verdiğin bilgiyle çelişme; bir durumu açıkladıktan sonra klişe 'nasıl yardımcı "
+            "olabilirim' KAPANIŞI YAPMA — mantıklı, SOMUT bir sonraki adım öner (ör. ödeme başarısız/"
+            "süresi dolmuşsa: 'dilerseniz yeniden sipariş oluşturmanıza yardımcı olayım' ya da ödeme "
+            "linkine yönlendir; kargo gecikmişse takip no ver; iade istiyorsa süreci anlat). "
+            "KURAL: Yalnızca aşağıda sana verilen bilgilerden cevapla; sipariş/stok/fiyat/"
             "kargo/ölçü gibi bir bilgi verilmemişse UYDURMA — kibarca 'kontrol edip döneyim' de ve "
             "insana devret (HANDOFF: yes).\n"
             "BEDEN ÖNERİSİ: Müşteri boyunu/kilosunu veya normalde giydiği bedeni söylerse, ürünün "
@@ -287,6 +318,8 @@ async def _handle_inbound(sender: str, mid: str, body: str,
             "sonra kibarca alışverişe/konuya yönlendir. Hakaret/uygunsuzlukta sakin ve profesyonel kal.\n"
             "--- BİLGİ KAYNAĞI (yalnız bunları kullan) ---\n"
         )
+        if dialog:
+            system += f"\n[Önceki Konuşma — son mesajlar; buna göre TUTARLI ve tekrarsız devam et]\n{dialog}\n"
         if ord_ctx:
             system += f"\n{ord_ctx}\n"
             if ord_count >= 2:
