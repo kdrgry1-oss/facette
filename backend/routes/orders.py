@@ -2476,17 +2476,29 @@ async def _decrement_stock_atomic(order: dict) -> dict:
                     if len(cand) == 1:
                         match_v = cand[0]
             if not match_v:
-                # Varyant tekil çözülemedi. Normalde yanlış varyantı düşürmemek için geçilirdi;
-                # AMA bu, ürünün TÜM varyantları 0 iken bile ("takım stoğu 0") siparişin geçmesine
-                # yol açıyordu → OVERSELL. Artık: ürün GENELİ stok qty'yi karşılamıyorsa REDDET
-                # (0 stoklu ürün asla sipariş edilemez); yeterliyse (gerçekten belirsiz) geçir.
-                _total_stock = 0
-                for _v in variants:
+                # Varyant tekil çözülemedi (barkodsuz/variant_id'siz + aynı bedende birden çok
+                # varyant). Normalde yanlış varyantı düşürmemek için geçilirdi → 0 stoklu
+                # varyanttan sipariş geçiyordu (OVERSELL). Artık müşterinin verdiği BEDEN(+RENK)
+                # ADAYLARINA bakılır: o adaylardan hiçbiri qty'yi karşılamıyorsa (o beden/varyant
+                # tükenmiş) REDDEDİLİR → "stoğu 0 olan varyanttan sipariş gelmez". Beden verilmemişse
+                # ürünün tüm varyantları aday alınır (hepsi 0 ise reddedilir).
+                _sz = str(it.get("size") or "").strip().lower()
+                _cl = str(it.get("color") or "").strip().lower()
+                _cands = variants
+                if _sz:
+                    _by_size = [v for v in variants if str(v.get("size") or "").strip().lower() == _sz]
+                    _cands = _by_size or variants
+                    if _cl:
+                        _by_color = [v for v in _cands if str(v.get("color") or "").strip().lower() == _cl]
+                        if _by_color:
+                            _cands = _by_color
+                _cand_max = 0
+                for _v in _cands:
                     try:
-                        _total_stock += int(_v.get("stock") or 0)
+                        _cand_max = max(_cand_max, int(_v.get("stock") or 0))
                     except Exception:
                         pass
-                if _total_stock < qty:
+                if _cand_max < qty:
                     await _reverse_stock_moves(applied)
                     return {"success": False, "barcode": "",
                             "name": it.get("name", "") or prod.get("name", "")}
