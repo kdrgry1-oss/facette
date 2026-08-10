@@ -2476,7 +2476,20 @@ async def _decrement_stock_atomic(order: dict) -> dict:
                     if len(cand) == 1:
                         match_v = cand[0]
             if not match_v:
-                # Varyant tekil çözülemedi → yanlış varyantı düşürmemek için geçir (mevcut davranış).
+                # Varyant tekil çözülemedi. Normalde yanlış varyantı düşürmemek için geçilirdi;
+                # AMA bu, ürünün TÜM varyantları 0 iken bile ("takım stoğu 0") siparişin geçmesine
+                # yol açıyordu → OVERSELL. Artık: ürün GENELİ stok qty'yi karşılamıyorsa REDDET
+                # (0 stoklu ürün asla sipariş edilemez); yeterliyse (gerçekten belirsiz) geçir.
+                _total_stock = 0
+                for _v in variants:
+                    try:
+                        _total_stock += int(_v.get("stock") or 0)
+                    except Exception:
+                        pass
+                if _total_stock < qty:
+                    await _reverse_stock_moves(applied)
+                    return {"success": False, "barcode": "",
+                            "name": it.get("name", "") or prod.get("name", "")}
                 continue
             _mvid = match_v.get("id")
             res3 = await db.products.update_one(
