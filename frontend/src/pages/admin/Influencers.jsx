@@ -319,7 +319,7 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
       name: form.name, platform: form.platform, handle: form.handle,
       instagram: form.instagram, tiktok: form.tiktok, birthday: form.birthday || null,
       phone: form.phone, email: form.email,
-      follower_count: Number(form.follower_count) || 0,
+      follower_count: parseInt(String(form.follower_count).replace(/[^\d]/g, ""), 10) || 0,
       coupon_code: form.coupon_code, aff_id: form.aff_id,
       commission_rate: Number(form.commission_rate) || 0,
       notes: form.notes,
@@ -359,7 +359,7 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
         <Field label="Instagram (@)"><input className="inp" value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="@kullanici" /></Field>
         <Field label="TikTok (@)"><input className="inp" value={form.tiktok} onChange={(e) => set("tiktok", e.target.value)} placeholder="@kullanici" /></Field>
         <Field label="Doğum Günü"><input type="date" className="inp" value={form.birthday} onChange={(e) => set("birthday", e.target.value)} /></Field>
-        <Field label="Takipçi"><input type="number" className="inp" value={form.follower_count} onChange={(e) => set("follower_count", e.target.value)} /></Field>
+        <Field label="Takipçi"><input type="text" inputMode="numeric" className="inp" value={form.follower_count} onChange={(e) => set("follower_count", e.target.value)} placeholder="Örn. 125.500" /></Field>
         <Field label="Telefon"><input className="inp" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
         <Field label="E-posta"><input className="inp" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
         <Field label="Kupon Kodu"><input data-testid="inf-coupon" className="inp uppercase" value={form.coupon_code} onChange={(e) => set("coupon_code", e.target.value)} placeholder="MELIS10" /></Field>

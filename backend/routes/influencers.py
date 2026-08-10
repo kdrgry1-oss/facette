@@ -28,6 +28,46 @@ def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _to_int_loose(v, default: int = 0) -> int:
+    """Takipçi sayısı gibi alanları TOLERANSLI biçimde int'e çevirir.
+    Türkçe binlik ayracı (nokta/boşluk) ve K/B(bin)/M(milyon) ekleri desteklenir.
+    Sebep: panel `type=number` inputu Türk kullanıcının yazdığı "125.500" değerini
+    JS `Number()` ile 125.5 (kesirli float) yapıyordu; Pydantic `int` bunu reddedip
+    kaydı 500 ile düşürüyordu ("takipçi girince kaydolmuyor" bug'ı). Artık asla patlamaz."""
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return default
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        try:
+            return int(round(v))
+        except Exception:
+            return default
+    import re as _re
+    s = str(v).strip().lower().replace(" ", "")
+    if not s:
+        return default
+    m = _re.match(r"^([\d.,]+)(k|b|bin|m|mn|milyon)?$", s)
+    if m:
+        num, suf = m.group(1), m.group(2)
+        # Türkçe: virgül = ondalık, nokta = binlik ayraç
+        num = num.replace(".", "").replace(",", ".")
+        try:
+            val = float(num)
+        except Exception:
+            val = None
+        if val is not None:
+            if suf in ("k", "b", "bin"):
+                val *= 1000
+            elif suf in ("m", "mn", "milyon"):
+                val *= 1_000_000
+            return int(round(val))
+    digits = _re.sub(r"\D", "", s)
+    return int(digits) if digits else default
+
+
 # =============================================================================
 # Sipariş eşleştirme yardımcı fonksiyonu (orders.py'den çağrılır)
 # =============================================================================
@@ -90,6 +130,8 @@ async def _send_direct_sms(phone: str, message: str) -> dict:
 
 @router.post("/influencers")
 async def create_influencer(payload: dict, current_user: dict = Depends(require_admin)):
+    if payload is not None and "follower_count" in payload:
+        payload["follower_count"] = _to_int_loose(payload.get("follower_count"))
     model = Influencer(**payload)
     doc = model.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
@@ -149,6 +191,8 @@ async def update_influencer(influencer_id: str, payload: dict, current_user: dic
         "coupon_code", "aff_id", "commission_rate", "shipping_address", "notes", "is_active",
     }
     update = {k: v for k, v in payload.items() if k in allowed}
+    if "follower_count" in update:
+        update["follower_count"] = _to_int_loose(update.get("follower_count"))
     if "coupon_code" in update and update["coupon_code"]:
         update["coupon_code"] = update["coupon_code"].upper()
     update["updated_at"] = _now_iso()
