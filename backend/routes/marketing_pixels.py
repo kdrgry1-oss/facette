@@ -509,6 +509,8 @@ async def capi_audit(
         "has_phone":        {"n": _sig(purchases, "phone"),        "pct": _pct(_sig(purchases, "phone"), total_p)},
         "has_fbp":          {"n": _sig(purchases, "fbp"),          "pct": _pct(_sig(purchases, "fbp"), total_p)},
         "has_fbc":          {"n": _sig(purchases, "fbc"),          "pct": _pct(_sig(purchases, "fbc"), total_p)},
+        "has_ttclid":       {"n": _sig(purchases, "ttclid"),       "pct": _pct(_sig(purchases, "ttclid"), total_p)},
+        "has_ttp":          {"n": _sig(purchases, "ttp"),          "pct": _pct(_sig(purchases, "ttp"), total_p)},
         "has_external_id":  {"n": _sig(purchases, "external_id"),  "pct": _pct(_sig(purchases, "external_id"), total_p)},
         "has_ip":           {"n": _sig(purchases, "ip"),           "pct": _pct(_sig(purchases, "ip"), total_p)},
         "has_user_agent":   {"n": _sig(purchases, "ua"),           "pct": _pct(_sig(purchases, "ua"), total_p)},
@@ -547,9 +549,9 @@ async def capi_audit(
             fbp_src["attribution_fallback"] += 1
         # source-path (hangi akıştan gönderildi)
         sp = ((o or {}).get("capi_purchase_source") or "unknown") if o is not None else "unknown_no_order"
-        b = src_path.setdefault(sp, {"n": 0, "email": 0, "phone": 0, "fbp": 0, "fbc": 0, "external_id": 0})
+        b = src_path.setdefault(sp, {"n": 0, "email": 0, "phone": 0, "fbp": 0, "fbc": 0, "ttclid": 0, "ttp": 0, "external_id": 0})
         b["n"] += 1
-        for k in ("email", "phone", "fbp", "fbc", "external_id"):
+        for k in ("email", "phone", "fbp", "fbc", "ttclid", "ttp", "external_id"):
             if (r.get("match_signals") or {}).get(k):
                 b[k] += 1
 

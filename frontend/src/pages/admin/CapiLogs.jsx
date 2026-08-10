@@ -43,6 +43,7 @@ export default function CapiLogs() {
   const [queue, setQueue] = useState([]);
   const [audit, setAudit] = useState(null);
   const [auditWindow, setAuditWindow] = useState(72);
+  const [auditProvider, setAuditProvider] = useState("meta");
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({ provider: "", event_name: "", ok: "" });
@@ -85,7 +86,7 @@ export default function CapiLogs() {
     setLoading(true);
     try {
       const res = await axios.get(
-        `${API}/marketing-pixels/capi/audit?provider=meta&sample=100&window_hours=${auditWindow}`, auth);
+        `${API}/marketing-pixels/capi/audit?provider=${auditProvider}&sample=100&window_hours=${auditWindow}`, auth);
       setAudit(res.data || null);
     } catch (e) {
       toast.error("Denetim yüklenemedi: " + (e?.response?.data?.detail || e.message));
@@ -97,7 +98,7 @@ export default function CapiLogs() {
     else if (tab === "queue") loadQueue();
     else if (tab === "audit") loadAudit();
     // eslint-disable-next-line
-  }, [tab, filters, queueFilter, auditWindow]);
+  }, [tab, filters, queueFilter, auditWindow, auditProvider]);
 
   const retryOne = async (qid) => {
     try {
@@ -223,8 +224,16 @@ export default function CapiLogs() {
           </select>
         </div>
       ) : (
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-2 text-sm flex-wrap">
           <Filter size={14} className="text-gray-500" />
+          <select value={auditProvider} onChange={(e) => setAuditProvider(e.target.value)}
+            className="border px-2 py-1 rounded text-xs font-semibold" data-testid="audit-provider">
+            <option value="meta">Meta</option>
+            <option value="tiktok">TikTok</option>
+            <option value="google_ads">Google Ads</option>
+            <option value="pinterest">Pinterest</option>
+            <option value="snapchat">Snapchat</option>
+          </select>
           <span className="text-xs text-gray-500">Sağlık penceresi:</span>
           <select value={auditWindow} onChange={(e) => setAuditWindow(Number(e.target.value))}
             className="border px-2 py-1 rounded text-xs" data-testid="audit-window">
@@ -248,19 +257,25 @@ export default function CapiLogs() {
             <>
               {/* Coverage */}
               <div className="bg-white border rounded-lg p-4">
-                <h3 className="font-semibold text-sm mb-1">Son {audit.sample_size} server Purchase — eşleşme sinyali coverage (PII'siz)</h3>
+                <h3 className="font-semibold text-sm mb-1">
+                  <span className="uppercase bg-gray-900 text-white text-[10px] px-1.5 py-0.5 rounded mr-2">{audit.provider}</span>
+                  Son {audit.sample_size} server Purchase — eşleşme sinyali coverage (PII'siz)
+                </h3>
                 <p className="text-[11px] text-gray-400 mb-3">Üretim: {fmtTime(audit.generated_at)} · yalnız var/yok oranı, ham değer yok.</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {[
                     ["Toplam Purchase", { n: audit.purchase_coverage?.total_server_purchase, pct: 100 }],
                     ["has_email", audit.purchase_coverage?.has_email],
                     ["has_phone", audit.purchase_coverage?.has_phone],
-                    ["has_fbp", audit.purchase_coverage?.has_fbp],
-                    ["has_fbc", audit.purchase_coverage?.has_fbc],
                     ["has_external_id", audit.purchase_coverage?.has_external_id],
+                    ...(auditProvider === "tiktok"
+                      ? [["has_ttclid", audit.purchase_coverage?.has_ttclid],
+                         ["has_ttp", audit.purchase_coverage?.has_ttp]]
+                      : [["has_fbp", audit.purchase_coverage?.has_fbp],
+                         ["has_fbc", audit.purchase_coverage?.has_fbc]]),
                     ["has_ip", audit.purchase_coverage?.has_ip],
                     ["has_user_agent", audit.purchase_coverage?.has_user_agent],
-                    ["Meta API başarılı", audit.purchase_coverage?.meta_api_ok],
+                    ["API başarılı", audit.purchase_coverage?.meta_api_ok],
                     ["IPv4", audit.purchase_coverage?.ip_version_4],
                     ["IPv6", audit.purchase_coverage?.ip_version_6],
                   ].map(([label, v]) => (
@@ -276,8 +291,9 @@ export default function CapiLogs() {
 
               {/* _fbp kaynağı + source-path */}
               <div className="grid md:grid-cols-2 gap-4">
+                {auditProvider === "meta" && (
                 <div className="bg-white border rounded-lg p-4">
-                  <h3 className="font-semibold text-sm mb-2">_fbp kaynağı</h3>
+                  <h3 className="font-semibold text-sm mb-2">_fbp kaynağı <span className="text-[10px] text-gray-400 font-normal">(Meta'ya özel)</span></h3>
                   <table className="w-full text-xs">
                     <tbody>
                       {Object.entries(audit.fbp_source || {}).map(([k, n]) => (
@@ -294,17 +310,18 @@ export default function CapiLogs() {
                     </tbody>
                   </table>
                 </div>
+                )}
                 <div className="bg-white border rounded-lg p-4">
                   <h3 className="font-semibold text-sm mb-2">Purchase source-path dağılımı</h3>
                   <table className="w-full text-xs">
-                    <thead className="text-gray-500"><tr><th className="text-left py-1">Akış</th><th className="text-right py-1">Adet</th><th className="text-right py-1">email</th><th className="text-right py-1">fbp</th><th className="text-right py-1">ext_id</th></tr></thead>
+                    <thead className="text-gray-500"><tr><th className="text-left py-1">Akış</th><th className="text-right py-1">Adet</th><th className="text-right py-1">email</th><th className="text-right py-1">{auditProvider === "tiktok" ? "ttclid" : "fbp"}</th><th className="text-right py-1">ext_id</th></tr></thead>
                     <tbody>
                       {Object.entries(audit.purchase_source_path || {}).map(([k, v]) => (
                         <tr key={k} className="border-t">
                           <td className="py-1.5 font-mono">{k}</td>
                           <td className="py-1.5 text-right font-bold">{v.n}</td>
                           <td className="py-1.5 text-right text-gray-500">{v.email}</td>
-                          <td className="py-1.5 text-right text-gray-500">{v.fbp}</td>
+                          <td className="py-1.5 text-right text-gray-500">{auditProvider === "tiktok" ? v.ttclid : v.fbp}</td>
                           <td className="py-1.5 text-right text-gray-500">{v.external_id}</td>
                         </tr>
                       ))}
