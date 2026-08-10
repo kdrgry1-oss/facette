@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import {
-  Factory, Plus, ChevronRight, Save, Trash2, Edit, X, Package, CheckCircle2,
+  Factory, Plus, ChevronRight, ChevronLeft, Save, Trash2, Edit, X, Package, CheckCircle2,
   Image as ImageIcon,
 } from "lucide-react";
 import { resolveColor, needsBorder, MULTI_GRADIENT } from "../../lib/colorMap";
@@ -300,9 +300,21 @@ export default function Manufacturing() {
   // İlerletme artık tarayıcı prompt'u yerine tasarıma uygun modal ile (kullanıcı isteği)
   const [advanceModal, setAdvanceModal] = useState(null); // {item, stage, date, note}
   const advanceStage = (item, newStage) => {
+    if (!newStage) return;
+    // Yön tespiti: seçilen aşama mevcut aşamadan ÖNCE ise "geri alma"dır.
+    const curIdx = stages.findIndex((s) => s.key === item.current_stage);
+    const newIdx = stages.findIndex((s) => s.key === newStage);
+    const back = curIdx > -1 && newIdx > -1 && newIdx < curIdx;
+    // Veri KORUMA: geri alırken o aşamada zaten girilmiş tarihi öne al (üzerine yazıp silmesin).
+    const existingDate =
+      (item.stage_dates || {})[newStage] ||
+      (newStage === "kesim" ? item.cutting_start_date || "" : "") ||
+      "";
     setAdvanceModal({
-      item, stage: newStage,
-      date: _STAGE_DATE_LABELS[newStage] ? new Date().toISOString().substring(0, 10) : "",
+      item, stage: newStage, back,
+      date: _STAGE_DATE_LABELS[newStage]
+        ? existingDate || (back ? "" : new Date().toISOString().substring(0, 10))
+        : "",
       note: "",
       workshop: newStage === "dikim" ? (item.sewing_workshop || "") : "",
     });
@@ -317,8 +329,8 @@ export default function Manufacturing() {
           ...(m.stage === "dikim" && m.workshop?.trim() ? { sewing_workshop: m.workshop.trim() } : {}) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success("Aşama güncellendi");
-      if (m.stage === "teslim_alindi") toast.success("Stok otomatik güncellendi");
+      toast.success(m.back ? "Aşama geri alındı — girilen veriler korundu" : "Aşama güncellendi");
+      if (!m.back && m.stage === "teslim_alindi") toast.success("Stok otomatik güncellendi");
       setAdvanceModal(null);
       fetchAll();
     } catch (err) {
@@ -402,6 +414,10 @@ export default function Manufacturing() {
   const nextStage = (current) => {
     const idx = stages.findIndex(s => s.key === current);
     return idx >= 0 && idx < stages.length - 1 ? stages[idx + 1].key : null;
+  };
+  const prevStage = (current) => {
+    const idx = stages.findIndex(s => s.key === current);
+    return idx > 0 ? stages[idx - 1].key : null;
   };
 
   // ── Renk × Beden kombinasyon matrisi ──────────────────────────────────
@@ -804,6 +820,16 @@ export default function Manufacturing() {
                         <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
                       </span>
                     )}
+                    {prevStage(item.current_stage) && (
+                      <button
+                        onClick={() => advanceStage(item, prevStage(item.current_stage))}
+                        data-testid={`stage-back-${item.id}`}
+                        title="Aşamayı bir önceki adıma geri al — girilen veriler (adet, tarih, kalite, atölye, görseller) korunur"
+                        className="px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded font-medium"
+                      >
+                        <ChevronLeft size={13} className="inline" /> Geri Al
+                      </button>
+                    )}
                     {nextStage(item.current_stage) && (
                       <button
                         onClick={() => advanceStage(item, nextStage(item.current_stage))}
@@ -871,8 +897,10 @@ export default function Manufacturing() {
         <DialogContent className="max-w-md" data-testid="advance-modal">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <ChevronRight size={18} className="text-rose-600" />
-              {advanceModal ? stageLabel(advanceModal.stage) : ""} aşamasına ilerlet
+              {advanceModal?.back
+                ? <ChevronLeft size={18} className="text-gray-600" />
+                : <ChevronRight size={18} className="text-rose-600" />}
+              {advanceModal ? stageLabel(advanceModal.stage) : ""} aşamasına {advanceModal?.back ? "geri al" : "ilerlet"}
             </DialogTitle>
           </DialogHeader>
           {advanceModal && (
@@ -880,8 +908,18 @@ export default function Manufacturing() {
               <p className="text-sm text-gray-500">
                 <b className="text-gray-800">{advanceModal.item.product_name}</b> kaydı
                 "<b>{stageLabel(advanceModal.item.current_stage)}</b>" aşamasından
-                "<b className="text-rose-700">{stageLabel(advanceModal.stage)}</b>" aşamasına taşınacak.
+                "<b className={advanceModal.back ? "text-gray-700" : "text-rose-700"}>{stageLabel(advanceModal.stage)}</b>" aşamasına taşınacak.
               </p>
+              {advanceModal.back && (
+                <p className="text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-600">
+                  Girilen diğer veriler (adet, kalite kontrol, atölye, görseller, tarihler) <b>korunur</b> — yalnızca aşama durumu değişir.
+                  {advanceModal.item.current_stage === "teslim_alindi" && (
+                    <span className="block mt-1 text-amber-700">
+                      ⚠️ Dikkat: Depo teslimatında eklenen <b>stok geri düşülmez</b>. Yanlış stok girdiyse Ürünler sayfasından manuel düzeltin.
+                    </span>
+                  )}
+                </p>
+              )}
               {_STAGE_DATE_LABELS[advanceModal.stage] && (
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">{_STAGE_DATE_LABELS[advanceModal.stage]}</label>
@@ -910,8 +948,8 @@ export default function Manufacturing() {
                 <button type="button" onClick={() => setAdvanceModal(null)}
                   className="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Vazgeç</button>
                 <button type="button" onClick={confirmAdvance} data-testid="advance-confirm"
-                  className="px-5 py-2 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700 font-semibold inline-flex items-center gap-1.5">
-                  <ChevronRight size={15} /> İlerlet
+                  className={`px-5 py-2 text-sm text-white rounded-lg font-semibold inline-flex items-center gap-1.5 ${advanceModal.back ? "bg-gray-700 hover:bg-gray-800" : "bg-rose-600 hover:bg-rose-700"}`}>
+                  {advanceModal.back ? <><ChevronLeft size={15} /> Geri Al</> : <><ChevronRight size={15} /> İlerlet</>}
                 </button>
               </div>
             </div>
