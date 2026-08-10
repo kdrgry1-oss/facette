@@ -227,7 +227,29 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
         pt = float(sum(p.get("amount", 0) for p in (payload.get("payments") or [])))
         update["paid_total"] = pt
         update["remaining"] = float(payload.get("agreed_total", existing.get("agreed_total", 0)) or existing.get("agreed_total", 0)) - pt
-    await db.manufacturing.update_one({"id": record_id}, {"$set": update})
+
+    # TARİH İKİLEMESİ FIX: qc_date / cutting_start_date UI'da stage_dates'e de düşüyor
+    # (liste ekranı `qc_date || stage_dates.kalite_kontrol` okur). Form bu alanı temizleyince
+    # stage_dates karşılığı da temizlenmeli; yoksa ekran eski tarihe geri düşüp "silinmedi"
+    # görünür. Dolu → $set, boş → $unset ile stage_dates senkron tutulur.
+    unset = {}
+    if "qc_date" in payload:
+        _v = str(payload.get("qc_date") or "").strip()
+        if _v:
+            update["stage_dates.kalite_kontrol"] = _v
+        else:
+            unset["stage_dates.kalite_kontrol"] = ""
+    if "cutting_start_date" in payload:
+        _v = str(payload.get("cutting_start_date") or "").strip()
+        if _v:
+            update["stage_dates.kesim"] = _v
+        else:
+            unset["stage_dates.kesim"] = ""
+
+    ops = {"$set": update}
+    if unset:
+        ops["$unset"] = unset
+    await db.manufacturing.update_one({"id": record_id}, ops)
     return {"success": True}
 
 
