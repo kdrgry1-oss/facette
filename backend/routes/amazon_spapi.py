@@ -180,6 +180,49 @@ async def get_valid_access_token() -> tuple[str, str, str]:
     return access_token, endpoint, cfg.get("marketplace_id") or DEFAULT_MARKETPLACE_ID
 
 
+# İlk faz: Amazon'a YAZMA varsayılan KAPALI (dry-run). Restricted-flag pattern'iyle aynı.
+# Açmak için: env AMAZON_ALLOW_WRITE=1 (canlı test SKU'su ile doğrulanınca). Rollback: =0.
+ALLOW_WRITE = os.environ.get("AMAZON_ALLOW_WRITE", "0") == "1"
+
+
+async def _spapi_send(method: str, path: str, body: dict = None, params: dict = None) -> dict:
+    """PATCH/PUT/POST yazma çağrısı. ALLOW_WRITE KAPALIYSA Amazon'a GİTMEZ (dry-run):
+    ne gönderileceğini döndürür → SKU/payload'ı canlı yazmadan doğrulayabilirsiniz.
+    Açıkken gerçek çağrı yapılır. PII yol koruması (§1) yine geçerli; gövde loglanmaz."""
+    _assert_restricted_allowed(path)
+    if not ALLOW_WRITE:
+        await _log_spapi_call(f"DRYRUN {method} {path}", None, True)
+        return {"status": 0, "ok": True, "dry_run": True,
+                "would_send": {"method": method, "path": path, "params": params or {}, "body": body}}
+    access_token, endpoint, _ = await get_valid_access_token()
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        r = await client.request(
+            method, f"{endpoint}{path}", params=params or {}, json=body,
+            headers={
+                "x-amz-access-token": access_token,
+                "content-type": "application/json",
+                "accept": "application/json",
+            },
+        )
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": r.text[:500]}
+        data = _scrub_pii(data)  # §1: beklenmedik PII saklanmadan sökülür
+        _ok = 200 <= r.status_code < 300
+        await _log_spapi_call(f"{method} {path}", r.status_code, _ok)  # gövde loglanmaz
+        return {"status": r.status_code, "ok": _ok, "data": data}
+
+
+async def _require_seller_id() -> str:
+    cfg = await _get_config()
+    seller = (cfg or {}).get("selling_partner_id")
+    if not seller:
+        raise HTTPException(status_code=400,
+                            detail="selling_partner_id yok — önce OAuth ile bağlanın (consent akışı)")
+    return seller
+
+
 async def _spapi_get(path: str, params: dict = None) -> dict:
     # §1: Restricted/PII yol ise (flag kapalı) çağrıyı hiç yapma.
     _assert_restricted_allowed(path)
@@ -314,6 +357,117 @@ async def spapi_orders(
             "fulfillment": o.get("FulfillmentChannel"),
         } for o in orders],
     }
+
+
+# ============================== STOK / FİYAT / LISTING (yazma) ==============================
+# Hepsi Listings Items API 2021-08-01 (PATCH) — Product Listing rolü yeterli.
+# Fiyatı YAZMAK için Pricing rolü GEREKMEZ (Pricing rolü sadece rakip/Buy Box fiyatı OKUMAK için).
+# İlk fazda ALLOW_WRITE=0 → dry-run; canlı yazma env ile açılır.
+
+@router.get("/write-status")
+async def spapi_write_status(current_user: dict = Depends(require_admin)):
+    """Yazma modu açık mı (canlı) yoksa dry-run mu — panelde göstermek için."""
+    return {"allow_write": ALLOW_WRITE, "mode": "live" if ALLOW_WRITE else "dry_run"}
+
+
+@router.post("/inventory/{sku}")
+async def spapi_set_inventory(sku: str, payload: dict, current_user: dict = Depends(require_admin)):
+    """Stok gönder: Listings Items PATCH fulfillment_availability.
+    Body: { quantity:int, product_type?:str, fulfillment_channel_code?:str }"""
+    try:
+        qty = max(0, int((payload or {}).get("quantity")))
+    except Exception:
+        raise HTTPException(status_code=400, detail="quantity (tam sayı) gerekli")
+    seller = await _require_seller_id()
+    _, _, mp = await get_valid_access_token()
+    body = {
+        "productType": (payload or {}).get("product_type") or "PRODUCT",
+        "patches": [{
+            "op": "replace",
+            "path": "/attributes/fulfillment_availability",
+            "value": [{
+                "fulfillment_channel_code": (payload or {}).get("fulfillment_channel_code") or "DEFAULT",
+                "quantity": qty,
+            }],
+        }],
+    }
+    res = await _spapi_send("PATCH", f"/listings/2021-08-01/items/{seller}/{sku}",
+                            body=body, params={"marketplaceIds": mp})
+    return {"success": res.get("ok"), "sku": sku, "quantity": qty, **res}
+
+
+@router.post("/price/{sku}")
+async def spapi_set_price(sku: str, payload: dict, current_user: dict = Depends(require_admin)):
+    """Fiyat gönder (KENDİ fiyatımız): Listings Items PATCH purchasable_offer.
+    Body: { price:float, currency?:str=TRY, product_type?:str }"""
+    try:
+        price = round(float((payload or {}).get("price")), 2)
+        if price <= 0:
+            raise ValueError()
+    except Exception:
+        raise HTTPException(status_code=400, detail="price (>0) gerekli")
+    currency = ((payload or {}).get("currency") or "TRY").upper()
+    seller = await _require_seller_id()
+    _, _, mp = await get_valid_access_token()
+    body = {
+        "productType": (payload or {}).get("product_type") or "PRODUCT",
+        "patches": [{
+            "op": "replace",
+            "path": "/attributes/purchasable_offer",
+            "value": [{
+                "marketplace_id": mp,
+                "currency": currency,
+                "our_price": [{"schedule": [{"value_with_tax": price}]}],
+            }],
+        }],
+    }
+    res = await _spapi_send("PATCH", f"/listings/2021-08-01/items/{seller}/{sku}",
+                            body=body, params={"marketplaceIds": mp})
+    return {"success": res.get("ok"), "sku": sku, "price": price, "currency": currency, **res}
+
+
+@router.patch("/listing/{sku}")
+async def spapi_patch_listing(sku: str, payload: dict, current_user: dict = Depends(require_admin)):
+    """Genel listing güncelle: çağıran JSON-patch listesi verir.
+    Body: { patches:[{op,path,value}], product_type?:str }. Yeni SKU için PUT gerekiyorsa
+    ayrı ele alınır — ilk faz mevcut SKU güncelleme odaklı."""
+    patches = (payload or {}).get("patches")
+    if not isinstance(patches, list) or not patches:
+        raise HTTPException(status_code=400, detail="patches (liste) gerekli")
+    seller = await _require_seller_id()
+    _, _, mp = await get_valid_access_token()
+    body = {"productType": (payload or {}).get("product_type") or "PRODUCT", "patches": patches}
+    res = await _spapi_send("PATCH", f"/listings/2021-08-01/items/{seller}/{sku}",
+                            body=body, params={"marketplaceIds": mp})
+    return {"success": res.get("ok"), "sku": sku, **res}
+
+
+# ============================== FİNANS + FİYAT OKUMA (read) ==============================
+
+@router.get("/finances")
+async def spapi_finances(days: int = Query(30, ge=1, le=180),
+                         current_user: dict = Depends(require_admin)):
+    """Finansal olaylar (Finances API v0) — PII'siz (tutar/komisyon/ücret; alıcı bilgisi YOK).
+    Finance and Accounting rolü gerekir."""
+    posted_after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    res = await _spapi_get("/finances/v0/financialEvents",
+                           {"PostedAfter": posted_after, "MaxResultsPerPage": 100})
+    if not res["ok"]:
+        return {"success": False, "status": res["status"], "error": res["data"]}
+    groups = (res["data"].get("payload") or {}).get("FinancialEvents") or {}
+    # PII'siz özet: yalnız event tipleri + adet (ham finansal detay Amazon'da; burada özet).
+    summary = {k: len(v) for k, v in groups.items() if isinstance(v, list)}
+    return {"success": True, "event_types": summary, "raw_keys": list(groups.keys())}
+
+
+@router.get("/pricing/{sku}")
+async def spapi_read_pricing(sku: str, current_user: dict = Depends(require_admin)):
+    """Amazon fiyatı / offer OKUMA (Product Pricing API v0). Pricing rolü gerekir.
+    NOT: Kendi fiyatımızı YAZMAK için bu rol GEREKMEZ; bu yalnız OKUMA içindir."""
+    _, _, mp = await get_valid_access_token()
+    res = await _spapi_get("/products/pricing/v0/price",
+                           {"MarketplaceId": mp, "ItemType": "Sku", "Skus": sku})
+    return {"success": res["ok"], "status": res["status"], "data": res.get("data")}
 
 
 def _public_base() -> str:
