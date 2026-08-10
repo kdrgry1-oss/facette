@@ -38,9 +38,11 @@ const PROVIDER_OPTIONS = [
 ];
 
 export default function CapiLogs() {
-  const [tab, setTab] = useState("logs");          // logs | queue
+  const [tab, setTab] = useState("logs");          // logs | queue | audit
   const [logs, setLogs] = useState([]);
   const [queue, setQueue] = useState([]);
+  const [audit, setAudit] = useState(null);
+  const [auditWindow, setAuditWindow] = useState(72);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({ provider: "", event_name: "", ok: "" });
@@ -79,10 +81,23 @@ export default function CapiLogs() {
     } finally { setLoading(false); }
   };
 
+  const loadAudit = async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get(
+        `${API}/marketing-pixels/capi/audit?provider=meta&sample=100&window_hours=${auditWindow}`, auth);
+      setAudit(res.data || null);
+    } catch (e) {
+      toast.error("Denetim yüklenemedi: " + (e?.response?.data?.detail || e.message));
+    } finally { setLoading(false); }
+  };
+
   useEffect(() => {
-    if (tab === "logs") loadLogs(); else loadQueue();
+    if (tab === "logs") loadLogs();
+    else if (tab === "queue") loadQueue();
+    else if (tab === "audit") loadAudit();
     // eslint-disable-next-line
-  }, [tab, filters, queueFilter]);
+  }, [tab, filters, queueFilter, auditWindow]);
 
   const retryOne = async (qid) => {
     try {
@@ -171,6 +186,11 @@ export default function CapiLogs() {
           data-testid="tab-queue">
           ⏳ Kuyruk ({queue.length})
         </button>
+        <button onClick={() => setTab("audit")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 ${tab === "audit" ? "border-black text-black" : "border-transparent text-gray-500 hover:text-black"}`}
+          data-testid="tab-audit">
+          🔎 Denetim (Meta Purchase)
+        </button>
       </div>
 
       {/* Filtreler */}
@@ -192,7 +212,7 @@ export default function CapiLogs() {
             <option value="false">✗ Hatalı</option>
           </select>
         </div>
-      ) : (
+      ) : tab === "queue" ? (
         <div className="flex items-center gap-2 text-sm">
           <Filter size={14} className="text-gray-500" />
           <select value={queueFilter} onChange={(e) => setQueueFilter(e.target.value)}
@@ -202,9 +222,157 @@ export default function CapiLogs() {
             <option value="true">💀 Ölü (max retry)</option>
           </select>
         </div>
+      ) : (
+        <div className="flex items-center gap-2 text-sm">
+          <Filter size={14} className="text-gray-500" />
+          <span className="text-xs text-gray-500">Sağlık penceresi:</span>
+          <select value={auditWindow} onChange={(e) => setAuditWindow(Number(e.target.value))}
+            className="border px-2 py-1 rounded text-xs" data-testid="audit-window">
+            <option value={24}>Son 24 saat</option>
+            <option value={72}>Son 72 saat</option>
+            <option value={168}>Son 7 gün</option>
+            <option value={720}>Son 30 gün</option>
+          </select>
+          <span className="text-[11px] text-gray-400">(coverage örneği: son 100 Purchase)</span>
+        </div>
+      )}
+
+      {/* Denetim (Audit) paneli */}
+      {tab === "audit" && (
+        <div className="space-y-4" data-testid="audit-panel">
+          {!audit ? (
+            <div className="bg-white border rounded-lg p-8 text-center text-gray-400 text-sm">
+              {loading ? "Denetim hesaplanıyor…" : "Veri yok."}
+            </div>
+          ) : (
+            <>
+              {/* Coverage */}
+              <div className="bg-white border rounded-lg p-4">
+                <h3 className="font-semibold text-sm mb-1">Son {audit.sample_size} server Purchase — eşleşme sinyali coverage (PII'siz)</h3>
+                <p className="text-[11px] text-gray-400 mb-3">Üretim: {fmtTime(audit.generated_at)} · yalnız var/yok oranı, ham değer yok.</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {[
+                    ["Toplam Purchase", { n: audit.purchase_coverage?.total_server_purchase, pct: 100 }],
+                    ["has_email", audit.purchase_coverage?.has_email],
+                    ["has_phone", audit.purchase_coverage?.has_phone],
+                    ["has_fbp", audit.purchase_coverage?.has_fbp],
+                    ["has_fbc", audit.purchase_coverage?.has_fbc],
+                    ["has_external_id", audit.purchase_coverage?.has_external_id],
+                    ["has_ip", audit.purchase_coverage?.has_ip],
+                    ["has_user_agent", audit.purchase_coverage?.has_user_agent],
+                    ["Meta API başarılı", audit.purchase_coverage?.meta_api_ok],
+                    ["IPv4", audit.purchase_coverage?.ip_version_4],
+                    ["IPv6", audit.purchase_coverage?.ip_version_6],
+                  ].map(([label, v]) => (
+                    <div key={label} className="border rounded-lg p-2.5">
+                      <div className="text-[11px] text-gray-500">{label}</div>
+                      <div className="text-lg font-bold">{v?.n ?? 0}
+                        {typeof v?.pct === "number" && <span className="text-xs font-normal text-gray-400 ml-1">%{v.pct}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* _fbp kaynağı + source-path */}
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="bg-white border rounded-lg p-4">
+                  <h3 className="font-semibold text-sm mb-2">_fbp kaynağı</h3>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {Object.entries(audit.fbp_source || {}).map(([k, n]) => (
+                        <tr key={k} className="border-t">
+                          <td className="py-1.5">{{
+                            order_snapshot: "Order snapshot / click_ids",
+                            attribution_fallback: "Attribution session fallback",
+                            none: "None",
+                            unknown_no_order: "Order bulunamadı",
+                          }[k] || k}</td>
+                          <td className="py-1.5 text-right font-bold">{n}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="bg-white border rounded-lg p-4">
+                  <h3 className="font-semibold text-sm mb-2">Purchase source-path dağılımı</h3>
+                  <table className="w-full text-xs">
+                    <thead className="text-gray-500"><tr><th className="text-left py-1">Akış</th><th className="text-right py-1">Adet</th><th className="text-right py-1">email</th><th className="text-right py-1">fbp</th><th className="text-right py-1">ext_id</th></tr></thead>
+                    <tbody>
+                      {Object.entries(audit.purchase_source_path || {}).map(([k, v]) => (
+                        <tr key={k} className="border-t">
+                          <td className="py-1.5 font-mono">{k}</td>
+                          <td className="py-1.5 text-right font-bold">{v.n}</td>
+                          <td className="py-1.5 text-right text-gray-500">{v.email}</td>
+                          <td className="py-1.5 text-right text-gray-500">{v.fbp}</td>
+                          <td className="py-1.5 text-right text-gray-500">{v.external_id}</td>
+                        </tr>
+                      ))}
+                      {Object.keys(audit.purchase_source_path || {}).length === 0 && (
+                        <tr><td colSpan={5} className="py-3 text-center text-gray-400">Kayıt yok</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Sağlık */}
+              <div className="bg-white border rounded-lg p-4">
+                <h3 className="font-semibold text-sm mb-3">Production sağlık — son {audit.health?.window_hours} saat</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                  {[
+                    ["Toplam event", audit.health?.total_events],
+                    ["Başarılı", audit.health?.ok],
+                    ["Hata", audit.health?.error],
+                    ["Hata oranı", `%${audit.health?.error_rate_pct}`],
+                    ["Retry başarı", audit.health?.retry_success],
+                    ["Kuyruk bekleyen", audit.health?.queue_pending],
+                    ["Dead-letter 💀", audit.health?.dead_letter],
+                    ["ViewContent hacmi", audit.health?.viewcontent_server_volume],
+                  ].map(([label, val]) => (
+                    <div key={label} className="border rounded-lg p-2.5">
+                      <div className="text-[11px] text-gray-500">{label}</div>
+                      <div className="text-lg font-bold">{val ?? 0}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[11px] text-gray-500 mb-1 uppercase font-bold">Event bazında</div>
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {Object.entries(audit.health?.by_event || {}).map(([k, v]) => (
+                          <tr key={k} className="border-t">
+                            <td className="py-1 font-mono">{k}</td>
+                            <td className="py-1 text-right">{v.n} <span className="text-gray-400">(%{v.ok_pct} ok)</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-gray-500 mb-1 uppercase font-bold">Hata durum kodları</div>
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {Object.entries(audit.health?.error_status_distribution || {}).map(([k, v]) => (
+                          <tr key={k} className="border-t"><td className="py-1 font-mono">HTTP {k}</td><td className="py-1 text-right font-bold">{v}</td></tr>
+                        ))}
+                        {Object.keys(audit.health?.error_status_distribution || {}).length === 0 && (
+                          <tr><td className="py-2 text-gray-400">Hata yok ✓</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <p className="text-[11px] text-amber-700 mt-3">⚠️ Per-event gönderim gecikmesi (latency) loglanmıyor — event akışını değiştirmemek için ölçüm eklenmedi.</p>
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {/* İçerik tablosu */}
+      {tab !== "audit" && (
       <div className="bg-white border rounded-lg overflow-hidden">
         {tab === "logs" ? (
           <table className="w-full text-xs">
@@ -298,6 +466,7 @@ export default function CapiLogs() {
           </table>
         )}
       </div>
+      )}
 
       <div className="text-xs text-gray-500 flex items-center gap-1">
         <AlertCircle size={12} />

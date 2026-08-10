@@ -467,6 +467,150 @@ async def capi_retry_one(qid: str, current_user: dict = Depends(require_admin)):
     return {"ok": True, "id": qid}
 
 
+def _pct(n: int, d: int) -> float:
+    """Yüzde (0 bölmeye dayanıklı, 1 ondalık)."""
+    return round((n * 100.0 / d), 1) if d else 0.0
+
+
+@router.get("/capi/audit")
+async def capi_audit(
+    current_user: dict = Depends(require_admin),
+    provider: str = "meta",
+    sample: int = 100,
+    window_hours: int = 72,
+):
+    """Post-deploy DOĞRULAMA denetimi — SALT-OKUNUR, PII'siz.
+
+    Meta CAPI'nin son N server Purchase eventini ve `window_hours` içindeki tüm
+    event'lerini `capi_event_logs` + `capi_event_queue` üzerinden özetler.
+    Ham e-posta/telefon/IP/fbp DÖNMEZ — yalnız var/yok sayıları, oranlar, kaynak
+    dağılımı. Event akışına HİÇ dokunmaz (yeni event üretmez/göndermez)."""
+    from datetime import timedelta
+    sample = max(1, min(int(sample or 100), 500))
+    window_hours = max(1, min(int(window_hours or 72), 24 * 30))
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(hours=window_hours)).isoformat()
+
+    # ── 1) Son N server Purchase — PII'siz coverage audit (§2) ────────────────
+    # İlk gönderim satırlarında match_signals bulunur (retry-başarı satırlarında yok).
+    purchases = await db.capi_event_logs.find(
+        {"provider": provider, "event_name": "purchase",
+         "match_signals": {"$exists": True}},
+        {"_id": 0, "event_id": 1, "ok": 1, "status": 1, "match_signals": 1, "created_at": 1},
+    ).sort("created_at", -1).limit(sample).to_list(sample)
+
+    def _sig(rows, key):
+        return sum(1 for r in rows if (r.get("match_signals") or {}).get(key))
+
+    total_p = len(purchases)
+    coverage = {
+        "total_server_purchase": total_p,
+        "has_email":        {"n": _sig(purchases, "email"),        "pct": _pct(_sig(purchases, "email"), total_p)},
+        "has_phone":        {"n": _sig(purchases, "phone"),        "pct": _pct(_sig(purchases, "phone"), total_p)},
+        "has_fbp":          {"n": _sig(purchases, "fbp"),          "pct": _pct(_sig(purchases, "fbp"), total_p)},
+        "has_fbc":          {"n": _sig(purchases, "fbc"),          "pct": _pct(_sig(purchases, "fbc"), total_p)},
+        "has_external_id":  {"n": _sig(purchases, "external_id"),  "pct": _pct(_sig(purchases, "external_id"), total_p)},
+        "has_ip":           {"n": _sig(purchases, "ip"),           "pct": _pct(_sig(purchases, "ip"), total_p)},
+        "has_user_agent":   {"n": _sig(purchases, "ua"),           "pct": _pct(_sig(purchases, "ua"), total_p)},
+        "meta_api_ok":      {"n": sum(1 for r in purchases if r.get("ok")), "pct": _pct(sum(1 for r in purchases if r.get("ok")), total_p)},
+    }
+    _ipv4 = sum(1 for r in purchases if (r.get("match_signals") or {}).get("ip_version") == 4)
+    _ipv6 = sum(1 for r in purchases if (r.get("match_signals") or {}).get("ip_version") == 6)
+    coverage["ip_version_4"] = {"n": _ipv4, "pct": _pct(_ipv4, total_p)}
+    coverage["ip_version_6"] = {"n": _ipv6, "pct": _pct(_ipv6, total_p)}
+
+    # ── 2) _fbp KAYNAK dağılımı + source-path (§2/§3) — orders JOIN ────────────
+    order_nums = [str(r.get("event_id")) for r in purchases if r.get("event_id")]
+    omap = {}
+    if order_nums:
+        async for o in db.orders.find(
+            {"order_number": {"$in": order_nums}},
+            {"_id": 0, "order_number": 1, "capi_purchase_source": 1,
+             "click_ids": 1, "attribution": 1},
+        ):
+            omap[str(o.get("order_number"))] = o
+
+    fbp_src = {"order_snapshot": 0, "attribution_fallback": 0, "none": 0, "unknown_no_order": 0}
+    src_path = {}
+    for r in purchases:
+        on = str(r.get("event_id") or "")
+        o = omap.get(on)
+        has_fbp = bool((r.get("match_signals") or {}).get("fbp"))
+        # _fbp kaynağı
+        if not o:
+            fbp_src["unknown_no_order"] += 1
+        elif not has_fbp:
+            fbp_src["none"] += 1
+        elif (o.get("click_ids") or {}).get("fbp"):
+            fbp_src["order_snapshot"] += 1
+        else:
+            fbp_src["attribution_fallback"] += 1
+        # source-path (hangi akıştan gönderildi)
+        sp = ((o or {}).get("capi_purchase_source") or "unknown") if o is not None else "unknown_no_order"
+        b = src_path.setdefault(sp, {"n": 0, "email": 0, "phone": 0, "fbp": 0, "fbc": 0, "external_id": 0})
+        b["n"] += 1
+        for k in ("email", "phone", "fbp", "fbc", "external_id"):
+            if (r.get("match_signals") or {}).get(k):
+                b[k] += 1
+
+    # ── 3) Production sağlık kontrolü (§4) — window_hours penceresi ────────────
+    base = {"provider": provider, "created_at": {"$gte": since}}
+    total_w = await db.capi_event_logs.count_documents(base)
+    ok_w = await db.capi_event_logs.count_documents({**base, "ok": True})
+    err_w = total_w - ok_w
+    retry_success = await db.capi_event_logs.count_documents({**base, "from_retry": True})
+    viewcontent_vol = await db.capi_event_logs.count_documents({**base, "event_name": "view_item"})
+    pending_q = await db.capi_event_queue.count_documents({"provider": provider, "dead": {"$ne": True}})
+    dead_q = await db.capi_event_queue.count_documents({"provider": provider, "dead": True})
+
+    by_event = {}
+    async for row in db.capi_event_logs.aggregate([
+        {"$match": base},
+        {"$group": {"_id": "$event_name",
+                    "n": {"$sum": 1},
+                    "ok": {"$sum": {"$cond": ["$ok", 1, 0]}}}},
+    ]):
+        by_event[row["_id"] or "?"] = {"n": row["n"], "ok": row["ok"],
+                                       "err": row["n"] - row["ok"],
+                                       "ok_pct": _pct(row["ok"], row["n"])}
+    status_dist = {}
+    async for row in db.capi_event_logs.aggregate([
+        {"$match": {**base, "ok": False}},
+        {"$group": {"_id": "$status", "n": {"$sum": 1}}},
+    ]):
+        status_dist[str(row["_id"])] = row["n"]
+
+    health = {
+        "window_hours": window_hours,
+        "total_events": total_w,
+        "ok": ok_w, "error": err_w, "error_rate_pct": _pct(err_w, total_w),
+        "retry_success": retry_success,
+        "queue_pending": pending_q, "dead_letter": dead_q,
+        "viewcontent_server_volume": viewcontent_vol,
+        "by_event": by_event,
+        "error_status_distribution": status_dist,
+        "send_latency_ms": None,  # KAYIT YOK — per-event süre ölçülmüyor (event akışını değiştirmemek için eklenmedi)
+    }
+
+    return {
+        "ok": True,
+        "generated_at": now.isoformat(),
+        "provider": provider,
+        "sample_size": total_p,
+        "window_since": since,
+        "purchase_coverage": coverage,
+        "fbp_source": fbp_src,
+        "purchase_source_path": src_path,
+        "health": health,
+        "notes": [
+            "PII'siz: ham email/telefon/IP/fbp değeri DÖNMEZ; yalnız var/yok sayısı ve oran.",
+            "coverage örneği = son N ilk-gönderim Purchase logu (retry-başarı satırları match_signals taşımaz, hariç).",
+            "source-path & _fbp kaynağı orders JOIN ile (event_id=order_number → orders.capi_purchase_source / click_ids).",
+            "send_latency_ms=None: per-event gönderim süresi loglanmıyor (ölçüm eklemek event akışını değiştirir — freeze gereği yapılmadı).",
+        ],
+    }
+
+
 @router.delete("/capi/queue/{qid}")
 async def capi_delete_one(qid: str, current_user: dict = Depends(require_admin)):
     res = await db.capi_event_queue.delete_one({"id": qid})
