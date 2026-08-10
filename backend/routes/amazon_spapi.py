@@ -470,6 +470,16 @@ async def spapi_read_pricing(sku: str, current_user: dict = Depends(require_admi
     return {"success": res["ok"], "status": res["status"], "data": res.get("data")}
 
 
+@router.get("/offers/{sku}")
+async def spapi_read_offers(sku: str, condition: str = Query("New"),
+                            current_user: dict = Depends(require_admin)):
+    """Offer / Buy Box OKUMA (getListingOffers). Pricing rolü gerekir. PII'siz."""
+    _, _, mp = await get_valid_access_token()
+    res = await _spapi_get(f"/products/pricing/v0/listings/{sku}/offers",
+                           {"MarketplaceId": mp, "ItemCondition": condition})
+    return {"success": res["ok"], "status": res["status"], "data": res.get("data")}
+
+
 def _public_base() -> str:
     return (os.environ.get("PUBLIC_BASE_URL") or os.environ.get("REACT_APP_BACKEND_URL") or "").rstrip("/")
 
