@@ -4862,26 +4862,6 @@ async def get_trendyol_claims(
         for c in claims:
             c["is_efatura"] = bool(_ef_map.get(str(c.get("order_number")), False))
 
-    # SİPARİŞ İNDİRİM ORANI — kısmi iade "iade tutarı" TAHMİNİ, onay öncesinde de gider
-    # pusulasıyla AYNI net taban üzerinden görünsün (indirim DÜŞÜLMÜŞ). Aksi halde onaydan
-    # önce liste (indirimsiz) toplam görünüp gider pusulasındaki net tutarla çelişiyordu
-    # (ör. 4001.38 vs 3801.31 = %5 havale indirimi). order.subtotal + order.discount batch
-    # çekilir; frontend _dr = discount/subtotal uygular. GERÇEK iade tutarı DEĞİŞMEZ (backend
-    # _compute_refund_breakdown zaten net hesaplar) — bu yalnızca ekran tahminidir.
-    if _onums:
-        _disc_map = {}
-        async for _o in db.orders.find(
-            {"order_number": {"$in": _onums}},
-            {"_id": 0, "order_number": 1, "subtotal": 1, "discount": 1},
-        ):
-            _disc_map[str(_o.get("order_number"))] = (
-                float(_o.get("subtotal") or 0), float(_o.get("discount") or 0))
-        for c in claims:
-            _sd = _disc_map.get(str(c.get("order_number")))
-            if _sd:
-                c["order_subtotal"] = _sd[0]
-                c["order_discount"] = _sd[1]
-
     # KALEM BEDENİ: iade kalemlerinde beden görünsün (kullanıcı isteği). productName/barcode
     # var ama size çoğu kayıtta boş → barkodu ürün kataloğundaki varyanttan zenginleştir.
     _bcs = list({str(it.get("barcode") or "").strip()

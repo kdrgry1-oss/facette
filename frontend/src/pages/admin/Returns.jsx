@@ -949,14 +949,7 @@ export default function Returns() {
                 // yarısı — 11361499309'daki "1207.5 yerine 2415 olmalı" hatası buydu).
                 const totalGross = (claim.items || []).reduce((s, i) => s + (i.unit_price || 0) * (i.quantity || 1), 0);
                 const totalDiscount = (claim.items || []).reduce((s, i) => s + (i.discount_amount || 0) * (i.quantity || 1), 0);
-                // İNDİRİM ORANINI UYGULA (RooftrReturns + gider pusulası ile BİREBİR formül):
-                // net = ürün fiyatı × (1 − indirim/ara toplam). Böylece onay öncesi gösterilen
-                // "iade tutarı" da gider pusulasındaki net tutarla aynı olur (ör. %5 havale
-                // indiriminde 4001.38 değil 3801.31). Gerçek iade backend'de hesaplanır — değişmez.
-                const _oBase = Number(claim.order_subtotal) || 0;
-                const _oDr = (_oBase > 0 && Number(claim.order_discount) > 0)
-                  ? Math.min(1, Number(claim.order_discount) / _oBase) : 0;
-                const _itemsNet = (claim.items || []).reduce((s, i) => s + (i.price || 0) * (i.quantity || 1) * (1 - _oDr), 0);
+                const _itemsNet = (claim.items || []).reduce((s, i) => s + (i.price || 0) * (i.quantity || 1), 0);
                 // İade tutarı: yetkili refund_amount öncelikli (Trendyol/sipariş toplamıyla birebir),
                 // yoksa kalemlerden (adet dahil) hesaplanır.
                 const totalNet = (claim.refund_amount != null && claim.refund_amount !== "")
