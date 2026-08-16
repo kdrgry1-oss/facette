@@ -673,7 +673,7 @@ export default function Manufacturing() {
                       const _actTot = Object.values(item.actual_distribution || {}).reduce((a, b) => a + Number(b || 0), 0);
                       return (
                         <div>
-                          <p className="text-[9px] text-gray-400 whitespace-nowrap">Sipariş: <b className="text-gray-600">{item.total_units || 0}</b></p>
+                          <p className="text-sm font-bold tabular-nums whitespace-nowrap text-black">Sipariş: {item.total_units || 0}</p>
                           {_actTot > 0 ? (
                             <p className="text-sm font-bold tabular-nums whitespace-nowrap text-black">
                               Kesilen: {_actTot}

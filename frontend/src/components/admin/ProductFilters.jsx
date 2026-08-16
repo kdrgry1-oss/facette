@@ -160,6 +160,14 @@ export const ProductFilters = ({ filters, update, onApply, onClear, categories =
             />
           </div>
           <Text label="Breadcrumb Kategori" k="breadcrumb" value={filters.breadcrumb} update={update} />
+          {/* Sezon filtresi — yalnız MEVCUT sezonlar (ürün kartındaki zorunlu Sezon alanıyla aynı liste). */}
+          <Sel label="Sezon" k="season" value={filters.season} update={update} options={[
+            { v: "", l: "Tümü" },
+            { v: "İlkbahar/Sonbahar", l: "İlkbahar/Sonbahar" },
+            { v: "Tüm Sezonlar", l: "Tüm Sezonlar" },
+            { v: "Yaz", l: "Yaz" },
+            { v: "Kış", l: "Kış" },
+          ]} />
           <Text label="Marka" k="brand" value={filters.brand} update={update} />
           <div>
             <label className={labelCls}>Tedarikçi Firma</label>
