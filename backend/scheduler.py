@@ -1426,7 +1426,8 @@ async def _dhl_cargo_poll_tick():
                             to_phone=addr.get("phone") or order.get("phone"),
                             to_email=addr.get("email") or order.get("email"),
                             variables={
-                                "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                                "customer_name": (f"{addr.get('first_name','')} {addr.get('last_name','')}".strip()
+                                                  or addr.get("full_name") or addr.get("name") or "Müşterimiz"),
                                 "order_number": siparis_no,
                                 "amount": f"{order.get('total', 0):.2f} TL",
                                 "tracking_number": gonderi or order.get("cargo_tracking_number", ""),

@@ -142,6 +142,15 @@ export default function NotificationTemplates() {
     } catch (e) { toast.error("Düzeltme hatası: " + (e?.response?.data?.detail || e.message)); }
   };
 
+  const applySmsDefaults = async () => {
+    if (!window.confirm("Sipariş SMS şablonları GÜNCEL metinlere sıfırlanacak (isim + sipariş no + kargo LİNKİ). Elle yaptığınız SMS düzenlemeleri de üzerine yazılır. Devam edilsin mi?")) return;
+    try {
+      const r = await axios.post(`${API}/notifications/templates/apply-sms-defaults`, {}, auth);
+      toast.success(`${r.data.applied || 0} SMS şablonu güncellendi`);
+      await load();
+    } catch (e) { toast.error("Güncelleme hatası: " + (e?.response?.data?.detail || e.message)); }
+  };
+
   const sendTest = async (channel) => {
     if (!testTo.trim()) { toast.error("Önce telefon numarası veya e-posta girin"); return; }
     setTestSending(channel);
@@ -186,6 +195,9 @@ export default function NotificationTemplates() {
           <p className="text-sm text-gray-500 mt-1">Her event × kanal için metni özelleştirin.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={applySmsDefaults} className="inline-flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 px-3 py-2 rounded text-sm" data-testid="notif-apply-sms">
+            <RefreshCw size={14} /> Sipariş SMS'lerini Güncelle (isim+no+link)
+          </button>
           <button onClick={fixNames} className="inline-flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 px-3 py-2 rounded text-sm" data-testid="notif-fix-names">
             <RefreshCw size={14} /> Ad → Ad Soyad Düzelt
           </button>

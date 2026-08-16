@@ -165,21 +165,21 @@ async def upsert_template(req: TemplateReq, current_user: dict = Depends(require
 _DEFAULT_TEMPLATES = {
     # (event, channel) → payload
     ("order_confirmed", "sms"):
-        "Merhaba {customer_name}, {order_number} numarali siparisiniz onaylandi. Facette",
+        "Merhaba {customer_name}, {order_number} numaralı Facette siparişiniz onaylandı. İlginiz için teşekkür ederiz.",
     ("order_shipped", "sms"):
-        "Siparisiniz kargoya verildi. Kargo takip: {tracking_number}. Facette",
+        "Merhaba {customer_name}, {order_number} numaralı Facette siparişiniz kargoya verilmiştir. Kargo gönderinizi aşağıdaki link üzerinden takip edebilirsiniz: {tracking_url}",
     ("order_delivered", "sms"):
-        "Siparisiniz teslim edildi. Facette'i tercih ettiginiz icin tesekkurler.",
+        "Merhaba {customer_name}, {order_number} numaralı Facette siparişiniz başarıyla teslim edilmiştir. Siparişinizi keyifle kullanmanızı dileriz. Bizi tercih ettiğiniz için teşekkür ederiz.",
     ("order_undelivered", "sms"):
-        "Kargonuz teslim edilemedi, subede bekliyor. Takip: {tracking_number}. Facette",
+        "Merhaba {customer_name}, {order_number} numaralı Facette kargonuz teslim edilemedi, şubede sizi bekliyor. Takip: {tracking_url}",
     ("order_cancelled", "sms"):
-        "{order_number} numarali siparisiniz iptal edildi. Bilgi: destek@facette.com",
+        "Merhaba {customer_name}, {order_number} numaralı Facette siparişiniz iptal edilmiştir. Bilgi için bizimle iletişime geçebilirsiniz.",
     ("order_awaiting_payment", "sms"):
-        "Merhaba {customer_name}, {order_number} numarali siparisiniz alindi. Havale/EFT odemenizi bekliyoruz; detaylar e-postanizda. Facette",
+        "Merhaba {customer_name}, {order_number} numaralı Facette siparişiniz alındı. Havale/EFT ödemenizi bekliyoruz; ödeme detayları e-postanızda. Facette",
     ("order_payment_reminder", "sms"):
-        "Sayin {customer_name}, {order_number} numarali siparisinizin havale/EFT odemesini henuz alamadik. {bank_name} IBAN {bank_iban} ({bank_account_holder}), Tutar {amount}. Odeme bildirimi: {payment_url} Facette",
+        "Merhaba {customer_name}, {order_number} no'lu siparişiniz için havale/EFT ödemenizin henüz ulaşmadığını hatırlatmak isteriz. Ödemenizi tamamlamanızın ardından siparişiniz işleme alınacaktır. İlginiz için teşekkür ederiz.",
     ("order_payment_notified", "sms"):
-        "Merhaba {customer_name}, {order_number} numarali siparisiniz icin odeme bildiriminiz alindi, kontrol ediliyor. Facette",
+        "Merhaba {customer_name}, {order_number} siparişinize ait ödemeniz başarıyla onaylanmıştır. İlginiz için teşekkür eder, keyifli günlerde kullanmanızı dileriz.",
     ("order_return_requested", "sms"):
         "Merhaba {customer_name}, {order_number} numarali siparisiniz icin iade talebiniz olusturuldu. Iade kodu: {return_code}. Facette",
     ("order_return_approved", "sms"):
@@ -510,6 +510,31 @@ async def fix_template_names(current_user: dict = Depends(require_admin)):
             if len(samples) < 8:
                 samples.append(f"{t.get('event')}·{t.get('channel')}")
     return {"success": True, "changed": changed, "samples": samples}
+
+
+@router.post("/templates/apply-sms-defaults")
+async def apply_sms_defaults(current_user: dict = Depends(require_admin)):
+    """SMS şablonlarını GÜNCEL varsayılan metinlere ZORLA uygular (manually_edited olsa bile üzerine yazar).
+    Kullanıcı isteği: sipariş SMS'leri isim/soyisim, sipariş no ve kargo LİNKİ çekmiyordu ({tracking_number}
+    yerine {tracking_url}) → tüm sipariş-döngüsü SMS metinleri değişken-dolu yeni sürüme çekilir.
+    Yalnız 'sms' kanalı; e-posta/whatsapp'a dokunmaz."""
+    applied, items = 0, []
+    for (ev, ch), body in _DEFAULT_TEMPLATES.items():
+        if ch != "sms" or not body:
+            continue
+        await db.notification_templates.update_one(
+            {"event": ev, "channel": "sms"},
+            {"$set": {
+                "event": ev, "channel": "sms", "body": body, "enabled": True,
+                "manually_edited": False,  # varsayılana sıfırlandı
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_by": current_user.get("email", ""),
+            }},
+            upsert=True,
+        )
+        applied += 1
+        items.append(ev)
+    return {"success": True, "applied": applied, "events": items}
 
 
 @router.post("/test")
