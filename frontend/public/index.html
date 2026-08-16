@@ -83,6 +83,38 @@
                 } catch (e) {}
             })();
         </script>
+        <!-- REKLAM / UYGULAMA-İÇİ TARAYICI CSS SELF-HEAL:
+             Instagram/Facebook in-app browser 'no-cache'i yok sayıp ESKİ index.html'i cache'leyebiliyor
+             → yeni deploy'da hash'i değişen main.[hash].css 404 olur → sayfa STİLSİZ (bozuk) açılır
+             (reklamdan gelen ilk ziyaret). CSS gerçekten yüklendi mi kontrol et; DOM'da <link> VAR ama
+             document.styleSheets'te YOK ise (404/yüklenemedi) cache-bypass ile BİR KEZ hard-reload et.
+             sessionStorage kilidi döngüyü engeller. Çalışan sayfada reload OLMAZ (yanlış-pozitif yok). -->
+        <script>
+            (function () {
+                function cssInSheets() {
+                    try {
+                        for (var i = 0; i < document.styleSheets.length; i++) {
+                            if ((document.styleSheets[i].href || "").indexOf("/static/css/") !== -1) return true;
+                        }
+                    } catch (e) {}
+                    return false;
+                }
+                window.addEventListener("load", function () {
+                    setTimeout(function () {
+                        try {
+                            var linkPresent = !!document.querySelector('link[rel="stylesheet"][href*="/static/css/"]');
+                            if (linkPresent && !cssInSheets() && !sessionStorage.getItem("__fct_css_heal")) {
+                                sessionStorage.setItem("__fct_css_heal", "1");
+                                try { if (window.__fctBeacon) window.__fctBeacon("css_missing_reload", { href: location.href }); } catch (e) {}
+                                var u = location.href;
+                                u += (u.indexOf("?") === -1 ? "?" : "&") + "_cb=" + Date.now();  // cache-bypass
+                                location.replace(u);
+                            }
+                        } catch (e) {}
+                    }, 1500);
+                });
+            })();
+        </script>
         <!-- Google Tag Manager -->
         <script>
             // [perf 2026-06-22] dataLayer erken hazir (erken event'ler kuyruga girer);
