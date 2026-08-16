@@ -2502,10 +2502,10 @@ export default function AdminProducts() {
                           if (pv.hasDiscount) {
                             return (
                               <div>
+                                {/* Sayısal '-%X' rozeti KALDIRILDI: kampanya adı (ör. SEPETTE10) yanında
+                                    ikinci bir yüzde göstermek kafa karıştırıyordu (Belgin). İndirim zaten
+                                    üstü-çizili liste → kırmızı fiyat ile görünür; kampanya adı ayrıca yazılır. */}
                                 <span className="text-red-600">{pv.display?.toFixed(2)} TL</span>
-                                {pv.campaignPct > 0 && (
-                                  <span className="ml-1 text-[10px] font-bold text-red-500">-%{pv.campaignPct}</span>
-                                )}
                                 <span className="text-xs text-gray-400 line-through block">{pv.list?.toFixed(2)} TL</span>
                                 {pv.campaignPct > 0 && (
                                   <span className="block text-[10px] text-purple-600 font-medium truncate max-w-[140px]"
