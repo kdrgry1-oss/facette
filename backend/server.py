@@ -284,6 +284,34 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Database initialization warning (server will still start): {e}")
 
+    # BİR KEZ — Sipariş SMS şablonlarını GÜNCEL varsayılan metinlere uygula (kullanıcı onayı).
+    # Belgin metinleri: {customer_name} Ad Soyad + {order_number} + kargo için {tracking_url} LİNKİ.
+    # settings.migrations.sms_templates_belgin_v1 flag'i ile YALNIZ BİR KEZ çalışır; bu uygulamadan
+    # sonraki manuel düzenlemeler korunur (bir daha ezmez).
+    try:
+        _mig = await db.settings.find_one({"id": "migrations"},
+                                          {"_id": 0, "sms_templates_belgin_v1": 1}) or {}
+        if not _mig.get("sms_templates_belgin_v1"):
+            from routes.notifications import _DEFAULT_TEMPLATES
+            _n = 0
+            for (_ev, _ch), _body in _DEFAULT_TEMPLATES.items():
+                if _ch != "sms" or not _body:
+                    continue
+                await db.notification_templates.update_one(
+                    {"event": _ev, "channel": "sms"},
+                    {"$set": {"event": _ev, "channel": "sms", "body": _body, "enabled": True,
+                              "manually_edited": False,
+                              "updated_at": datetime.now(timezone.utc).isoformat(),
+                              "updated_by": "system_migration"}},
+                    upsert=True,
+                )
+                _n += 1
+            await db.settings.update_one({"id": "migrations"},
+                                         {"$set": {"sms_templates_belgin_v1": True}}, upsert=True)
+            logger.info(f"[migration] sms_templates_belgin_v1 uygulandı: {_n} SMS şablonu")
+    except Exception as e:
+        logger.warning(f"[migration] sms_templates_belgin_v1 atlandı: {e}")
+
     # Start background scheduler (auto-cancel 48h unpaid havale orders)
     try:
         from scheduler import start_scheduler
