@@ -265,6 +265,24 @@ def render_size_table_image(
     return out.getvalue()
 
 
+async def _snapshot_history(product_id: str, reason: str = "overwrite"):
+    """YAZMADAN ÖNCE YEDEK: Bir ölçü tablosu üzerine yazılmadan/senkronlanmadan önce,
+    mevcut DOLU kaydı `db.size_tables_history`'ye kopyalar. Böylece yanlış/boş bir kayıt
+    mevcut tabloyu ezerse bile eski içerik history'den geri yüklenebilir (asla kalıcı kayıp).
+    Yalnız DOLU (sizes+values) kayıtlar yedeklenir; boş kayıt yedeklenmez (gürültü olmasın)."""
+    try:
+        cur = await db.size_tables.find_one({"product_id": product_id}, {"_id": 0})
+        if not cur or not (cur.get("sizes") and cur.get("values")):
+            return
+        snap = dict(cur)
+        snap["_hist_product_id"] = product_id
+        snap["_hist_reason"] = reason
+        snap["_hist_at"] = datetime.now(timezone.utc).isoformat()
+        await db.size_tables_history.insert_one(snap)
+    except Exception as e:
+        logger.warning(f"[size-table history] snapshot başarısız {product_id}: {e}")
+
+
 async def _inherited_size_table(product_id: str):
     """Kendi ölçü tablosu olmayan ürün için, AYNI stok kodlu başka bir üründe
     kayıtlı (dolu) ölçü tablosunu döndürür. Stok kodu boşsa / kardeş yoksa None.
@@ -359,6 +377,106 @@ async def fix_size_table_labels(current_user: dict = Depends(require_admin)):
     return {"scanned": scanned, "fixed": fixed}
 
 
+@router.post("/maintenance/recover-lost")
+async def recover_lost_size_tables(payload: dict = None, current_user: dict = Depends(require_admin)):
+    """KAYIP ÖLÇÜ TABLOSU KURTARMA (yeni). Boş/silinmiş numerik tabloları şu SIRAYLA geri yükler:
+      1) `size_tables_history` — yazmadan-önce alınan en son DOLU yedek (en güvenilir),
+      2) hayatta kalan RENK KARDEŞİ — aynı stok kodlu başka renkte hâlâ dolu tablo.
+    Hiçbirinden gelmeyen ama render'lı GÖRSELİ olan ürünler `still_lost_with_image` altında
+    raporlanır (müşteri görselden görmeye devam eder; tam numerik veri için Atlas yedeği gerekir).
+    payload: {"dry_run": true|false}. Varsayılan dry_run=True (önce gör, sonra uygula)."""
+    dry = True if not payload else bool(payload.get("dry_run", True))
+    from_history = from_sibling = still_lost = scanned = 0
+    still_lost_samples = []
+    # Boş/eksik numerik satırı olan (ama tablo girilmiş olması muhtemel) ürünleri tara:
+    # önce boş size_tables kayıtları, sonra render'lı görseli olup kaydı hiç olmayanlar.
+    candidate_ids = set()
+    async for st in db.size_tables.find(
+            {"$or": [{"sizes": {"$exists": False}}, {"sizes": []}, {"values": {}}]},
+            {"_id": 0, "product_id": 1}):
+        if st.get("product_id"):
+            candidate_ids.add(st["product_id"])
+    async for p in db.products.find(
+            {"images": {"$elemMatch": {"is_size_table": True}}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1}):
+        if p.get("id"):
+            candidate_ids.add(p["id"])
+
+    for pid in candidate_ids:
+        scanned += 1
+        own = await db.size_tables.find_one({"product_id": pid}, {"_id": 0})
+        if own and own.get("sizes") and own.get("values"):
+            continue  # zaten dolu
+        # 1) HISTORY: en son dolu yedek
+        hist = await db.size_tables_history.find_one(
+            {"_hist_product_id": pid, "sizes": {"$exists": True, "$ne": []}, "values": {"$nin": [{}, None]}},
+            {"_id": 0}, sort=[("_hist_at", -1)])
+        src, src_kind = None, None
+        if hist:
+            src, src_kind = hist, "history"
+        else:
+            # 2) SIBLING: hayatta kalan kardeş tablo
+            sib = await _inherited_size_table(pid)
+            if sib and sib.get("sizes") and sib.get("values"):
+                src, src_kind = sib, "sibling"
+        if not src:
+            # Kurtarılamadı — ama render'lı görsel var mı? (müşteri hâlâ görüyor)
+            has_img = await db.products.find_one(
+                {"id": pid, "images": {"$elemMatch": {"is_size_table": True}}}, {"_id": 1})
+            if has_img:
+                still_lost += 1
+                if len(still_lost_samples) < 25:
+                    pr = await db.products.find_one({"id": pid}, {"_id": 0, "name": 1, "stock_code": 1})
+                    still_lost_samples.append({"id": pid, "name": (pr or {}).get("name", "")[:40],
+                                               "stock_code": (pr or {}).get("stock_code", "")})
+            continue
+        if not dry:
+            restore_doc = {
+                "product_id": pid,
+                "sizes": src.get("sizes") or [],
+                "columns": src.get("columns") or [],
+                "values": src.get("values") or {},
+                "restored_from": src_kind,
+                "restored_at": datetime.now(timezone.utc).isoformat(),
+                "restored_by": current_user.get("email", ""),
+            }
+            # Manken/ürün-bedeni RENK ÖZELDİR: history kendi ürününün ise koru, kardeşten ise yazma
+            if src_kind == "history":
+                if src.get("model_info"):
+                    restore_doc["model_info"] = src.get("model_info")
+                if src.get("product_size"):
+                    restore_doc["product_size"] = src.get("product_size")
+            await db.size_tables.update_one({"product_id": pid}, {"$set": restore_doc}, upsert=True)
+        if src_kind == "history":
+            from_history += 1
+        else:
+            from_sibling += 1
+    logger.warning(f"[size-table recover] dry={dry} taranan={scanned} history={from_history} "
+                   f"kardeş={from_sibling} kurtarılamayan(görselli)={still_lost}")
+    return {
+        "dry_run": dry,
+        "scanned": scanned,
+        "restored_from_history": from_history,
+        "restored_from_sibling": from_sibling,
+        "still_lost_with_image": still_lost,
+        "still_lost_samples": still_lost_samples,
+        "note": ("DRY-RUN — hiçbir şey yazılmadı. Uygulamak için {\"dry_run\": false} gönderin."
+                 if dry else "Uygulandı. still_lost_with_image için Atlas yedeği gerekir "
+                 "(müşteri görselden görmeye devam eder)."),
+    }
+
+
+@router.post("/maintenance/remark-images")
+async def remark_size_table_images(current_user: dict = Depends(require_admin)):
+    """Görsel-işaret onarımını (repair_size_table_markers) ZORLA yeniden çalıştırır: üründe DURAN
+    1200×1800 render'lı tablo görsellerinin kayıp `is_size_table` işaretini geri koyar → 'Beden
+    Tablosu' butonu + mağaza görsel fallback'i geri gelir. Startup bayrağını sıfırlar (yeniden koşar)."""
+    await db.settings.update_one({"id": "size_table_marker_repair"}, {"$set": {"done": False}}, upsert=True)
+    await repair_size_table_markers()
+    flag = await db.settings.find_one({"id": "size_table_marker_repair"}, {"_id": 0})
+    return {"success": True, "result": {k: flag.get(k) for k in ("scanned", "marked", "products", "at")}}
+
+
 @router.post("/{product_id}")
 async def save_size_table(product_id: str, payload: dict, current_user: dict = Depends(require_admin)):
     sizes = payload.get("sizes", [])
@@ -405,6 +523,8 @@ async def save_size_table(product_id: str, payload: dict, current_user: dict = D
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": current_user.get("email", ""),
     }
+    # YAZMADAN ÖNCE mevcut dolu tabloyu yedekle (yanlış üzerine-yazma geri alınabilsin)
+    await _snapshot_history(product_id, reason="save")
     await db.size_tables.update_one({"product_id": product_id}, {"$set": doc}, upsert=True)
 
     # RENK KARDEŞİ SENKRONU: ÖLÇÜ TABLOSU (beden×ölçü) ürün düzeyindedir → aynı stok kodlu diğer
@@ -431,6 +551,8 @@ async def save_size_table(product_id: str, payload: dict, current_user: dict = D
                     "updated_at": doc["updated_at"],
                     "updated_by": doc["updated_by"],
                 }
+                # Kardeşin mevcut dolu tablosunu da yazmadan önce yedekle
+                await _snapshot_history(s["id"], reason="sibling-sync")
                 await db.size_tables.update_one({"product_id": s["id"]}, {"$set": sib_set}, upsert=True)
                 synced += 1
     except Exception as e:

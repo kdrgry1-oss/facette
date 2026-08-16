@@ -1673,6 +1673,12 @@ async def copy_attributes_to_siblings(product_id: str, current_user: dict = Depe
     src_hb_nc = {k: v for k, v in (src.get("hepsiburada_attributes") or {}).items() if _n(k) not in COLOR_NAMES}
     src_temu_nc = {k: v for k, v in (src.get("temu_attributes") or {}).items() if _n(k) not in COLOR_NAMES}
 
+    # VERİ KORUMASI: kaynak üründe kopyalanacak (renk-dışı) ÖZELLİK yoksa, kardeşlerin dolu
+    # özelliklerini BOŞLA ezme — kaza eseri boş kaynaktan tüm renk grubu silinmesin.
+    if not src_attrs_nc and not src_hb_nc and not src_temu_nc:
+        return {"updated": 0, "siblings": 0, "sibling_ids": [],
+                "detail": "Kaynak üründe kopyalanacak özellik yok — kardeşler korundu (boş ezme engellendi)."}
+
     updated, sib_ids = 0, []
     cursor = db.products.find({"csv_card_id": card_id, "id": {"$ne": src["id"]}}, {"_id": 0})
     async for s in cursor:
@@ -2318,6 +2324,22 @@ async def update_product(
         _pre = await db.products.find_one(
             {"id": product_id}, {"_id": 0, "variants": 1, "stock": 1, "name": 1})
 
+    # ══ VERİ KORUMASI: DOLU alanı BOŞ payload'la ezme ══════════════════════════════════════
+    # Panel yüklenmeden/boşken Kaydet edilirse istemci boş liste/dize gönderebilir. Mevcut
+    # veri doluyken boş gelirse o alan $set'ten ÇIKARILIR (mevcut korunur). Gerçek temizlik
+    # nadir ve ayrı bir işlem olmalı; kaza eseri boş kayıt veri kaybı yapmasın.
+    _guard_keys = ("variants", "images", "attributes", "description",
+                   "hepsiburada_attributes", "temu_attributes")
+    _maybe_blank = [k for k in _guard_keys if k in product_data and not product_data.get(k)]
+    if _maybe_blank:
+        _ex = await db.products.find_one(
+            {"id": product_id}, {"_id": 0, **{k: 1 for k in _maybe_blank}})
+        for _k in _maybe_blank:
+            if (_ex or {}).get(_k):  # mevcut DOLU + gelen BOŞ → ezme
+                product_data.pop(_k, None)
+                logger.warning(f"[ürün-koruma] boş '{_k}' ile mevcut dolu veri EZİLMEDİ "
+                               f"(product_id={product_id})")
+
     await db.products.update_one({"id": product_id}, {"$set": product_data})
 
     if _pre is not None:
@@ -2371,14 +2393,19 @@ async def update_product(
                       else existing.get("stock_code")) or "").strip()
         COLOR_NAMES = {"renk", "web color", "color"}
         def _cn(s): return (s or "").strip().lower()
+        # ══ VERİ KORUMASI (ölçü tablosu SİLİNME bugının ikizi) ══════════════════════════════
+        # Kardeşe YALNIZ DOLU değer yansıtılır. Boş liste/dict/string yansıtılırsa (panel
+        # yüklenmeden/boşken Kaydet) aynı stok kodlu TÜM renk kardeşlerinin Özellikleri/Sezonu
+        # tek hamlede silinir. Bu yüzden boş değerler senkron dışı bırakılır (tek üründe temizlik
+        # istenirse o üründe yapılır; kardeşlere boşluk YAYILMAZ).
         _sib_base = {}
-        if "season" in product_data:
+        if str(product_data.get("season") or "").strip():
             _sib_base["season"] = product_data.get("season")
-        if "size_advice" in product_data:
+        if str(product_data.get("size_advice") or "").strip():
             _sib_base["size_advice"] = product_data.get("size_advice")
-        _has_attrs = isinstance(product_data.get("attributes"), list)
+        _has_attrs = isinstance(product_data.get("attributes"), list) and len(product_data["attributes"]) > 0
         _mp_keys = [k for k in ("hepsiburada_attributes", "temu_attributes")
-                    if isinstance(product_data.get(k), dict)]
+                    if isinstance(product_data.get(k), dict) and len(product_data.get(k)) > 0]
         if _scode and (_sib_base or _has_attrs or _mp_keys):
             _src_attrs_nc = ([a for a in product_data["attributes"]
                               if isinstance(a, dict) and _cn(a.get("name") or a.get("type")) not in COLOR_NAMES]

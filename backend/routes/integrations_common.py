@@ -1690,6 +1690,17 @@ async def import_xml_products(
                 # oversell/pasif ürüne sipariş kapısı açılır). Varyant stoğu admin/panelden yönetilir.
                 if existing.get("variants"):
                     _upd.pop("stock", None)
+                # ══ VERİ KORUMASI: feed'in BOŞ parse değeri DOLU mevcut alanı EZMESİN ══════════
+                # Bir feed item'ın açıklaması parse olmazsa attributes/sizes []; görsel yoksa
+                # images []; custom_label_0 yoksa stock_code "" gelir. Bunlar mevcut DOLU veriyi
+                # (curated özellikler, beden listesi, galeri, kardeş-gruplama stok kodu) SİLMEMELİ.
+                # Boşsa o alanı $set'ten çıkar; feed yalnız DOLU veri getirdiğinde günceller.
+                for _fk in ("attributes", "sizes", "images", "stock_code", "description"):
+                    if _fk in _upd and not _upd.get(_fk) and existing.get(_fk):
+                        _upd.pop(_fk, None)
+                # thumbnail görselle birlikte korunur (görsel ezilmiyorsa thumbnail de ezilmesin)
+                if "images" not in _upd and existing.get("thumbnail"):
+                    _upd.pop("thumbnail", None)
                 await db.products.update_one(
                     {"xml_id": xml_id},
                     {"$set": _upd, "$unset": {"deactivated_reason": ""}},
