@@ -367,6 +367,29 @@ async def save_size_table(product_id: str, payload: dict, current_user: dict = D
     if not isinstance(sizes, list) or not isinstance(columns, list):
         raise HTTPException(status_code=400, detail="sizes ve columns liste olmalı")
 
+    # ══ KRİTİK VERİ KORUMASI (ölçü tablosu SİLİNME kök nedeni) ══════════════════════════════
+    # BOŞ tablo (`sizes`/`columns` boş) kaydını YAZMA. Eskiden boş payload ile gelen kayıt, hem bu
+    # ürünün hem de AYNI STOK KODLU renk-kardeşlerinin mevcut ölçü tablosunu (beden×ölçü) senkronla
+    # EZİP YOK EDİYORDU (SizeTablePanel yüklenmeden/boşken save → tüm kardeşler silinir). Artık
+    # `sizes` boşsa beden×ölçü tablosuna DOKUNULMAZ; yalnız manken (model_info) / ürün bedeni
+    # (product_size) varsa onlar güncellenir — mevcut tablo ve kardeşler KORUNUR.
+    _has_table = bool(sizes) and bool(columns)
+    if not _has_table:
+        _mset = {}
+        _ps = str(payload.get("product_size") or "").strip()
+        if _ps:
+            _mset["product_size"] = _ps
+        if isinstance(payload.get("model_info"), dict) and payload.get("model_info"):
+            _mset["model_info"] = payload.get("model_info")
+        if _mset:
+            _mset["updated_at"] = datetime.now(timezone.utc).isoformat()
+            _mset["updated_by"] = current_user.get("email", "")
+            await db.size_tables.update_one({"product_id": product_id}, {"$set": _mset}, upsert=True)
+        logger.warning(f"[size-table] BOŞ tablo kaydı ATLANDI (koruma) product_id={product_id} "
+                       f"(mevcut tablo/kardeşler silinmedi)")
+        return {"success": True, "skipped_empty_table": True,
+                "note": "Boş ölçü tablosu kaydı atlandı — mevcut tablo ve renk kardeşleri korundu."}
+
     # Etiketleri kayıtta normalize et (baş harfler büyük + yazım düzeltmesi) —
     # storefront tablosu ve görsel aynı temiz etiketi kullansın.
     columns, values = _normalize_table_labels(columns, values)
