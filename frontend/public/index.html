@@ -422,8 +422,10 @@
                         };
                     } catch (e) {}
                 }
-                // CSS 404/bayatsa: mevcut <link>'i cache-bust query ile YENİDEN ekle (tam reload gerekmez).
-                function reinjectMainCss() {
+                // Basit tazeleme: mevcut <link>'in AYNI href'ini cache-bust ile yeniden ekle.
+                // NOT: href BAYAT/ölü bir hash ise bu işe yaramaz (sunucu SPA fallback'i 200+HTML
+                // döndürdüğü için "CSS diye HTML" gelir → 0 kural). Bu yüzden yalnızca son çare.
+                function reinjectSameHref() {
                     try {
                         var l = document.querySelector('link[rel="stylesheet"][href*="/static/css/"]');
                         if (!l) return;
@@ -435,6 +437,45 @@
                         document.head.appendChild(n);
                     } catch (e) {}
                 }
+                // GÜÇLÜ TAZELEME (kök çözüm): DOM'daki (muhtemelen bayat) href'e GÜVENME. Taze
+                // index.html'i cache:'reload' ile çek, GÜNCEL /static/css/main.<hash>.css yolunu
+                // oradan çıkar ve onu enjekte et. Böylece in-app tarayıcı eski HTML'i cache'lese
+                // bile GÜNCEL CSS uygulanır — tam reload (beyaz flash) gerekmez.
+                function reinjectFreshCss() {
+                    try {
+                        if (typeof fetch !== "function") { reinjectSameHref(); return; }
+                        fetch("/?_shf=" + Date.now(), { cache: "reload" })
+                            .then(function (r) { return r.text(); })
+                            .then(function (html) {
+                                var m = html.match(/\/static\/css\/main\.[A-Za-z0-9]+\.css/);
+                                var cssHref = m ? m[0] : null;
+                                if (!cssHref) { reinjectSameHref(); return; }
+                                var sheets = document.styleSheets;
+                                for (var i = 0; i < sheets.length; i++) {
+                                    if ((sheets[i].href || "").indexOf(cssHref) > -1) {
+                                        try { if (sheets[i].cssRules && sheets[i].cssRules.length > 0) return; }
+                                        catch (e) { return; }
+                                    }
+                                }
+                                var n = document.createElement("link");
+                                n.rel = "stylesheet";
+                                n.href = cssHref + "?_c=" + Date.now();
+                                document.head.appendChild(n);
+                                try { if (window.__fctBeacon) window.__fctBeacon("css_reinject_fresh", { href: cssHref }); } catch (e) {}
+                                // Enjekte ettik ama uygulanmadıysa (nadir) son çare: bir kez taze reload.
+                                setTimeout(function () {
+                                    if (!cssApplied() && !healedAlready()) {
+                                        try { sessionStorage.setItem("__heal", "1"); } catch (e) {}
+                                        var u = location.pathname +
+                                            (location.search ? location.search + "&" : "?") + "_r=" + Date.now() +
+                                            location.hash;
+                                        location.replace(u);
+                                    }
+                                }, 2500);
+                            })
+                            .catch(function () { reinjectSameHref(); });
+                    } catch (e) { reinjectSameHref(); }
+                }
                 function check() {
                     try {
                         // YALNIZ #root GERÇEKTEN boşken reload et. Mount OLMUŞ sayfayı CSS
@@ -443,7 +484,7 @@
                         if (appMounted()) {
                             try { sessionStorage.removeItem("__heal"); } catch (e) {}
                             stripHealParam(); // URL temizlensin — kullanıcı ?_r= görmesin
-                            if (!cssApplied()) reinjectMainCss(); // reload yerine YALNIZ CSS'i tazele
+                            if (!cssApplied()) reinjectFreshCss(); // reload yerine taze HTML'den GÜNCEL CSS'i enjekte et
                             return; // uygulama açık — her şey yolunda
                         }
                         if (healedAlready()) { showFallback(); return; } // bir kez denendi; döngü YOK → sessiz beyaz ekran yerine MESAJ
