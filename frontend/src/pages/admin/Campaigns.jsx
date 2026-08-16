@@ -74,6 +74,7 @@ const blankForm = () => ({
   buy_quantity: 2, free_quantity: 1, get_discount: 50, bundle_price: 0,
   priority: 0, combinable: false, stack_group: "", combinable_with: [],
   categories: [], products: [], payment_methods: [],
+  excluded_products_raw: "",
 });
 
 export default function AdminCampaigns() {
@@ -190,6 +191,7 @@ export default function AdminCampaigns() {
       categories: c.categories || [],
       products: c.products || [],
       payment_methods: c.payment_methods || [],
+      excluded_products_raw: c.excluded_products_raw || "",
     });
     setModalOpen(true);
   };
@@ -553,6 +555,21 @@ export default function AdminCampaigns() {
                     ))}
                   </div>
                 )}
+              </div>
+              {/* HARİÇ TUTULACAK ÜRÜNLER: kategori seçili olsa bile bu ürünlere kampanya UYGULANMAZ */}
+              <div>
+                <label className={lblCls}>Kategoriden hariç tutulacak ürünler (opsiyonel)</label>
+                <textarea
+                  rows={3}
+                  value={formData.excluded_products_raw || ""}
+                  onChange={(e) => setFormData({ ...formData, excluded_products_raw: e.target.value })}
+                  placeholder={"Ürün kart id'si, stok kodu veya ürün adı — alt alta VEYA virgülle ayırın.\nÖrn:\nW11003\nMotion Paraşüt Ceket Şort Takım Siyah"}
+                  className={inputCls + " font-mono text-[12px] leading-relaxed"}
+                />
+                <div className="text-[11px] text-gray-500 mt-1">
+                  Seçilen kategoride olsalar bile burada yazılan ürünlere kampanya indirimi uygulanmaz.
+                  Bir stok kodu / kart id yazarsanız o modelin tüm renkleri hariç tutulur.
+                </div>
               </div>
             </div>
 

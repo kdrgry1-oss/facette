@@ -251,13 +251,59 @@ def _item_category_set(it: dict) -> set:
     return {str(single)} if single not in (None, "") else set()
 
 
-def _item_in_scope(it: dict, allowed_cats: set, allowed_pids: set) -> bool:
+def _item_in_scope(it: dict, allowed_cats: set, allowed_pids: set, excluded_pids: set = None) -> bool:
     pid = it.get("product_id")
+    # HARİÇ TUTMA (kullanıcı isteği): kategori kapsamında olsa BİLE bu ürün kampanyaya girmez.
+    # Hariç tutma HER ZAMAN kazanır (kapsamdan önce değerlendirilir).
+    if excluded_pids and pid and str(pid) in excluded_pids:
+        return False
     if pid and str(pid) in allowed_pids:
         return True
     if allowed_cats and _item_category_set(it) & allowed_cats:
         return True
     return False
+
+
+async def _resolve_excluded_pids(raw) -> list:
+    """Admin'in yazdığı 'hariç tutulacak ürünler' metnini (alt alta VEYA virgülle ayrılmış;
+    ürün kart id'si / stok kodu / ürün id'si / ürün adı) gerçek ürün id listesine çevirir.
+    Bir kart id / stok kodu verilirse o modelin TÜM renk kardeşleri (aynı gruptaki ürünler)
+    hariç tutulur. Ad eşleşmesi önce birebir (küçük/büyük duyarsız), yoksa 'içeren' ile aranır."""
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        tokens = [str(t).strip() for t in raw if str(t).strip()]
+    else:
+        tokens = [t.strip() for t in re.split(r"[\n,;]+", str(raw)) if t.strip()]
+    if not tokens:
+        return []
+    pids = set()
+    for tok in tokens:
+        matched = False
+        # 1) Kimlik alanları: ürün id / kart id / stok kodu / ürün-kartı id (birebir)
+        cur = db.products.find(
+            {"$or": [{"id": tok}, {"csv_card_id": tok}, {"stock_code": tok},
+                     {"urun_karti_id": tok}, {"barcode": tok}]},
+            {"_id": 0, "id": 1})
+        async for p in cur:
+            if p.get("id"):
+                pids.add(p["id"]); matched = True
+        if matched:
+            continue
+        # 2) Ad: birebir (küçük/büyük duyarsız)
+        rx_exact = {"$regex": f"^{re.escape(tok)}$", "$options": "i"}
+        cur = db.products.find({"name": rx_exact}, {"_id": 0, "id": 1})
+        async for p in cur:
+            if p.get("id"):
+                pids.add(p["id"]); matched = True
+        if matched:
+            continue
+        # 3) Ad: içeren (son çare)
+        rx_has = {"$regex": re.escape(tok), "$options": "i"}
+        async for p in db.products.find({"name": rx_has}, {"_id": 0, "id": 1}).limit(200):
+            if p.get("id"):
+                pids.add(p["id"])
+    return sorted(pids)
 
 
 async def _enrich_items_category_ids(items: list) -> list:
@@ -302,19 +348,22 @@ def _compute_discount(c: dict, cart_total: float, items: list) -> float:
     # boşa düşürüp indirimi 0 yapıyordu.
     allowed_cats = {str(x) for x in (c.get("categories") or []) if x is not None}
     allowed_pids = {str(x) for x in (c.get("products") or []) if x is not None}
+    # HARİÇ TUTMA (kullanıcı isteği): kategori kapsamında olsa dahi bu ürünler kampanyaya girmez.
+    excluded_pids = {str(x) for x in (c.get("excluded_products") or []) if x is not None}
     # KURAL: ürün kartında indirimli fiyat (sale_price) girili kalemler kampanya tabanına
     # GİRMEZ → o kalemlere kampanya uygulanmaz (indirimli fiyat geçerli). _has_manual_sale
     # bayrağı _enrich_items_category_ids'ten gelir.
     if allowed_cats or allowed_pids:
         base = 0.0
         for it in items:
-            if _item_in_scope(it, allowed_cats, allowed_pids) and not it.get("_has_manual_sale"):
+            if _item_in_scope(it, allowed_cats, allowed_pids, excluded_pids) and not it.get("_has_manual_sale"):
                 base += float(it.get("price", 0)) * int(it.get("qty", 0) or 0)
     else:
         base = cart_total
-        # Kapsamsız (tüm sepet) kampanyada da indirimli-fiyatlı kalemleri tabandan düş.
+        # Kapsamsız (tüm sepet) kampanyada da indirimli-fiyatlı VE hariç-tutulan kalemleri tabandan düş.
         for it in items:
-            if it.get("_has_manual_sale"):
+            _ex = excluded_pids and str(it.get("product_id")) in excluded_pids
+            if it.get("_has_manual_sale") or _ex:
                 base -= float(it.get("price", 0)) * int(it.get("qty", 0) or 0)
         base = max(0.0, base)
     ctype = c.get("type")
@@ -325,7 +374,9 @@ def _compute_discount(c: dict, cart_total: float, items: list) -> float:
         gd = float(c.get("get_discount") or 0)
         units = []
         for it in items:
-            inscope = (not allowed_cats and not allowed_pids) or _item_in_scope(it, allowed_cats, allowed_pids)
+            _ex = excluded_pids and str(it.get("product_id")) in excluded_pids
+            inscope = (not _ex) and ((not allowed_cats and not allowed_pids)
+                                     or _item_in_scope(it, allowed_cats, allowed_pids, excluded_pids))
             if inscope and not it.get("_has_manual_sale"):  # indirimli-fiyatlı kalem kampanyaya girmez
                 for _ in range(int(it.get("qty", 0) or 0)):
                     units.append(float(it.get("price", 0) or 0))
@@ -557,6 +608,8 @@ def _coupon_to_campaign(c: dict) -> dict:
         "stack_group": c.get("stack_group") or "",
         "categories": c.get("categories") or [],
         "products": c.get("products") or [],
+        "excluded_products": c.get("excluded_products") or [],
+        "excluded_products_raw": c.get("excluded_products_raw") or "",
         "combinable_with": c.get("combinable_with") or [],
         "payment_methods": c.get("payment_methods") or [],
     }
@@ -604,6 +657,20 @@ def _campaign_to_coupon_fields(payload: dict) -> dict:
     }
 
 
+async def _excluded_fields_from_payload(payload: dict):
+    """Payload'daki 'excluded_products_raw' (admin'in yazdığı metin) alanını çözer.
+    Alan HİÇ yoksa None döner (kısmi güncellemede mevcut hariç-listeyi ezme). Boş string
+    verilirse hariç-liste temizlenir. Döndürülen dict doğrudan coupon dokümanına $set edilir."""
+    if "excluded_products_raw" not in payload and "excluded_products" not in payload:
+        return None
+    raw = payload.get("excluded_products_raw")
+    if raw is None:  # sadece çözülmüş liste gelmişse onu da kabul et
+        raw = payload.get("excluded_products")
+    pids = await _resolve_excluded_pids(raw)
+    return {"excluded_products": pids,
+            "excluded_products_raw": (raw if isinstance(raw, str) else "")}
+
+
 @campaigns_router.get("")
 async def list_campaigns(current_user: dict = Depends(require_admin)):
     """Kampanya listesi — frontend düz dizi bekler (res.data)."""
@@ -636,6 +703,9 @@ async def create_campaign(payload: dict, current_user: dict = Depends(require_ad
         "created_by": current_user.get("email", ""),
     }
     doc.update(_campaign_to_coupon_fields(payload))
+    _exf = await _excluded_fields_from_payload(payload)
+    if _exf is not None:
+        doc.update(_exf)
     await db.coupons.insert_one(doc)
     doc.pop("_id", None)
     return {"success": True, "campaign": _coupon_to_campaign(doc)}
@@ -644,6 +714,9 @@ async def create_campaign(payload: dict, current_user: dict = Depends(require_ad
 @campaigns_router.put("/{cid}")
 async def update_campaign(cid: str, payload: dict, current_user: dict = Depends(require_admin)):
     update = _campaign_to_coupon_fields(payload)
+    _exf = await _excluded_fields_from_payload(payload)
+    if _exf is not None:
+        update.update(_exf)
     update["updated_at"] = _utcnow()
     res = await db.coupons.update_one({"id": cid}, {"$set": update})
     if res.matched_count == 0:

@@ -1470,7 +1470,7 @@ async def _auto_campaigns_for_badges() -> list:
     # şekilde Python'da yapılır → rozet ⊆ motorun uygulayacağı indirim.
     q = {"is_active": True, "auto_apply": True, "type": "percent"}
     rows = await db.coupons.find(q, {"_id": 0, "id": 1, "name": 1, "title": 1, "code": 1, "value": 1,
-                                     "categories": 1, "products": 1,
+                                     "categories": 1, "products": 1, "excluded_products": 1,
                                      "min_cart_total": 1, "first_order_only": 1,
                                      "start_at": 1, "end_at": 1,
                                      "usage_limit": 1, "min_quantity": 1}).to_list(200)
@@ -1532,6 +1532,9 @@ def _campaign_pct_for_product(p: dict, camps: list):
     for c in camps:
         ac = {str(x) for x in (c.get("categories") or []) if x}
         ap = {str(x) for x in (c.get("products") or []) if x}
+        ex = {str(x) for x in (c.get("excluded_products") or []) if x}
+        if pid in ex:  # HARİÇ TUTULAN ürün: kategori kapsamında olsa da rozet/indirim gösterme
+            continue
         in_scope = (not ac and not ap) or (pid in ap) or bool(cats & ac)
         if in_scope and float(c.get("value") or 0) > best:
             best = float(c["value"])
