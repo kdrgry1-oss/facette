@@ -62,6 +62,7 @@ DEFAULT_EVENTS = [
     {"key": "order_awaiting_payment", "name": "Siparişiniz Alındı · Ödeme Bekleniyor (Havale)"},
     {"key": "order_payment_reminder", "name": "Ödeme Hatırlatma (Havale · elle gönder)"},
     {"key": "order_payment_notified", "name": "Ödeme Bildirimi Alındı"},
+    {"key": "order_payment_approved", "name": "Ödemenizi Aldık (Havale Onayı)"},
     {"key": "order_pending", "name": "Sipariş Alındı (Onay Bekliyor)"},
     {"key": "order_preparing", "name": "Sipariş Hazırlanıyor"},
     {"key": "order_ready_to_ship", "name": "Kargoya Hazır"},

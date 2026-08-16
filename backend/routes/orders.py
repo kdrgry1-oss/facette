@@ -2318,10 +2318,11 @@ async def mark_order_paid(
                            {"payment_status": "paid", "status_flipped": _flip_confirmed},
                            order_number=order_doc.get("order_number", ""))
 
-    # Havale onayinda "Onaylandi" bildirimi (Siparis Durumlari ayarina gore)
+    # Havale/EFT ONAYINDA "Ödemenizi Aldık" bildirimi (kullanıcı isteği): personel ödemeyi görüp
+    # onaylayınca müşteriye ödemenin alındığı + siparişin onaylandığı SMS'i gider. Kanal seçimi
+    # Sipariş Durumları'ndaki 'confirmed' ayarından; şablon = order_payment_approved.
     if _flip_confirmed:
-        import asyncio as _aio2
-        async def _notify_confirmed():
+        async def _notify_payment_approved():
             try:
                 import sys, os
                 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -2333,17 +2334,16 @@ async def mark_order_paid(
                 if not ch:
                     return
                 addr = order_doc.get("shipping_address") or {}
-                _base = os.environ.get("FRONTEND_PUBLIC_URL") or os.environ.get("REACT_APP_BACKEND_URL") or ""
                 await send_notification(
-                    db, "order_confirmed",
+                    db, "order_payment_approved",
                     to_phone=addr.get("phone") or order_doc.get("phone"),
                     to_email=addr.get("email") or order_doc.get("email"),
                     variables=await _order_notify_vars(order_doc, status_label=customer_label_for("confirmed")),
                     channels=ch,
                 )
             except Exception as e:
-                logger.warning(f"confirmed notif failed: {e}")
-        _spawn(_notify_confirmed())
+                logger.warning(f"payment_approved notif failed: {e}")
+        _spawn(_notify_payment_approved())
 
     # CAPI offline conversion (purchase) — merkezi helper (idempotent,
     # event_id = sipariş no; havale/EFT onayında da tek purchase çıkar)

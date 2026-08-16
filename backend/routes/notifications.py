@@ -179,7 +179,9 @@ _DEFAULT_TEMPLATES = {
     ("order_payment_reminder", "sms"):
         "Merhaba {customer_name}, {order_number} no'lu siparişiniz için havale/EFT ödemenizin henüz ulaşmadığını hatırlatmak isteriz. Ödemenizi tamamlamanızın ardından siparişiniz işleme alınacaktır. İlginiz için teşekkür ederiz.",
     ("order_payment_notified", "sms"):
-        "Merhaba {customer_name}, {order_number} siparişinize ait ödemeniz başarıyla onaylanmıştır. İlginiz için teşekkür eder, keyifli günlerde kullanmanızı dileriz.",
+        "Merhaba {customer_name}, {order_number} numaralı siparişiniz için ödeme bildiriminiz alındı, kontrol ediliyor. Facette",
+    ("order_payment_approved", "sms"):
+        "Merhaba {customer_name}, {order_number} numaralı siparişinizin havale/EFT ödemesini aldık. Siparişiniz onaylandı ve işleme alınmıştır. İlginiz için teşekkür ederiz.",
     ("order_return_requested", "sms"):
         "Merhaba {customer_name}, {order_number} numarali siparisiniz icin iade talebiniz olusturuldu. Iade kodu: {return_code}. Facette",
     ("order_return_approved", "sms"):
