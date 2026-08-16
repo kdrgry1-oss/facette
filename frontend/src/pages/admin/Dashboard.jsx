@@ -320,7 +320,7 @@ export default function Dashboard() {
       <div className="bg-white rounded-xl border p-6 mb-8">
         <h3 className="font-semibold mb-4 flex items-center gap-2">
           <BarChart3 size={18} /> Sipariş Karşılaştırma Grafiği
-          <span className="text-xs font-normal text-gray-400">· {rangeLabel}</span>
+          <span className="text-xs font-normal text-gray-400">· {dateRange === "0" ? "bugün + son 14 gün" : rangeLabel}</span>
         </h3>
         {(stats.daily_series || []).length === 0 ? (
           <div className="text-center text-gray-400 py-12 text-sm">Seçili aralıkta veri yok</div>

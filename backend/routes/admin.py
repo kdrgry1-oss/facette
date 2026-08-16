@@ -21,10 +21,16 @@ async def get_dashboard_stats(
     28k+ siparişte grafik/ciro/gün eksiksiz gelir; önceki günler/aylar 0 görünmez.
     """
     try:
+        # ── TÜRKİYE YEREL GÜNÜ (UTC+3) ── Kritik: "Bugün"/gün sınırları TR takvim gününe göre
+        # hesaplanır. Eskiden UTC gece yarısı alınıyordu → gece 00:00–03:00 TR arası (UTC'de hâlâ
+        # önceki gün) panelde bir önceki günün TÜM cirosunu "Bugün" gösteriyordu (ör. 02:17'de 69
+        # sipariş). Artık today_midnight = TR 00:00'ın UTC karşılığı.
+        _TR = timezone(timedelta(hours=3))
         end_date = datetime.now(timezone.utc)
-        today_midnight = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        tr_now = end_date.astimezone(_TR)
+        today_midnight = tr_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
         if days <= 0:
-            # "Bugün" — takvim günü 00:00'dan itibaren; kıyas dün (00:00–bugün 00:00).
+            # "Bugün" — TR takvim günü 00:00'dan itibaren; kıyas dün (00:00–bugün 00:00).
             start_date = today_midnight
             prev_start = today_midnight - timedelta(days=1)
             prev_end = today_midnight
@@ -92,16 +98,26 @@ async def get_dashboard_stats(
         pending_orders = await db.orders.count_documents(_with({"status": "pending", "created_at": {"$gte": start_iso}}))
         shipped_orders = await db.orders.count_documents(_with({"status": "shipped", "created_at": {"$gte": start_iso}}))
 
-        # Günlük seri (aggregation — limitsiz)
+        # Günlük seri (aggregation — limitsiz). GÜNLER TR YERELİNE (Europe/Istanbul) göre gruplanır
+        # (aksi halde gece yarısına yakın siparişler yanlış güne düşer). "Bugün" seçilse bile grafik
+        # KARŞILAŞTIRMA amaçlı son 14 günü gösterir (tek çubuk gibi durmasın — kullanıcı isteği).
+        chart_days = days if (days and days > 0) else 14
+        chart_start = today_midnight - timedelta(days=chart_days)   # TR 00:00 (UTC karşılığı) - N gün
         daily_agg = await db.orders.aggregate([
-            {"$match": _with({"created_at": {"$gte": start_iso}})},
-            {"$group": {"_id": {"$substr": [{"$toString": "$created_at"}, 0, 10]},
-                        "orders": {"$sum": 1}, "revenue": {"$sum": _rev}}},
+            {"$match": _with({"created_at": {"$gte": chart_start.isoformat()}})},
+            {"$addFields": {"_trd": {"$dateToString": {
+                "format": "%Y-%m-%d", "timezone": "Europe/Istanbul",
+                "date": {"$cond": [
+                    {"$eq": [{"$type": "$created_at"}, "string"]},
+                    {"$dateFromString": {"dateString": "$created_at", "onError": None}},
+                    "$created_at"]}}}}},
+            {"$match": {"_trd": {"$ne": None}}},
+            {"$group": {"_id": "$_trd", "orders": {"$sum": 1}, "revenue": {"$sum": _rev}}},
         ]).to_list(500)
         daily_map = {r["_id"]: r for r in daily_agg}
         daily_series = []
-        for i in range(days, -1, -1):
-            d = (end_date - timedelta(days=i)).strftime("%Y-%m-%d")
+        for i in range(chart_days, -1, -1):
+            d = (tr_now - timedelta(days=i)).strftime("%Y-%m-%d")   # TR takvim günü etiketi
             b = daily_map.get(d)
             daily_series.append({"date": d, "orders": (b["orders"] if b else 0),
                                  "revenue": round((b["revenue"] if b else 0) or 0, 2)})
