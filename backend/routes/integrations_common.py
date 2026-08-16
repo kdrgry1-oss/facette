@@ -1424,6 +1424,25 @@ async def upload_rooftr_products_excel(
                     # Bu, ürün kaybolma/renk-adı-değişme bug'ının ikinci savunma hattı.
                     for _k in ("color", "description", "variants", "stock_code", "sku", "breadcrumb"):
                         _set_doc.pop(_k, None)
+                # VARYANT STOĞUNU KORU: mevcut ürünün varyant stokları panel/sipariş ile yönetilir.
+                # Ticimax import stoğu gerçek stok DEĞİL, sabit `default_stock` (Excel'de stok yoksa
+                # varsayılan). Re-import'ta bunu yazmak admin'in 0 yaptığı stoğu "kendi kendine"
+                # default'a çıkarıyordu → oversell/pasif ürüne sipariş kapısı. Barkod (yoksa beden)
+                # ile eşleştirip MEVCUT stoğu taşı; yalnız YENİ varyantlarda import stoğu kalır.
+                if isinstance(_set_doc.get("variants"), list) and existing.get("variants"):
+                    _ex_bc, _ex_sz = {}, {}
+                    for _ev in (existing.get("variants") or []):
+                        _b = str(_ev.get("barcode") or "").strip()
+                        _s = str(_ev.get("size") or "").strip().upper()
+                        if _b:
+                            _ex_bc[_b] = _ev
+                        if _s:
+                            _ex_sz.setdefault(_s, _ev)
+                    for _nv in _set_doc["variants"]:
+                        _m = _ex_bc.get(str(_nv.get("barcode") or "").strip()) \
+                            or _ex_sz.get(str(_nv.get("size") or "").strip().upper())
+                        if _m is not None and _m.get("stock") is not None:
+                            _nv["stock"] = _m.get("stock")   # panel-yönetilen stok korunur
                 # slug'ı da (name'e bağlı) bozmamak için dokunmuyoruz (zaten update_doc'ta yok).
                 await db.products.update_one({"id": existing["id"]}, {"$set": _set_doc})
                 stats["parents_updated_db"] += 1
@@ -1665,6 +1684,12 @@ async def import_xml_products(
                 # görsel…) yine güncellensin; yalnız is_active'e dokunma.
                 if existing.get("manual_deactivated") or existing.get("is_deleted"):
                     _upd.pop("is_active", None)
+                    _upd.pop("stock", None)   # elle pasif/silinmiş → feed stoğu 1'e RESETLEMESİN ("kendi kendine 1 arttı")
+                # VARYANTLI üründe product.stock varyant stok TOPLAMIDIR; feed'in ham "stock:1"
+                # değeriyle ezme (aksi halde 0-stok varyantlı ürün feed sonrası "1 stok"lu görünür,
+                # oversell/pasif ürüne sipariş kapısı açılır). Varyant stoğu admin/panelden yönetilir.
+                if existing.get("variants"):
+                    _upd.pop("stock", None)
                 await db.products.update_one(
                     {"xml_id": xml_id},
                     {"$set": _upd, "$unset": {"deactivated_reason": ""}},
