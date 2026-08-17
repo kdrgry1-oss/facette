@@ -4144,15 +4144,28 @@ async def trendyol_reconcile(
 
     ty = await _ty_fetch_orders_range(client, start_ms, end_ms)
 
-    # Bizim taraf — aynı TR yerel aralık, Trendyol kaynaklı siparişler
+    # Bizim taraf — aynı TR yerel aralık, Trendyol kaynaklı siparişler.
+    # KRİTİK: aralık üyeliği EFFECTIVE DATE ile belirlenir (marketplace_order_date ?? created_at)
+    # — Trendyol ucu orderDate ile sayfalanır; created_at (senkron zamanı) kullanmak apples-to-
+    # oranges karşılaştırma yapıp sahte missing/extra üretiyordu. Raporlarla da aynı taban.
+    # Ayrıca AYNI order_number'ın birden çok belgeye düşmesi (DUPLICATE) tespit edilir:
+    # ours[onum] tekilleştirir ama panel_docs ham belge sayısını tutar → fark = kopya.
     ours: dict = {}
-    async for o in db.orders.find(
-            {"created_at": {"$gte": s_iso, "$lte": e_iso},
-             "$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]},
-            {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
-             "items.quantity": 1, "partial_cancel_amount": 1}):
+    panel_docs = 0
+    dup_onums: dict = {}
+    _pipe_ours = [
+        {"$addFields": {"_eff": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
+        {"$match": {"_eff": {"$gte": s_iso, "$lte": e_iso},
+                    "$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]}},
+        {"$project": {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
+                      "items.quantity": 1, "partial_cancel_amount": 1}},
+    ]
+    async for o in db.orders.aggregate(_pipe_ours):
         onum = str(o.get("order_number") or "")
         if onum:
+            panel_docs += 1
+            if onum in ours:
+                dup_onums[onum] = dup_onums.get(onum, 1) + 1
             ours[onum] = o
 
     def _units(o):
@@ -4245,12 +4258,20 @@ async def trendyol_reconcile(
     return {
         "range": {"start": start_date, "end": end_date},
         "trendyol": {"orders": len(ty), "units": ty_units, "amount": ty_amount},
-        "panel": {"orders": len(ours), "units": our_units, "amount": our_amount},
+        "panel": {"orders": len(ours), "units": our_units, "amount": our_amount,
+                  "docs": panel_docs},
         "diff": {
             "orders": len(ours) - len(ty),
             "units": our_units - ty_units,
             "amount": round(our_amount - ty_amount, 2),
             "amount_pct": round(100 * (our_amount - ty_amount) / ty_amount, 3) if ty_amount else 0,
+        },
+        # DUPLICATE tanısı: aynı sipariş no'nun birden çok belgesi (rapor bunları AYRI sayar,
+        # sapmanın olası kaynağı). docs - orders = fazladan belge adedi.
+        "duplicates": {
+            "extra_docs": panel_docs - len(ours),
+            "order_numbers": [{"order_number": k, "doc_count": v} for k, v in
+                              sorted(dup_onums.items(), key=lambda x: -x[1])][:list_limit],
         },
         "missing_in_panel": {"count": len(missing), "items": missing[:list_limit]},
         "extra_in_panel": {"count": len(extra), "items": extra[:list_limit]},
