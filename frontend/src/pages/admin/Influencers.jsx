@@ -65,7 +65,7 @@ export default function Influencers() {
   const [tab, setTab] = useState("pr"); // 'pr' | 'influencers' | 'shipments'
 
   return (
-    <div className="p-6 max-w-6xl mx-auto" data-testid="influencers-page">
+    <div className="p-6 w-full" data-testid="influencers-page">
       <div className="mb-4">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Instagram className="text-pink-600" size={24} /> Influencer / İş Birlikleri
@@ -260,13 +260,25 @@ function PRTrackTab() {
           Kayıt yok. "Yeni PR Kaydı" ile ekleyin.
         </div>
       ) : (
-        <div className="space-y-2" data-testid="pr-list">
-          {entries.map((e) => (
-            <PRCard key={e.id} e={e}
-                    onEdit={() => { setEditTarget(e); setShowForm(true); }}
-                    onDelete={() => del(e.id)}
-                    onHistory={() => e.influencer_id && setHistoryFor({ id: e.influencer_id, name: e.influencer_name })} />
-          ))}
+        <div className="overflow-x-auto border rounded-xl bg-white" data-testid="pr-list">
+          <table className="w-full text-sm whitespace-nowrap">
+            <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500 text-left">
+              <tr>
+                {["İsim Soyisim", "Kullanıcı Adı", "Telefon", "Adres", "Ürün", "Beden",
+                  "Anlaşma", "Durum", "Tarih", "İletişim", "Teklif", "Cevap", "Follow-up", "Not", ""].map((h, i) => (
+                  <th key={i} className="px-3 py-2 font-semibold">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <PRRow key={e.id} e={e}
+                       onEdit={() => { setEditTarget(e); setShowForm(true); }}
+                       onDelete={() => del(e.id)}
+                       onHistory={() => e.influencer_id && setHistoryFor({ id: e.influencer_id, name: e.influencer_name })} />
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -282,42 +294,39 @@ function PRTrackTab() {
   );
 }
 
-function PRCard({ e, onEdit, onDelete, onHistory }) {
+// Basılı PR listesi gibi TABLO satırı (kart yerine) — Kadir: sayfaya yayılan geniş tablo.
+function PRRow({ e, onEdit, onDelete, onHistory }) {
   const st = prStatusMeta(e.status);
-  const Cell = ({ label, children }) => (
-    <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
-      <div className="text-sm text-gray-800 truncate">{children || "—"}</div>
-    </div>
-  );
+  const td = "px-3 py-2 align-top";
   return (
-    <div className="bg-white border rounded-xl px-4 py-3 hover:border-black transition-colors" data-testid={`pr-card-${e.id}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold">{e.influencer_name || "—"}</span>
-            {e.influencer_type && <Badge>{e.influencer_type}</Badge>}
-            <span className={`text-[10px] px-2 py-0.5 rounded-full ${st.c}`}>{st.l}</span>
-          </div>
-          <div className="mt-1 text-xs"><SocialLinks instagram={e.instagram} tiktok={e.tiktok} /></div>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
+    <tr className="border-t hover:bg-gray-50" data-testid={`pr-row-${e.id}`}>
+      <td className={`${td} font-medium`}>
+        {e.influencer_name || "—"}
+        {e.influencer_turu && <span className="ml-1 text-[10px] text-purple-600">({e.influencer_turu})</span>}
+      </td>
+      <td className={td}><SocialLinks instagram={e.instagram} tiktok={e.tiktok} /></td>
+      <td className={`${td} text-gray-600`}>{e.phone || "—"}</td>
+      <td className={`${td} whitespace-normal max-w-[220px] text-gray-600`}>{e.adres || "—"}</td>
+      <td className={`${td} whitespace-normal max-w-[220px]`}>{e.urun || "—"}</td>
+      <td className={td}>{e.beden || "—"}</td>
+      <td className={td}>{e.anlasma_sekli || "—"}</td>
+      <td className={td}><span className={`text-[10px] px-2 py-0.5 rounded-full ${st.c}`}>{st.l}</span></td>
+      <td className={`${td} text-gray-500`}>{fmtDate(e.date)}</td>
+      <td className={td}>{e.contact || "—"}</td>
+      <td className={td}>{e.offer || "—"}</td>
+      <td className={td}>{e.response || "—"}</td>
+      <td className={td}>{e.follow_up || "—"}</td>
+      <td className={`${td} whitespace-normal max-w-[200px] text-gray-600`}>{e.note || "—"}</td>
+      <td className={`${td} whitespace-nowrap`}>
+        <div className="flex items-center gap-1">
           {e.influencer_id && (
-            <button onClick={onHistory} title="Geçmiş" className="text-gray-400 hover:text-black p-1" data-testid={`pr-history-${e.id}`}><History size={15} /></button>
+            <button onClick={onHistory} title="Geçmiş" className="text-gray-400 hover:text-black p-1" data-testid={`pr-history-${e.id}`}><History size={14} /></button>
           )}
-          <button onClick={onEdit} title="Düzenle" className="text-gray-400 hover:text-black p-1"><Pencil size={14} /></button>
-          <button onClick={onDelete} title="Sil" className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
+          <button onClick={onEdit} title="Düzenle" className="text-gray-400 hover:text-black p-1"><Pencil size={13} /></button>
+          <button onClick={onDelete} title="Sil" className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={13} /></button>
         </div>
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-x-4 gap-y-2 mt-3">
-        <Cell label="Tarih">{fmtDate(e.date)}</Cell>
-        <Cell label="İletişim">{e.contact}</Cell>
-        <Cell label="Teklif">{e.offer}</Cell>
-        <Cell label="Cevap">{e.response}</Cell>
-        <Cell label="Follow-up">{e.follow_up}</Cell>
-        <Cell label="Not">{e.note}</Cell>
-      </div>
-    </div>
+      </td>
+    </tr>
   );
 }
 

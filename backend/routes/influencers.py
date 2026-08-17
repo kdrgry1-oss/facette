@@ -246,6 +246,53 @@ _PR_FIELDS = ("influencer_id", "influencer_name", "influencer_type", "date",
               "instagram", "tiktok", "products")
 
 
+def _pr_addr(inf) -> str:
+    """Influencer master kargo adresini tek satır string'e çevirir (adres, ilçe, il)."""
+    sa = (inf or {}).get("shipping_address") or {}
+    if isinstance(sa, dict):
+        return ", ".join(str(p) for p in [sa.get("adres"), sa.get("ilce"), sa.get("il")] if p)
+    return str(sa or "")
+
+
+def _pr_beden(inf, e) -> str:
+    """Beden = master alt/üst; yoksa PR kaydının kendi beden alanı."""
+    alt = (inf or {}).get("beden_alt") or ""
+    ust = (inf or {}).get("beden_ust") or ""
+    if alt or ust:
+        return f"Alt: {alt} / Üst: {ust}"
+    return (e or {}).get("beden") or ""
+
+
+def _pr_urun(e) -> str:
+    """Gönderilen ürün(ler) — PR kaydının products listesi (yoksa boş)."""
+    prods = (e or {}).get("products")
+    if isinstance(prods, list) and prods:
+        return ", ".join(
+            (str(p.get("name") or p.get("barcode")) if isinstance(p, dict) else str(p))
+            for p in prods)
+    return ""
+
+
+async def _pr_enrich(docs: list) -> None:
+    """PR kayıtlarına bağlı influencer master alanlarını (telefon/adres/beden/anlaşma/türü)
+    yerinde ekler — liste tablosu basılı PR listesi gibi görünsün diye."""
+    inf_ids = list({d.get("influencer_id") for d in docs if d.get("influencer_id")})
+    inf_map: dict = {}
+    if inf_ids:
+        async for i in db.influencers.find({"id": {"$in": inf_ids}}, {"_id": 0}):
+            inf_map[i["id"]] = i
+    for d in docs:
+        inf = inf_map.get(d.get("influencer_id")) or {}
+        d["phone"] = inf.get("phone") or ""
+        d["adres"] = _pr_addr(inf)
+        d["beden"] = _pr_beden(inf, d)
+        d["anlasma_sekli"] = inf.get("anlasma_sekli") or d.get("anlasma_sekli") or ""
+        d["influencer_turu"] = _influencer_turu(inf.get("follower_count")) if inf else ""
+        d["urun"] = _pr_urun(d)
+        d["instagram"] = d.get("instagram") or inf.get("instagram") or ""
+        d["tiktok"] = d.get("tiktok") or inf.get("tiktok") or ""
+
+
 async def _pr_period_summary() -> dict:
     """Günlük/haftalık/aylık/yıllık PR kaydı SAYISI — TR yerel güne göre
     (reports.py ile aynı 3 saat kayması disiplini). `date` alanı üzerinden sayar."""
@@ -324,6 +371,7 @@ async def list_pr_entries(
             dr["$lte"] = end_date
         query["date"] = dr
     docs = await db.influencer_pr.find(query, {"_id": 0}).sort("date", -1).to_list(2000)
+    await _pr_enrich(docs)  # telefon/adres/beden/anlaşma/türü — tablo basılı liste gibi görünsün
     status_counts: dict = {}
     for d in docs:
         s = d.get("status") or "beklemede"
