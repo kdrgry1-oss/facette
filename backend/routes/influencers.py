@@ -276,7 +276,9 @@ _PR_FIELDS = ("influencer_id", "influencer_name", "influencer_type", "date",
               "instagram", "tiktok", "products",
               # Kadir: bu alanlar da PR kaydına DOĞRUDAN girilebilsin (bağlı influencer
               # yoksa/boşsa elle) — tablo sütunları form'dan doldurulabilir olsun.
-              "urun", "beden", "anlasma_sekli", "phone", "adres")
+              "urun", "beden", "anlasma_sekli", "phone", "adres",
+              # Kargo: ürün girilmiş PR'dan gönderim yapılınca (kampanya+MNG barkod) işlenir.
+              "campaign_id", "cargo_barcode", "cargo_tracking_no", "shipped_at")
 
 
 def _pr_addr(inf) -> str:

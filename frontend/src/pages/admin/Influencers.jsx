@@ -217,6 +217,33 @@ function PRTrackTab() {
     } catch { toast.error("Excel oluşturulamadı"); }
   };
 
+  // Kamyon: PR'daki ürünleri KARGOYA VER — mevcut influencer kargo akışını kullanır
+  // (kampanya oluştur → ürünleri işle [STOK DÜŞER] → MNG barkod + takip). PR kaydına işlenir.
+  const shipPR = async (e) => {
+    if (!e.influencer_id) return toast.error("Kargo için PR kaydı bir kayıtlı influencer'a bağlı olmalı");
+    if (!(e.products && e.products.length)) return toast.error("Önce ürün ekleyin (ürünü ara → beden seç)");
+    if (e.cargo_barcode) return toast(`Zaten kargolandı · barkod ${e.cargo_barcode}`);
+    if (!window.confirm("Bu ürünler kargoya verilsin mi? STOK DÜŞÜLECEK ve MNG barkodu oluşturulacak.")) return;
+    const t = toast.loading("Kargo oluşturuluyor…");
+    try {
+      const cr = await axios.post(`${API}/influencers/${e.influencer_id}/campaigns`, { title: `PR Gönderi · ${fmtDate(e.date)}` }, auth());
+      const cid = cr.data?.campaign?.id;
+      await axios.post(`${API}/influencer-campaigns/${cid}/commit-products`,
+        { products: e.products.map((p) => ({ barcode: p.barcode, qty: p.qty || 1 })), auto_cost: true }, auth());
+      const cg = await axios.post(`${API}/influencer-campaigns/${cid}/cargo`, {}, auth());
+      // Kadir: gönderim tarihi + durumu kargo bilgisinden ilgili alanlara doldur.
+      await axios.put(`${API}/influencer-pr/${e.id}`, {
+        campaign_id: cid, cargo_barcode: cg.data?.cargo_barcode || "",
+        cargo_tracking_no: cg.data?.tracking_no || "", shipped_at: new Date().toISOString(),
+        status: "gonderildi",
+      }, auth());
+      toast.success(`Kargo oluşturuldu · barkod ${cg.data?.cargo_barcode || "—"} · stok düşüldü`, { id: t });
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Kargo oluşturulamadı", { id: t });
+    }
+  };
+
   return (
     <div data-testid="pr-track-tab">
       {/* Dönem sayaçları */}
@@ -284,6 +311,7 @@ function PRTrackTab() {
                 <PRRow key={e.id} e={e}
                        onEdit={() => { setEditTarget(e); setShowForm(true); }}
                        onDelete={() => del(e.id)}
+                       onShip={() => shipPR(e)}
                        onHistory={() => e.influencer_id && setHistoryFor({ id: e.influencer_id, name: e.influencer_name })} />
               ))}
             </tbody>
@@ -304,9 +332,10 @@ function PRTrackTab() {
 }
 
 // Basılı PR listesi gibi TABLO satırı (kart yerine) — Kadir: sayfaya yayılan geniş tablo.
-function PRRow({ e, onEdit, onDelete, onHistory }) {
+function PRRow({ e, onEdit, onDelete, onHistory, onShip }) {
   const st = prStatusMeta(e.status);
   const td = "px-3 py-2 align-top";
+  const canShip = (e.products && e.products.length > 0 && e.influencer_id);
   return (
     <tr className="border-t hover:bg-gray-50" data-testid={`pr-row-${e.id}`}>
       <td className={`${td} font-medium`}>
@@ -328,6 +357,13 @@ function PRRow({ e, onEdit, onDelete, onHistory }) {
       <td className={`${td} whitespace-normal max-w-[200px] text-gray-600`}>{e.note || "—"}</td>
       <td className={`${td} whitespace-nowrap`}>
         <div className="flex items-center gap-1">
+          {canShip && (
+            e.cargo_barcode
+              ? <span className="text-[10px] text-green-700 bg-green-50 rounded px-1.5 py-0.5" title={`Kargolandı · barkod ${e.cargo_barcode}`}>Kargoda</span>
+              : <button onClick={onShip} title="Kargoya ver — stok düşer + MNG barkod oluşur"
+                        className="inline-flex items-center text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded px-1.5 py-1"
+                        data-testid={`pr-ship-${e.id}`}><Truck size={14} /><Plus size={10} /></button>
+          )}
           {e.influencer_id && (
             <button onClick={onHistory} title="Geçmiş" className="text-gray-400 hover:text-black p-1" data-testid={`pr-history-${e.id}`}><History size={14} /></button>
           )}
@@ -376,18 +412,15 @@ function PRFormModal({ initial, onClose, onSaved }) {
     const inf = infList.find((i) => i.id === id);
     const sa = inf?.shipping_address || {};
     const adr = [sa.adres, sa.ilce, sa.il].filter(Boolean).join(", ");
-    const bd = (inf?.beden_alt || inf?.beden_ust)
-      ? `Alt: ${inf.beden_alt || ""} / Üst: ${inf.beden_ust || ""}` : "";
+    // Kadir: SADECE kimlik/iletişim otomatik dolsun (isim/insta/tiktok/telefon/adres).
+    // Tür/anlaşma/beden/teklif/cevap/durum vb. her kayıtta DEĞİŞEBİLİR → otomatik doldurulmaz.
     setForm((f) => ({
       ...f, influencer_id: id,
       influencer_name: inf?.name || f.influencer_name,
-      influencer_type: inf?.influencer_turu || inf?.platform || f.influencer_type,
       instagram: inf?.instagram || f.instagram,
       tiktok: inf?.tiktok || f.tiktok,
       phone: inf?.phone || f.phone,
       adres: adr || f.adres,
-      beden: bd || f.beden,
-      anlasma_sekli: inf?.anlasma_sekli || f.anlasma_sekli,
     }));
   };
 
