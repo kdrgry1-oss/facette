@@ -10,6 +10,7 @@ import ProductCard from "../components/ProductCard";
 import { optimizeImg } from "../lib/img";
 import { slugify } from "../lib/slug";
 import { priceView } from "../lib/price";
+import { resolveColor } from "../lib/colorMap";
 import { isRecommendedSize, recommendLetterSize } from "../lib/sizeRecommend";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
@@ -1539,6 +1540,12 @@ const TR_COLOR_HEX = {
 };
 function colorHexTR(name) {
   if (!name) return null;
+  // DENETİM FIX: önce paylaşılan zengin harita (lib/colorMap.resolveColor) — kelime-bazlı
+  // eşleşme yapar ("Acı Kahve" → "kahve" → #7c4a2d). Eskiden yerel TR_COLOR_HEX'te "kahve"
+  // anahtarı yoktu (yalnız "kahverengi") → "acı kahve" eşleşmeyip #e5e5e5 (açık gri≈beyaz)
+  // gösteriyordu. resolveColor null dönerse eski yerel haritaya güvenli fallback.
+  const r = resolveColor(name);
+  if (r && r.type === "solid") return r.value;
   const n = String(name).toLocaleLowerCase("tr").trim();
   if (TR_COLOR_HEX[n]) return TR_COLOR_HEX[n];
   for (const key of Object.keys(TR_COLOR_HEX)) if (n.includes(key)) return TR_COLOR_HEX[key];
