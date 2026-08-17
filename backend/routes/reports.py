@@ -210,10 +210,13 @@ async def sales_summary(
         # ── 1) CİRO (brüt) + net sipariş/adet: SİPARİŞ tarihine göre (satışın gerçekleştiği ay).
         # DENETİM K1: revenue_all iptal+iade DAHİL brüt kalır AMA ödenmemiş grubu (awaiting_payment/
         # payment_failed/pending/payment_notified) elenir — aksi halde headline rakamlar şişiyordu.
-        _m = {"created_at": {"$gte": s_iso, "$lt": e_iso}, "status": {"$nin": _UNPAID_STATUSES}}
+        # Efektif satış tarihi: pazaryeri siparişleri Trendyol'un orderDate'ine göre sayılır
+        # (created_at = senkron zamanı, sapma yaratıyordu). Site siparişi created_at kalır.
+        _m = {"_eff_date": {"$gte": s_iso, "$lt": e_iso}, "status": {"$nin": _UNPAID_STATUSES}}
         if _sc:
             _m.update(_sc)
         pipe = [
+            {"$addFields": {"_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
             {"$match": _m},
             {"$group": {
                 "_id": None,
@@ -778,14 +781,21 @@ async def sales_breakdown(
     (Trendyol 'Brüt Satış Adedi') aynı birim. `orders` = sipariş sayısı.
     Tarih aralığı TR yerel gün, kaynak filtreli."""
     s, e = _iso_range(start_date, end_date)
-    base = {"created_at": {"$gte": s, "$lte": e}}
     sc = _source_cond(source)
-    if sc:
-        base.update(sc)
-
     proj = {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
             "items.quantity": 1, "partial_cancel_amount": 1, "partial_cancel_units": 1}
-    orders = [o async for o in db.orders.find(base, proj)]
+    # SIFIR-SAPMA + tutarlılık: ciro kartları da aralık üyeliğini EFFECTIVE DATE ile belirler
+    # (marketplace_order_date ?? created_at) — cancel_return_by_source tablosuyla AYNI taban,
+    # Trendyol orderDate kümesiyle örtüşür. (Salt-okunur; stok/kalem'e dokunmaz.)
+    _match = {"_eff_date": {"$gte": s, "$lte": e}}
+    if sc:
+        _match.update(sc)
+    _pipe = [
+        {"$addFields": {"_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
+        {"$match": _match},
+        {"$project": proj},
+    ]
+    orders = [o async for o in db.orders.aggregate(_pipe)]
     onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
     oids = list({str(o.get("id")) for o in orders if o.get("id")})
     closed, open_ = await _split_maps(onums, oids)
