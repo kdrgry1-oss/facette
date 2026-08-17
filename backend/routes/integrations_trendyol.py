@@ -1693,7 +1693,23 @@ async def sync_products_to_trendyol(
                 "dimensionalWeight": float(product.get("cargo_weight", 1)),
                 "images": [{"url": u} for u in _ty_imgs]
             }
-            
+
+            # Trendyol MENŞEİ geçişi: 2026-10-23'te ZORUNLU olacak yeni top-level `origin` alanı
+            # (menşei artık attribute değil, stockCode/barcode gibi bağımsız field). Hibrit dönemde
+            # OPSİYONEL gönderiyoruz — kategori menşeiyi hâlâ attribute olarak isterse resolve_attributes
+            # onu da yollar (çift gönderim güvenli). Değer: ürünün menşei özelliği → yoksa firma
+            # varsayılanı (beyaz-etiket: config.default_origin, fallback "Türkiye" — TR üretim).
+            _origin_val = ""
+            for _a in (product.get("attributes") or []):
+                _an = str((_a.get("name") if isinstance(_a, dict) else "") or "").lower()
+                if any(k in _an for k in ("menşe", "mense", "menşei", "origin", "ülke", "ulke", "made in")):
+                    _origin_val = str((_a.get("value") if isinstance(_a, dict) else "") or "").strip()
+                    if _origin_val:
+                        break
+            _origin_val = _origin_val or str(config.get("default_origin") or "Türkiye")
+            if _origin_val:
+                base_item["origin"] = _origin_val
+
             if not base_item["images"]:
                 errors.append(f"{product.get('name')} - En az 1 görsel gerekli.")
                 continue
