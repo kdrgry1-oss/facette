@@ -206,6 +206,7 @@ export function SalesReport() {
                   <th className="text-left p-2">Kanal</th>
                   <th className="text-right p-2">Sipariş Adeti</th>
                   <th className="text-right p-2">Ürün Adeti</th>
+                  <th className="text-right p-2" title="Net + İptal + İade — Trendyol 'Brüt Satış' adediyle karşılaştırın">Brüt Adet</th>
                   <th className="text-right p-2">Ciro</th>
                   <th className="text-right p-2">İptal</th>
                   <th className="text-right p-2">İptal Tutarı</th>
@@ -230,6 +231,7 @@ export function SalesReport() {
                       <td className="p-2 font-medium">{c.source}</td>
                       <td className="p-2 text-right tabular-nums">{c.orders || 0}</td>
                       <td className="p-2 text-right tabular-nums font-semibold">{c.units || 0}</td>
+                      <td className="p-2 text-right tabular-nums text-gray-500" title="Net + İptal + İade adedi — Trendyol 'Brüt Satış' ile karşılaştırın">{c.total_units || 0}</td>
                       <td className="p-2 text-right tabular-nums font-semibold">{tl(c.revenue)}</td>
                       <td className="p-2 text-right tabular-nums">{c.cancel_units || 0}</td>
                       <td className="p-2 text-right tabular-nums text-rose-600">{tl(c.cancel_total)}</td>
@@ -251,7 +253,7 @@ export function SalesReport() {
               </tbody>
             </table>
           </div>
-          <p className="text-[10px] text-gray-400 mt-1">Sipariş = sipariş sayısı, Adet = ürün adedi (pazaryeri raporlarıyla aynı birim). İptal/İade oranları ADET üzerinden, o kanalın toplam adedine (satış + iptal + iade) göredir. Kısmi iadede yalnız iade edilen ürün İade'ye yazılır.</p>
+          <p className="text-[10px] text-gray-400 mt-1">Sipariş Adeti / Ürün Adeti / Ciro = <b>NET</b> (iptal + iade + ödenmemiş hariç). <b>Brüt Adet</b> = Net + İptal + İade — Trendyol "Satış Özeti"ndeki <b>Brüt Satış</b> adediyle karşılaştırın (Brüt − İptal − İade = Net). İptal/İade oranları ADET üzerinden, brüt adede göredir. Kısmi iadede yalnız iade edilen ürün İade'ye yazılır. Not: Facette adedi NET, Trendyol paneli çoğunlukla iptal/iade dahil brütü de gösterir; aylık farkta senkron/paket ayrımını "Trendyol Mutabakat" ile doğrulayın.</p>
         </div>
       )}
 

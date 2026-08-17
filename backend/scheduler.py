@@ -432,7 +432,7 @@ async def _run_trendyol_auto_orders_pull():
         sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
         from trendyol_client import TrendyolClient
         from routes.deps import db as _db, generate_id
-        from routes.integrations import map_trendyol_order, _sync_trendyol_status_passes
+        from routes.integrations import map_trendyol_order, _sync_trendyol_status_passes, _ms_to_iso
 
         client = TrendyolClient(
             supplier_id=cfg["supplier_id"],
@@ -471,7 +471,11 @@ async def _run_trendyol_auto_orders_pull():
                     updated += 1
                 else:
                     data["id"] = generate_id()
-                    data["created_at"] = datetime.now(timezone.utc).isoformat()
+                    # RC4 DENETİM FIX: created_at = GERÇEK sipariş tarihi (orderDate) — diğer 5
+                    # Trendyol insert yoluyla (manuel import/backfill/status-sweep) TUTARLI. Eskiden
+                    # cron 'now' (senkron anı) yazıyordu → ay sınırındaki siparişler yanlış aya düşüp
+                    # aylık pazaryeri adedi Trendyol paneliyle tutmuyordu.
+                    data["created_at"] = _ms_to_iso(t_order.get("orderDate")) or datetime.now(timezone.utc).isoformat()
                     await _db.orders.insert_one(data)
                     imported += 1
                     # Zaten iptal/iade durumunda gelen YENİ sipariş için stok DÜŞÜLMEZ

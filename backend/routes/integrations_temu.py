@@ -33,7 +33,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from .deps import db, require_admin
+from .deps import db, require_admin, generate_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/temu", tags=["Integrations-Temu"])
@@ -540,12 +540,20 @@ async def temu_webhook(request: Request):
                 "refunded": "refunded", "returned": "returned",
             }
             _internal = _status_map.get(_raw_status, "pending")
+            # RC6 DENETİM FIX: upsert eskiden created_at/id/order_number YAZMIYORDU → Temu
+            # siparişleri tarih-aralıklı raporlarda (created_at filtresi) HİÇ görünmüyor,
+            # kanal adedi ~0 çıkıyordu. $setOnInsert ile YALNIZ ilk oluşturmada eklenir
+            # (sonraki güncellemeler bu alanları değiştirmez). Sipariş tarihi ham veride
+            # güvenilir/tek-format olmadığından created_at = webhook anı (order.created
+            # oluşturma anına yakın gelir) — mevcut "hiç sayılmıyor" durumundan çok daha doğru.
+            _now = datetime.now(timezone.utc).isoformat()
             await db.orders.update_one(
                 {"platform": "temu", "marketplace_order_id": oid},
                 {"$set": {"platform": "temu", "marketplace": "temu",
                           "marketplace_order_id": oid, "raw_data": data,
                           "status": _internal, "marketplace_status_raw": _raw_status,
-                          "updated_at": datetime.now(timezone.utc).isoformat()}},
+                          "updated_at": _now},
+                 "$setOnInsert": {"id": generate_id(), "order_number": str(oid), "created_at": _now}},
                 upsert=True,
             )
     return {"status": "received", "event_type": event}
