@@ -1709,7 +1709,7 @@ async def get_color_siblings(product_id: str):
     import re as _re
     p = await db.products.find_one(
         {"$or": [{"id": product_id}, {"slug": product_id}]},
-        {"_id": 0, "id": 1, "csv_card_id": 1, "urun_karti_id": 1, "name": 1, "color": 1}
+        {"_id": 0, "id": 1, "csv_card_id": 1, "urun_karti_id": 1, "name": 1, "color": 1, "stock_code": 1}
     )
     if not p:
         return {"siblings": []}
@@ -1754,20 +1754,31 @@ async def get_color_siblings(product_id: str):
                 continue
             seen_ids.add(s["id"]); siblings.append(_row(s))
 
-    # 2) FALLBACK (açık anahtar yok/eşleşmedi): renk varyantları AYRI ürün olarak, farklı
-    #    urun_karti_id ile eklenmiş olabilir (ör. Siyah=2890, Ekru=2889). Tek ortak bağ MODEL
-    #    ADI'dır. Addan sondaki renk kelimesini soyup aynı taban-adlı diğer renkleri bul.
-    if not siblings:
-        base = _strip_trailing_color(p.get("name") or "")
-        if base and len(base) >= 6:
-            rx = "^" + _re.escape(base) + r"(\s|$)"
-            cur = db.products.find(
-                {"name": {"$regex": rx, "$options": "i"}, "id": {"$ne": p["id"]},
-                 "is_active": True}, _PROJ).limit(20)
-            async for s in cur:
-                if s["id"] in seen_ids:
-                    continue
-                seen_ids.add(s["id"]); siblings.append(_row(s))
+    # 2) STOK KODU ile de eşleştir — renk varyantları AYNI stok kodunu paylaşır (ör. FCFW1300005).
+    #    DENETİM FIX: anchor (kart id) TUTARSIZ olabilir (ör. Beyaz=2698 ama Acı Kahve/Siyah=2696)
+    #    → yalnız kart id ile gruplayınca Beyaz DÜŞÜYORDU. Artık stok kodu + model adı eşleşmesini
+    #    anchor ile BİRLİKTE kullanıp birleştiriyoruz (seen_ids dedup) → 3 renk de görünür.
+    _sc = str(p.get("stock_code") or "").strip()
+    if _sc:
+        cur = db.products.find(
+            {"stock_code": _sc, "id": {"$ne": p["id"]}, "is_active": True}, _PROJ).limit(20)
+        async for s in cur:
+            if s["id"] in seen_ids:
+                continue
+            seen_ids.add(s["id"]); siblings.append(_row(s))
+
+    # 3) MODEL ADI ile eşleştir (renk kelimesi soyulmuş taban ad) — kart id VE stok kodu farklı
+    #    eklenmiş renkleri de yakalar. Yalnız fallback DEĞİL: her zaman çalışır ve birleşir.
+    base = _strip_trailing_color(p.get("name") or "")
+    if base and len(base) >= 6:
+        rx = "^" + _re.escape(base) + r"(\s|$)"
+        cur = db.products.find(
+            {"name": {"$regex": rx, "$options": "i"}, "id": {"$ne": p["id"]},
+             "is_active": True}, _PROJ).limit(20)
+        async for s in cur:
+            if s["id"] in seen_ids:
+                continue
+            seen_ids.add(s["id"]); siblings.append(_row(s))
 
     return {"siblings": siblings}
 

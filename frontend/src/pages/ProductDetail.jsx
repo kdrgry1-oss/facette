@@ -1173,10 +1173,28 @@ export default function ProductDetail() {
                   {expandedSections.shipping ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                 </button>
                 {expandedSections.shipping && (
-                  <ul className="pb-3 text-xs text-gray-600 space-y-1.5">
-                    <li>• {(freeShippingThreshold != null ? Number(freeShippingThreshold) : 4000).toLocaleString("tr-TR")} TL ve üzeri siparişlerde ücretsiz kargo</li>
-                    <li>• 1-3 iş günü içinde kargoya verilir</li>
-                  </ul>
+                  <div className="pb-3 text-xs text-gray-600 space-y-2.5 leading-relaxed">
+                    <div>
+                      <p className="font-semibold text-gray-800">Ücretsiz Kargo</p>
+                      <p>{(freeShippingThreshold != null ? Number(freeShippingThreshold) : 4000).toLocaleString("tr-TR")} TL ve üzeri tüm siparişlerinizde kargo ücretsizdir.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800">Sipariş Hazırlama &amp; Kargoya Teslim</p>
+                      <p>Siparişiniz, ödeme onayının ardından 1–2 iş günü içerisinde özenle hazırlanarak kargoya teslim edilir.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800">Güvenli Teslimat</p>
+                      <p>Gönderimlerimiz, güvenli ve hızlı teslimat süreçleri için DHL Kargo ile gerçekleştirilir.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800">Kargo Takip</p>
+                      <p>Siparişiniz kargoya teslim edildiğinde, kargo takip numaranız SMS ve/veya e-posta yoluyla tarafınıza iletilir. Böylece siparişinizin teslimat sürecini kolayca takip edebilirsiniz.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800">Teslimat Süresi</p>
+                      <p>Teslimat süresi, teslimat adresine ve kargo firmasının operasyonel süreçlerine bağlı olarak değişiklik gösterebilir. Kargoya teslim edilen siparişlerin tahmini teslimat süresi, bulunduğunuz bölgeye göre farklılık gösterebilir.</p>
+                    </div>
+                  </div>
                 )}
               </div>
               
