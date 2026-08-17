@@ -558,7 +558,9 @@ async def auto_sync_instagram():
     """Scheduler: auto_sync açık + token varsa gönderileri tazeler."""
     try:
         s = await _get_settings()
-        if not s.get("auto_sync") or not s.get("access_token") or not s.get("ig_user_id"):
+        # Kadir: 2 günlük arka plan tarama VARSAYILAN AÇIK — yalnız admin auto_sync'i AÇIKÇA
+        # kapatırsa (False) durur. token+ig_user_id yoksa yine atlanır.
+        if s.get("auto_sync") is False or not s.get("access_token") or not s.get("ig_user_id"):
             return
         token = decrypt(s.get("access_token"))
         total, per, _tags_err = await _do_sync(token, s.get("ig_user_id"), 100)

@@ -2077,12 +2077,15 @@ def start_scheduler():
     # Instagram akışı — auto_sync açık + token varsa her 30 dk @facette gönderilerini tazeler.
     try:
         from routes.instagram import auto_sync_instagram
+        # Kadir: Instagram feed'i 2 GÜNDE BİR arka planda otomatik tara (elle "şimdi çek" dışında).
+        # Boot'tan 2 dk sonra bir kez, sonra her 48 saatte bir. (Önceden 30 dk idi — IG API'ye
+        # gereksiz yüktü ve etkili çalışmıyordu; istenen kadans 2 gün.)
         _add(
             auto_sync_instagram,
             "interval",
-            minutes=30,
+            days=2,
             id="instagram_auto_sync",
-            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
             max_instances=1,
             coalesce=True,
         )
