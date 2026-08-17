@@ -39,7 +39,7 @@ const TABS = [
   { key: "fast", label: "Hızlı Satan", icon: TrendingUp },
   { key: "slow", label: "Yavaş Satan", icon: TrendingDown },
   { key: "returns", label: "İade Oranı", icon: AlertTriangle },
-  { key: "profit", label: "Net Kâr (Kanal)", icon: Wallet },
+  { key: "profit", label: "Brüt Marj (Kanal)", icon: Wallet },
   { key: "costs", label: "Maliyet Girişi", icon: DollarSign },
 ];
 
@@ -54,7 +54,7 @@ export default function ReportsExtended() {
       </div>
 
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
-        <span className="font-semibold">Bu raporda:</span> Kârlılık ve stok verimliliğini yönetirsiniz — <b>Stok Değer</b> (alış/satış değeri ve potansiyel kâr marjı), <b>Üretim Önerisi</b> (satış hızına göre tükenecek ürünler ve önerilen üretim adedi), <b>Hızlı/Yavaş Satan</b> ürünler, <b>İade Oranı</b> uyarısı, kanal bazlı <b>Net Kâr</b> ve ürün <b>Maliyet Girişi</b>. "Yavaş Satan / Ölü Stok" ile uzun süredir satmayıp paranızı bağlayan ürünleri fark eder, "Net Kâr" ve "Maliyet Girişi" ile hangi kanalın gerçekte kâr bıraktığını görüp kârınızı artıracak kararlar alırsınız.
+        <span className="font-semibold">Bu raporda:</span> Kârlılık ve stok verimliliğini yönetirsiniz — <b>Stok Değer</b> (alış/satış değeri ve potansiyel kâr marjı), <b>Üretim Önerisi</b> (satış hızına göre tükenecek ürünler ve önerilen üretim adedi), <b>Hızlı/Yavaş Satan</b> ürünler, <b>İade Oranı</b> uyarısı, kanal bazlı <b>Brüt Marj</b> ve ürün <b>Maliyet Girişi</b>. "Yavaş Satan / Ölü Stok" ile uzun süredir satmayıp paranızı bağlayan ürünleri fark eder, "Brüt Marj" ve "Maliyet Girişi" ile hangi kanalın daha fazla marj bıraktığını görüp kararlar alırsınız.
       </div>
 
       <div className="border-b border-gray-200 flex gap-1 overflow-x-auto">
@@ -467,12 +467,17 @@ function ReturnRateAlerts() {
       </div>
       <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
         ⚠️ {data.total ?? 0} ürün iade oranı eşiği aşıyor. Bu ürünleri inceleyin — beden/kalite/açıklama sorunu olabilir.
+        <div className="mt-1.5 text-xs text-amber-800">
+          <b>Not (üst-sınır tahmini — sipariş bazlı):</b> Oran, sipariş statüsü üzerinden hesaplanır; iade statüsüne düşen bir siparişin
+          TÜM kalemleri iade sayılır (3 kalemli siparişin 1'i iade edilse bile 3 iade görünür). Bu yüzden gerçek iade oranı bu değerin
+          <b> altında</b> olabilir. Kalem bazlı kesin iade için "İadeler" raporunu kullanın.
+        </div>
       </div>
       <Table rows={data.items} testid="returns-table"
         cols={[
           { k: "name", l: "Ürün" },
           { k: "sold", l: "Satış", num: true },
-          { k: "returned", l: "İade", num: true },
+          { k: "returned", l: "İade (tahmini)", num: true },
           { k: "return_rate_pct", l: "Oran %", num: true, render: (r) => (
               <span className={`px-2 py-0.5 rounded text-xs font-medium ${r.severity==="critical"?"bg-red-100 text-red-800":r.severity==="high"?"bg-orange-100 text-orange-800":"bg-amber-100 text-amber-800"}`}>{r.return_rate_pct}%</span>
             ) },
@@ -509,8 +514,8 @@ function ProfitByChannel() {
         <KPI label="Ciro" value={fmtMoney(t.revenue)} tone="info" />
         <KPI label="Maliyet" value={fmtMoney(t.cost)} />
         <KPI label="Komisyon" value={fmtMoney(t.commission)} />
-        <KPI label="Net Kâr" value={fmtMoney(t.net_profit)} tone={t.net_profit >= 0 ? "ok" : "danger"} />
-        <KPI label="Marj" value={fmtPct(t.margin_pct)} tone="ok" />
+        <KPI label="Brüt Marj" value={fmtMoney(t.gross_margin)} tone={t.gross_margin >= 0 ? "ok" : "danger"} />
+        <KPI label="Brüt Marj %" value={fmtPct(t.margin_pct)} tone="ok" />
       </div>
       <Table rows={data.items} testid="profit-table"
         cols={[
@@ -519,12 +524,16 @@ function ProfitByChannel() {
           { k: "revenue", l: "Ciro", money: true },
           { k: "cost", l: "Maliyet", money: true },
           { k: "commission", l: `Komisyon (~${"%"})`, money: true },
-          { k: "refunds", l: "İade", money: true },
-          { k: "net_profit", l: "Net Kâr", money: true, render: (r) => (
-              <span className={r.net_profit >= 0 ? "text-emerald-700 font-semibold" : "text-red-700 font-semibold"}>{fmtMoney(r.net_profit)}</span>
+          { k: "shipping", l: "Kargo", money: true },
+          { k: "gross_margin", l: "Brüt Marj", money: true, render: (r) => (
+              <span className={r.gross_margin >= 0 ? "text-emerald-700 font-semibold" : "text-red-700 font-semibold"}>{fmtMoney(r.gross_margin)}</span>
             ) },
-          { k: "margin_pct", l: "Marj", render: (r) => fmtPct(r.margin_pct) },
+          { k: "margin_pct", l: "Marj %", render: (r) => fmtPct(r.margin_pct) },
         ]} />
+      <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900">
+        <b>Not:</b> Bu tablo <b>kanal brüt marjını</b> gösterir — yalnız ürün maliyeti, komisyon ve kargo düşülmüştür.
+        <b> Net kâr değildir</b>: KDV, kurumlar vergisi, reklam ve hizmet bedeli düşülmez. Tam net kâr (P&amp;L) için <b>"Kârlılık Analizi"</b> sayfasını kullanın.
+      </div>
       <p className="text-xs text-gray-500">
         💡 Komisyon oranları varsayılan: Trendyol 18%, HB 17%, N11 12%, Site 3%. Gerçek değerler için "Maliyet Girişi" sekmesinden ürün maliyetlerini girin.
       </p>

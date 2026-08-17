@@ -41,6 +41,25 @@ def _days_ago(days: int) -> str:
     return (_now() - timedelta(days=days)).isoformat()
 
 
+def _intval(v) -> int:
+    """Güvenli int — string/None stok değerlerini tolere eder."""
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _effective_stock(p: dict) -> int:
+    """O5 DENETİM FIX: EFEKTİF stok = varyant varsa Σ(variants[].stock), yoksa top-level
+    'stock'. reports.py::stock_report ile AYNI formül. Eskiden bu uçlar yalnız top-level
+    'stock'a bakıyordu → varyantlı ürün (S:0,M:8,L:2) top-level stock=0 taşıdığından
+    ölü-stok'a düşüyor / hızlı-satan'da stok 0 görünüyordu."""
+    variants = p.get("variants") or []
+    if variants:
+        return sum(_intval(v.get("stock")) for v in variants)
+    return _intval(p.get("stock"))
+
+
 # Ciro/hız/kâr uçları için GEÇERLİ SATIŞ dışı durumlar: iptal + ÖDENMEMİŞ + iade grubu
 # (reports.py:_EXCLUDED_STATUSES ile aynı disiplin). Pazaryeri siparişi daima confirmed+
 # geldiği için pazaryeri satışı düşmez; yalnız gerçekten ödenmemiş/iptal/iade elenir.
@@ -109,7 +128,13 @@ async def stock_valuation(
       (alış değeri toplamına katılmaz, satış değerine katılır).
     - Stok varyantlıysa gerçek adet = varyant stoklarının toplamı.
     """
-    q: dict = {"$or": [{"stock": {"$gt": 0}}, {"variants.stock": {"$gt": 0}}]}
+    # O11 DENETİM FIX: silinmiş (çöp kutusu) + pasif ürünler stok değerine KATILMASIN —
+    # reports.py::stock_report ile aynı süzgeç. Eskiden bunlar sayılıp toplam değer şişiyordu.
+    q: dict = {
+        "$or": [{"stock": {"$gt": 0}}, {"variants.stock": {"$gt": 0}}],
+        "is_deleted": {"$ne": True},
+        "is_active": {"$ne": False},
+    }
     if brand: q["brand"] = brand
     if category: q["category_name"] = category  # Y18: ürünler category değil category_name tutar
     if manufacturer: q["manufacturer"] = manufacturer
@@ -195,10 +220,12 @@ async def _build_product_lookup() -> dict:
     STOPWORDS = {"kadın", "erkek", "çocuk", "kız", "oğlan", "ürün", "yeni", "standart",
                  "fit", "the", "and", "ve", "ile", "de", "da", "için", "bir", "mevsimlik", "ince"}
     products = []
-    async for p in db.products.find({"stock": {"$gt": 0}},
+    # O5 DENETİM FIX: varyant-stoklu ürünler (top-level stock=0) de dahil edilir; efektif stok
+    # için variants.stock projeksiyona eklenir.
+    async for p in db.products.find({"$or": [{"stock": {"$gt": 0}}, {"variants.stock": {"$gt": 0}}]},
                                        {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1,
                                         "stock_code": 1, "barcode": 1, "brand": 1, "category_name": 1,
-                                        "manufacturer": 1}):
+                                        "manufacturer": 1, "variants.stock": 1}):
         nm = (p.get("name") or "").lower()
         # Kelime tokenize + filtre
         words = {w for w in re.findall(r"[a-zçğıöşü]{4,}", nm) if w not in STOPWORDS}
@@ -279,7 +306,7 @@ async def stockout_forecast(
         velocity = max(velocity_by_pid.get(pid, 0.0), velocity_by_smart.get(pid, 0.0))
         if velocity < min_velocity:
             continue
-        stock = int(p.get("stock") or 0)
+        stock = _effective_stock(p)  # O5: varyant stoğu dahil efektif stok
         if stock <= 0:
             continue
         days_left = stock / velocity if velocity > 0 else 9999
@@ -375,7 +402,7 @@ async def fast_movers(
     ids = [i["product_id"] for i in items]
     stock_map = {}
     _proj = {"_id": 0, "id": 1, "name": 1, "stock": 1, "stock_code": 1, "price": 1,
-             "brand": 1, "category_name": 1, "variants.urun_id": 1}
+             "brand": 1, "category_name": 1, "variants.urun_id": 1, "variants.stock": 1}
     async for p in db.products.find({"id": {"$in": ids}}, _proj):
         stock_map[str(p["id"])] = p
     # Eski (Ticimax/pazaryeri) siparişlerde product_id yerel UUID değil varyant urun_id'si
@@ -391,7 +418,7 @@ async def fast_movers(
         p = stock_map.get(it["product_id"]) or {}
         if p.get("name") and (not it.get("name") or it["name"] == "—"):
             it["name"] = p["name"]
-        it["stock"] = int(p.get("stock") or 0)
+        it["stock"] = _effective_stock(p)  # O5: varyant stoğu dahil efektif stok
         it["stock_code"] = p.get("stock_code")
         it["price"] = float(p.get("price") or 0)
         it["brand"] = p.get("brand")
@@ -414,11 +441,16 @@ async def slow_movers(
     # Önce satılanları topla
     sold = {it["product_id"]: it for it in await _velocity_aggregate(days)}
     items = []
-    cursor = db.products.find({"stock": {"$gte": min_stock}},
+    # O5 DENETİM FIX: varyant-stoklu ürünler (top-level stock=0) de aranır; efektif stok
+    # eşiği Python tarafında uygulanır (variants projeksiyona eklendi).
+    cursor = db.products.find({"$or": [{"stock": {"$gte": min_stock}}, {"variants.stock": {"$gt": 0}}]},
                                {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1, "stock_code": 1,
-                                "brand": 1, "category_name": 1, "created_at": 1})
+                                "brand": 1, "category_name": 1, "created_at": 1, "variants.stock": 1})
     async for p in cursor:
         pid = str(p["id"])
+        eff_stock = _effective_stock(p)  # O5: varyant stoğu dahil
+        if eff_stock < min_stock:
+            continue
         sold_info = sold.get(pid)
         sold_qty = sold_info["sold_qty"] if sold_info else 0
         # "Yavaş satan" tanımı: günlük velocity < 0.1 (yani 30 günde 3 adetten az)
@@ -428,13 +460,13 @@ async def slow_movers(
                 "product_id": pid,
                 "name": p.get("name"),
                 "stock_code": p.get("stock_code"),
-                "stock": int(p.get("stock") or 0),
+                "stock": eff_stock,
                 "sold_qty_period": sold_qty,
                 "daily_velocity": round(velocity, 3),
                 "price": float(p.get("price") or 0),
                 "brand": p.get("brand"),
                 "category": p.get("category_name"),
-                "tied_value": round(int(p.get("stock") or 0) * float(p.get("price") or 0), 2),
+                "tied_value": round(eff_stock * float(p.get("price") or 0), 2),
             })
     items.sort(key=lambda x: -x["tied_value"])
     return {"days": days, "min_stock": min_stock, "total": len(items), "items": items[:limit]}
@@ -458,19 +490,24 @@ async def dead_stock(
         if r["_id"]: sold_ids.add(str(r["_id"]))
 
     items = []
-    cursor = db.products.find({"stock": {"$gt": 0}},
-                               {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1, "stock_code": 1, "brand": 1})
+    # O5 DENETİM FIX: varyant-stoklu ürünler (top-level stock=0) de dahil; efektif stok kullanılır.
+    cursor = db.products.find({"$or": [{"stock": {"$gt": 0}}, {"variants.stock": {"$gt": 0}}]},
+                               {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1, "stock_code": 1,
+                                "brand": 1, "variants.stock": 1})
     async for p in cursor:
         if str(p["id"]) in sold_ids:
+            continue
+        eff_stock = _effective_stock(p)  # O5: varyant stoğu dahil
+        if eff_stock <= 0:
             continue
         items.append({
             "product_id": str(p["id"]),
             "name": p.get("name"),
             "stock_code": p.get("stock_code"),
-            "stock": int(p.get("stock") or 0),
+            "stock": eff_stock,
             "price": float(p.get("price") or 0),
             "brand": p.get("brand"),
-            "tied_value": round(int(p.get("stock") or 0) * float(p.get("price") or 0), 2),
+            "tied_value": round(eff_stock * float(p.get("price") or 0), 2),
         })
     items.sort(key=lambda x: -x["tied_value"])
     return {"days": days, "total": len(items), "items": items[:500]}
@@ -486,13 +523,19 @@ async def return_rate(
     min_orders: int = Query(5, ge=1, description="En az kaç sipariş olmalı"),
     _=Depends(require_admin),
 ):
-    """Belirli periyotta iade oranı `threshold`% üzerinde olan ürünleri listeler."""
+    """Belirli periyotta iade oranı `threshold`% üzerinde olan ürünleri listeler.
+
+    O9 DENETİM NOTU: Bu oran SİPARİŞ-STATÜSÜ bazlı bir ÜST-SINIR TAHMİNİDİR — order-seviyesi
+    statü iade grubuna düşünce siparişin TÜM kalemleri (3 kalemli siparişte 1'i iade edilse bile
+    3'ü) iade sayılır; gerçek kalem-bazlı iade adedi `customer_returns` koleksiyonundadır. Kesin
+    ürün-bazlı iade için /reports/returns/by-product kullanın. UI'da "üst-sınır tahmini" olarak
+    etiketlenir (kullanıcı bunu KESİN değer sanmasın)."""
     since = _days_ago(days)
     pipeline = [
         # Payda (total_sold): iptal/ödenmemiş HARİÇ; iade edilenler SATILDI sayılır (paydada kalır).
         # Pay (returned_qty): order-seviyesi statü iade grubuna düşenler (returned/refunded/partial).
-        # NOT: sitedeki KISMİ iadeler siparişi açık bırakabildiğinden bu order-statü tabanlı oran
-        # bir ALT SINIR'dır; ürün-bazlı ayrıntılı iade için /reports/returns/by-product kullanılır.
+        # NOT: sitedeki KISMİ iadeler siparişi açık bırakabildiğinden ve tam-iade siparişin TÜM
+        # kalemlerini iade saydığından bu order-statü tabanlı oran bir TAHMİN'dir (bkz. O9 notu).
         {"$match": {"created_at": {"$gte": since}, "status": {"$nin": _UNPAID_CANCEL}}},
         {"$unwind": "$items"},
         {"$group": {
@@ -525,14 +568,23 @@ async def return_rate(
 
 
 # ---------------------------------------------------------------------------
-# 4) KANAL BAZLI NET KÂR — Site / Trendyol / HB ...
+# 4) KANAL BAZLI BRÜT MARJ — Site / Trendyol / HB ...
 # ---------------------------------------------------------------------------
 @router.get("/profit-by-channel")
 async def profit_by_channel(
     days: int = Query(30, ge=1, le=365),
     _=Depends(require_admin),
 ):
-    """Her kanal için: satış, maliyet, komisyon (varsa), kargo, iade, net kâr."""
+    """Her kanal için: satış, maliyet, komisyon (varsa), kargo → KANAL BRÜT MARJI.
+
+    K2 DENETİM FIX: Bu uç eskiden "net_profit" (Net Kâr) döndürüyordu ve v1 "Kârlılık Analizi"
+    (reports.py::profitability, tam P&L) ile ~2x çelişiyordu. Bu bir NET KÂR DEĞİLDİR: yalnız
+    kanal maliyetleri (ürün maliyeti + komisyon + kargo) düşülür; KDV, kurumlar vergisi, reklam,
+    hizmet bedeli DÜŞÜLMEZ. Bu yüzden kavram "Brüt Marj" olarak yeniden adlandırıldı ve alan
+    `gross_margin` döner. Tam net kâr için v1 "Kârlılık Analizi" sayfası kanonik kaynaktır.
+    O4 DENETİM FIX: kargo (shipping) eskiden hesaplanıp net'e KATILMIYORDU → artık düşülür.
+    D1 DENETİM FIX: "refunds/İade" kolonu kaldırıldı — iade siparişleri sorgudan (_EXCLUDED)
+    zaten elendiğinden daima 0 dönen ölü koddu (yanıltıcıydı)."""
     since = _days_ago(days)
 
     # Pazaryeri komisyon varsayılanları (yüzde) — gelecekte ayrı config'den okunabilir
@@ -559,7 +611,7 @@ async def profit_by_channel(
                  "admin_manual": "manual", "admin": "manual", "manuel": "manual"}
     rows: dict = defaultdict(lambda: {
         "orders": 0, "revenue": 0.0, "cost": 0.0, "shipping": 0.0,
-        "commission": 0.0, "refunds": 0.0,
+        "commission": 0.0,
     })
     async for o in db.orders.aggregate(pipeline):
         ch = (o.get("channel") or "site").lower()
@@ -574,19 +626,19 @@ async def profit_by_channel(
             qty = int(it.get("quantity") or 1)
             price = float(it.get("price") or 0)
             cost = cost_map.get(pid)
-            if cost is None:
+            # D4 DENETİM FIX: maliyet 0 VEYA eksikse (None) fiyatın %50'si fallback — aksi halde
+            # maliyeti 0 olan ürün ~%100 sahte marj gösteriyordu.
+            if not cost:
                 cost = round(price * 0.5, 2)
             rows[ch]["cost"] += qty * cost
         # Komisyon (yaklaşık)
         rows[ch]["commission"] += rev * (DEFAULT_COMMISSION_PCT.get(ch, 5.0) / 100)
-        # İade
-        if o.get("status") == "returned":
-            rows[ch]["refunds"] += rev
 
     out = []
     for ch, r in rows.items():
-        net = r["revenue"] - r["cost"] - r["commission"] - r["refunds"]
-        margin = (net / r["revenue"] * 100) if r["revenue"] else 0
+        # O4: kargo (shipping) da düşülür. K2: bu NET KÂR değil, kanal BRÜT MARJI'dır.
+        gross = r["revenue"] - r["cost"] - r["commission"] - r["shipping"]
+        margin = (gross / r["revenue"] * 100) if r["revenue"] else 0
         out.append({
             "channel": ch,
             "orders": r["orders"],
@@ -594,12 +646,11 @@ async def profit_by_channel(
             "cost": round(r["cost"], 2),
             "commission": round(r["commission"], 2),
             "shipping": round(r["shipping"], 2),
-            "refunds": round(r["refunds"], 2),
-            "net_profit": round(net, 2),
+            "gross_margin": round(gross, 2),
             "margin_pct": round(margin, 2),
             "commission_pct": DEFAULT_COMMISSION_PCT.get(ch, 5.0),
         })
-    out.sort(key=lambda x: -x["net_profit"])
+    out.sort(key=lambda x: -x["gross_margin"])
 
     # Toplam satır
     totals = {
@@ -607,11 +658,11 @@ async def profit_by_channel(
         "revenue": round(sum(r["revenue"] for r in out), 2),
         "cost": round(sum(r["cost"] for r in out), 2),
         "commission": round(sum(r["commission"] for r in out), 2),
-        "refunds": round(sum(r["refunds"] for r in out), 2),
-        "net_profit": round(sum(r["net_profit"] for r in out), 2),
+        "shipping": round(sum(r["shipping"] for r in out), 2),
+        "gross_margin": round(sum(r["gross_margin"] for r in out), 2),
     }
     if totals["revenue"]:
-        totals["margin_pct"] = round(totals["net_profit"] / totals["revenue"] * 100, 2)
+        totals["margin_pct"] = round(totals["gross_margin"] / totals["revenue"] * 100, 2)
     else:
         totals["margin_pct"] = 0
     return {"days": days, "items": out, "totals": totals}

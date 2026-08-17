@@ -130,6 +130,12 @@ export function SalesReport() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [source]);
   const tl = (v) => `₺${(v ?? 0).toLocaleString("tr-TR")}`;
 
+  // O8 audit-fix: "Ortalama Sepet (Net)" kartı NET ciro/NET sipariş üzerinden hesaplanır
+  // (brk.net — kısmi iptal/iade düşülmüş). Önceden data.totals.aov brüt ciroyu kullanıyordu;
+  // etiket "Net" derken değer brüttü. Artık yandaki "Net" ciro kartıyla aynı tabana oturur.
+  const netOrders = brk?.net?.orders || 0;
+  const netAov = netOrders > 0 ? (brk.net.revenue || 0) / netOrders : 0;
+
   return (
     <div className="space-y-5" data-testid="sales-report-page">
       <div className="flex justify-between items-center flex-wrap gap-3">
@@ -184,9 +190,9 @@ export function SalesReport() {
         <span className="text-2xl">🛒</span>
         <div>
           <div className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Ortalama Sepet (Net)</div>
-          <div className="text-2xl font-bold text-indigo-700 tabular-nums">{tl(data?.totals?.aov)}</div>
+          <div className="text-2xl font-bold text-indigo-700 tabular-nums">{tl(netAov)}</div>
         </div>
-        <span className="text-[11px] text-gray-400 ml-2">{data?.totals?.orders ?? 0} sipariş ortalaması</span>
+        <span className="text-[11px] text-gray-400 ml-2">{netOrders} sipariş ortalaması</span>
       </div>
 
       {/* 🏬 Pazaryerine Göre Satış · İptal · İade — TEK tablo (eski iki ayrı blok birleştirildi) */}
@@ -387,7 +393,8 @@ export function SalesReport() {
                     {p.method}
                   </td>
                   <td className="p-2 text-right">{p.orders}</td>
-                  <td className="p-2 text-right font-semibold">₺{p.revenue.toLocaleString("tr-TR")}</td>
+                  {/* D3 audit-fix: ciro null gelirse render patlamasın — grafik etiketiyle aynı (value||0) koruması */}
+                  <td className="p-2 text-right font-semibold">₺{(p.revenue || 0).toLocaleString("tr-TR")}</td>
                 </tr>
               ))}
             </tbody>
@@ -453,9 +460,12 @@ export function ProductsReport() {
     let r = top.map(p => {
       const wr = (p.velocity || {}).weekly_rate ?? 0;
       const prev = top90Map[p.product_id];
-      // İade % paydası = Toplam Satış (net+iptal+iade) — iptaller oranı ŞİŞİRMEZ
-      // (kullanıcı isteği: iade oranına iptal siparişleri dahil edilmez).
-      const totQ = (p.qty || 0) + (p.cancel_qty || 0) + (p.return_qty || 0);
+      // Y2 audit-fix: İade % paydası = Net Satış + İade (iptal HARİÇ). İptal edilen
+      // adetler hiç satılmadığı için paydaya girmez — aksi halde oran suni düşer ve
+      // ≥%15 kırmızı uyarısı gizlenirdi. Excel export'u da net+iade kullanır; ekran
+      // artık onunla hizalı. Örn: 10 net + 5 iptal + 2 iade → 2/(10+2)=%16.7 (kırmızı),
+      // eskiden 2/(10+5+2)=%11.8 idi.
+      const totQ = (p.qty || 0) + (p.return_qty || 0);
       return {
         ...p,
         _cover: (p.current_stock != null && wr > 0) ? p.current_stock / wr : null,
@@ -637,7 +647,7 @@ export function ProductsReport() {
                     {p.return_qty || 0}
                   </td>
                   <td className={`p-3 text-right tabular-nums text-xs ${p._retpct >= 15 ? "text-red-600 font-bold" : p._retpct >= 8 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
-                    title={`İade % = İade / Toplam Satış (${p.return_qty || 0}/${p._gross})${p._retpct >= 15 ? " — %15+ iade: bu ürün muhtemelen zarar ettiriyor (kalıp/beden denetimi önerilir)" : ""}`}>
+                    title={`İade % = İade / (Net Satış + İade) — iptal hariç (${p.return_qty || 0}/${(p.qty || 0) + (p.return_qty || 0)})${p._retpct >= 15 ? " — %15+ iade: bu ürün muhtemelen zarar ettiriyor (kalıp/beden denetimi önerilir)" : ""}`}>
                     {p._retpct > 0 ? `%${p._retpct.toFixed(1)}` : ""}
                   </td>
                   <td className="p-3 text-right">{p.qty}</td>

@@ -9,9 +9,11 @@ AMAÇ:
      pazarlama modeli; VIP / Riskli / Kaybedilen / Yeni gibi gruplar için
      hedefli kampanya yapmayı sağlar.
 
-  2) **Marketplace Karlılık Raporu** — Her pazaryeri için net ciro =
-     brüt - komisyon - kargo - iade. Komisyon yüzdesi
+  2) **Marketplace Karlılık Raporu** — Her pazaryeri için net kâr =
+     brüt - COGS (ürün maliyeti) - komisyon - kargo - iade. Komisyon yüzdesi
      `marketplace_accounts.{key}.transfer_rules.commission_value`'dan okunur.
+     COGS, profitability raporuyla AYNI zincirden gelir (purchase_price>0 else
+     cost_price; eksikse cog_fallback_ratio ile oranla tahmin).
 
   3) **Google Merchant Feed** — Google Shopping için XML feed. Ücretsiz
      listeleme ve Google Ads Shopping kampanyaları için zorunludur.
@@ -161,10 +163,27 @@ async def marketplace_profit(
     current_user: dict = Depends(require_admin),
 ):
     """
-    Her kanal/pazaryeri için brüt ciro, komisyon (transfer_rules'tan),
-    kargo maliyeti, iade tutarı ve net kâr hesaplar.
+    Her kanal/pazaryeri için brüt ciro, COGS (ürün maliyeti), komisyon
+    (transfer_rules'tan), kargo maliyeti, iade tutarı ve net kâr hesaplar.
+
+    DENETİM DÜZELTMESİ (K3): Eskiden net kâr = brüt − komisyon − kargo − iade
+    idi; ürün maliyeti (COGS) HİÇ düşülmüyordu → 80₺'ye alıp 100₺'ye satılan
+    (%18 komisyon) üründe gerçek kâr 2₺ iken rapor ~82₺ (~40x şişik) gösteriyordu.
+    Artık net = brüt − COGS − komisyon − kargo − iade. COGS, profitability
+    raporuyla AYNI zincir/eşleşmeyle çekilir (aşağıdaki _cogs_pipeline).
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    # Maliyet-oranı yapılandırması (profitability ile ortak): maliyeti bilinmeyen
+    # kalemlerde satış fiyatının bu oranı COGS sayılır → eksik maliyet SAHTE %100
+    # marj üretmesin (denetim bulgusu D4). Yerelde import: modül-yükleme sırasında
+    # döngüsel bağımlılık riskini önlemek için fonksiyon içinde (feed'deki `import os` stili).
+    try:
+        from .reports import _profitability_config
+        _cfg = await _profitability_config()
+        cog_fallback_ratio = float(_cfg.get("cog_fallback_ratio") or 0.5)
+    except Exception:
+        cog_fallback_ratio = 0.5
 
     # Komisyon ayarlarını çek
     accounts_cursor = db.marketplace_accounts.find({}, {"_id": 0, "key": 1, "transfer_rules": 1})
@@ -202,8 +221,53 @@ async def marketplace_profit(
     ]
     agg = await db.orders.aggregate(pipeline).to_list(length=50)
 
+    # COGS (ürün maliyeti) — kanal bazında. Kalemleri aç, ürünü profitability'nin
+    # $lookup'ı ile TIPATIP aynı şekilde eşleştir: product_id VEYA barcode (üst-seviye
+    # ya da varyant). Pazaryeri kalemleri Facette id'si değil productCode/barcode taşır.
+    # Birim maliyet zinciri: purchase_price(>0) → cost_price. Maliyeti bilinmeyen
+    # kalemin cirosu revenue_nocost'ta toplanır ve aşağıda cog_fallback_ratio ile tahmin edilir.
+    cogs_pipeline = [
+        {"$match": {"created_at": {"$gte": cutoff},
+                    "status": {"$nin": ["cancelled", "cancel_refunded",
+                                        "awaiting_payment", "payment_failed",
+                                        "pending", "payment_notified"]}}},
+        {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
+        {"$unwind": "$items"},
+        {"$addFields": {"_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}}}},
+        {"$lookup": {
+            "from": "products",
+            "let": {"pid": "$items.product_id", "bc": "$_bc"},
+            "pipeline": [
+                {"$match": {"$expr": {"$or": [
+                    {"$eq": ["$id", "$$pid"]},
+                    {"$and": [{"$ne": ["$$bc", ""]}, {"$eq": [{"$toString": "$barcode"}, "$$bc"]}]},
+                    {"$and": [{"$ne": ["$$bc", ""]}, {"$in": ["$$bc", {"$map": {"input": {"$ifNull": ["$variants", []]}, "as": "v", "in": {"$toString": "$$v.barcode"}}}]}]},
+                ]}}},
+                {"$limit": 1},
+                {"$project": {"_id": 0, "purchase_price": 1, "cost_price": 1}},
+            ],
+            "as": "p",
+        }},
+        {"$unwind": {"path": "$p", "preserveNullAndEmptyArrays": True}},
+        {"$addFields": {"_unit_cost": {"$let": {
+            "vars": {"pp": {"$ifNull": ["$p.purchase_price", 0]}, "cp": {"$ifNull": ["$p.cost_price", 0]}},
+            "in": {"$cond": [{"$gt": ["$$pp", 0]}, "$$pp", "$$cp"]}}}}},
+        {"$group": {
+            "_id": "$_ch",
+            "cogs": {"$sum": {"$multiply": [{"$ifNull": ["$_unit_cost", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
+            "revenue_nocost": {"$sum": {"$cond": [{"$gt": [{"$ifNull": ["$_unit_cost", 0]}, 0]}, 0,
+                                {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}]}},
+        }},
+    ]
+    cogs_map = {}
+    async for r in db.orders.aggregate(cogs_pipeline):
+        ch = (r["_id"] or "site")
+        # Maliyeti bilinmeyen kalemler için oranla tahmin ekle (sahte %100 marj önlenir).
+        est = float(r.get("cogs") or 0) + float(r.get("revenue_nocost") or 0) * cog_fallback_ratio
+        cogs_map[ch] = est
+
     result = []
-    totals = {"orders": 0, "gross": 0, "commission": 0, "shipping_cost": 0, "refunded": 0, "net": 0}
+    totals = {"orders": 0, "gross": 0, "cogs": 0, "commission": 0, "shipping_cost": 0, "refunded": 0, "net": 0}
     for r in agg:
         ch = r["_id"] or "site"
         cfg = comm_map.get(ch, {"type": "none", "value": 0})
@@ -212,11 +276,13 @@ async def marketplace_profit(
             commission = (r["gross"] or 0) * cfg["value"] / 100
         elif cfg["type"] == "amount":
             commission = (r["orders"] or 0) * cfg["value"]
-        net = (r["gross"] or 0) - commission - (r["shipping_cost"] or 0) - (r["refunded"] or 0)
+        cogs = float(cogs_map.get(ch, 0) or 0)
+        net = (r["gross"] or 0) - cogs - commission - (r["shipping_cost"] or 0) - (r["refunded"] or 0)
         result.append({
             "channel": ch,
             "orders": r["orders"],
             "gross": round(r["gross"] or 0, 2),
+            "cogs": round(cogs, 2),
             "commission": round(commission, 2),
             "commission_rate": cfg["value"],
             "commission_type": cfg["type"],
@@ -225,7 +291,7 @@ async def marketplace_profit(
             "net": round(net, 2),
             "net_margin_pct": round((net / r["gross"] * 100) if r["gross"] else 0, 2),
         })
-        for k in ["orders", "gross", "commission", "shipping_cost", "refunded", "net"]:
+        for k in ["orders", "gross", "cogs", "commission", "shipping_cost", "refunded", "net"]:
             totals[k] += result[-1][k] if k != "orders" else r["orders"]
     return {"days": days, "items": result, "totals": {
         **{k: round(v, 2) for k, v in totals.items() if k != "orders"},
