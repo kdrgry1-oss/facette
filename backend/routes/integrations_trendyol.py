@@ -4354,6 +4354,62 @@ async def trendyol_verify_orderdate(
     }
 
 
+@router.get("/trendyol/ticimax-dup-audit")
+async def trendyol_ticimax_dup_audit(
+    sample: int = Query(20, ge=0, le=200),
+    current_user: dict = Depends(require_admin),
+):
+    """SALT-OKUNUR denetim: imported_from=ticimax_history siparişlerinden, gömülü gerçek
+    Trendyol numarası (ticimax_siparis_no = 'TY-<tic>_<GERCEK_TY_NO>') CANLI kayıt olarak
+    da varsa = ÇİFT. Kaç adet çift/tekil, ciro ve ay dağılımını çıkarır. Silme YOK."""
+    total = 0
+    dup = {"count": 0, "revenue": 0.0, "units": 0, "by_month": {}}
+    uniq = {"count": 0, "revenue": 0.0, "by_month": {}}
+    no_embed = 0
+    samples = []
+    cur = db.orders.find(
+        {"imported_from": "ticimax_history"},
+        {"_id": 0, "id": 1, "order_number": 1, "ticimax_siparis_no": 1, "total": 1,
+         "items.quantity": 1, "created_at": 1, "marketplace_order_date": 1, "status": 1})
+    async for o in cur:
+        total += 1
+        tsn = str(o.get("ticimax_siparis_no") or "")
+        native = tsn.rsplit("_", 1)[-1] if "_" in tsn else ""
+        eff = str(o.get("marketplace_order_date") or o.get("created_at") or "")[:7]
+        amt = float(o.get("total") or 0)
+        u = sum(max(1, int((it or {}).get("quantity") or 1)) for it in (o.get("items") or [])) or 1
+        twin = None
+        if native and native.isdigit() and native != str(o.get("order_number")):
+            twin = await db.orders.find_one(
+                {"order_number": native, "id": {"$ne": o.get("id")}}, {"_id": 1, "id": 1})
+        if not native:
+            no_embed += 1
+        if twin:
+            dup["count"] += 1
+            dup["revenue"] += amt
+            dup["units"] += u
+            dup["by_month"][eff] = dup["by_month"].get(eff, 0) + 1
+            if len(samples) < sample:
+                samples.append({"ticimax_no": o.get("order_number"), "native_no": native,
+                                "eff_month": eff, "total": round(amt, 2), "status": o.get("status")})
+        else:
+            uniq["count"] += 1
+            uniq["revenue"] += amt
+            uniq["by_month"][eff] = uniq["by_month"].get(eff, 0) + 1
+    dup["revenue"] = round(dup["revenue"], 2)
+    uniq["revenue"] = round(uniq["revenue"], 2)
+    dup["by_month"] = dict(sorted(dup["by_month"].items()))
+    uniq["by_month"] = dict(sorted(uniq["by_month"].items()))
+    return {
+        "ticimax_history_total": total,
+        "no_embedded_native": no_embed,
+        "duplicates_with_live_twin": dup,   # canlı sync'te de olan = raporda çift sayılan
+        "unique_no_twin": uniq,             # yalnız ticimax'te olan gerçek geçmiş
+        "samples": samples,
+        "note": "SALT-OKUNUR. Silme/çıkarma yapılmadı.",
+    }
+
+
 @router.get("/trendyol/orderdate-numbers")
 async def trendyol_orderdate_numbers(
     start_date: str = Query(...),
