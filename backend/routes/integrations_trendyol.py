@@ -4281,6 +4281,79 @@ async def trendyol_reconcile(
     }
 
 
+@router.get("/trendyol/verify-orderdate")
+async def trendyol_verify_orderdate(
+    start_date: str = Query(..., description="Son-değişiklik penceresi başlangıcı (YYYY-MM-DD, TR)"),
+    end_date: str = Query(..., description="Son-değişiklik penceresi bitişi (YYYY-MM-DD, TR)"),
+    current_user: dict = Depends(require_admin),
+):
+    """ELMA-ELMA doğrulama: Trendyol'u SON-DEĞİŞİKLİK penceresiyle geniş çeker ama her
+    siparişi kendi **orderDate**'ine (sipariş tarihi) göre AYA dağıtır; bizim tarafı da
+    aynı orderDate (marketplace_order_date) tabanıyla aya dağıtır → iki sayım aynı temelde.
+
+    reconcile'daki missing/extra, Trendyol API'nin son-değişiklik tarihiyle filtrelemesinden
+    doğan gölgeydi; bu uç onu ortadan kaldırır. Salt-okunur (apply YOK).
+
+    Not: [start..end] son-değişiklik penceresi, orderDate'i o aralıkta olan TÜM siparişleri
+    kapsamak için yeterince GENİŞ verilmeli (ör. ay başından BUGÜNE) — bir ayda verilip
+    sonraki ay değişen siparişler ancak pencere o değişikliği kapsıyorsa sayılır.
+    """
+    from .deps import tr_range_to_utc
+    config = await get_trendyol_config()
+    if not config.get("is_active"):
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(supplier_id=config["supplier_id"], api_key=config["api_key"],
+                            api_secret=config["api_secret"], mode=config["mode"])
+
+    s_iso, e_iso = tr_range_to_utc(start_date, end_date)
+    start_ms = int(datetime.fromisoformat(s_iso).timestamp() * 1000)
+    end_ms = int(datetime.fromisoformat(e_iso).timestamp() * 1000)
+    if end_ms <= start_ms:
+        raise HTTPException(status_code=400, detail="Bitiş başlangıçtan sonra olmalı")
+    if (end_ms - start_ms) / 86400000.0 > 62:
+        raise HTTPException(status_code=400, detail="Son-değişiklik penceresi en fazla 62 gün; ay ay çağırıp orderDate kovalarını birleştirin.")
+
+    ty = await _ty_fetch_orders_range(client, start_ms, end_ms)
+    # Trendyol siparişlerini KENDİ orderDate ayına dağıt (UTC ay — bizim marketplace_order_date
+    # ile birebir aynı üretim: _ms_to_iso(orderDate), o yüzden aynı sipariş iki tarafta aynı kovaya düşer).
+    ty_m: dict = {}
+    for onum, t in ty.items():
+        od = t.get("order_date")
+        mon = (_ms_to_iso(od) or "")[:7]
+        if not mon:
+            continue
+        b = ty_m.setdefault(mon, {"orders": 0, "units": 0, "amount": 0.0})
+        b["orders"] += 1
+        b["units"] += int(t.get("units") or 0)
+        b["amount"] += float(t.get("amount") or 0)
+    for b in ty_m.values():
+        b["amount"] = round(b["amount"], 2)
+
+    # Bizim taraf — TÜM Trendyol siparişleri, marketplace_order_date (??created_at) UTC ayına göre.
+    our_pipe = [
+        {"$match": {"$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]}},
+        {"$addFields": {
+            "_eff": {"$ifNull": ["$marketplace_order_date", "$created_at"]},
+            "_u": {"$sum": {"$map": {"input": {"$ifNull": ["$items", []]}, "as": "it",
+                                     "in": {"$ifNull": ["$$it.quantity", 1]}}}}}},
+        {"$addFields": {"_mon": {"$substrBytes": ["$_eff", 0, 7]}}},
+        {"$group": {"_id": "$_mon", "orders": {"$sum": 1}, "units": {"$sum": "$_u"}}},
+    ]
+    our_m: dict = {}
+    async for r in db.orders.aggregate(our_pipe):
+        mon = r.get("_id") or ""
+        if mon:
+            our_m[mon] = {"orders": int(r.get("orders") or 0), "units": int(r.get("units") or 0)}
+
+    return {
+        "lastmod_window": {"start": start_date, "end": end_date},
+        "trendyol_by_orderdate_month": dict(sorted(ty_m.items())),
+        "panel_by_orderdate_month": dict(sorted(our_m.items())),
+        "note": "TY orderDate bazlı; pencere orderDate'i kapsayacak kadar geniş olmalı.",
+    }
+
+
 @router.get("/trendyol/claims/sync")
 async def sync_trendyol_claims(
     days_back: int = 1095,
