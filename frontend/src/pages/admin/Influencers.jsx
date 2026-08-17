@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import {
   Plus, TrendingUp, CheckCircle, Trash2, X,
   Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Music2, Package,
-  ClipboardList, ExternalLink, History, Filter,
+  ClipboardList, ExternalLink, History, Filter, Download,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -191,6 +191,23 @@ function PRTrackTab() {
 
   const quick = (kind) => { setStart(periodStart(kind)); setEnd(""); };
 
+  // Excel'e aktar — ekrandaki AYNI filtreyle (durum/tarih/arama). Auth header gerektiği
+  // için blob olarak çekip indiriyoruz (window.open header taşımaz).
+  const exportXlsx = async () => {
+    try {
+      const params = {};
+      if (q.trim()) params.q = q.trim();
+      if (start) params.start_date = start;
+      if (end) params.end_date = `${end}T23:59:59.999999`;
+      if (statusF) params.status = statusF;
+      const r = await axios.get(`${API}/influencer-pr/export`, { ...auth(), params, responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = "pr-listesi.xlsx"; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("Excel oluşturulamadı"); }
+  };
+
   return (
     <div data-testid="pr-track-tab">
       {/* Dönem sayaçları */}
@@ -225,8 +242,12 @@ function PRTrackTab() {
           <option value="">Tüm durumlar</option>
           {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
         </select>
+        <button onClick={exportXlsx} data-testid="pr-export-btn"
+                className="inline-flex items-center gap-2 border px-3 py-2 rounded-lg text-sm hover:bg-gray-50 ml-auto">
+          <Download size={15} /> Excel'e Aktar
+        </button>
         <button onClick={() => { setEditTarget(null); setShowForm(true); }} data-testid="new-pr-btn"
-                className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800 ml-auto">
+                className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800">
           <Plus size={16} /> Yeni PR Kaydı
         </button>
       </div>
@@ -549,6 +570,9 @@ function InfluencerListTab() {
                   {inf.coupon_code && <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded">Kupon: {inf.coupon_code}</span>}
                   {inf.aff_id && <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded">aff: {inf.aff_id}</span>}
                   <span className="bg-gray-50 text-gray-600 px-2 py-0.5 rounded">{(inf.follower_count || 0).toLocaleString("tr-TR")} takipçi</span>
+                  <span className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded" title="Takipçiye göre: Nano/Micro/Makro">{inf.influencer_turu || influencerTuru(inf.follower_count)}</span>
+                  {inf.anlasma_sekli && <span className="bg-teal-50 text-teal-700 px-2 py-0.5 rounded">{inf.anlasma_sekli}</span>}
+                  {(inf.beden_alt || inf.beden_ust) && <span className="bg-gray-50 text-gray-600 px-2 py-0.5 rounded">Beden {inf.beden_alt || "—"}/{inf.beden_ust || "—"}</span>}
                 </div>
               </button>
             </div>
@@ -653,6 +677,13 @@ function ShipmentsTab() {
 }
 
 /* ======================= INFLUENCER EKLE/DÜZENLE ======================= */
+// Kadir: influencer anlaşma şekilleri + türü (takipçiden türetilir).
+const ANLASMA_SEKLI = ["Barter", "İş birliği", "PR", "Aylık ücretli", "Açıkta"];
+const influencerTuru = (fc) => {
+  const n = parseInt(String(fc ?? "").replace(/[^\d]/g, ""), 10) || 0;
+  return n >= 100000 ? "Makro" : n >= 10000 ? "Micro" : "Nano";
+};
+
 function InfluencerFormModal({ initial, onClose, onSaved }) {
   const isEdit = !!initial;
   const addr = initial?.shipping_address || {};
@@ -664,6 +695,8 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
     follower_count: initial?.follower_count || 0,
     coupon_code: initial?.coupon_code || "", aff_id: initial?.aff_id || "",
     commission_rate: initial?.commission_rate || 0,
+    anlasma_sekli: initial?.anlasma_sekli || "",
+    beden_alt: initial?.beden_alt || "", beden_ust: initial?.beden_ust || "",
     notes: initial?.notes || "",
     address_full_name: addr.full_name || "", address_phone: addr.phone || "",
     il: addr.il || "", ilce: addr.ilce || "", adres: addr.adres || "",
@@ -681,6 +714,7 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
       follower_count: parseInt(String(form.follower_count).replace(/[^\d]/g, ""), 10) || 0,
       coupon_code: form.coupon_code, aff_id: form.aff_id,
       commission_rate: Number(form.commission_rate) || 0,
+      anlasma_sekli: form.anlasma_sekli, beden_alt: form.beden_alt, beden_ust: form.beden_ust,
       notes: form.notes,
       shipping_address: {
         full_name: form.address_full_name || form.name, phone: form.address_phone || form.phone,
@@ -724,6 +758,18 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
         <Field label="Kupon Kodu"><input data-testid="inf-coupon" className="inp uppercase" value={form.coupon_code} onChange={(e) => set("coupon_code", e.target.value)} placeholder="MELIS10" /></Field>
         <Field label="aff_id (takip linki)"><input className="inp" value={form.aff_id} onChange={(e) => set("aff_id", e.target.value)} placeholder="melis" /></Field>
         <Field label="Komisyon %"><input type="number" className="inp" value={form.commission_rate} onChange={(e) => set("commission_rate", e.target.value)} /></Field>
+        <Field label="Anlaşma Şekli">
+          <select className="inp" value={form.anlasma_sekli} onChange={(e) => set("anlasma_sekli", e.target.value)} data-testid="inf-anlasma">
+            <option value="">— Seçin —</option>
+            {ANLASMA_SEKLI.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </Field>
+        <Field label="Influencer Türü (takipçiden otomatik)">
+          <input className="inp bg-gray-50 text-gray-500" value={influencerTuru(form.follower_count)} readOnly
+                 title="Nano <10.000 · Micro 10.000–100.000 · Makro 100.000+" />
+        </Field>
+        <Field label="Beden — Alt"><input className="inp" value={form.beden_alt} onChange={(e) => set("beden_alt", e.target.value)} placeholder="Örn. S / 36" /></Field>
+        <Field label="Beden — Üst"><input className="inp" value={form.beden_ust} onChange={(e) => set("beden_ust", e.target.value)} placeholder="Örn. M / 38" /></Field>
       </div>
       <p className="text-xs font-semibold text-gray-500 mt-4 mb-2">Kargo Adresi (seeding için)</p>
       <div className="grid grid-cols-2 gap-3">

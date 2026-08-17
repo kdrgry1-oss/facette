@@ -28,6 +28,17 @@ def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _influencer_turu(follower_count) -> str:
+    """Takipçi sayısına göre influencer türü (Kadir): Nano (<10K) / Micro (10K–100K) /
+    Makro (100K+). TÜRETİLİR — panelde ayrı yazılmaz, follower_count'tan hesaplanır."""
+    n = _to_int_loose(follower_count)
+    if n >= 100_000:
+        return "Makro"
+    if n >= 10_000:
+        return "Micro"
+    return "Nano"
+
+
 def _to_int_loose(v, default: int = 0) -> int:
     """Takipçi sayısı gibi alanları TOLERANSLI biçimde int'e çevirir.
     Türkçe binlik ayracı (nokta/boşluk) ve K/B(bin)/M(milyon) ekleri desteklenir.
@@ -165,6 +176,8 @@ async def list_influencers(
     if is_active is not None:
         query["is_active"] = is_active
     docs = await db.influencers.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    for d in docs:  # türetilmiş türü (Nano/Micro/Makro) — kart rozeti + Excel için
+        d["influencer_turu"] = _influencer_turu(d.get("follower_count"))
     return {"influencers": docs, "total": len(docs)}
 
 
@@ -177,6 +190,7 @@ async def get_influencer(influencer_id: str, current_user: dict = Depends(requir
         {"influencer_id": influencer_id}, {"_id": 0}
     ).sort("created_at", -1).to_list(200)
     doc["campaigns"] = campaigns
+    doc["influencer_turu"] = _influencer_turu(doc.get("follower_count"))
     return doc
 
 
@@ -189,6 +203,9 @@ async def update_influencer(influencer_id: str, payload: dict, current_user: dic
         "name", "platform", "handle", "instagram", "tiktok", "birthday",
         "phone", "email", "follower_count",
         "coupon_code", "aff_id", "commission_rate", "shipping_address", "notes", "is_active",
+        # Kadir PR alanları: anlaşma şekli (barter/işbirliği/pr/aylık ücretli/açıkta),
+        # beden alt+üst (takım için ayrı). influencer_turu takipçiden TÜRETİLİR (yazılmaz).
+        "anlasma_sekli", "beden_alt", "beden_ust",
     }
     update = {k: v for k, v in payload.items() if k in allowed}
     if "follower_count" in update:
@@ -313,6 +330,122 @@ async def list_pr_entries(
         status_counts[s] = status_counts.get(s, 0) + 1
     return {"entries": docs, "total": len(docs),
             "summary": await _pr_period_summary(), "status_counts": status_counts}
+
+
+_PR_STATUS_LABEL = {
+    "beklemede": "Beklemede", "iletildi": "İletildi", "cevap_bekleniyor": "Cevap Bekleniyor",
+    "olumlu": "Olumlu", "olumsuz": "Olumsuz", "gonderildi": "Gönderildi",
+    "yayinlandi": "Yayınlandı", "iptal": "İptal",
+}
+_AY_TR = ["", "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz",
+          "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+
+
+@router.get("/influencer-pr/export")
+async def export_pr_entries(
+    q: Optional[str] = Query(None),
+    influencer_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
+    """PR Listesi Excel çıktısı — ekrandaki FİLTREYLE AYNI kayıtlar (durum/tarih/arama).
+    Bağlı influencer master'ından telefon/adres/beden/anlaşma/türü join edilir. Aya göre
+    sıralı. Kolonlar Kadir'in basılı PR listesiyle aynı + PR detay alanları."""
+    import openpyxl
+    from io import BytesIO
+    from fastapi.responses import Response
+    from openpyxl.utils import get_column_letter
+
+    query: dict = {}
+    if influencer_id:
+        query["influencer_id"] = influencer_id
+    if status:
+        query["status"] = status
+    if q:
+        query["$or"] = [
+            {"influencer_name": {"$regex": q, "$options": "i"}},
+            {"instagram": {"$regex": q, "$options": "i"}},
+            {"tiktok": {"$regex": q, "$options": "i"}},
+            {"note": {"$regex": q, "$options": "i"}},
+            {"offer": {"$regex": q, "$options": "i"}},
+        ]
+    if start_date or end_date:
+        dr: dict = {}
+        if start_date:
+            dr["$gte"] = start_date
+        if end_date:
+            dr["$lte"] = end_date
+        query["date"] = dr
+    entries = await db.influencer_pr.find(query, {"_id": 0}).sort("date", 1).to_list(5000)
+
+    inf_ids = list({e.get("influencer_id") for e in entries if e.get("influencer_id")})
+    inf_map: dict = {}
+    if inf_ids:
+        async for i in db.influencers.find({"id": {"$in": inf_ids}}, {"_id": 0}):
+            inf_map[i["id"]] = i
+
+    def _ay(dstr):
+        try:
+            return _AY_TR[int(str(dstr)[5:7])]
+        except Exception:
+            return ""
+
+    def _addr(inf):
+        sa = (inf or {}).get("shipping_address") or {}
+        if isinstance(sa, dict):
+            return ", ".join(str(p) for p in [sa.get("adres"), sa.get("ilce"), sa.get("il")] if p)
+        return str(sa or "")
+
+    def _beden(inf, e):
+        alt = (inf or {}).get("beden_alt") or ""
+        ust = (inf or {}).get("beden_ust") or ""
+        if alt or ust:
+            return f"Alt: {alt} / Üst: {ust}"
+        return e.get("beden") or ""
+
+    def _urun(e):
+        prods = e.get("products")
+        if isinstance(prods, list) and prods:
+            return ", ".join(
+                (str(p.get("name") or p.get("barcode")) if isinstance(p, dict) else str(p))
+                for p in prods)
+        return e.get("offer") or ""
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "PR Listesi"
+    ws.append(["Ay", "İsim Soyisim", "Kullanıcı Adı", "Telefon", "Adres", "Ürün", "Beden",
+               "Anlaşma Türü", "Influencer Türü", "Durum", "Tarih", "İletişim", "Teklif",
+               "Cevap", "Follow-up", "Not"])
+    for e in entries:
+        inf = inf_map.get(e.get("influencer_id")) or {}
+        uname = (e.get("instagram") or e.get("tiktok")
+                 or inf.get("instagram") or inf.get("tiktok") or "")
+        ws.append([
+            _ay(e.get("date")),
+            e.get("influencer_name") or inf.get("name") or "",
+            uname,
+            inf.get("phone") or "",
+            _addr(inf),
+            _urun(e),
+            _beden(inf, e),
+            inf.get("anlasma_sekli") or e.get("anlasma_sekli") or "",
+            _influencer_turu(inf.get("follower_count")) if inf else "",
+            _PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or ""),
+            str(e.get("date") or "")[:10],
+            e.get("contact") or "", e.get("offer") or "", e.get("response") or "",
+            e.get("follow_up") or "", e.get("note") or "",
+        ])
+    for idx, w in enumerate([10, 20, 16, 14, 30, 34, 16, 14, 14, 14, 12, 16, 20, 20, 16, 30], 1):
+        ws.column_dimensions[get_column_letter(idx)].width = w
+    buf = BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=pr-listesi.xlsx"})
 
 
 @router.put("/influencer-pr/{entry_id}")
