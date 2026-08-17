@@ -2271,3 +2271,67 @@ async def customer_type(
         "returning": {"customers": ret_c, "orders": ret_ord, "revenue": round(ret_rev, 2)},
         "repeat_rate": round((ret_c / total_c) * 100, 1) if total_c else 0,
     }
+
+
+@router.get("/gated/stock-restock-audit")
+async def gated_stock_restock_audit(
+    days: int = Query(180, ge=1, le=730),
+    apply: bool = Query(False, description="false=yalnız rapor (dry-run); true=idempotent stok düzeltmesi"),
+    limit: int = Query(1000, ge=1, le=5000),
+    source: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
+    """GATED (dry-run VARSAYILAN): iptal/iade edilmiş, stoğu GERÇEKTEN DÜŞÜLMÜŞ ama GERİ
+    EKLENMEMİŞ siparişleri bulur (stok sızıntısı). apply=true ile idempotent + STOK-ONLY düzeltir.
+
+    GÜVENLİK (CLAUDE.md kritik alan):
+      • Yalnız DEDUCT hareketi OLAN (gerçekten düşülmüş) + RESTORE hareketi OLMAYAN sipariş
+        seçilir → hiç düşülmemiş (iptalle gelen) sipariş yanlışlıkla +stok ALMAZ.
+      • Düzeltme: _restock_order_once(order,'backfill_increment') → _restock_authoritative
+        yalnız GERÇEK düşülen delta'yı geri ekler (kalem-bazlı idempotent, guard'lı).
+        'backfill_increment' finansal iade (hediye çeki/puan/kupon) TETİKLEMEZ — SADECE STOK.
+      • apply=false iken HİÇBİR ŞEY değişmez. Ödeme/sipariş-statüsü invariantlarına dokunmaz.
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    cutoff = (_dt.now(_tz.utc) - _td(days=days)).isoformat()
+    q = {"created_at": {"$gte": cutoff},
+         "status": {"$in": _CANCEL_STATUSES + _RETURN_STATUSES_BD}}
+    sc = _source_cond(source)
+    if sc:
+        q.update(sc)
+    from .orders import _RESTORE_MOVE_TYPES, _DEDUCT_MOVE_TYPES, _restock_order_once
+    orders = [o async for o in db.orders.find(q, {"_id": 0}).limit(limit)]
+    suspects = []
+    fixed = 0
+    restocked_units = 0
+    for o in orders:
+        oid = o.get("id")
+        if not oid:
+            continue
+        has_deduct = await db.stock_movements.find_one(
+            {"order_id": oid, "type": {"$in": _DEDUCT_MOVE_TYPES}}, {"_id": 1})
+        if not has_deduct:
+            continue  # hiç düşülmemiş (iptalle gelen / stoksuz) → DOKUNMA
+        has_restore = await db.stock_movements.find_one(
+            {"order_id": oid, "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1})
+        if has_restore:
+            continue  # zaten geri eklenmiş
+        rec = {"order_number": o.get("order_number"), "status": o.get("status"),
+               "units": _order_units(o), "total": round(float(o.get("total") or 0), 2),
+               "platform": (o.get("platform") or o.get("marketplace") or "site")}
+        if apply:
+            try:
+                moves = await _restock_order_once(o, "backfill_increment")
+                if moves:
+                    fixed += 1
+                    restocked_units += sum(int((m or {}).get("qty") or 0) for m in moves if isinstance(m, dict))
+                    rec["fixed"] = True
+            except Exception as _ex:
+                rec["error"] = str(_ex)[:200]
+        suspects.append(rec)
+    return {"apply": apply, "days": days, "source": source or "all",
+            "scanned": len(orders), "leaked_count": len(suspects),
+            "fixed": fixed, "restocked_units": restocked_units,
+            "note": ("DRY-RUN: hiçbir şey değişmedi. apply=true ile stok düzeltilir."
+                     if not apply else "UYGULANDI: stok geri eklendi (idempotent, stok-only)."),
+            "samples": suspects[:100]}

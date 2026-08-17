@@ -204,8 +204,8 @@ export function SalesReport() {
               <thead className="bg-gray-50 text-xs uppercase text-gray-500">
                 <tr>
                   <th className="text-left p-2">Kanal</th>
-                  <th className="text-right p-2">Sipariş Adeti</th>
-                  <th className="text-right p-2">Ürün Adeti</th>
+                  <th className="text-right p-2" title="NET sipariş sayısı — iptal + iade + ödenmemiş HARİÇ (sipariş birimi)">Sipariş Adeti <span className="text-[9px] text-emerald-600 font-normal">(Net)</span></th>
+                  <th className="text-right p-2" title="NET ürün adedi — iptal + iade + ödenmemiş hariç">Ürün Adeti <span className="text-[9px] text-emerald-600 font-normal">(Net)</span></th>
                   <th className="text-right p-2" title="Net + İptal + İade — Trendyol 'Brüt Satış' adediyle karşılaştırın">Brüt Adet</th>
                   <th className="text-right p-2">Ciro</th>
                   <th className="text-right p-2">İptal</th>
@@ -253,7 +253,6 @@ export function SalesReport() {
               </tbody>
             </table>
           </div>
-          <p className="text-[10px] text-gray-400 mt-1">Sipariş Adeti / Ürün Adeti / Ciro = <b>NET</b> (iptal + iade + ödenmemiş hariç). <b>Brüt Adet</b> = Net + İptal + İade — Trendyol "Satış Özeti"ndeki <b>Brüt Satış</b> adediyle karşılaştırın (Brüt − İptal − İade = Net). İptal/İade oranları ADET üzerinden, brüt adede göredir. Kısmi iadede yalnız iade edilen ürün İade'ye yazılır. Not: Facette adedi NET, Trendyol paneli çoğunlukla iptal/iade dahil brütü de gösterir; aylık farkta senkron/paket ayrımını "Trendyol Mutabakat" ile doğrulayın.</p>
         </div>
       )}
 
