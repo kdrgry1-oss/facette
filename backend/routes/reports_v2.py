@@ -24,9 +24,11 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 
 from .deps import db, require_admin, generate_id
+from .report_dedup import merge_match, load_dup_dep
 
 
-router = APIRouter(prefix="/admin/reports2", tags=["admin-reports-v2"])
+router = APIRouter(prefix="/admin/reports2", tags=["admin-reports-v2"],
+                   dependencies=[Depends(load_dup_dep)])
 costs_router = APIRouter(prefix="/admin/product-costs", tags=["product-costs"])
 
 
@@ -244,7 +246,7 @@ async def _velocity_smart_match(days: int, product_index: list) -> dict:
     since = _days_ago(days)
     # Tüm sipariş kalemlerini bir kere çek
     pipeline = [
-        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}}},
+        {"$match": merge_match({"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}})},
         {"$unwind": "$items"},
         {"$project": {"name": {"$ifNull": ["$items.product_name", "$items.name"]},
                        "qty": {"$ifNull": ["$items.quantity", 1]}}},
@@ -362,7 +364,7 @@ async def stockout_forecast(
 async def _velocity_aggregate(days: int):
     since = _days_ago(days)
     pipeline = [
-        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}}},
+        {"$match": merge_match({"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}})},
         {"$unwind": "$items"},
         {"$group": {
             "_id": "$items.product_id",
@@ -536,7 +538,7 @@ async def return_rate(
         # Pay (returned_qty): order-seviyesi statü iade grubuna düşenler (returned/refunded/partial).
         # NOT: sitedeki KISMİ iadeler siparişi açık bırakabildiğinden ve tam-iade siparişin TÜM
         # kalemlerini iade saydığından bu order-statü tabanlı oran bir TAHMİN'dir (bkz. O9 notu).
-        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": _UNPAID_CANCEL}}},
+        {"$match": merge_match({"created_at": {"$gte": since}, "status": {"$nin": _UNPAID_CANCEL}})},
         {"$unwind": "$items"},
         {"$group": {
             "_id": "$items.product_id",
@@ -597,7 +599,8 @@ async def profit_by_channel(
     cost_map = await _product_cost_lookup()  # manuel > cost_price > purchase_price
 
     pipeline = [
-        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}}},
+        # ticimax_history ÇİFT kayıtları hariç (Trendyol kanal ciro/kâr'ını şişirir)
+        {"$match": merge_match({"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}})},
         {"$project": {
             # Y16: Kanal `platform` alanında tutulur (marketplace/source değil). Ayrıca 2-arg
             # $ifNull kullanılır (3-arg Mongo 5.0 gerektiriyordu, eski sürümde patlıyordu).

@@ -30,8 +30,9 @@ from typing import Optional
 from xml.sax.saxutils import escape
 
 from .deps import db, require_admin
+from .report_dedup import merge_match, load_dup_dep
 
-router = APIRouter(tags=["Analytics Extra"])
+router = APIRouter(tags=["Analytics Extra"], dependencies=[Depends(load_dup_dep)])
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ async def rfm_analysis(
                         "awaiting_payment", "payment_failed", "pending", "payment_notified",
                         "return_requested", "return_approved", "return_in_transit",
                         "returned", "refunded", "partial_refunded"]}}},
+        {"$match": merge_match({})},  # ticimax_history ÇİFT kayıtları hariç
         {"$group": {
             "_id": {"$ifNull": ["$customer_email",
                                 {"$ifNull": ["$user_email",
@@ -204,6 +206,7 @@ async def marketplace_profit(
                     "status": {"$nin": ["cancelled", "cancel_refunded",
                                         "awaiting_payment", "payment_failed",
                                         "pending", "payment_notified"]}}},
+        {"$match": merge_match({})},  # ticimax_history ÇİFT kayıtları hariç (Trendyol kâr'ını şişirir)
         {"$group": {
             # Denetim: var olmayan 'channel' alanı yüzünden HER sipariş 'web'e düşüyordu.
             # Gerçek kaynak platform/marketplace'ten: trendyol/hepsiburada/temu/site.
@@ -231,6 +234,7 @@ async def marketplace_profit(
                     "status": {"$nin": ["cancelled", "cancel_refunded",
                                         "awaiting_payment", "payment_failed",
                                         "pending", "payment_notified"]}}},
+        {"$match": merge_match({})},  # ticimax_history ÇİFT kayıtları hariç (COGS'u şişirir)
         {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
         {"$unwind": "$items"},
         {"$addFields": {"_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}}}},

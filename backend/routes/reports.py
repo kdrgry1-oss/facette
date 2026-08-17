@@ -15,9 +15,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from .deps import db, require_admin, tr_range_to_utc
+from .report_dedup import dup_nor, merge_match, load_dup_dep
 
 
-router = APIRouter(prefix="/admin/reports", tags=["admin-reports"])
+router = APIRouter(prefix="/admin/reports", tags=["admin-reports"],
+                   dependencies=[Depends(load_dup_dep)])
 
 
 def _iso_range(start: Optional[str], end: Optional[str], days_default: int = 30):
@@ -129,7 +131,8 @@ def _base_match(s: str, e: str, source: Optional[str] = None) -> dict:
     sc = _source_cond(source)
     if sc:
         m.update(sc)
-    return m
+    # ticimax_history ÇİFT kayıtlarını (canlı native twin'i olan) rapordan HARİÇ tut.
+    return merge_match(m)
 
 
 @router.get("/sales-summary")
@@ -164,7 +167,7 @@ async def sales_summary(
     _ret_meta = {}   # order_number -> {"total", "site", "channel", "oa", "ret_amount"}
     _ret_oids = []   # customer_returns kalem eşleşmesi için sipariş id'leri
     async for _o in db.orders.find(
-            {"status": {"$in": _RETURN_ST}},
+            merge_match({"status": {"$in": _RETURN_ST}}),  # ticimax ÇİFT kayıtları hariç
             {"_id": 0, "order_number": 1, "id": 1, "total": 1, "platform": 1, "marketplace": 1,
              "return_approved_at": 1, "refund_paid_at": 1, "updated_at": 1}):
         _on = str(_o.get("order_number") or "")
@@ -215,6 +218,7 @@ async def sales_summary(
         _m = {"_eff_date": {"$gte": s_iso, "$lt": e_iso}, "status": {"$nin": _UNPAID_STATUSES}}
         if _sc:
             _m.update(_sc)
+        _m = merge_match(_m)  # ticimax_history ÇİFT kayıtları hariç
         pipe = [
             {"$addFields": {
                 "_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]},
@@ -249,6 +253,7 @@ async def sales_summary(
             _mm = {"status": {"$in": status_list}}
             if _sc:
                 _mm.update(_sc)
+            _mm = merge_match(_mm)  # ticimax_history ÇİFT kayıtları hariç
             _pipe = [
                 {"$match": _mm},
                 {"$addFields": {"_ad": {"$ifNull": [f"${date_field}", f"${fallback_field}"]}}},
@@ -426,6 +431,7 @@ async def day_orders(
     sc = _source_cond(source)
     if sc:
         m.update(sc)
+    m = merge_match(m)  # ticimax_history ÇİFT kayıtları hariç
     pipeline = [
         {"$match": m},
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
@@ -839,6 +845,7 @@ async def sales_breakdown(
     _match = {"_eff_date": {"$gte": s, "$lte": e}}
     if sc:
         _match.update(sc)
+    _match = merge_match(_match)  # ticimax_history ÇİFT kayıtları hariç
     _pipe = [
         {"$addFields": {"_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
         {"$match": _match},
@@ -1595,8 +1602,10 @@ async def sales_by_platform(
     kaynakları DEĞİL; sipariş platform alanından). İptal/iade hariç."""
     s, e = _iso_range(start_date, end_date)
     _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}
+    # ticimax_history ÇİFT kayıtları hariç (Trendyol satırını şişirir)
+    _m = merge_match({"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}})
     pipeline = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}}},
+        {"$match": _m},
         {"$group": {"_id": {"$cond": [{"$in": [_plat, ["trendyol", "hepsiburada", "temu"]]}, _plat, "site"]},
                     "orders": {"$sum": 1},
                     "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
@@ -1628,6 +1637,7 @@ async def cancel_return_products(
     sc = _source_cond(source)
     if sc:
         m.update(sc)
+    m = merge_match(m)  # ticimax_history ÇİFT kayıtları hariç
     _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}
     pipeline = [
         {"$match": m},
@@ -1730,7 +1740,7 @@ async def cancel_return_by_source(
     # ürün-kalem verisine DOKUNMAZ.)
     _pipe = [
         {"$addFields": {"_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
-        {"$match": {"_eff_date": {"$gte": s, "$lte": e}}},
+        {"$match": merge_match({"_eff_date": {"$gte": s, "$lte": e}})},  # ticimax ÇİFT hariç
         {"$project": proj},
     ]
     orders = [o async for o in db.orders.aggregate(_pipe)]
@@ -1783,7 +1793,8 @@ async def cargo_report(
     s, e = _iso_range(start_date, end_date)
     pipeline = [
         # Denetim: ödenmemiş/iptal/iade siparişler kargolanmaz → kargo hacmine katılmasın.
-        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}}},
+        # ticimax_history ÇİFT kayıtları hariç (canlı twin'i zaten sayılıyor).
+        {"$match": merge_match({"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}})},
         {"$group": {"_id": {"$ifNull": ["$cargo_provider_name", "$cargo.company"]}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$shipping_cost", 0]}}}},
         {"$sort": {"orders": -1}},
     ]
@@ -1880,7 +1891,7 @@ async def returns_by_product(
     sales_map = {}
     if product_ids:
         sales_pipe = [
-            {"$match": {"created_at": {"$gte": start, "$lte": end}, "status": {"$nin": _EXCLUDED_STATUSES}}},
+            {"$match": merge_match({"created_at": {"$gte": start, "$lte": end}, "status": {"$nin": _EXCLUDED_STATUSES}})},
             {"$unwind": "$items"},
             {"$match": {"items.product_id": {"$in": product_ids}}},
             {"$group": {
@@ -1941,7 +1952,7 @@ async def fast_selling_products(
     now = datetime.now(timezone.utc)
     start_ts = (now - timedelta(days=window_days)).isoformat()
     pipeline = [
-        {"$match": {"created_at": {"$gte": start_ts}, "status": {"$nin": _EXCLUDED_STATUSES}}},
+        {"$match": merge_match({"created_at": {"$gte": start_ts}, "status": {"$nin": _EXCLUDED_STATUSES}})},
         {"$unwind": "$items"},
         {"$group": {
             "_id": "$items.product_id",
@@ -2129,7 +2140,8 @@ async def sales_by_source(
     (Instagram/Google/Meta/direct) — attribution.source/channel'dan türetilir."""
     s, e = _iso_range(start_date, end_date)
     pipeline = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}}},
+        # ticimax_history ÇİFT kayıtları hariç (Trendyol kanalını şişirir)
+        {"$match": merge_match({"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}})},
         {"$group": {
             "_id": {
                 "platform": {"$ifNull": ["$platform", ""]},
@@ -2319,6 +2331,7 @@ async def customer_type(
     _valid = {"$not": [{"$in": ["$status", _EXCLUDED_STATUSES]}]}
     _valid_in_range = {"$and": [_in_range, _valid]}
     pipeline = [
+        {"$match": merge_match({})},  # ticimax_history ÇİFT kayıtları hariç (aynı müşteriyi/ciroyu şişirir)
         {"$group": {
             "_id": key,
             "firstOrder": {"$min": "$created_at"},
