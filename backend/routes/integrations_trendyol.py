@@ -2976,6 +2976,9 @@ def map_trendyol_order(t_order: dict) -> dict:
         "marketplace_estimated_delivery_start": _ms_to_iso(t_order.get("estimatedDeliveryStartDate")),
         "marketplace_estimated_delivery_end": _ms_to_iso(t_order.get("estimatedDeliveryEndDate")),
         "marketplace_last_modified": _ms_to_iso(t_order.get("lastModifiedDate")),
+        # OTANTİK sipariş tarihi (Trendyol'un raporlarını saydığı alan). Aralık-üyeliği
+        # bununla yapılınca Trendyol paneliyle SIFIR sapma olur (created_at senkron-anı olabilir).
+        "marketplace_order_date": _ms_to_iso(t_order.get("orderDate")),
         "cargo_sender_number": str(t_order.get("cargoSenderNumber") or ""),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }

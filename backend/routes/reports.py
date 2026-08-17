@@ -1663,7 +1663,17 @@ async def cancel_return_by_source(
     proj = {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
             "items.quantity": 1, "partial_cancel_amount": 1, "partial_cancel_units": 1,
             "platform": 1, "marketplace": 1}
-    orders = [o async for o in db.orders.find({"created_at": {"$gte": s, "$lte": e}}, proj)]
+    # SIFIR-SAPMA (Kadir): aralık üyeliğini EFFECTIVE DATE ile belirle — pazaryeri siparişinde
+    # OTANTİK orderDate (marketplace_order_date), yoksa created_at. Trendyol raporunu orderDate'e
+    # göre saydığından, created_at (senkron-anı olabilir) yerine bununla saymak Trendyol'la AYNI
+    # sipariş kümesini verir → 855↔891 gibi sapmaların ana nedeni kapanır. (Salt-okunur; stok/
+    # ürün-kalem verisine DOKUNMAZ.)
+    _pipe = [
+        {"$addFields": {"_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
+        {"$match": {"_eff_date": {"$gte": s, "$lte": e}}},
+        {"$project": proj},
+    ]
+    orders = [o async for o in db.orders.aggregate(_pipe)]
     onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
     oids = list({str(o.get("id")) for o in orders if o.get("id")})
     closed, open_ = await _split_maps(onums, oids)
