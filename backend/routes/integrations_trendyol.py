@@ -4354,6 +4354,77 @@ async def trendyol_verify_orderdate(
     }
 
 
+@router.get("/trendyol/orderdate-numbers")
+async def trendyol_orderdate_numbers(
+    start_date: str = Query(...),
+    end_date: str = Query(...),
+    month: str = Query(..., description="Hedef orderDate ayı YYYY-MM"),
+    current_user: dict = Depends(require_admin),
+):
+    """Belirli orderDate ayı için Trendyol (son-değişiklik penceresinden, orderDate'i o aya
+    düşenler) ve panel sipariş NO kümelerini döndürür → set-farkı çıkarmak için. Salt-okunur."""
+    from .deps import tr_range_to_utc
+    config = await get_trendyol_config()
+    if not config.get("is_active"):
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(supplier_id=config["supplier_id"], api_key=config["api_key"],
+                            api_secret=config["api_secret"], mode=config["mode"])
+    s_iso, e_iso = tr_range_to_utc(start_date, end_date)
+    start_ms = int(datetime.fromisoformat(s_iso).timestamp() * 1000)
+    end_ms = int(datetime.fromisoformat(e_iso).timestamp() * 1000)
+    if (end_ms - start_ms) / 86400000.0 > 62:
+        raise HTTPException(status_code=400, detail="Pencere en fazla 62 gün.")
+    ty = await _ty_fetch_orders_range(client, start_ms, end_ms)
+    ty_nums = sorted([onum for onum, t in ty.items()
+                      if (_ms_to_iso(t.get("order_date")) or "")[:7] == month])
+    panel_nums = set()
+    async for o in db.orders.aggregate([
+        {"$match": {"$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]}},
+        {"$addFields": {"_eff": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
+        {"$addFields": {"_mon": {"$substrBytes": ["$_eff", 0, 7]}}},
+        {"$match": {"_mon": month}},
+        {"$project": {"_id": 0, "order_number": 1}},
+    ]):
+        n = str(o.get("order_number") or "")
+        if n:
+            panel_nums.add(n)
+    return {"month": month, "ty_count": len(ty_nums), "panel_count": len(panel_nums),
+            "ty_order_numbers": ty_nums, "panel_order_numbers": sorted(panel_nums)}
+
+
+@router.get("/trendyol/probe-order")
+async def trendyol_probe_order(
+    order_number: str = Query(...),
+    current_user: dict = Depends(require_admin),
+):
+    """Tek siparişi Trendyol'a SİPARİŞ NO ile (tarih filtresiz) sorar → gerçekten Trendyol'da
+    var mı, orderDate/durum ne. 'panel_only' siparişlerin gerçek mi/hayalet mi olduğunu
+    kesinleştirmek için. Salt-okunur."""
+    config = await get_trendyol_config()
+    if not config.get("is_active"):
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(supplier_id=config["supplier_id"], api_key=config["api_key"],
+                            api_secret=config["api_secret"], mode=config["mode"])
+    try:
+        resp = await client.get_orders(order_number=order_number, size=50, page=0)
+    except Exception as e:
+        return {"order_number": order_number, "error": str(e)[:200]}
+    content = resp.get("content", []) or []
+    if not content:
+        return {"order_number": order_number, "exists_on_trendyol": False}
+    od = None
+    statuses = []
+    for pkg in content:
+        _d = pkg.get("orderDate")
+        if _d and (od is None or _d < od):
+            od = _d
+        statuses.append(_ty_pkg_status(pkg))
+    return {"order_number": order_number, "exists_on_trendyol": True,
+            "order_date": _ms_to_iso(od), "statuses": statuses}
+
+
 @router.get("/trendyol/claims/sync")
 async def sync_trendyol_claims(
     days_back: int = 1095,
