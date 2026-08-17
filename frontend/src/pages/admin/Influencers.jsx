@@ -226,18 +226,10 @@ function PRTrackTab() {
     if (!window.confirm("Bu ürünler kargoya verilsin mi? STOK DÜŞÜLECEK ve MNG barkodu oluşturulacak.")) return;
     const t = toast.loading("Kargo oluşturuluyor…");
     try {
-      const cr = await axios.post(`${API}/influencers/${e.influencer_id}/campaigns`, { title: `PR Gönderi · ${fmtDate(e.date)}` }, auth());
-      const cid = cr.data?.campaign?.id;
-      await axios.post(`${API}/influencer-campaigns/${cid}/commit-products`,
-        { products: e.products.map((p) => ({ barcode: p.barcode, qty: p.qty || 1 })), auto_cost: true }, auth());
-      const cg = await axios.post(`${API}/influencer-campaigns/${cid}/cargo`, {}, auth());
-      // Kadir: gönderim tarihi + durumu kargo bilgisinden ilgili alanlara doldur.
-      await axios.put(`${API}/influencer-pr/${e.id}`, {
-        campaign_id: cid, cargo_barcode: cg.data?.cargo_barcode || "",
-        cargo_tracking_no: cg.data?.tracking_no || "", shipped_at: new Date().toISOString(),
-        status: "gonderildi",
-      }, auth());
-      toast.success(`Kargo oluşturuldu · barkod ${cg.data?.cargo_barcode || "—"} · stok düşüldü`, { id: t });
+      // İdempotent backend ucu: kampanya → stok düşümü → MNG barkod + takip; gönderim
+      // tarihi/durumu PR kaydına işler. Tekrar tıklamada çift stok düşümü YAPMAZ.
+      const r = await axios.post(`${API}/influencer-pr/${e.id}/ship`, {}, auth());
+      toast.success(`Kargo oluşturuldu · barkod ${r.data?.cargo_barcode || "—"} · stok düşüldü`, { id: t });
       load();
     } catch (err) {
       toast.error(err.response?.data?.detail || "Kargo oluşturulamadı", { id: t });

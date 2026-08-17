@@ -567,6 +567,54 @@ async def delete_pr_entry(entry_id: str, current_user: dict = Depends(require_ad
     return {"success": True}
 
 
+@router.post("/influencer-pr/{entry_id}/ship")
+async def ship_pr_entry(entry_id: str, current_user: dict = Depends(require_admin)):
+    """PR kaydındaki ürünleri KARGOYA VER — İDEMPOTENT. Mevcut influencer kargo akışını kullanır:
+    kampanya oluştur → ürünleri işle (STOK DÜŞER, kampanya-bazlı atomik) → MNG barkod + takip.
+    Tekrar çağrılırsa yeniden kampanya/stok düşümü YAPMAZ (campaign_id PR'da saklanır) → çift
+    stok düşümü riski YOK (frontend zincirinin aksine)."""
+    e = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
+    if not e:
+        raise HTTPException(status_code=404, detail="PR kaydı bulunamadı")
+    if e.get("cargo_barcode"):
+        return {"success": True, "already": True, "cargo_barcode": e.get("cargo_barcode"),
+                "tracking_no": e.get("cargo_tracking_no")}
+    if not e.get("influencer_id"):
+        raise HTTPException(status_code=400, detail="Kargo için PR kaydı bir influencer'a bağlı olmalı")
+    prods = [p for p in (e.get("products") or []) if isinstance(p, dict) and p.get("barcode")]
+    if not prods:
+        raise HTTPException(status_code=400, detail="Kargolanacak ürün yok (ürünü ara → beden seç)")
+
+    # 1) Kampanya — idempotent: PR'da campaign_id varsa YENİDEN OLUŞTURMA.
+    cid = e.get("campaign_id")
+    if not cid:
+        cr = await create_campaign(
+            e["influencer_id"], {"title": f"PR Gönderi · {str(e.get('date') or '')[:10]}"}, current_user)
+        cid = (cr.get("campaign") or {}).get("id")
+        if not cid:
+            raise HTTPException(status_code=500, detail="Kampanya oluşturulamadı")
+        # campaign_id'yi HEMEN sakla — sonraki adım (stok/kargo) hata verse bile tekrar denemede
+        # yeni kampanya oluşturulup stok İKİNCİ kez düşülmesin.
+        await db.influencer_pr.update_one({"id": entry_id}, {"$set": {"campaign_id": cid}})
+
+    # 2) Ürünleri işle (STOK DÜŞER) — kampanya-bazlı atomik; zaten düşülmüşse atla (retry-güvenli).
+    camp = await db.influencer_campaigns.find_one({"id": cid}, {"_id": 0, "stock_deducted": 1})
+    if not (camp or {}).get("stock_deducted"):
+        await commit_campaign_products(
+            cid, {"products": [{"barcode": p["barcode"], "qty": p.get("qty") or 1} for p in prods],
+                  "auto_cost": True}, current_user)
+
+    # 3) MNG barkod + takip (influencer'ın yapılandırılmış kargo adresi gerekir).
+    cg = await create_campaign_cargo(cid, current_user)
+
+    upd = {"campaign_id": cid, "cargo_barcode": cg.get("cargo_barcode") or "",
+           "cargo_tracking_no": cg.get("tracking_no") or "", "shipped_at": _now_iso(),
+           "status": "gonderildi", "updated_at": _now_iso()}
+    await db.influencer_pr.update_one({"id": entry_id}, {"$set": upd})
+    return {"success": True, "cargo_barcode": upd["cargo_barcode"],
+            "tracking_no": upd["cargo_tracking_no"], "shipped_at": upd["shipped_at"]}
+
+
 @router.get("/influencers/{influencer_id}/history")
 async def influencer_history(influencer_id: str, current_user: dict = Depends(require_admin)):
     """Yan sayfa: bir influencerla GEÇMİŞ — daha önce ne gönderdik (seeding kampanyaları)
