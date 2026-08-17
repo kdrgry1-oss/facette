@@ -2000,6 +2000,52 @@ async def _run_visual_index_refresh():
         logger.error(f"[cron] görsel indeks yenileme hatası: {e}")
 
 
+async def _backfill_trendyol_order_dates():
+    """GEÇMİŞ SIFIR-SAPMA (Kadir: Haziran'dan beri düzelt): Trendyol siparişlerine OTANTİK
+    orderDate'i (marketplace_order_date) yazar — SALT TARİH. Stok/statü/kalem verisine
+    DOKUNMAZ (bu yüzden reconcile değil — reconcile confirmed→cancelled geçişinde stok hareketi
+    yapar). Tek seferlik (settings flag). Rapor effective-date'i (marketplace_order_date ??
+    created_at) bununla saydığından, geçmiş de Trendyol'un orderDate kümesiyle oturur."""
+    try:
+        from routes.deps import db as _db
+        _st = await _db.settings.find_one({"id": "ty_orderdate_backfill"}, {"_id": 0}) or {}
+        if _st.get("done"):
+            return
+        from routes.integrations import get_trendyol_config, _ms_to_iso
+        cfg = await get_trendyol_config()
+        if not cfg.get("is_active"):
+            return
+        import sys, os
+        from datetime import datetime as _dt
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        from trendyol_client import TrendyolClient
+        from routes.integrations_trendyol import _ty_fetch_orders_range
+        client = TrendyolClient(supplier_id=cfg["supplier_id"], api_key=cfg["api_key"],
+                                api_secret=cfg["api_secret"], mode=cfg["mode"])
+        start_ms = int(_dt(2026, 6, 1).timestamp() * 1000)   # Haziran 1'den itibaren
+        end_ms = int(_dt.now().timestamp() * 1000)
+        by_order = await _ty_fetch_orders_range(client, start_ms, end_ms)
+        _updated = 0
+        for onum, d in (by_order or {}).items():
+            od = _ms_to_iso(d.get("order_date"))
+            if not od or not onum:
+                continue
+            # SALT TARİH — items/status/stok'a DOKUNMAZ. Hem platform hem marketplace alanını tolere et.
+            res = await _db.orders.update_one(
+                {"order_number": str(onum),
+                 "$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]},
+                {"$set": {"marketplace_order_date": od}})
+            if res.modified_count:
+                _updated += 1
+        await _db.settings.update_one(
+            {"id": "ty_orderdate_backfill"},
+            {"$set": {"done": True, "updated": _updated, "at": _dt.now().isoformat()},
+             "$setOnInsert": {"id": "ty_orderdate_backfill"}}, upsert=True)
+        logger.info(f"[backfill] Trendyol orderDate backfill (Haziran→bugün): {_updated} sipariş güncellendi")
+    except Exception as _e:
+        logger.error(f"[backfill] Trendyol orderDate backfill hata: {_e}")
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -2016,6 +2062,17 @@ def start_scheduler():
         hours=24,
         id="instagram_token_refresh",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+        max_instances=1,
+        coalesce=True,
+    )
+    # TEK SEFERLİK: Trendyol siparişlerine Haziran'dan beri OTANTİK orderDate'i yaz (salt tarih;
+    # stok/kalem yok). Settings flag ile bir kez çalışır; sonraki turlar no-op. Boot+3dk sonra.
+    _add(
+        _backfill_trendyol_order_dates,
+        "interval",
+        hours=24,
+        id="ty_orderdate_backfill",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=180),
         max_instances=1,
         coalesce=True,
     )
