@@ -216,8 +216,19 @@ async def sales_summary(
         if _sc:
             _m.update(_sc)
         pipe = [
-            {"$addFields": {"_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
+            {"$addFields": {
+                "_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]},
+                "_term": {"$cond": [{"$in": ["$status", _CANCEL_ST + _RETURN_ST]}, 1, 0]},
+                "_dk": {"$ifNull": ["$order_number", "$id"]}}},
             {"$match": _m},
+            # KOPYA belge tekilleştir: aynı order_number = tek sipariş. Farklı içe-aktarım
+            # yolları (platform vs marketplace anahtarı) ikinci belge yaratabiliyor; rapor
+            # her belgeyi ayrı sayıp adet/ciroyu şişiriyordu. Terminal (iptal/iade) kopya
+            # tercih edilir (Trendyol'un gerçek durumu), sonra en güncel. Boş order_number →
+            # id ile tekil (farklı siparişler collapse OLMAZ). Salt-okunur.
+            {"$sort": {"_term": -1, "updated_at": -1, "created_at": -1}},
+            {"$group": {"_id": "$_dk", "doc": {"$first": "$$ROOT"}}},
+            {"$replaceRoot": {"newRoot": "$doc"}},
             {"$group": {
                 "_id": None,
                 "revenue_all": {"$sum": {"$ifNull": ["$total", 0]}},
@@ -595,6 +606,44 @@ async def _split_maps(order_numbers: list, order_ids: list) -> tuple:
     return closed, open_
 
 
+def _dedupe_by_order_number(orders: list) -> list:
+    """Aynı order_number'a düşmüş KOPYA belgeleri tekilleştirir — bir sipariş = bir kayıt.
+
+    Kopya, farklı içe-aktarım yollarından doğabiliyor: sipariş bir yolda
+    `platform="trendyol"`, başka bir yolda yalnız `marketplace="trendyol"` ile
+    yazılınca senkron `find_one({order_number, platform})` mevcut kaydı GÖREMEYİP
+    ikinci bir belge insert ediyor. Rapor her belgeyi AYRI saydığı için adet/ciro
+    şişiyordu (Trendyol paneliyle sipariş-adedi sapmasının bir kaynağı).
+
+    Tekilleştirmede TERMİNAL durumlu (iptal/iade) kopya tercih edilir ki Trendyol'un
+    gerçek durumu yansısın; eşitlikte en güncel (updated_at/created_at) kazanır.
+    Boş order_number'lı belgeler olduğu gibi bırakılır. Salt-okunur — stok/kalem/
+    belge verisine DOKUNMAZ, yalnız sayım girdisini tekilleştirir."""
+    _TERMINAL = set(_CANCEL_STATUSES) | set(_RETURN_STATUSES_BD)
+
+    def _rank(o):
+        st = str(o.get("status") or "")
+        terminal = 1 if st in _TERMINAL else 0
+        try:
+            has_pc = 1 if float(o.get("partial_cancel_amount") or 0) > 0 else 0
+        except Exception:
+            has_pc = 0
+        recency = str(o.get("updated_at") or o.get("created_at") or "")
+        return (terminal, has_pc, recency)
+
+    best: dict = {}
+    passthrough: list = []
+    for o in orders:
+        onum = str(o.get("order_number") or "").strip()
+        if not onum:
+            passthrough.append(o)
+            continue
+        cur = best.get(onum)
+        if cur is None or _rank(o) > _rank(cur):
+            best[onum] = o
+    return list(best.values()) + passthrough
+
+
 def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
     """İptal/iade kovalarını KALEM BAZINDA hesaplayan TEK kaynak.
 
@@ -796,6 +845,7 @@ async def sales_breakdown(
         {"$project": proj},
     ]
     orders = [o async for o in db.orders.aggregate(_pipe)]
+    orders = _dedupe_by_order_number(orders)  # kopya belge = tek sipariş (sapma önle)
     onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
     oids = list({str(o.get("id")) for o in orders if o.get("id")})
     closed, open_ = await _split_maps(onums, oids)
@@ -1684,6 +1734,7 @@ async def cancel_return_by_source(
         {"$project": proj},
     ]
     orders = [o async for o in db.orders.aggregate(_pipe)]
+    orders = _dedupe_by_order_number(orders)  # kopya belge = tek sipariş (sapma önle)
     onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
     oids = list({str(o.get("id")) for o in orders if o.get("id")})
     closed, open_ = await _split_maps(onums, oids)
