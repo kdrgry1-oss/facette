@@ -3139,7 +3139,11 @@ export default function AdminProducts() {
                   const hiddenAttrNames = [
                     "beden", "renk", "web color", "yaka",
                     "alt siluet", "ust siluet", "silüet", "kesim", "ozellik", "stil",
-                    "urun icerik bilgisi", "kumas", "yikama talimati", "materyal analiz testi",
+                    // DENETİM FIX: "urun icerik bilgisi" gizli listeden ÇIKARILDI — Trendyol'da
+                    // zorunlu "Materyal Bileşeni"ne bridge olur (integrations_trendyol.py:1474);
+                    // gizliyken yeni/boş üründe hiç girilemiyor → boş → push'ta atlanıyordu.
+                    // "materyal/kimyasal analiz testi" gizli KALIR (Trendyol dosya/sertifika ister).
+                    "kumas", "yikama talimati", "materyal analiz testi",
                     "kimyasal analiz testi", "ürün tipi", "ürün detayı",
                   ].map(_attrNorm);
                   const _isHiddenAttr = (nm) => hiddenAttrNames.includes(_attrNorm(nm));
