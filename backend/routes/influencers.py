@@ -176,9 +176,39 @@ async def list_influencers(
     if is_active is not None:
         query["is_active"] = is_active
     docs = await db.influencers.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    for d in docs:  # türetilmiş türü (Nano/Micro/Makro) — kart rozeti + Excel için
-        d["influencer_turu"] = _influencer_turu(d.get("follower_count"))
+    for d in docs:  # KAYITLI türü (elle seçilen) öncelikli; yoksa takipçiden ÖNERİ türet.
+        d["influencer_turu"] = d.get("influencer_turu") or _influencer_turu(d.get("follower_count"))
     return {"influencers": docs, "total": len(docs)}
+
+
+_DEFAULT_INF_TURU = ["Nano", "Micro", "Makro"]
+
+
+@router.get("/influencer-types")
+async def list_influencer_types(current_user: dict = Depends(require_admin)):
+    """Influencer türü seçenekleri (Nano/Micro/Makro + admin'in eklediği yeni tipler).
+    Kadir: elle yazmak yerine dropdown; gerektiğinde yeni tip eklenebilir."""
+    doc = await db.settings.find_one({"id": "influencer_types"}, {"_id": 0})
+    types = list((doc or {}).get("types") or [])
+    seen = {str(t).lower() for t in types}
+    types += [t for t in _DEFAULT_INF_TURU if t.lower() not in seen]  # varsayılanları garanti et
+    return {"types": types}
+
+
+@router.post("/influencer-types")
+async def add_influencer_type(payload: dict, current_user: dict = Depends(require_admin)):
+    name = str((payload or {}).get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Tip adı gerekli")
+    doc = await db.settings.find_one({"id": "influencer_types"}, {"_id": 0}) or {}
+    types = list(doc.get("types") or _DEFAULT_INF_TURU)
+    if name.lower() not in {str(t).lower() for t in types}:
+        types.append(name)
+    await db.settings.update_one(
+        {"id": "influencer_types"},
+        {"$set": {"types": types, "updated_at": _now_iso()}, "$setOnInsert": {"id": "influencer_types"}},
+        upsert=True)
+    return {"success": True, "types": types}
 
 
 @router.get("/influencers/{influencer_id}")
@@ -190,7 +220,7 @@ async def get_influencer(influencer_id: str, current_user: dict = Depends(requir
         {"influencer_id": influencer_id}, {"_id": 0}
     ).sort("created_at", -1).to_list(200)
     doc["campaigns"] = campaigns
-    doc["influencer_turu"] = _influencer_turu(doc.get("follower_count"))
+    doc["influencer_turu"] = doc.get("influencer_turu") or _influencer_turu(doc.get("follower_count"))
     return doc
 
 
@@ -203,9 +233,9 @@ async def update_influencer(influencer_id: str, payload: dict, current_user: dic
         "name", "platform", "handle", "instagram", "tiktok", "birthday",
         "phone", "email", "follower_count",
         "coupon_code", "aff_id", "commission_rate", "shipping_address", "notes", "is_active",
-        # Kadir PR alanları: anlaşma şekli (barter/işbirliği/pr/aylık ücretli/açıkta),
-        # beden alt+üst (takım için ayrı). influencer_turu takipçiden TÜRETİLİR (yazılmaz).
-        "anlasma_sekli", "beden_alt", "beden_ust",
+        # Kadir PR alanları: anlaşma şekli, beden alt+üst, influencer_turu (artık ELLE seçilir —
+        # dropdown'dan; takipçiden yalnız ÖNERİ olarak türetilir, kaydedilen değer korunur).
+        "anlasma_sekli", "beden_alt", "beden_ust", "influencer_turu",
     }
     update = {k: v for k, v in payload.items() if k in allowed}
     if "follower_count" in update:
@@ -258,12 +288,20 @@ def _pr_addr(inf) -> str:
 
 
 def _pr_beden(inf, e) -> str:
-    """Beden = master alt/üst; yoksa PR kaydının kendi beden alanı."""
+    """Beden: önce SEÇİLEN ÜRÜNLERİN bedeni (products[].size — Kadir: ürünü arayıp bedenini
+    seçiyoruz), yoksa kaydın kendi beden alanı, yoksa influencer master alt/üst."""
+    prods = (e or {}).get("products") or []
+    _psz = ", ".join(str(p.get("size")) for p in prods
+                     if isinstance(p, dict) and p.get("size"))
+    if _psz:
+        return _psz
+    if (e or {}).get("beden"):
+        return e["beden"]
     alt = (inf or {}).get("beden_alt") or ""
     ust = (inf or {}).get("beden_ust") or ""
     if alt or ust:
         return f"Alt: {alt} / Üst: {ust}"
-    return (e or {}).get("beden") or ""
+    return ""
 
 
 def _pr_urun(e) -> str:

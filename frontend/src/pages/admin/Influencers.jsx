@@ -341,6 +341,7 @@ function PRRow({ e, onEdit, onDelete, onHistory }) {
 
 function PRFormModal({ initial, onClose, onSaved }) {
   const [infList, setInfList] = useState([]);
+  const [products, setProducts] = useState(Array.isArray(initial?.products) ? initial.products : []);
   const [form, setForm] = useState({
     influencer_id: initial?.influencer_id || "",
     influencer_name: initial?.influencer_name || "",
@@ -394,7 +395,7 @@ function PRFormModal({ initial, onClose, onSaved }) {
     if (!form.influencer_name.trim() && !form.influencer_id) return toast.error("Influencer seçin veya adını yazın");
     setSaving(true);
     try {
-      const body = { ...form, date: form.date ? `${form.date}T00:00:00` : new Date().toISOString() };
+      const body = { ...form, products, beden: "", urun: "", date: form.date ? `${form.date}T00:00:00` : new Date().toISOString() };
       if (initial?.id) await axios.put(`${API}/influencer-pr/${initial.id}`, body, auth());
       else await axios.post(`${API}/influencer-pr`, body, auth());
       toast.success("Kaydedildi");
@@ -426,8 +427,9 @@ function PRFormModal({ initial, onClose, onSaved }) {
             {ANLASMA_SEKLI.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
         </Field>
-        <Field label="Beden"><input className="inp" value={form.beden} onChange={(e) => set("beden", e.target.value)} placeholder="Örn. Alt: S / Üst: M" /></Field>
-        <Field label="Ürün (gönderilen)" full><input className="inp" value={form.urun} onChange={(e) => set("urun", e.target.value)} placeholder="Örn. Monaro Takım - Ekose Fular - Era Çanta" /></Field>
+        <Field label="Ürün & Beden (ürünü ara → bedenini seç; birden çok eklenebilir)" full>
+          <ProductPicker picked={products} setPicked={setProducts} />
+        </Field>
         <Field label="Adres" full><input className="inp" value={form.adres} onChange={(e) => set("adres", e.target.value)} placeholder="Kargo adresi" /></Field>
         <Field label="Tarih"><input type="date" className="inp" value={form.date} onChange={(e) => set("date", e.target.value)} /></Field>
         <Field label="Durum">
@@ -737,6 +739,7 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
     coupon_code: initial?.coupon_code || "", aff_id: initial?.aff_id || "",
     commission_rate: initial?.commission_rate || 0,
     anlasma_sekli: initial?.anlasma_sekli || "",
+    influencer_turu: initial?.influencer_turu || "",
     beden_alt: initial?.beden_alt || "", beden_ust: initial?.beden_ust || "",
     notes: initial?.notes || "",
     address_full_name: addr.full_name || "", address_phone: addr.phone || "",
@@ -744,6 +747,21 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const [turuTypes, setTuruTypes] = useState(["Nano", "Micro", "Makro"]);
+  useEffect(() => {
+    axios.get(`${API}/influencer-types`, auth())
+      .then((r) => setTuruTypes(r.data?.types || ["Nano", "Micro", "Makro"]))
+      .catch(() => {});
+  }, []);
+  const addTuruType = async () => {
+    const name = window.prompt("Yeni influencer türü:");
+    if (!name || !name.trim()) return;
+    try {
+      const r = await axios.post(`${API}/influencer-types`, { name: name.trim() }, auth());
+      setTuruTypes(r.data?.types || turuTypes);
+      set("influencer_turu", name.trim());
+    } catch { toast.error("Tip eklenemedi"); }
+  };
 
   const save = async () => {
     if (!form.name.trim()) return toast.error("İsim gerekli");
@@ -755,7 +773,9 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
       follower_count: parseInt(String(form.follower_count).replace(/[^\d]/g, ""), 10) || 0,
       coupon_code: form.coupon_code, aff_id: form.aff_id,
       commission_rate: Number(form.commission_rate) || 0,
-      anlasma_sekli: form.anlasma_sekli, beden_alt: form.beden_alt, beden_ust: form.beden_ust,
+      anlasma_sekli: form.anlasma_sekli,
+      influencer_turu: form.influencer_turu || influencerTuru(form.follower_count),
+      beden_alt: form.beden_alt, beden_ust: form.beden_ust,
       notes: form.notes,
       shipping_address: {
         full_name: form.address_full_name || form.name, phone: form.address_phone || form.phone,
@@ -805,9 +825,14 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
             {ANLASMA_SEKLI.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
         </Field>
-        <Field label="Influencer Türü (takipçiden otomatik)">
-          <input className="inp bg-gray-50 text-gray-500" value={influencerTuru(form.follower_count)} readOnly
-                 title="Nano <10.000 · Micro 10.000–100.000 · Makro 100.000+" />
+        <Field label={`Influencer Türü (öneri: ${influencerTuru(form.follower_count)})`}>
+          <div className="flex gap-1">
+            <select className="inp flex-1" value={form.influencer_turu} onChange={(e) => set("influencer_turu", e.target.value)} data-testid="inf-turu">
+              <option value="">— Seçin —</option>
+              {turuTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <button type="button" onClick={addTuruType} title="Yeni tip ekle" className="px-3 border rounded-lg hover:bg-gray-50">+</button>
+          </div>
         </Field>
         <Field label="Beden — Alt"><input className="inp" value={form.beden_alt} onChange={(e) => set("beden_alt", e.target.value)} placeholder="Örn. S / 36" /></Field>
         <Field label="Beden — Üst"><input className="inp" value={form.beden_ust} onChange={(e) => set("beden_ust", e.target.value)} placeholder="Örn. M / 38" /></Field>
