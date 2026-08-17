@@ -9,7 +9,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   Plus, TrendingUp, CheckCircle, Trash2, X,
-  Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Music2, Package,
+  Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Package,
   ClipboardList, ExternalLink, History, Filter, Download,
 } from "lucide-react";
 
@@ -80,11 +80,11 @@ export default function Influencers() {
         <TabBtn active={tab === "pr"} onClick={() => setTab("pr")} icon={<ClipboardList size={15} />} testid="tab-pr">
           PR Takip
         </TabBtn>
-        <TabBtn active={tab === "influencers"} onClick={() => setTab("influencers")} icon={<Instagram size={15} />} testid="tab-influencers">
-          Kayıtlı Influencerlar
-        </TabBtn>
         <TabBtn active={tab === "shipments"} onClick={() => setTab("shipments")} icon={<Package size={15} />} testid="tab-shipments">
           Ürün Gönderimleri
+        </TabBtn>
+        <TabBtn active={tab === "influencers"} onClick={() => setTab("influencers")} icon={<Instagram size={15} />} testid="tab-influencers">
+          Kayıtlı Influencerlar
         </TabBtn>
       </div>
 
@@ -97,6 +97,15 @@ export default function Influencers() {
  * Kadir: haftalık PR listesi — her işlem TEK TEK "sipariş gibi" ayrı kart, alt alta.
  * Tarih filtresi + günlük/haftalık/aylık/yıllık sayaç. TikTok/Insta otomatik linkli.
  * Yan panel: bir influencerla geçmiş (ne gönderdik + PR işlemleri). STOK HAREKETİ YOK. */
+
+// TikTok orijinal glyph (lucide'de marka ikonu yok — inline SVG, currentColor ile renk alır).
+function TikTokIcon({ size = 12, className = "" }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" className={className} aria-hidden="true">
+      <path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 1 1-2.59-2.59c.27 0 .53.04.77.12V9.79a5.7 5.7 0 0 0-.77-.05 5.69 5.69 0 1 0 5.69 5.69V8.9a7.32 7.32 0 0 0 4.3 1.38V7.19a4.28 4.28 0 0 1-3.25-1.37z" />
+    </svg>
+  );
+}
 
 const PR_STATUS = [
   { v: "beklemede", l: "Beklemede", c: "bg-gray-100 text-gray-600" },
@@ -134,7 +143,7 @@ function SocialLinks({ instagram, tiktok, size = 12 }) {
       {tk && (
         <a href={tk} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
            className="inline-flex items-center gap-1 text-gray-800 hover:underline">
-          <Music2 size={size} /> {cleanHandle(tiktok)} <ExternalLink size={size - 3} />
+          <TikTokIcon size={size} /> {cleanHandle(tiktok)} <ExternalLink size={size - 3} />
         </a>
       )}
     </span>
@@ -345,6 +354,11 @@ function PRFormModal({ initial, onClose, onSaved }) {
     note: initial?.note || "",
     instagram: initial?.instagram || "",
     tiktok: initial?.tiktok || "",
+    urun: initial?.urun || "",
+    beden: initial?.beden || "",
+    anlasma_sekli: initial?.anlasma_sekli || "",
+    phone: initial?.phone || "",
+    adres: initial?.adres || "",
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -359,12 +373,20 @@ function PRFormModal({ initial, onClose, onSaved }) {
   // Kayıtlı influencer seçilince isim/tür/insta/tiktok otomatik dolsun (kullanıcı sonra düzenleyebilir).
   const pickInfluencer = (id) => {
     const inf = infList.find((i) => i.id === id);
+    const sa = inf?.shipping_address || {};
+    const adr = [sa.adres, sa.ilce, sa.il].filter(Boolean).join(", ");
+    const bd = (inf?.beden_alt || inf?.beden_ust)
+      ? `Alt: ${inf.beden_alt || ""} / Üst: ${inf.beden_ust || ""}` : "";
     setForm((f) => ({
       ...f, influencer_id: id,
       influencer_name: inf?.name || f.influencer_name,
-      influencer_type: inf?.platform || f.influencer_type,
+      influencer_type: inf?.influencer_turu || inf?.platform || f.influencer_type,
       instagram: inf?.instagram || f.instagram,
       tiktok: inf?.tiktok || f.tiktok,
+      phone: inf?.phone || f.phone,
+      adres: adr || f.adres,
+      beden: bd || f.beden,
+      anlasma_sekli: inf?.anlasma_sekli || f.anlasma_sekli,
     }));
   };
 
@@ -397,6 +419,16 @@ function PRFormModal({ initial, onClose, onSaved }) {
         <Field label="Influencer Türü"><input className="inp" value={form.influencer_type} onChange={(e) => set("influencer_type", e.target.value)} placeholder="Örn. Moda / Mikro / Nano" /></Field>
         <Field label="Instagram (@)"><input className="inp" value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="@kullanici" /></Field>
         <Field label="TikTok (@)"><input className="inp" value={form.tiktok} onChange={(e) => set("tiktok", e.target.value)} placeholder="@kullanici" /></Field>
+        <Field label="Telefon"><input className="inp" value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="05..." /></Field>
+        <Field label="Anlaşma Şekli">
+          <select className="inp" value={form.anlasma_sekli} onChange={(e) => set("anlasma_sekli", e.target.value)} data-testid="pr-anlasma">
+            <option value="">— Seçin —</option>
+            {ANLASMA_SEKLI.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </Field>
+        <Field label="Beden"><input className="inp" value={form.beden} onChange={(e) => set("beden", e.target.value)} placeholder="Örn. Alt: S / Üst: M" /></Field>
+        <Field label="Ürün (gönderilen)" full><input className="inp" value={form.urun} onChange={(e) => set("urun", e.target.value)} placeholder="Örn. Monaro Takım - Ekose Fular - Era Çanta" /></Field>
+        <Field label="Adres" full><input className="inp" value={form.adres} onChange={(e) => set("adres", e.target.value)} placeholder="Kargo adresi" /></Field>
         <Field label="Tarih"><input type="date" className="inp" value={form.date} onChange={(e) => set("date", e.target.value)} /></Field>
         <Field label="Durum">
           <select className="inp" value={form.status} onChange={(e) => set("status", e.target.value)} data-testid="pr-status">
@@ -571,7 +603,7 @@ function InfluencerListTab() {
                 </div>
                 <div className="flex flex-col gap-0.5 mt-1 text-xs text-gray-500">
                   {inf.instagram && <span className="flex items-center gap-1"><Instagram size={11} /> {inf.instagram}</span>}
-                  {inf.tiktok && <span className="flex items-center gap-1"><Music2 size={11} /> {inf.tiktok}</span>}
+                  {inf.tiktok && <span className="flex items-center gap-1"><TikTokIcon size={11} /> {inf.tiktok}</span>}
                   {!inf.instagram && !inf.tiktok && <span>{inf.handle || "—"}</span>}
                   {inf.birthday && <span className="flex items-center gap-1"><Calendar size={11} /> {fmtDate(inf.birthday)}</span>}
                 </div>
@@ -831,7 +863,7 @@ function DetailModal({ influencerId, onClose }) {
       {/* Kimlik satırı */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 mb-4">
         {inf.instagram && <span className="flex items-center gap-1"><Instagram size={12} /> {inf.instagram}</span>}
-        {inf.tiktok && <span className="flex items-center gap-1"><Music2 size={12} /> {inf.tiktok}</span>}
+        {inf.tiktok && <span className="flex items-center gap-1"><TikTokIcon size={12} /> {inf.tiktok}</span>}
         {inf.phone && <span>☎ {inf.phone}</span>}
         {inf.birthday && <span className="flex items-center gap-1"><Calendar size={12} /> {fmtDate(inf.birthday)}</span>}
         {inf.coupon_code && <span className="text-amber-700">Kupon: {inf.coupon_code}</span>}
@@ -856,9 +888,24 @@ function DetailModal({ influencerId, onClose }) {
       {/* Gönderimler */}
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-semibold text-sm">Bu influencer'a gönderimler</h3>
-        <button onClick={() => setShowCampaign(true)} data-testid="new-campaign-btn" className="inline-flex items-center gap-1 text-sm border px-3 py-1.5 rounded-lg hover:bg-gray-50">
-          <Plus size={14} /> Yeni Gönderim
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              try {
+                const r = await axios.get(`${API}/influencer-pr/export`, { ...auth(), params: { influencer_id: influencerId }, responseType: "blob" });
+                const url = URL.createObjectURL(r.data);
+                const a = document.createElement("a");
+                a.href = url; a.download = "influencer-pr-rapor.xlsx"; a.click();
+                URL.revokeObjectURL(url);
+              } catch { toast.error("Rapor oluşturulamadı"); }
+            }}
+            className="inline-flex items-center gap-1 text-sm border px-3 py-1.5 rounded-lg hover:bg-gray-50" title="Bu influencer'ın PR işlemlerini Excel indir">
+            <Download size={14} /> PR Rapor
+          </button>
+          <button onClick={() => setShowCampaign(true)} data-testid="new-campaign-btn" className="inline-flex items-center gap-1 text-sm border px-3 py-1.5 rounded-lg hover:bg-gray-50">
+            <Plus size={14} /> Yeni Gönderim
+          </button>
+        </div>
       </div>
       <div className="space-y-2">
         {(inf.campaigns || []).length === 0 && <p className="text-xs text-gray-400 py-3">Henüz gönderim yok. Her ürün gönderimi için ayrı kart açın.</p>}

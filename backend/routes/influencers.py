@@ -243,7 +243,10 @@ PR_STATUSES = ["beklemede", "iletildi", "cevap_bekleniyor", "olumlu",
 
 _PR_FIELDS = ("influencer_id", "influencer_name", "influencer_type", "date",
               "contact", "offer", "response", "status", "follow_up", "note",
-              "instagram", "tiktok", "products")
+              "instagram", "tiktok", "products",
+              # Kadir: bu alanlar da PR kaydına DOĞRUDAN girilebilsin (bağlı influencer
+              # yoksa/boşsa elle) — tablo sütunları form'dan doldurulabilir olsun.
+              "urun", "beden", "anlasma_sekli", "phone", "adres")
 
 
 def _pr_addr(inf) -> str:
@@ -283,12 +286,13 @@ async def _pr_enrich(docs: list) -> None:
             inf_map[i["id"]] = i
     for d in docs:
         inf = inf_map.get(d.get("influencer_id")) or {}
-        d["phone"] = inf.get("phone") or ""
-        d["adres"] = _pr_addr(inf)
-        d["beden"] = _pr_beden(inf, d)
-        d["anlasma_sekli"] = inf.get("anlasma_sekli") or d.get("anlasma_sekli") or ""
+        # Önce KAYDIN kendi değeri (form'dan girilen), yoksa bağlı influencer master'ı.
+        d["phone"] = d.get("phone") or inf.get("phone") or ""
+        d["adres"] = d.get("adres") or _pr_addr(inf)
+        d["beden"] = d.get("beden") or _pr_beden(inf, d)
+        d["anlasma_sekli"] = d.get("anlasma_sekli") or inf.get("anlasma_sekli") or ""
         d["influencer_turu"] = _influencer_turu(inf.get("follower_count")) if inf else ""
-        d["urun"] = _pr_urun(d)
+        d["urun"] = d.get("urun") or _pr_urun(d)
         d["instagram"] = d.get("instagram") or inf.get("instagram") or ""
         d["tiktok"] = d.get("tiktok") or inf.get("tiktok") or ""
 
@@ -328,6 +332,11 @@ async def create_pr_entry(payload: dict, current_user: dict = Depends(require_ad
             doc["influencer_type"] = doc.get("influencer_type") or inf.get("platform")
             doc["instagram"] = doc.get("instagram") or inf.get("instagram")
             doc["tiktok"] = doc.get("tiktok") or inf.get("tiktok")
+            # Kadir: adres/beden/anlaşma/telefon da influencer'dan otomatik dolsun (elle override edilebilir).
+            doc["phone"] = doc.get("phone") or inf.get("phone")
+            doc["adres"] = doc.get("adres") or _pr_addr(inf)
+            doc["beden"] = doc.get("beden") or _pr_beden(inf, doc)
+            doc["anlasma_sekli"] = doc.get("anlasma_sekli") or inf.get("anlasma_sekli")
     if (doc.get("status") or "") not in PR_STATUSES:
         doc["status"] = "beklemede"
     doc["date"] = doc.get("date") or _now_iso()
