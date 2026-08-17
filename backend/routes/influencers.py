@@ -11,7 +11,7 @@ Sipariş eşleştirme: orders.create_order, resolve_influencer_for_order() çağ
   2) Fallback: order.coupon_code, influencer'ın kuponuyla eşleşirse override.
 """
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid as _uuid
 
@@ -207,7 +207,148 @@ async def delete_influencer(influencer_id: str, current_user: dict = Depends(req
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Influencer bulunamadı")
     await db.influencer_campaigns.delete_many({"influencer_id": influencer_id})
+    await db.influencer_pr.delete_many({"influencer_id": influencer_id})
     return {"success": True}
+
+
+# =============================================================================
+# PR TAKİP (outreach tracker) — Kadir: haftalık PR listesi.
+# Her işlem TEK TEK "sipariş gibi" ayrı kayıt. Alanlar: influencer · tür · tarih ·
+# iletişim · teklif · cevap · durum · follow-up · not (+ insta/tiktok linki).
+# ⚠️ Bu katman SAF KAYIT: STOK DÜŞÜRMEZ/ARTIRMAZ (iptal/iade dahil). Gerçek ürün
+# gönderimi + stok düşümü AYRI akış: influencer_campaigns (seeding). Karıştırma.
+# =============================================================================
+
+# Durum seçenekleri (frontend açılır menüsü ile ortak — panelde düzenlenebilir değil,
+# outreach akışının sabit adımları).
+PR_STATUSES = ["beklemede", "iletildi", "cevap_bekleniyor", "olumlu",
+               "olumsuz", "gonderildi", "yayinlandi", "iptal"]
+
+_PR_FIELDS = ("influencer_id", "influencer_name", "influencer_type", "date",
+              "contact", "offer", "response", "status", "follow_up", "note",
+              "instagram", "tiktok", "products")
+
+
+async def _pr_period_summary() -> dict:
+    """Günlük/haftalık/aylık/yıllık PR kaydı SAYISI — TR yerel güne göre
+    (reports.py ile aynı 3 saat kayması disiplini). `date` alanı üzerinden sayar."""
+    _tr = timedelta(hours=3)
+    now_tr = datetime.now(timezone.utc) + _tr
+    day0 = now_tr.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def _u(dt_tr):  # TR yerel → UTC ISO
+        return (dt_tr - _tr).isoformat()
+
+    bounds = {
+        "today": _u(day0),
+        "week": _u(day0 - timedelta(days=day0.weekday())),
+        "month": _u(day0.replace(day=1)),
+        "year": _u(day0.replace(month=1, day=1)),
+    }
+    out = {}
+    for k, since in bounds.items():
+        out[k] = await db.influencer_pr.count_documents({"date": {"$gte": since}})
+    out["all"] = await db.influencer_pr.count_documents({})
+    return out
+
+
+@router.post("/influencer-pr")
+async def create_pr_entry(payload: dict, current_user: dict = Depends(require_admin)):
+    """PR işlemi ekle (stok hareketi YOK). influencer_id verilirse isim/insta/tiktok
+    influencer kaydından otomatik doldurulur (girilmişse override edilmez)."""
+    doc = {k: (payload.get(k) if payload else None) for k in _PR_FIELDS}
+    if doc.get("influencer_id"):
+        inf = await db.influencers.find_one({"id": doc["influencer_id"]}, {"_id": 0})
+        if inf:
+            doc["influencer_name"] = doc.get("influencer_name") or inf.get("name")
+            doc["influencer_type"] = doc.get("influencer_type") or inf.get("platform")
+            doc["instagram"] = doc.get("instagram") or inf.get("instagram")
+            doc["tiktok"] = doc.get("tiktok") or inf.get("tiktok")
+    if (doc.get("status") or "") not in PR_STATUSES:
+        doc["status"] = "beklemede"
+    doc["date"] = doc.get("date") or _now_iso()
+    doc["id"] = generate_id()
+    doc["created_at"] = _now_iso()
+    doc["updated_at"] = _now_iso()
+    await db.influencer_pr.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return {"success": True, "entry": doc}
+
+
+@router.get("/influencer-pr")
+async def list_pr_entries(
+    q: Optional[str] = Query(None),
+    influencer_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
+    """Ana liste: tüm PR işlemleri (tarih filtreli), en yeni üstte. Ayrıca dönem
+    sayaçları (günlük/haftalık/aylık/yıllık) + filtrelenmiş sonucun durum kırılımı."""
+    query: dict = {}
+    if influencer_id:
+        query["influencer_id"] = influencer_id
+    if status:
+        query["status"] = status
+    if q:
+        query["$or"] = [
+            {"influencer_name": {"$regex": q, "$options": "i"}},
+            {"instagram": {"$regex": q, "$options": "i"}},
+            {"tiktok": {"$regex": q, "$options": "i"}},
+            {"note": {"$regex": q, "$options": "i"}},
+            {"offer": {"$regex": q, "$options": "i"}},
+        ]
+    if start_date or end_date:
+        dr: dict = {}
+        if start_date:
+            dr["$gte"] = start_date
+        if end_date:
+            dr["$lte"] = end_date
+        query["date"] = dr
+    docs = await db.influencer_pr.find(query, {"_id": 0}).sort("date", -1).to_list(2000)
+    status_counts: dict = {}
+    for d in docs:
+        s = d.get("status") or "beklemede"
+        status_counts[s] = status_counts.get(s, 0) + 1
+    return {"entries": docs, "total": len(docs),
+            "summary": await _pr_period_summary(), "status_counts": status_counts}
+
+
+@router.put("/influencer-pr/{entry_id}")
+async def update_pr_entry(entry_id: str, payload: dict, current_user: dict = Depends(require_admin)):
+    existing = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="PR kaydı bulunamadı")
+    update = {k: v for k, v in (payload or {}).items() if k in _PR_FIELDS}
+    if "status" in update and (update.get("status") or "") not in PR_STATUSES:
+        update.pop("status")
+    update["updated_at"] = _now_iso()
+    await db.influencer_pr.update_one({"id": entry_id}, {"$set": update})
+    doc = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
+    return {"success": True, "entry": doc}
+
+
+@router.delete("/influencer-pr/{entry_id}")
+async def delete_pr_entry(entry_id: str, current_user: dict = Depends(require_admin)):
+    res = await db.influencer_pr.delete_one({"id": entry_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="PR kaydı bulunamadı")
+    return {"success": True}
+
+
+@router.get("/influencers/{influencer_id}/history")
+async def influencer_history(influencer_id: str, current_user: dict = Depends(require_admin)):
+    """Yan sayfa: bir influencerla GEÇMİŞ — daha önce ne gönderdik (seeding kampanyaları)
+    + tüm PR işlemleri. 'Ne aldık/gönderdik' bu iki kaynaktan gelir."""
+    inf = await db.influencers.find_one({"id": influencer_id}, {"_id": 0})
+    if not inf:
+        raise HTTPException(status_code=404, detail="Influencer bulunamadı")
+    campaigns = await db.influencer_campaigns.find(
+        {"influencer_id": influencer_id}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    pr_entries = await db.influencer_pr.find(
+        {"influencer_id": influencer_id}, {"_id": 0}).sort("date", -1).to_list(500)
+    return {"influencer": inf, "campaigns": campaigns, "pr_entries": pr_entries}
 
 
 # =============================================================================

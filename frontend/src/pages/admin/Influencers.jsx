@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import {
   Plus, TrendingUp, CheckCircle, Trash2, X,
   Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Music2, Package,
+  ClipboardList, ExternalLink, History, Filter,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -61,7 +62,7 @@ function makeCampaignActions(reload) {
 }
 
 export default function Influencers() {
-  const [tab, setTab] = useState("influencers"); // 'influencers' | 'shipments'
+  const [tab, setTab] = useState("pr"); // 'pr' | 'influencers' | 'shipments'
 
   return (
     <div className="p-6 max-w-6xl mx-auto" data-testid="influencers-page">
@@ -70,12 +71,15 @@ export default function Influencers() {
           <Instagram className="text-pink-600" size={24} /> Influencer / İş Birlikleri
         </h1>
         <p className="text-sm text-gray-500 mt-1">
-          Influencer kayıtları, seeding gönderimleri, kargo otomasyonu ve ROI takibi.
+          PR takip, influencer kayıtları, seeding gönderimleri, kargo otomasyonu ve ROI takibi.
         </p>
       </div>
 
       {/* Sekmeler */}
       <div className="flex gap-2 border-b mb-5">
+        <TabBtn active={tab === "pr"} onClick={() => setTab("pr")} icon={<ClipboardList size={15} />} testid="tab-pr">
+          PR Takip
+        </TabBtn>
         <TabBtn active={tab === "influencers"} onClick={() => setTab("influencers")} icon={<Instagram size={15} />} testid="tab-influencers">
           Kayıtlı Influencerlar
         </TabBtn>
@@ -84,7 +88,362 @@ export default function Influencers() {
         </TabBtn>
       </div>
 
-      {tab === "influencers" ? <InfluencerListTab /> : <ShipmentsTab />}
+      {tab === "pr" ? <PRTrackTab /> : tab === "influencers" ? <InfluencerListTab /> : <ShipmentsTab />}
+    </div>
+  );
+}
+
+/* ======================= SEKME 0: PR TAKİP =======================
+ * Kadir: haftalık PR listesi — her işlem TEK TEK "sipariş gibi" ayrı kart, alt alta.
+ * Tarih filtresi + günlük/haftalık/aylık/yıllık sayaç. TikTok/Insta otomatik linkli.
+ * Yan panel: bir influencerla geçmiş (ne gönderdik + PR işlemleri). STOK HAREKETİ YOK. */
+
+const PR_STATUS = [
+  { v: "beklemede", l: "Beklemede", c: "bg-gray-100 text-gray-600" },
+  { v: "iletildi", l: "İletildi", c: "bg-blue-50 text-blue-700" },
+  { v: "cevap_bekleniyor", l: "Cevap Bekleniyor", c: "bg-amber-50 text-amber-700" },
+  { v: "olumlu", l: "Olumlu", c: "bg-green-50 text-green-700" },
+  { v: "olumsuz", l: "Olumsuz", c: "bg-red-50 text-red-700" },
+  { v: "gonderildi", l: "Gönderildi", c: "bg-indigo-50 text-indigo-700" },
+  { v: "yayinlandi", l: "Yayınlandı", c: "bg-emerald-50 text-emerald-700" },
+  { v: "iptal", l: "İptal", c: "bg-gray-100 text-gray-400 line-through" },
+];
+const prStatusMeta = (v) => PR_STATUS.find((s) => s.v === v) || PR_STATUS[0];
+
+// Kullanıcı adını (@x veya x) tam profil linkine çevirir.
+const cleanHandle = (h) => String(h || "").trim().replace(/^@+/, "").replace(/\s+/g, "");
+const socialUrl = (kind, h) => {
+  const u = cleanHandle(h);
+  if (!u) return null;
+  if (/^https?:\/\//i.test(h)) return h;
+  return kind === "tiktok" ? `https://www.tiktok.com/@${u}` : `https://instagram.com/${u}`;
+};
+
+function SocialLinks({ instagram, tiktok, size = 12 }) {
+  const ig = socialUrl("instagram", instagram);
+  const tk = socialUrl("tiktok", tiktok);
+  if (!ig && !tk) return null;
+  return (
+    <span className="flex items-center gap-2">
+      {ig && (
+        <a href={ig} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+           className="inline-flex items-center gap-1 text-pink-600 hover:underline">
+          <Instagram size={size} /> {cleanHandle(instagram)} <ExternalLink size={size - 3} />
+        </a>
+      )}
+      {tk && (
+        <a href={tk} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+           className="inline-flex items-center gap-1 text-gray-800 hover:underline">
+          <Music2 size={size} /> {cleanHandle(tiktok)} <ExternalLink size={size - 3} />
+        </a>
+      )}
+    </span>
+  );
+}
+
+function periodStart(kind) {
+  const now = new Date();
+  const d = new Date(now);
+  if (kind === "today") { d.setHours(0, 0, 0, 0); return d.toISOString().slice(0, 10); }
+  if (kind === "week") { const wd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wd); return d.toISOString().slice(0, 10); }
+  if (kind === "month") return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  if (kind === "year") return new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10);
+  return "";
+}
+
+function PRTrackTab() {
+  const [entries, setEntries] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [statusF, setStatusF] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
+  const [historyFor, setHistoryFor] = useState(null); // {id, name}
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (q.trim()) params.q = q.trim();
+      if (start) params.start_date = start;
+      if (end) params.end_date = `${end}T23:59:59.999999`;
+      if (statusF) params.status = statusF;
+      const r = await axios.get(`${API}/influencer-pr`, { ...auth(), params });
+      setEntries(r.data?.entries || []);
+      setSummary(r.data?.summary || {});
+    } catch {
+      toast.error("PR kayıtları yüklenemedi");
+    } finally {
+      setLoading(false);
+    }
+  }, [q, start, end, statusF]);
+
+  useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [load]);
+
+  const del = async (id) => {
+    if (!window.confirm("Bu PR kaydı silinsin mi?")) return;
+    try { await axios.delete(`${API}/influencer-pr/${id}`, auth()); toast.success("Silindi"); load(); }
+    catch { toast.error("Silinemedi"); }
+  };
+
+  const quick = (kind) => { setStart(periodStart(kind)); setEnd(""); };
+
+  return (
+    <div data-testid="pr-track-tab">
+      {/* Dönem sayaçları */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <Stat icon={<Calendar size={16} />} label="Bugün" value={summary.today ?? 0} color="blue" />
+        <Stat icon={<Calendar size={16} />} label="Bu Hafta" value={summary.week ?? 0} color="green" />
+        <Stat icon={<Calendar size={16} />} label="Bu Ay" value={summary.month ?? 0} color="blue" />
+        <Stat icon={<Calendar size={16} />} label="Bu Yıl" value={summary.year ?? 0} color="green" />
+      </div>
+
+      {/* Filtre çubuğu */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} data-testid="pr-search"
+                 placeholder="Influencer, @kullanıcı, not, teklif ara…"
+                 className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-black" />
+        </div>
+        <div className="flex items-center gap-1 text-xs">
+          <Filter size={14} className="text-gray-400" />
+          <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="border rounded-lg px-2 py-1.5" data-testid="pr-start" />
+          <span className="text-gray-400">–</span>
+          <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="border rounded-lg px-2 py-1.5" data-testid="pr-end" />
+        </div>
+        <div className="flex gap-1 text-xs">
+          {[["today", "Bugün"], ["week", "Hafta"], ["month", "Ay"], ["year", "Yıl"]].map(([k, l]) => (
+            <button key={k} onClick={() => quick(k)} className="px-2 py-1.5 border rounded-lg hover:bg-gray-50">{l}</button>
+          ))}
+          {(start || end) && <button onClick={() => { setStart(""); setEnd(""); }} className="px-2 py-1.5 border rounded-lg text-gray-500 hover:bg-gray-50">Temizle</button>}
+        </div>
+        <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="border rounded-lg px-2 py-1.5 text-xs" data-testid="pr-status-filter">
+          <option value="">Tüm durumlar</option>
+          {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+        </select>
+        <button onClick={() => { setEditTarget(null); setShowForm(true); }} data-testid="new-pr-btn"
+                className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800 ml-auto">
+          <Plus size={16} /> Yeni PR Kaydı
+        </button>
+      </div>
+
+      {/* İşlem listesi — alt alta, her biri "sipariş gibi" */}
+      {loading ? (
+        <div className="text-gray-400 text-sm py-12 text-center">Yükleniyor...</div>
+      ) : entries.length === 0 ? (
+        <div className="border border-dashed rounded-xl py-16 text-center text-gray-500">
+          Kayıt yok. "Yeni PR Kaydı" ile ekleyin.
+        </div>
+      ) : (
+        <div className="space-y-2" data-testid="pr-list">
+          {entries.map((e) => (
+            <PRCard key={e.id} e={e}
+                    onEdit={() => { setEditTarget(e); setShowForm(true); }}
+                    onDelete={() => del(e.id)}
+                    onHistory={() => e.influencer_id && setHistoryFor({ id: e.influencer_id, name: e.influencer_name })} />
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <PRFormModal initial={editTarget} onClose={() => setShowForm(false)}
+                     onSaved={() => { setShowForm(false); load(); }} />
+      )}
+      {historyFor && (
+        <HistoryPanel influencerId={historyFor.id} influencerName={historyFor.name}
+                      onClose={() => setHistoryFor(null)} />
+      )}
+    </div>
+  );
+}
+
+function PRCard({ e, onEdit, onDelete, onHistory }) {
+  const st = prStatusMeta(e.status);
+  const Cell = ({ label, children }) => (
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="text-sm text-gray-800 truncate">{children || "—"}</div>
+    </div>
+  );
+  return (
+    <div className="bg-white border rounded-xl px-4 py-3 hover:border-black transition-colors" data-testid={`pr-card-${e.id}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold">{e.influencer_name || "—"}</span>
+            {e.influencer_type && <Badge>{e.influencer_type}</Badge>}
+            <span className={`text-[10px] px-2 py-0.5 rounded-full ${st.c}`}>{st.l}</span>
+          </div>
+          <div className="mt-1 text-xs"><SocialLinks instagram={e.instagram} tiktok={e.tiktok} /></div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {e.influencer_id && (
+            <button onClick={onHistory} title="Geçmiş" className="text-gray-400 hover:text-black p-1" data-testid={`pr-history-${e.id}`}><History size={15} /></button>
+          )}
+          <button onClick={onEdit} title="Düzenle" className="text-gray-400 hover:text-black p-1"><Pencil size={14} /></button>
+          <button onClick={onDelete} title="Sil" className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-x-4 gap-y-2 mt-3">
+        <Cell label="Tarih">{fmtDate(e.date)}</Cell>
+        <Cell label="İletişim">{e.contact}</Cell>
+        <Cell label="Teklif">{e.offer}</Cell>
+        <Cell label="Cevap">{e.response}</Cell>
+        <Cell label="Follow-up">{e.follow_up}</Cell>
+        <Cell label="Not">{e.note}</Cell>
+      </div>
+    </div>
+  );
+}
+
+function PRFormModal({ initial, onClose, onSaved }) {
+  const [infList, setInfList] = useState([]);
+  const [form, setForm] = useState({
+    influencer_id: initial?.influencer_id || "",
+    influencer_name: initial?.influencer_name || "",
+    influencer_type: initial?.influencer_type || "",
+    date: (initial?.date || new Date().toISOString()).slice(0, 10),
+    contact: initial?.contact || "",
+    offer: initial?.offer || "",
+    response: initial?.response || "",
+    status: initial?.status || "beklemede",
+    follow_up: initial?.follow_up || "",
+    note: initial?.note || "",
+    instagram: initial?.instagram || "",
+    tiktok: initial?.tiktok || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    (async () => {
+      try { const r = await axios.get(`${API}/influencers`, auth()); setInfList(r.data?.influencers || []); }
+      catch { /* sessiz */ }
+    })();
+  }, []);
+
+  // Kayıtlı influencer seçilince isim/tür/insta/tiktok otomatik dolsun (kullanıcı sonra düzenleyebilir).
+  const pickInfluencer = (id) => {
+    const inf = infList.find((i) => i.id === id);
+    setForm((f) => ({
+      ...f, influencer_id: id,
+      influencer_name: inf?.name || f.influencer_name,
+      influencer_type: inf?.platform || f.influencer_type,
+      instagram: inf?.instagram || f.instagram,
+      tiktok: inf?.tiktok || f.tiktok,
+    }));
+  };
+
+  const save = async () => {
+    if (!form.influencer_name.trim() && !form.influencer_id) return toast.error("Influencer seçin veya adını yazın");
+    setSaving(true);
+    try {
+      const body = { ...form, date: form.date ? `${form.date}T00:00:00` : new Date().toISOString() };
+      if (initial?.id) await axios.put(`${API}/influencer-pr/${initial.id}`, body, auth());
+      else await axios.post(`${API}/influencer-pr`, body, auth());
+      toast.success("Kaydedildi");
+      onSaved();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Kaydedilemedi");
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal title={initial?.id ? "PR Kaydı Düzenle" : "Yeni PR Kaydı"} onClose={onClose}>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Kayıtlı influencer (opsiyonel — seçince alanlar dolar)" full>
+          <select className="inp" value={form.influencer_id} onChange={(e) => pickInfluencer(e.target.value)} data-testid="pr-inf-select">
+            <option value="">— Bağlama / serbest yaz —</option>
+            {infList.map((i) => (
+              <option key={i.id} value={i.id}>{i.name}{i.instagram ? ` (${i.instagram})` : ""}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Influencer adı *"><input className="inp" value={form.influencer_name} onChange={(e) => set("influencer_name", e.target.value)} placeholder="İsim" /></Field>
+        <Field label="Influencer Türü"><input className="inp" value={form.influencer_type} onChange={(e) => set("influencer_type", e.target.value)} placeholder="Örn. Moda / Mikro / Nano" /></Field>
+        <Field label="Instagram (@)"><input className="inp" value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="@kullanici" /></Field>
+        <Field label="TikTok (@)"><input className="inp" value={form.tiktok} onChange={(e) => set("tiktok", e.target.value)} placeholder="@kullanici" /></Field>
+        <Field label="Tarih"><input type="date" className="inp" value={form.date} onChange={(e) => set("date", e.target.value)} /></Field>
+        <Field label="Durum">
+          <select className="inp" value={form.status} onChange={(e) => set("status", e.target.value)} data-testid="pr-status">
+            {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+          </select>
+        </Field>
+        <Field label="İletişim (nasıl/kanal)"><input className="inp" value={form.contact} onChange={(e) => set("contact", e.target.value)} placeholder="DM / e-posta / telefon" /></Field>
+        <Field label="Teklif"><input className="inp" value={form.offer} onChange={(e) => set("offer", e.target.value)} placeholder="Ne teklif edildi" /></Field>
+        <Field label="Cevap"><input className="inp" value={form.response} onChange={(e) => set("response", e.target.value)} placeholder="Ne cevap geldi" /></Field>
+        <Field label="Follow-up"><input className="inp" value={form.follow_up} onChange={(e) => set("follow_up", e.target.value)} placeholder="Tekrar iletişim / hatırlatma" /></Field>
+        <Field label="Not" full><textarea className="inp h-20" value={form.note} onChange={(e) => set("note", e.target.value)} /></Field>
+      </div>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm border rounded-lg">İptal</button>
+        <button onClick={save} disabled={saving} data-testid="pr-save" className="px-4 py-2 text-sm bg-black text-white rounded-lg disabled:opacity-50">
+          {saving ? "..." : "Kaydet"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function HistoryPanel({ influencerId, influencerName, onClose }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try { const r = await axios.get(`${API}/influencers/${influencerId}/history`, auth()); setData(r.data); }
+      catch { toast.error("Geçmiş yüklenemedi"); }
+    })();
+  }, [influencerId]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex justify-end" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative bg-white w-full max-w-md h-full overflow-y-auto p-5 shadow-xl" onClick={(e) => e.stopPropagation()} data-testid="pr-history-panel">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold text-lg flex items-center gap-2"><History size={18} /> {influencerName || "Geçmiş"}</h2>
+          <button onClick={onClose}><X size={20} /></button>
+        </div>
+        {!data ? (
+          <div className="py-10 text-center text-gray-400 text-sm">Yükleniyor...</div>
+        ) : (
+          <>
+            <div className="text-xs mb-3"><SocialLinks instagram={data.influencer?.instagram} tiktok={data.influencer?.tiktok} /></div>
+
+            <h3 className="font-semibold text-sm mb-2 flex items-center gap-1"><Package size={14} /> Gönderdiklerimiz ({(data.campaigns || []).length})</h3>
+            <div className="space-y-2 mb-5">
+              {(data.campaigns || []).length === 0 && <p className="text-xs text-gray-400">Henüz ürün gönderimi yok.</p>}
+              {(data.campaigns || []).map((c) => (
+                <div key={c.id} className="border rounded-lg p-2.5 text-xs">
+                  <div className="flex justify-between"><span className="font-medium">{c.title || "Gönderim"}</span><span className="text-gray-400">{fmtDate(c.created_at)}</span></div>
+                  {(c.products || []).length > 0 && (
+                    <div className="text-gray-500 mt-1">{(c.products || []).map((p) => `${p.name || p.barcode}${p.qty ? ` ×${p.qty}` : ""}`).join(", ")}</div>
+                  )}
+                  {c.status && <Badge>{c.status}</Badge>}
+                </div>
+              ))}
+            </div>
+
+            <h3 className="font-semibold text-sm mb-2 flex items-center gap-1"><ClipboardList size={14} /> PR işlemleri ({(data.pr_entries || []).length})</h3>
+            <div className="space-y-2">
+              {(data.pr_entries || []).length === 0 && <p className="text-xs text-gray-400">Henüz PR işlemi yok.</p>}
+              {(data.pr_entries || []).map((e) => (
+                <div key={e.id} className="border rounded-lg p-2.5 text-xs">
+                  <div className="flex justify-between items-center">
+                    <span className={`px-2 py-0.5 rounded-full ${prStatusMeta(e.status).c}`}>{prStatusMeta(e.status).l}</span>
+                    <span className="text-gray-400">{fmtDate(e.date)}</span>
+                  </div>
+                  {e.offer && <div className="mt-1"><span className="text-gray-400">Teklif:</span> {e.offer}</div>}
+                  {e.response && <div><span className="text-gray-400">Cevap:</span> {e.response}</div>}
+                  {e.note && <div className="text-gray-500 mt-0.5">{e.note}</div>}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
