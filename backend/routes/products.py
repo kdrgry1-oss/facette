@@ -1405,10 +1405,17 @@ async def get_product_stock_movements(product_id: str, limit: int = Query(300, g
             except Exception:
                 delta = 0
         _t = r.get("type", "") or ""
+        # 'tüketildi' işaretli (reaktivasyon/reconcile'de guard dışına taşınan) restore hareketi:
+        # ham type + '_consumed'. Silinmiyor → tarihçede kalıyor; okunaklı etiketle.
+        if _t.endswith("_consumed"):
+            _base = _t[:-len("_consumed")]
+            _reason = _STOCK_MOVE_REASONS.get(_base, _base or "—") + " → sonradan tekrar düşüldü (tüketildi)"
+        else:
+            _reason = _STOCK_MOVE_REASONS.get(_t, _t or "—")
         out.append({
             "date": r.get("created_at", ""),
             "type": _t,
-            "reason": _STOCK_MOVE_REASONS.get(_t, _t or "—"),
+            "reason": _reason,
             "delta": delta,
             "order_number": r.get("order_number", ""),
             "by": r.get("created_by") or r.get("source") or "",

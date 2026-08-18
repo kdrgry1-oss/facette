@@ -759,13 +759,13 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
         if _claim.modified_count == 1:
             try:
                 _o2 = await db.orders.find_one({"id": order_id}, {"_id": 0})
-                from .orders import _stock_delta_for_order, _RESTORE_MOVE_TYPES
+                from .orders import _stock_delta_for_order, _consume_restore_moves
                 _moves = await _stock_delta_for_order(_o2, -1)
-                # B6: auto-cancel'in yazdığı BAYAT restore hareketini SİL. Aksi halde sonraki
-                # GERÇEK iptal _restock_order_once guard'ına takılıp (mevcut restore hareketi
-                # görülüp) stoğu ASLA iade etmiyordu → paid siparişin envanteri kalıcı kilitli.
-                await db.stock_movements.delete_many(
-                    {"order_id": order_id, "type": {"$in": _RESTORE_MOVE_TYPES}})
+                # B6: auto-cancel'in yazdığı BAYAT restore hareketini guard DIŞINA taşı ('tüketildi').
+                # Aksi halde sonraki GERÇEK iptal _restock_order_once guard'ına takılıp (mevcut restore
+                # hareketi görülüp) stoğu ASLA iade etmiyordu → paid siparişin envanteri kalıcı kilitli.
+                # Öncesinde delete_many ile SİLİNİYORDU (stok geçmişi kaybı); artık kayıt korunur.
+                await _consume_restore_moves(order_id, "reconcile_redecrement")
                 logger.info(f"[reconcile] restock sonrası tekrar-ödendi → stok yeniden düşüldü order_id={order_id} moves={len(_moves or [])}")
             except Exception as _rse:
                 # Düşüm/temizlik başarısızsa claim'i GERİ AL — sonraki denemede tekrar işlensin.

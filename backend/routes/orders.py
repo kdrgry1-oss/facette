@@ -2264,8 +2264,9 @@ async def update_order_status(
                 if _restore_items:
                     # _reverse_stock_moves: back = -delta → delta>0 verildiğinden İADE EDİLENİ geri DÜŞER.
                     await _reverse_stock_moves(_restore_items)
-                    await db.stock_movements.delete_many(
-                        {"order_id": order_id, "type": {"$in": list(_RESTORE_MOVE_TYPES)}})
+                    # Bayat restore hareketini SİLME → 'tüketildi' işaretle (guard yine görmez ama
+                    # stok geçmişi KORUNUR). Öncesinde delete_many ile siliniyordu (log kaybı).
+                    await _consume_restore_moves(order_id, "reactivate_decrement")
                     await db.stock_movements.insert_one({
                         "id": str(uuid.uuid4()),
                         "type": "reactivate_decrement",
@@ -2732,6 +2733,28 @@ _RESTORE_MOVE_TYPES = ["order_cancelled", "auto_cancel_expired", "manual_increme
 # variant_id/barcode taşıyan) delta'sını ters çevirir. reactivate_decrement BİLEREK dışarıda:
 # order_created zaten tam düşümü temsil eder; onu da saysak çift düşüm sayılırdı.
 _DEDUCT_MOVE_TYPES = ["order_created", "order_imported", "manual_decrement", "backfill_decrement"]
+
+
+async def _consume_restore_moves(order_id: str, reason: str) -> int:
+    """Bir siparişin restore (geri-stok) hareketlerini SİLMEK yerine 'tüketildi' işaretler.
+
+    Neden: reaktivasyon/reconcile'de stok yeniden düşülünce, bayat restore hareketi sonraki
+    GERÇEK iptalin restock guard'ını (_RESTORE_MOVE_TYPES) bloklamasın diye eskiden
+    `delete_many` ile SİLİNİYORDU (orders reactivate + payment reconcile). Bu, panelde ürün
+    STOK GEÇMİŞİNİ yok ediyordu ("loglar kayboldu"). Silmek yerine type'ı guard listesinin
+    DIŞINA taşıyoruz (type += '_consumed') → tüm guard'lar (hepsi `type $in _RESTORE_MOVE_TYPES`
+    tam-eşleşme) bunları ARTIK GÖRMEZ (silinmiş gibi davranır) AMA audit satırı KORUNUR.
+    İdempotent: ikinci çağrıda eşleşen kalmaz. Stok miktarına DOKUNMAZ (yalnız log tipi)."""
+    now = datetime.now(timezone.utc).isoformat()
+    res = await db.stock_movements.update_many(
+        {"order_id": order_id, "type": {"$in": list(_RESTORE_MOVE_TYPES)}},
+        [{"$set": {
+            "type": {"$concat": [{"$ifNull": ["$type", ""]}, "_consumed"]},
+            "consumed_at": now,
+            "consumed_reason": reason,
+        }}],
+    )
+    return int(getattr(res, "modified_count", 0) or 0)
 
 
 def _mv_key(it: dict):
