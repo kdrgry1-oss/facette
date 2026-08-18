@@ -168,6 +168,56 @@ def _spawn(coro):
     return _t
 
 
+async def _send_admin_new_order_email(order: dict, ship: dict, kind_label: str = "") -> None:
+    """Admin'e (firma iletişim adresi → beyaz-etiket varsayılan info@facette.com.tr) yeni sipariş
+    ÖZET maili. OLUŞTURMADA yalnız ödeme-onayı bekleyen ama gerçek aksiyon bekleyen site
+    siparişlerinde (havale/EFT, kapıda ödeme) gönderilir. KART siparişi HARİÇ — o, 3DS yarıda
+    kalabileceğinden ödeme onaylanınca payment._notify_paid_order_confirmed ile gider (invariant #3).
+    Best-effort: hata sipariş akışını ETKİLEMEZ."""
+    try:
+        import company as _company
+        from notification_service import _email_send
+        _ci = await _company.get_company(db)
+        _to = str(_ci.get("contact_email") or _ci.get("email") or "info@facette.com.tr").strip()
+        if not _to:
+            return
+        _tl = float(order.get("total") or 0)
+        _tl_fmt = f"{_tl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        _who = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
+                or ship.get("full_name") or "Müşteri")
+        _phone = ship.get("phone") or order.get("phone") or "-"
+        _pm = order.get("payment_method") or "-"
+        _rows = ""
+        for _it in (order.get("items") or []):
+            _nm = _it.get("name") or _it.get("product_name") or "Ürün"
+            _qty = _it.get("quantity") or _it.get("qty") or 1
+            _var = " · ".join([x for x in (_it.get("color") or "", _it.get("size") or "") if x])
+            _vh = (f" <span style='color:#888'>({_var})</span>") if _var else ""
+            _rows += ("<tr><td style='padding:4px 8px;border-bottom:1px solid #eee'>"
+                      f"{_nm}{_vh}</td><td style='padding:4px 8px;border-bottom:1px solid #eee;"
+                      f"text-align:center'>{_qty}</td></tr>")
+        _adr = ship.get("address") or ""
+        _loc = " / ".join([x for x in (ship.get("district") or ship.get("ilce") or "",
+                                       ship.get("city") or ship.get("il") or "") if x])
+        _kl = (" · " + kind_label) if kind_label else ""
+        _html = (
+            f"<h2 style='margin:0 0 8px'>Yeni Sipariş{_kl}</h2>"
+            f"<p style='margin:0 0 4px'><b>Sipariş No:</b> {order.get('order_number','')}</p>"
+            f"<p style='margin:0 0 4px'><b>Müşteri:</b> {_who} · {_phone}</p>"
+            f"<p style='margin:0 0 4px'><b>Tutar:</b> {_tl_fmt} TL</p>"
+            f"<p style='margin:0 0 4px'><b>Ödeme:</b> {_pm}</p>"
+            f"<p style='margin:0 0 8px'><b>Teslimat:</b> {_adr} {_loc}</p>"
+            f"<table style='border-collapse:collapse;width:100%;max-width:520px'>"
+            f"<tr><th style='text-align:left;padding:4px 8px;border-bottom:2px solid #333'>Ürün</th>"
+            f"<th style='text-align:center;padding:4px 8px;border-bottom:2px solid #333'>Adet</th></tr>"
+            f"{_rows}</table>"
+        )
+        await _email_send(db, _to, f"Yeni Sipariş · {order.get('order_number','')}", _html)
+        logger.info(f"admin yeni-sipariş maili → {_to} order={order.get('order_number')} ({kind_label})")
+    except Exception as _e:
+        logger.warning(f"admin yeni-sipariş maili atlandı: {_e}")
+
+
 async def _order_notify_vars(order: dict, **extra) -> dict:
     """Bir sipariş dokümanından TÜM bildirim değişkenlerini (email + SMS şablonlarının
     kullandığı her placeholder) tek elden üretir. Amaç: hiçbir ma/sms'te {order_date},
@@ -1674,6 +1724,9 @@ async def create_order(
                     variables=variables,
                     channels=_channels,
                 )
+                # ADMIN E-POSTA: havale/EFT siparişi OLUŞTURMADA firma adresine (info@...) haber ver
+                # (kart HARİÇ — o ödeme onaylanınca gider). Müşteriye banka-detay maili zaten gitti.
+                await _send_admin_new_order_email(order, ship, "Havale/EFT bekleniyor")
             else:
                 # ÖNEMLİ: Online kart (iyzico) siparişinde "Siparişiniz Alındı" onay
                 # maili sipariş OLUŞTURMA anında DEĞİL, ödeme onaylandıktan SONRA
@@ -1691,6 +1744,11 @@ async def create_order(
                         to_email=ship.get("email") or order.get("email"),
                         variables=variables,
                     )
+                    # ADMIN E-POSTA: kapıda ödeme siparişinde OLUŞTURMADA haber ver. Hediye-çeki ile
+                    # zaten ÖDENMİŞ (_already_paid) siparişte payment._notify_paid_order_confirmed
+                    # zaten admin maili gönderir → burada YALNIZ kapıda ödemede gönder (çift mail yok).
+                    if _cod and not _already_paid:
+                        await _send_admin_new_order_email(order, ship, "Kapıda ödeme")
                 else:
                     logger.info(
                         f"[order_confirmed ERTELENDİ] online kart, ödeme onayı bekleniyor "
