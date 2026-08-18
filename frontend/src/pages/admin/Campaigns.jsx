@@ -88,6 +88,8 @@ export default function AdminCampaigns() {
   const [prodQuery, setProdQuery] = useState("");
   const [prodResults, setProdResults] = useState([]);
   const [prodNames, setProdNames] = useState({}); // id -> ad (chip gösterimi)
+  const [exQuery, setExQuery] = useState("");      // HARİÇ-TUTMA ürün arama
+  const [exResults, setExResults] = useState([]);
 
   useEffect(() => { fetchCampaigns(); }, []);
   useEffect(() => {
@@ -113,6 +115,26 @@ export default function AdminCampaigns() {
     setProdQuery(""); setProdResults([]);
   };
   const removeProduct = (id) => setFormData({ ...formData, products: (formData.products || []).filter((x) => x !== id) });
+  // HARİÇ TUTULACAK ÜRÜNLER — arayıp tıklayarak ekleme (id yazmaya gerek yok).
+  // admin_view=1: pasif ürünler de bulunsun. Seçilen ürünün kart id'si (yoksa stok kodu/id)
+  // metin kutusuna eklenir; backend _resolve_excluded_pids bunu gerçek ürün id'sine çevirir.
+  const searchExcl = async (q) => {
+    setExQuery(q);
+    if (!q || q.trim().length < 2) { setExResults([]); return; }
+    try {
+      const r = await axios.get(`${API}/products?search=${encodeURIComponent(q.trim())}&admin_view=1&limit=8`);
+      setExResults(r.data?.products || []);
+    } catch { setExResults([]); }
+  };
+  const addExcl = (p) => {
+    const tok = String(p.urun_karti_id || p.stock_code || p.id || "").trim();
+    if (!tok) return;
+    const raw = String(formData.excluded_products_raw || "");
+    const toks = raw.split(/[\n,;]+/).map((t) => t.trim()).filter(Boolean);
+    if (!toks.includes(tok)) toks.push(tok);
+    setFormData({ ...formData, excluded_products_raw: toks.join(", ") });
+    setExQuery(""); setExResults([]);
+  };
   const toggleCombinableWith = (id) => {
     const cur = formData.combinable_with || [];
     setFormData({ ...formData, combinable_with: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
@@ -559,6 +581,35 @@ export default function AdminCampaigns() {
               {/* HARİÇ TUTULACAK ÜRÜNLER: kategori seçili olsa bile bu ürünlere kampanya UYGULANMAZ */}
               <div>
                 <label className={lblCls}>Kategoriden hariç tutulacak ürünler (opsiyonel)</label>
+                {/* ÜRÜN SEÇİCİ: arayıp tıklayarak hariç-tutma listesine ekle (id yazmaya gerek yok). */}
+                <div className="relative mb-2">
+                  <input
+                    type="text"
+                    value={exQuery}
+                    onChange={(e) => searchExcl(e.target.value)}
+                    placeholder="Ürün ara ve tıkla → hariç tutulacaklar listesine eklenir…"
+                    className={inputCls}
+                  />
+                  {exResults.length > 0 && (
+                    <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-auto">
+                      {exResults.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => addExcl(p)}
+                          className="w-full text-left px-3 py-2 hover:bg-orange-50 flex items-center gap-2 border-b last:border-b-0 border-gray-100"
+                        >
+                          <span className="flex-1 text-sm text-gray-800 truncate">{p.name}</span>
+                          <span className="text-[11px] text-gray-400 whitespace-nowrap">
+                            {p.urun_karti_id ? `kart ${p.urun_karti_id}` : (p.stock_code || p.id)}
+                            {p.is_active === false ? " · pasif" : ""}
+                          </span>
+                          <Plus size={14} className="text-orange-500 shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <textarea
                   rows={3}
                   value={formData.excluded_products_raw || ""}
