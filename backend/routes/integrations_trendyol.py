@@ -2786,6 +2786,18 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                     # ki tarih sıralaması doğru olsun.
                     _was_new = (res.matched_count == 0)
                     if _was_new:
+                        # KÖK NEDEN (tekrarlayan hayalet +stok): matched_count==0 iki nedenle olur —
+                        # (a) sipariş GERÇEKTEN yok, (b) sipariş VAR ama terminal-koruma filtresi
+                        # (status $nin, satır ~2778) UnDelivered→confirmed güncellemesini bloke etti.
+                        # (b)'de eskiden YENİ id ile MÜKERRER "confirmed" doküman insert ediliyordu →
+                        # aynı order_number için çok doküman → 5 dk'lık iptal turunun restock guard'ı
+                        # yanlış kopyaya bakıp her turda tekrar +1 yapıyordu. Artık: order_number
+                        # zaten varsa MÜKERRER OLUŞTURMA (mevcut terminal kayıt korunur).
+                        _exists_any = await db.orders.find_one(
+                            {"order_number": onum, "platform": "trendyol"}, {"_id": 1})
+                        if _exists_any:
+                            _was_new = False
+                    if _was_new:
                         try:
                             mapped["id"] = generate_id()
                             mapped["created_at"] = _ms_to_iso(t_order.get("orderDate")) or datetime.now(timezone.utc).isoformat()
@@ -2807,7 +2819,14 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                                 from routes.orders import _stock_delta_for_order, _RESTORE_MOVE_TYPES
                                 # B4: guard'ı TÜM restore hareketlerine genişlet (kısmi iade
                                 # sonrası tam-iptal çift-restock'unu engelle).
-                                _already = await db.stock_movements.find_one({"order_id": _o.get("id"), "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1})
+                                # B10: guard'ı order_id VE order_number ile al — aynı order_number
+                                # için mükerrer doküman olsa bile (yukarıdaki fix sonrası oluşmamalı,
+                                # ama GEÇMİŞTE oluşmuş kopyalar için) herhangi biri restock edilmişse
+                                # TEKRAR +1 YAPMA. Eskiden yalnız order_id bakılıp mükerrer kopyada
+                                # atlanıyor ve her 5 dk'da hayalet +stok üretiyordu.
+                                _already = await db.stock_movements.find_one(
+                                    {"$or": [{"order_id": _o.get("id")}, {"order_number": onum}],
+                                     "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1})
                                 if not _already:
                                     _moves = await _stock_delta_for_order(_o, +1)
                                     await db.stock_movements.insert_one({
@@ -4228,8 +4247,10 @@ async def trendyol_reconcile(
                 _o = await db.orders.find_one({"id": row["id"]}, {"_id": 0, "id": 1, "items": 1})
                 if _o:
                     from routes.orders import _stock_delta_for_order, _RESTORE_MOVE_TYPES
+                    # B10: order_id VE order_number ile guard — mükerrer dokümanda çift-restock önle.
                     _already = await db.stock_movements.find_one(
-                        {"order_id": _o["id"], "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1})
+                        {"$or": [{"order_id": _o["id"]}, {"order_number": row["order_number"]}],
+                         "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1})
                     if not _already:
                         _moves = await _stock_delta_for_order(_o, +1)
                         await db.stock_movements.insert_one({

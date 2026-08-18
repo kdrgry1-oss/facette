@@ -343,8 +343,11 @@ async def _update_existing_trendyol_order(_db, existing, data, number, restock_s
             # B4: guard'ı TÜM restore hareketlerine genişlet. Yalnız 'order_cancelled' aramak,
             # sipariş önceden kısmi iade (return_restock/order_returned) ile geri stoklanmışsa
             # bunu göremeyip TÜM siparişi İKİNCİ kez +stokluyordu.
+            # B10: guard'ı order_id VE order_number ile al — mükerrer sipariş dokümanı olsa bile
+            # herhangi biri restock edilmişse tekrar +stok yapma (hayalet stok döngüsü fix'i).
             _already = await _db.stock_movements.find_one(
-                {"order_id": existing.get("id"), "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1}
+                {"$or": [{"order_id": existing.get("id")}, {"order_number": number}],
+                 "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1}
             )
             if not _already:
                 _moves = await _stock_delta_for_order(existing, +1)
