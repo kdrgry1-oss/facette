@@ -197,21 +197,34 @@ export default function ProductDetail() {
     axios.post(`${API}/products/cart-pricing`, { product_ids: _rvIdsKey.split(",") })
       .then((r) => {
         if (cancel || !r.data?.items) return;
+        const items = r.data.items;
         setRecentItems((prev) => {
-          let changed = false;
-          const next = prev.map((it) => {
-            const info = r.data.items[it.id];
-            if (!info) return it;
-            const patch = {
-              price: info.price, sale_price: info.sale_price,
-              campaign_discount_percent: info.campaign_discount_percent,
-            };
-            if (Number(it.price) === Number(info.price) && Number(it.sale_price || 0) === Number(info.sale_price || 0)
-                && Number(it.campaign_discount_percent || 0) === Number(info.campaign_discount_percent || 0)) return it;
-            changed = true;
-            return { ...it, ...patch };
-          });
-          return changed ? next : prev;
+          // PASİF/SİLİNMİŞ ÜRÜNLERİ AT: cart-pricing bulunan her ürün için is_active döner.
+          // Sunucudan HİÇ dönmeyen (info yok) = silinmiş; is_active===false = pasif. İkisi de
+          // "Son Gezdiklerin"de gösterilmez (kırık görsel / satılamayan ürün sızmasın).
+          const next = prev
+            .filter((it) => {
+              const info = items[it.id];
+              return info && info.is_active !== false;
+            })
+            .map((it) => {
+              const info = items[it.id];
+              return {
+                ...it,
+                price: info.price, sale_price: info.sale_price,
+                campaign_discount_percent: info.campaign_discount_percent,
+              };
+            });
+          // Değişiklik yoksa aynı referansı koru (gereksiz render/döngü olmasın)
+          const unchanged = next.length === prev.length && next.every((it, i) =>
+            it.id === prev[i].id
+            && Number(it.price) === Number(prev[i].price)
+            && Number(it.sale_price || 0) === Number(prev[i].sale_price || 0)
+            && Number(it.campaign_discount_percent || 0) === Number(prev[i].campaign_discount_percent || 0));
+          if (unchanged) return prev;
+          // Temizlenmiş listeyi localStorage'a da yaz (pasifler bir daha yüklenmesin)
+          try { localStorage.setItem(RV_KEY, JSON.stringify(next.slice(0, 12))); } catch { /* sessiz */ }
+          return next;
         });
       })
       .catch(() => {});
