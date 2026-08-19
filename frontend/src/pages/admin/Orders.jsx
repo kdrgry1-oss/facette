@@ -877,19 +877,25 @@ export default function AdminOrders({ unpaidView = false }) {
     }
   };
 
-  const formatDate = (dateStr) => {
+  // Bir siparişin pazaryeri (Trendyol/HB/Temu/N11/Amazon) olup olmadığı.
+  const _isMarketplaceOrder = (o) => {
+    const s = String((o && (o.platform || o.marketplace)) || "").toLowerCase();
+    return ["trendyol", "hepsiburada", "temu", "n11", "amazon"].some((x) => s.includes(x));
+  };
+  // asIs=true → değeri OLDUĞU GİBİ göster (kayma yok). Pazaryeri siparişlerinde orderDate
+  // TR duvar-saati olarak +00:00 etiketiyle saklanıyor (Trendyol orderDate quirk); +3 EKLENİRSE
+  // saat ileri kayar ("13:45 gibi gelecek saat"). Site siparişleri ise gerçek UTC → +3 (Istanbul).
+  const formatDate = (dateStr, asIs = false) => {
     if (!dateStr) return "";
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return "";
-    // created_at UTC saklanır; saat dilimini CİHAZDAN bağımsız TR'ye (Europe/Istanbul) sabitle
-    // → admin'in cihazı UTC/farklı TZ olsa bile sipariş saatleri her zaman doğru TR saatiyle görünür.
     return d.toLocaleString('tr-TR', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      timeZone: 'Europe/Istanbul'
+      timeZone: asIs ? 'UTC' : 'Europe/Istanbul'
     });
   };
 
@@ -1443,7 +1449,7 @@ export default function AdminOrders({ unpaidView = false }) {
                         return <span className="text-gray-300">—</span>;
                       })()}
                     </td>
-                    <td className="text-sm text-gray-500">{formatDate(order.created_at)}</td>
+                    <td className="text-sm text-gray-500">{formatDate(order.created_at, _isMarketplaceOrder(order))}</td>
                     <td>
                       {/* Ticimax benzeri işlem butonları - daha belirgin ve ayrık */}
                       <div className="flex items-center gap-1 flex-wrap">
