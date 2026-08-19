@@ -878,12 +878,18 @@ export default function AdminOrders({ unpaidView = false }) {
   };
 
   const formatDate = (dateStr) => {
-    return new Date(dateStr).toLocaleDateString('tr-TR', {
+    if (!dateStr) return "";
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "";
+    // created_at UTC saklanır; saat dilimini CİHAZDAN bağımsız TR'ye (Europe/Istanbul) sabitle
+    // → admin'in cihazı UTC/farklı TZ olsa bile sipariş saatleri her zaman doğru TR saatiyle görünür.
+    return d.toLocaleString('tr-TR', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      timeZone: 'Europe/Istanbul'
     });
   };
 
@@ -1775,14 +1781,14 @@ export default function AdminOrders({ unpaidView = false }) {
                         </span>
                       </p>
                       {selectedOrder.payment_notified_at && (
-                        <p className="text-xs text-gray-500 mt-1">Dekont yüklendi: {new Date(selectedOrder.payment_notified_at).toLocaleString('tr-TR')}</p>
+                        <p className="text-xs text-gray-500 mt-1">Dekont yüklendi: {new Date(selectedOrder.payment_notified_at).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })}</p>
                       )}
                       {selectedOrder.payment_receipt?.note && (
                         <p className="text-xs text-gray-500 mt-0.5">Not: {selectedOrder.payment_receipt.note}</p>
                       )}
                       {selectedOrder.payment_status !== 'paid' && selectedOrder.payment_reminder_last_at && (
                         <p className="text-xs text-blue-600 mt-1">
-                          Son hatırlatma: {new Date(selectedOrder.payment_reminder_last_at).toLocaleString('tr-TR')}
+                          Son hatırlatma: {new Date(selectedOrder.payment_reminder_last_at).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })}
                           {selectedOrder.payment_reminder_count ? ` (${selectedOrder.payment_reminder_count} kez)` : ''}
                         </p>
                       )}
@@ -2258,7 +2264,7 @@ export default function AdminOrders({ unpaidView = false }) {
                 {noteTargetOrder.admin_notes.map(n => (
                   <div key={n.id || n.at} className="bg-yellow-50 border-l-4 border-yellow-400 p-2 rounded text-sm">
                     <p className="text-gray-800">{n.text}</p>
-                    <p className="text-[10px] text-gray-500 mt-1">{n.by || "Personel"} · {new Date(n.at).toLocaleString('tr-TR')}</p>
+                    <p className="text-[10px] text-gray-500 mt-1">{n.by || "Personel"} · {new Date(n.at).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })}</p>
                   </div>
                 ))}
               </div>
