@@ -595,7 +595,7 @@ export default function Checkout() {
       toast.success(`Kupon uygulandı: ${Number(hit.discount).toFixed(2)} TL indirim`);
     } else {
       const rej = (d.rejected || []).find((r) => (r.code || "").toUpperCase() === code);
-      toast.error(rej?.reason || "Kupon uygulanamadı (daha yüksek öncelikli kampanya olabilir)");
+      toast.error(rej?.reason || "Bu kupon, sepette uygulanan kampanya ile birlikte kullanılamıyor. Kampanyayı kaldırıp tekrar deneyin.");
     }
   };
 

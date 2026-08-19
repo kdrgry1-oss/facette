@@ -133,6 +133,20 @@ async def check_gift_card(request: Request, payload: dict):
     code = (payload or {}).get("code") or ""
     card = await _find_active_card(code)
     if not card:
+        # Sık karışıklık: kullanıcı indirim/kampanya KODUNU (ör. HOSGELDIN10) hediye çeki
+        # alanına giriyor → "geçersiz" mesajı yanıltıyor. Kod bir kupon/kampanya ise net söyle
+        # ve kampanyaların her zaman birleşmeyebileceğini uyar (kullanıcı isteği).
+        _norm = str(code or "").strip().upper()
+        if _norm:
+            try:
+                _cpn = await db.coupons.find_one({"code": _norm}, {"_id": 0, "id": 1})
+            except Exception:
+                _cpn = None
+            if _cpn:
+                return {"valid": False, "is_coupon": True,
+                        "error": "Bu bir indirim/kampanya kodu — hediye çeki değil. Lütfen "
+                                 "\"Promosyon kodu\" alanına girin. Not: sepette zaten bir kampanya "
+                                 "varsa ikisi aynı anda kullanılamayabilir."}
         return {"valid": False, "error": "Hediye çeki geçersiz veya süresi dolmuş"}
     if (card.get("kind") or "gift") == "credit":
         owner = (card.get("customer_email") or "").strip().lower()
