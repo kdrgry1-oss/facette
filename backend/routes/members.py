@@ -95,32 +95,30 @@ async def list_members(
 
     skip = (page - 1) * limit
 
-    # DENETİM FIX (#39): segment sunucuda materyalize edilir. Eskiden segment yalnız
-    # o SAYFAYA gelen kayıtlar üzerinde Python'da kırpılıyordu → 'total' yanlış, sayfalar
-    # eksik/boş kalıyordu. Artık orders istatistiği tek $lookup ile hesaplanır, segment
-    # $addFields ile türetilir, filtre uygulandıktan SONRA total sayılır ve skip/limit
-    # $facet içinde yapılır. Sonuç: doğru sayfalama + doğru toplam.
-    base_pipeline: list = [
-        {"$match": query},
-        {"$lookup": {
-            "from": "orders",
-            "let": {"uid": "$id", "em": {"$toLower": {"$ifNull": ["$email", ""]}}},
-            "pipeline": [
-                {"$match": {"$expr": {"$and": [
-                    {"$ne": ["$status", "cancelled"]},
-                    {"$or": [
-                        {"$eq": ["$user_id", "$$uid"]},
-                        {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$email", ""]}}, "$$em"]}]},
-                        {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$shipping_address.email", ""]}}, "$$em"]}]},
-                        {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$billing_address.email", ""]}}, "$$em"]}]},
-                    ]},
-                ]}}},
-                {"$group": {"_id": None, "orders": {"$sum": 1},
-                            "total_spent": {"$sum": {"$ifNull": ["$total", 0]}},
-                            "last_order_at": {"$max": "$created_at"}}},
-            ],
-            "as": "_ostats",
-        }},
+    # Sipariş istatistiği $lookup'ı (e-posta lowercase eşleşmesi → indekslenemez) PAHALI.
+    # Eskiden TÜM üyeler (10k+) için, $facet'ten ÖNCE çalışıyordu → O(üye×sipariş) → 60sn
+    # timeout, sayfa açılmıyordu. FIX: sipariş istatistiğini YALNIZ görüntülenen sayfanın
+    # üyeleri için hesapla. Bunun için $lookup'ı sort/skip/limit'ten SONRA koyarız.
+    _stats_lookup = {"$lookup": {
+        "from": "orders",
+        "let": {"uid": "$id", "em": {"$toLower": {"$ifNull": ["$email", ""]}}},
+        "pipeline": [
+            {"$match": {"$expr": {"$and": [
+                {"$ne": ["$status", "cancelled"]},
+                {"$or": [
+                    {"$eq": ["$user_id", "$$uid"]},
+                    {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$email", ""]}}, "$$em"]}]},
+                    {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$shipping_address.email", ""]}}, "$$em"]}]},
+                    {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$billing_address.email", ""]}}, "$$em"]}]},
+                ]},
+            ]}}},
+            {"$group": {"_id": None, "orders": {"$sum": 1},
+                        "total_spent": {"$sum": {"$ifNull": ["$total", 0]}},
+                        "last_order_at": {"$max": "$created_at"}}},
+        ],
+        "as": "_ostats",
+    }}
+    _stats_addfields = [
         {"$addFields": {
             "orders_count": {"$ifNull": [{"$arrayElemAt": ["$_ostats.orders", 0]}, 0]},
             "total_spent": {"$round": [{"$ifNull": [{"$arrayElemAt": ["$_ostats.total_spent", 0]}, 0]}, 2]},
@@ -134,25 +132,46 @@ async def list_members(
             ], "default": "prospect"}},
         }},
     ]
-    if segment:
-        base_pipeline.append({"$match": {"segment": segment}})
-    base_pipeline.append({"$facet": {
-        "meta": [{"$count": "total"}],
-        "items": [
+    _project = {"$project": {"_id": 0, "password": 0, "_ostats": 0}}
+
+    if not segment:
+        # HIZLI YOL (varsayılan): önce sayfayı seç, istatistiği YALNIZ o ~25 üye için hesapla.
+        total = await db.users.count_documents(query)
+        pipeline = [
+            {"$match": query},
             {"$sort": {"created_at": -1}},
             {"$skip": skip},
             {"$limit": limit},
-            {"$project": {"_id": 0, "password": 0, "_ostats": 0}},
-        ],
-    }})
+            _stats_lookup,
+            *_stats_addfields,
+            _project,
+        ]
+        items = [r async for r in db.users.aggregate(pipeline)]
+        return {"items": items, "total": total, "page": page, "pages": (total + limit - 1) // limit}
 
+    # SEGMENT FİLTRESİ: segment istatistikten türediği için filtreden ÖNCE tüm eşleşen üyeler
+    # için hesaplanmalı (bilinçli filtre aksiyonu). Sayfalama $facet içinde; total filtre sonrası.
+    base_pipeline: list = [
+        {"$match": query},
+        _stats_lookup,
+        *_stats_addfields,
+        {"$match": {"segment": segment}},
+        {"$facet": {
+            "meta": [{"$count": "total"}],
+            "items": [
+                {"$sort": {"created_at": -1}},
+                {"$skip": skip},
+                {"$limit": limit},
+                _project,
+            ],
+        }},
+    ]
     agg_out = None
-    async for row in db.users.aggregate(base_pipeline):
+    async for row in db.users.aggregate(base_pipeline, allowDiskUse=True):
         agg_out = row
     items = (agg_out or {}).get("items", [])
     meta = (agg_out or {}).get("meta", [])
     total = int(meta[0]["total"]) if meta else 0
-
     return {"items": items, "total": total, "page": page, "pages": (total + limit - 1) // limit}
 
 
