@@ -136,17 +136,21 @@ async def check_gift_card(request: Request, payload: dict):
         # Sık karışıklık: kullanıcı indirim/kampanya KODUNU (ör. HOSGELDIN10) hediye çeki
         # alanına giriyor → "geçersiz" mesajı yanıltıyor. Kod bir kupon/kampanya ise net söyle
         # ve kampanyaların her zaman birleşmeyebileceğini uyar (kullanıcı isteği).
-        _norm = str(code or "").strip().upper()
+        # Harf + Türkçe-I duyarsız: 'HOSGELDİN', 'hosgeldin', 'hosgeldın' hepsi 'HOSGELDIN' say.
+        _norm = str(code or "").strip().replace("İ", "I").replace("ı", "I").upper()
         if _norm:
+            import re as _re_cpn
             try:
-                _cpn = await db.coupons.find_one({"code": _norm}, {"_id": 0, "id": 1})
+                _cpn = await db.coupons.find_one(
+                    {"code": {"$regex": f"^{_re_cpn.escape(_norm)}$", "$options": "i"}},
+                    {"_id": 0, "id": 1, "code": 1})
             except Exception:
                 _cpn = None
             if _cpn:
-                return {"valid": False, "is_coupon": True,
-                        "error": "Bu bir indirim/kampanya kodu — hediye çeki değil. Lütfen "
-                                 "\"Promosyon kodu\" alanına girin. Not: sepette zaten bir kampanya "
-                                 "varsa ikisi aynı anda kullanılamayabilir."}
+                # is_coupon + coupon_code: frontend bu kodu OTOMATİK "Promosyon kodu" olarak
+                # uygular (kullanıcı ayrı alana tekrar girmek zorunda kalmaz).
+                return {"valid": False, "is_coupon": True, "coupon_code": _cpn.get("code") or _norm,
+                        "error": "Bu bir indirim/kampanya kodu — promosyon olarak uygulanıyor…"}
         return {"valid": False, "error": "Hediye çeki geçersiz veya süresi dolmuş"}
     if (card.get("kind") or "gift") == "credit":
         owner = (card.get("customer_email") or "").strip().lower()

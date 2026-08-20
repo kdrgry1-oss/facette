@@ -747,13 +747,20 @@ async def _promo_cap_pct() -> float:
     return v if v > 0 else 70.0
 
 
+def fold_code(s) -> str:
+    """Kupon kodunu HARF-DUYARSIZ + TÜRKÇE-I DUYARSIZ tek forma indirger.
+    Kullanıcı 'HOSGELDİN' (noktalı İ), 'hosgeldin', 'hosgeldın' (noktasız ı) yazsa da
+    hepsi kayıtlı 'HOSGELDIN' ile eşleşsin (kullanıcı isteği). İ/ı → ASCII I, sonra upper."""
+    return (s or "").strip().replace("İ", "I").replace("ı", "I").upper()
+
+
 async def evaluate_cart_promotions(cart_total: float, items: list,
                                    user_id=None, email: str = "", entered_code: str = "",
                                    payment_method: str = "", excluded_ids=None) -> dict:
     """Otomatik kampanyalar + (varsa) girilen kodu birlikte degerlendirir. Saf orkestrasyon.
     excluded_ids: musterinin X ile kaldirdigi kampanya id'leri -> uygulanmaz (ama eligible'da
     yine gorunur ki geri eklenebilsin). Boylece motor 'en yuksegi zorla' DEGIL, musteri secer."""
-    entered = (entered_code or "").strip().upper()
+    entered = fold_code(entered_code)
     # KOK SEBEP DUZELTMESI: items'i gercek urun kategori uyelikleriyle zenginlestir
     # ('En Yeniler' gibi ikincil kategoriye ozel kampanyalar bunsuz hic eslesmiyordu).
     items = await _enrich_items_category_ids(items)
@@ -777,7 +784,10 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
             candidates[c["id"]] = c
     entered_id = None
     if entered:
-        ec = await db.coupons.find_one({"code": entered}, {"_id": 0})
+        # Harf/Türkçe-I duyarsız eşleşme: girilen kod katlanmış (fold_code); kayıtlı kodla
+        # büyük-küçük harf gözetmeksizin eşle (kayıtlı kodlar ASCII büyük harf).
+        ec = await db.coupons.find_one(
+            {"code": {"$regex": f"^{re.escape(entered)}$", "$options": "i"}}, {"_id": 0})
         if ec:
             candidates[ec["id"]] = ec
             entered_id = ec["id"]

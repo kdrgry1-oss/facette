@@ -584,26 +584,51 @@ export default function Checkout() {
     setTimeout(() => navigate(`/order-success/${orderNumber}`), 1200);
   };
 
-  const applyCode = async (rawCode) => {
-    const code = (rawCode || "").trim().toUpperCase();
+  // Kodu HARF-DUYARSIZ + TÜRKÇE-I DUYARSIZ tek forma indir (İ/ı → I). Böylece 'HOSGELDİN',
+  // 'hosgeldin', 'hosgeldın' hepsi kayıtlı 'HOSGELDIN' ile eşleşir (kullanıcı isteği).
+  const foldCode = (s) => (s || "").trim().replace(/İ/g, "I").replace(/ı/g, "I").toUpperCase();
+
+  const applyCode = async (rawCode, _fromGift = false) => {
+    const code = foldCode(rawCode);
     if (!code) return;
     const d = await recalcPromotions(code);
     if (!d) { toast.error("Kampanya hesaplanamadı"); return; }
-    const hit = (d.applied || []).find((a) => (a.code || "").toUpperCase() === code);
+    const hit = (d.applied || []).find((a) => foldCode(a.code) === code);
     if (hit) {
       setAppliedCoupon({ code });
+      setCouponCode(rawCode);
       toast.success(`Kupon uygulandı: ${Number(hit.discount).toFixed(2)} TL indirim`);
-    } else {
-      const rej = (d.rejected || []).find((r) => (r.code || "").toUpperCase() === code);
-      toast.error(rej?.reason || "Bu kupon, sepette uygulanan kampanya ile birlikte kullanılamıyor. Kampanyayı kaldırıp tekrar deneyin.");
+      return;
     }
+    const rej = (d.rejected || []).find((r) => foldCode(r.code) === code);
+    if (rej) {
+      // Kod GEÇERLİ bir kupon ama bu sepete uygulanamıyor (ör. kampanya çakışması / ilk sipariş).
+      toast.error(rej.reason || "Bu kupon şu an bu sepete uygulanamıyor.");
+      return;
+    }
+    // Kod hiçbir kampanyayla eşleşmedi → belki HEDİYE ÇEKİdir; giftcard olarak dene (döngü yok).
+    if (!_fromGift) {
+      try {
+        const { data } = await axios.post(`${API}/gift-cards/check`, {
+          code, email: shippingAddress.email || user?.email || "",
+        });
+        if (data?.valid) {
+          setGiftCardApplied({ code, balance: Number(data.balance) || 0, kind: data.kind || "gift" });
+          setGiftCardCode(rawCode);
+          toast.success(`Hediye çeki uygulandı — bakiye: ${(Number(data.balance) || 0).toFixed(2)} TL`);
+          return;
+        }
+      } catch { /* sessiz */ }
+    }
+    toast.error("Bu kod geçersiz veya bu sepete uygulanamıyor.");
   };
 
   const handleApplyCoupon = () => applyCode(couponCode);
 
   // C2: Hediye çeki doğrula + uygula (bakiye sunucudan; asıl düşüm sipariş oluşturmada atomik)
   const handleApplyGiftCard = async () => {
-    const code = giftCardCode.trim().toUpperCase();
+    const raw = giftCardCode.trim();
+    const code = foldCode(raw);
     if (!code || giftCardBusy) return;
     setGiftCardBusy(true);
     try {
@@ -613,6 +638,12 @@ export default function Checkout() {
       if (data?.valid) {
         setGiftCardApplied({ code, balance: Number(data.balance) || 0, kind: data.kind || "gift" });
         toast.success(`Hediye çeki uygulandı — bakiye: ${(Number(data.balance) || 0).toFixed(2)} TL`);
+      } else if (data?.is_coupon) {
+        // Hediye çeki alanına KUPON/kampanya kodu girilmiş → ayrı alana zorlama YOK; otomatik
+        // promosyon olarak uygula (kullanıcı isteği: hangi kutuya girilirse kabul et).
+        setGiftCardApplied(null);
+        setGiftCardCode("");
+        await applyCode(data.coupon_code || raw, true);
       } else {
         setGiftCardApplied(null);
         toast.error(data?.error || "Hediye çeki geçersiz");
