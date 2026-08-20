@@ -833,6 +833,16 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
         scaled_items = [{**it, "price": float(it.get("price", 0)) * scale} for it in items]
         d = _compute_discount(cand["c"], running, scaled_items)
         fs = cand["free_shipping"]
+        # 4000-TL KAPISI (muhasebe sızıntısı): bedava-kargo kampanyası, İNDİRİM SONRASI kalan
+        # tutar (running) kampanyanın min_cart_total'ını KARŞILAMIYORSA uygulanmaz. KARGO0 gibi
+        # kampanyalar eskiden min'i indirim ÖNCESİ sepete göre geçtiğinden, indirimlerle 4000
+        # altına düşen sepetler bedava kargo alıyordu ("4000 altı ama kargo bedava" faturaları).
+        # free_shipping kampanyaları hesaplanan indirimi 0 olduğundan sıralamada en sona düşer →
+        # bu noktada `running` tüm indirimler düşülmüş NET tutardır; eşiği net tutara uygularız.
+        if fs:
+            _fs_min = float(cand["c"].get("min_cart_total") or 0)
+            if _fs_min and round(running, 2) < _fs_min:
+                continue
         if d <= 0 and not fs:
             continue
         applied.append({**cand, "applied_discount": round(d, 2)})
