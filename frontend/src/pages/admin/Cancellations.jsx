@@ -217,7 +217,7 @@ export default function Cancellations() {
               <th className="text-left font-medium px-3 py-2">Müşteri / Ürün</th>
               <th className="text-left font-medium px-3 py-2">Tutar</th>
               <th className="text-left font-medium px-3 py-2">Ödeme</th>
-              <th className="text-left font-medium px-3 py-2">Tarih</th>
+              <th className="text-left font-medium px-3 py-2">Sipariş Tarihi</th>
               <th className="text-left font-medium px-3 py-2">Sebep</th>
               <th className="text-left font-medium px-3 py-2">Durum</th>
               <th className="text-left font-medium px-3 py-2">İşlem</th>

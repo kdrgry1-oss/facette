@@ -2726,11 +2726,33 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                                 end_date_ms=end_date_ms, size=100,
                             )
                             _DEAD_ST = ("Cancelled", "Returned", "UnDelivered", "UnSupplied")
+                            _DEAD_LINE_ST = {"Cancelled", "Returned", "UnDelivered", "UnSupplied"}
                             for _pk in (_allp.get("content") or []):
+                                # (1) SİBLING/İSİM KORUMASI: dönen paketin orderNumber'ı işlenen
+                                # sipariş ile BİREBİR eşleşmiyorsa reddet — aynı isimli farklı bir
+                                # siparişin paketi "aktif paket" diye sızıp yanlış kısmi-iptal üretmesin.
+                                if str(_pk.get("orderNumber") or "") != onum:
+                                    continue
                                 _pst = str(_pk.get("shipmentPackageStatus") or _pk.get("status") or "")
-                                if _pst and _pst not in _DEAD_ST:
-                                    _active_pkg = _pk
-                                    break
+                                if _pst and _pst in _DEAD_ST:
+                                    continue  # paket-statüsü ölü → aktif değil
+                                # (2) SATIR-STATÜ KORUMASI: paket-statüsü "ölü değil" görünse bile
+                                # Trendyol iptali çoğu kez KALEM seviyesindedir (paket Shipped/Created
+                                # kalır ama lines[].orderLineItemStatusName = Cancelled). Paket ancak
+                                # İPTAL-OLMAYAN en az bir satırı varsa AKTİF sayılır; TÜM satırlar
+                                # iptalse bu paket aktif DEĞİL → sipariş tam-iptale düşsün.
+                                _lines = _pk.get("lines") or []
+                                if _lines:
+                                    _has_live_line = any(
+                                        (str(_ln.get("orderLineItemStatusName") or "").strip()
+                                         and str(_ln.get("orderLineItemStatusName") or "").strip()
+                                             not in _DEAD_LINE_ST)
+                                        for _ln in _lines
+                                    )
+                                    if not _has_live_line:
+                                        continue  # tüm kalemler iptal → aktif paket değil
+                                _active_pkg = _pk
+                                break
                         except Exception as _pce:
                             logger.warning(f"[trendyol kismi-iptal kontrol {onum}] {_pce}")
                             _active_pkg = None
@@ -2768,6 +2790,11 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                     if st in _CANCEL_PASS:
                         _set["cancel_reason"] = _reason
                         _set["cancel_source"] = "trendyol"
+                        # Tam iptale düşen sipariş ARTIK kısmi değil → eskiden yanlış set edilmiş
+                        # partial_cancelled bayrağını temizle. Bu, 11520635927 gibi mevcut yanlış
+                        # kayıtları bir sonraki iptal-tarama turunda OTOMATİK düzeltir.
+                        if mapped.get("status") == "cancelled":
+                            _set["partial_cancelled"] = False
                     # İADE KORUMASI (kök neden): bu sweep bir siparişi ASLA terminal (iade/iptal)
                     # durumundan TEKRAR aktif 'confirmed'e ÇEKMESİN. Örn. "UnDelivered" paketi
                     # 'confirmed'e map olur; claim ile 'returned' yapılmış siparişi bu ezip ciroyu
