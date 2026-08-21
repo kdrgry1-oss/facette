@@ -1249,7 +1249,7 @@ export default function AdminOrders({ unpaidView = false }) {
                         )}
                       </button>
                     </td>
-                    <td className="font-medium">{order.order_number}{order.has_partial_return ? <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 align-middle" title="Bu siparişte bir veya daha fazla kalem iade edildi">kısmi iade</span> : null}{order.partial_cancelled ? <span className="relative inline-flex ml-1.5 align-middle" title="Bu siparişte iptal edilen ürün var"><span className="animate-ping absolute inline-flex h-2.5 w-2.5 rounded-full bg-red-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span></span> : null}</td>
+                    <td className="font-medium">{order.order_number}{order.has_partial_return ? <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 align-middle" title="Bu siparişte bir veya daha fazla kalem iade edildi">kısmi iade</span> : null}{(order.partial_cancelled && !["cancelled", "cancel_refunded"].includes(order.status)) ? <span className="relative inline-flex ml-1.5 align-middle" title="Bu siparişte iptal edilen ürün var"><span className="animate-ping absolute inline-flex h-2.5 w-2.5 rounded-full bg-red-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span></span> : null}</td>
                     <td>
                       <div>
                         {(() => {
@@ -1581,7 +1581,7 @@ export default function AdminOrders({ unpaidView = false }) {
           
           {selectedOrder && (
             <div className="space-y-6">
-              {selectedOrder.partial_cancelled && (
+              {selectedOrder.partial_cancelled && !["cancelled", "cancel_refunded"].includes(selectedOrder.status) && (
                 <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
                   <span className="relative inline-flex">
                     <span className="animate-ping absolute inline-flex h-2.5 w-2.5 rounded-full bg-red-400 opacity-75"></span>

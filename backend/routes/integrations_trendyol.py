@@ -2787,14 +2787,15 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                         "trendyol_status_raw": _raw_status,
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
+                    # Tam iptale (cancelled) düşen sipariş ARTIK kısmi DEĞİL → hangi pass olursa olsun
+                    # eskiden yanlış set edilmiş partial_cancelled bayrağını temizle (iptal edilmiş
+                    # siparişte 'kısmi iptal' uyarısı çıkmasın). 11520635927 gibi mevcut yanlış
+                    # kayıtları bir sonraki iptal-tarama turunda OTOMATİK düzeltir.
+                    if str(mapped.get("status")) == "cancelled":
+                        _set["partial_cancelled"] = False
                     if st in _CANCEL_PASS:
                         _set["cancel_reason"] = _reason
                         _set["cancel_source"] = "trendyol"
-                        # Tam iptale düşen sipariş ARTIK kısmi değil → eskiden yanlış set edilmiş
-                        # partial_cancelled bayrağını temizle. Bu, 11520635927 gibi mevcut yanlış
-                        # kayıtları bir sonraki iptal-tarama turunda OTOMATİK düzeltir.
-                        if mapped.get("status") == "cancelled":
-                            _set["partial_cancelled"] = False
                     # İADE KORUMASI (kök neden): bu sweep bir siparişi ASLA terminal (iade/iptal)
                     # durumundan TEKRAR aktif 'confirmed'e ÇEKMESİN. Örn. "UnDelivered" paketi
                     # 'confirmed'e map olur; claim ile 'returned' yapılmış siparişi bu ezip ciroyu
