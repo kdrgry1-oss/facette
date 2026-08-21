@@ -24,6 +24,8 @@ export default function ProductAttributes() {
   const [newAttrName, setNewAttrName] = useState('');
 
   const [newValueName, setNewValueName] = useState('');
+  const [selAttrIds, setSelAttrIds] = useState(new Set());   // toplu ÖZELLİK seçimi
+  const [selVals, setSelVals] = useState(new Set());         // toplu DEĞER seçimi
 
   useEffect(() => {
     fetchAttributes();
@@ -164,6 +166,40 @@ export default function ProductAttributes() {
     });
   };
 
+  const toggleIn = (setter) => (key) => setter((prev) => {
+    const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n;
+  });
+  const toggleAttrSel = toggleIn(setSelAttrIds);
+  const toggleValSel = toggleIn(setSelVals);
+
+  const bulkDeleteAttrs = async () => {
+    const ids = Array.from(selAttrIds);
+    if (!ids.length) return;
+    if (!window.confirm(`${ids.length} özellik silinsin mi?`)) return;
+    let ok = 0;
+    for (const id of ids) {
+      try { await axios.delete(`${API}/attributes/${id}`, { headers: authHeaders() }); ok++; } catch { /* atla */ }
+    }
+    if (selectedAttr && ids.includes(selectedAttr.id)) setSelectedAttr(null);
+    setSelAttrIds(new Set());
+    toast.success(`${ok}/${ids.length} özellik silindi`);
+    fetchAttributes();
+  };
+  const bulkDeleteVals = async () => {
+    if (!selectedAttr) return;
+    const vals = Array.from(selVals);
+    if (!vals.length) return;
+    if (!window.confirm(`${vals.length} değer silinsin mi?`)) return;
+    const updated = (selectedAttr.values || []).filter(v => !selVals.has(v));
+    try {
+      await axios.put(`${API}/attributes/${selectedAttr.id}`,
+        { name: selectedAttr.name, values: updated }, { headers: authHeaders() });
+      toast.success(`${vals.length} değer silindi`);
+      setSelVals(new Set());
+      fetchAttributes();
+    } catch { toast.error('Silinemedi'); }
+  };
+
   const filteredAttributes = attributes.filter(a =>
     a.name.toLowerCase().includes(searchAttr.toLowerCase())
   );
@@ -226,21 +262,40 @@ export default function ProductAttributes() {
               <div className="p-4 text-center text-sm text-gray-500">Özellik bulunamadı.</div>
             ) : (
               <div className="space-y-1">
+                {selAttrIds.size > 0 && (
+                  <div className="flex items-center justify-between px-2 py-1.5 mb-1 bg-red-50 border border-red-200 rounded-lg">
+                    <span className="text-xs font-medium text-red-700">{selAttrIds.size} özellik seçili</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setSelAttrIds(new Set())} className="text-xs text-gray-500 hover:underline">Vazgeç</button>
+                      <button onClick={bulkDeleteAttrs} className="text-xs font-semibold text-red-600 hover:underline flex items-center gap-1"><Trash2 size={12} /> Seçilenleri Sil</button>
+                    </div>
+                  </div>
+                )}
                 {filteredAttributes.map((attr) => (
                   <div
                     key={attr.id}
-                    onClick={() => { setSelectedAttr(attr); setSearchValue(''); setIsAddingAttr(false); }}
+                    onClick={() => { setSelectedAttr(attr); setSearchValue(''); setIsAddingAttr(false); setSelVals(new Set()); }}
                     className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${selectedAttr?.id === attr.id ? 'bg-orange-50 border border-orange-200' : 'hover:bg-gray-100 border border-transparent'}`}
                   >
-                    <div>
-                      <h3 className={`font-medium ${selectedAttr?.id === attr.id ? 'text-orange-700' : 'text-gray-800'}`}>
-                        {attr.name}
-                      </h3>
-                      <p className="text-xs text-gray-500 mt-0.5">{attr.values?.length || 0} değer</p>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={selAttrIds.has(attr.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleAttrSel(attr.id)}
+                        className="w-4 h-4 accent-red-500 shrink-0"
+                        title="Toplu silme için seç"
+                      />
+                      <div className="min-w-0">
+                        <h3 className={`font-medium truncate ${selectedAttr?.id === attr.id ? 'text-orange-700' : 'text-gray-800'}`}>
+                          {attr.name}
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-0.5">{attr.values?.length || 0} değer</p>
+                      </div>
                     </div>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDeleteAttribute(attr.id, attr.name); }}
-                      className="hidden group-hover:block p-1.5 text-red-500 hover:bg-red-100 rounded"
+                      className="hidden group-hover:block p-1.5 text-red-500 hover:bg-red-100 rounded shrink-0"
                       title="Sil"
                     >
                       <Trash2 size={14} />
@@ -305,16 +360,34 @@ export default function ProductAttributes() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-6">
+                {selVals.size > 0 && (
+                  <div className="flex items-center justify-between px-3 py-2 mb-3 bg-red-50 border border-red-200 rounded-lg">
+                    <span className="text-xs font-medium text-red-700">{selVals.size} değer seçili</span>
+                    <div className="flex gap-3">
+                      <button onClick={() => setSelVals(new Set())} className="text-xs text-gray-500 hover:underline">Vazgeç</button>
+                      <button onClick={bulkDeleteVals} className="text-xs font-semibold text-red-600 hover:underline flex items-center gap-1"><Trash2 size={12} /> Seçilenleri Sil</button>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                   {filteredValues.map((val, idx) => (
                     <div
                       key={idx}
-                      className="group flex items-center justify-between bg-white border border-gray-200 p-3 rounded-lg hover:border-orange-300 hover:shadow-sm transition-all"
+                      className={`group flex items-center justify-between bg-white border p-3 rounded-lg hover:shadow-sm transition-all ${selVals.has(val) ? 'border-red-300 bg-red-50/50' : 'border-gray-200 hover:border-orange-300'}`}
                     >
-                      <span className="text-sm font-medium text-gray-700 truncate" title={val}>{val}</span>
+                      <label className="flex items-center gap-2 min-w-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selVals.has(val)}
+                          onChange={() => toggleValSel(val)}
+                          className="w-4 h-4 accent-red-500 shrink-0"
+                          title="Toplu silme için seç"
+                        />
+                        <span className="text-sm font-medium text-gray-700 truncate" title={val}>{val}</span>
+                      </label>
                       <button
                         onClick={() => handleDeleteValue(val)}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:bg-red-50 rounded transition-opacity"
+                        className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:bg-red-50 rounded transition-opacity shrink-0"
                         title="Sil"
                       >
                         <Trash2 size={14} />
