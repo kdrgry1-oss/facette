@@ -367,9 +367,17 @@ async def test_capi_connection(req: PixelReq, current_user: dict = Depends(requi
             token = await _resolve_access_token(existing) or ""
 
     pixel_id = (req.tag_id or "").strip()
-    if not pixel_id or not token:
+    # Hangi alanın eksik olduğunu NET söyle (eskiden 'pixel_id ve access_token gerekli' genel mesajı
+    # kafa karıştırıyordu: token girildiği hâlde Pixel ID boşken de aynı hata çıkıyordu).
+    if not pixel_id and not token:
         raise HTTPException(status_code=400,
-                            detail="Test için pixel_id ve access_token gerekli.")
+                            detail="Test için hem 'Etiket / Pixel ID' hem 'Access Token' gerekli — ikisi de boş.")
+    if not pixel_id:
+        raise HTTPException(status_code=400,
+                            detail="'Etiket / Pixel ID' alanı boş. Meta Pixel/Dataset ID'yi girip tekrar test edin.")
+    if not token:
+        raise HTTPException(status_code=400,
+                            detail="Access Token bulunamadı. Token'ı forma girin (veya kayıtlı pixel'de vault/env anahtarını doğrulayın).")
 
     res = await mod.test_connection(
         pixel_id=pixel_id, access_token=token,
