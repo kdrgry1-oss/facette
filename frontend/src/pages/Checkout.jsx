@@ -155,7 +155,6 @@ export default function Checkout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
   // C2 Hediye çeki / mağaza kredisi
-  const [giftCardCode, setGiftCardCode] = useState("");
   const [giftCardApplied, setGiftCardApplied] = useState(null); // {code, balance, kind}
   const [giftCardBusy, setGiftCardBusy] = useState(false);
   // Aktif ödeme yöntemleri — admin "Ödeme Yöntemleri" ayarından gelir (public /settings).
@@ -608,49 +607,20 @@ export default function Checkout() {
     }
     // Kod hiçbir kampanyayla eşleşmedi → belki HEDİYE ÇEKİdir; giftcard olarak dene (döngü yok).
     if (!_fromGift) {
+      setGiftCardBusy(true);
       try {
         const { data } = await axios.post(`${API}/gift-cards/check`, {
           code, email: shippingAddress.email || user?.email || "",
         });
         if (data?.valid) {
           setGiftCardApplied({ code, balance: Number(data.balance) || 0, kind: data.kind || "gift" });
-          setGiftCardCode(rawCode);
           toast.success(`Hediye çeki uygulandı — bakiye: ${(Number(data.balance) || 0).toFixed(2)} TL`);
           return;
         }
       } catch { /* sessiz */ }
+      finally { setGiftCardBusy(false); }
     }
     toast.error("Bu kod geçersiz veya bu sepete uygulanamıyor.");
-  };
-
-  const handleApplyCoupon = () => applyCode(couponCode);
-
-  // C2: Hediye çeki doğrula + uygula (bakiye sunucudan; asıl düşüm sipariş oluşturmada atomik)
-  const handleApplyGiftCard = async () => {
-    const raw = giftCardCode.trim();
-    const code = foldCode(raw);
-    if (!code || giftCardBusy) return;
-    setGiftCardBusy(true);
-    try {
-      const { data } = await axios.post(`${API}/gift-cards/check`, {
-        code, email: shippingAddress.email || user?.email || "",
-      });
-      if (data?.valid) {
-        setGiftCardApplied({ code, balance: Number(data.balance) || 0, kind: data.kind || "gift" });
-        toast.success(`Hediye çeki uygulandı — bakiye: ${(Number(data.balance) || 0).toFixed(2)} TL`);
-      } else if (data?.is_coupon) {
-        // Hediye çeki alanına KUPON/kampanya kodu girilmiş → ayrı alana zorlama YOK; otomatik
-        // promosyon olarak uygula (kullanıcı isteği: hangi kutuya girilirse kabul et).
-        setGiftCardApplied(null);
-        setGiftCardCode("");
-        await applyCode(data.coupon_code || raw, true);
-      } else {
-        setGiftCardApplied(null);
-        toast.error(data?.error || "Hediye çeki geçersiz");
-      }
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Hediye çeki doğrulanamadı");
-    } finally { setGiftCardBusy(false); }
   };
 
   const handleRemoveCoupon = () => {
@@ -1395,48 +1365,38 @@ export default function Checkout() {
                   </div>
                 )}
 
-                {/* Promosyon kodu — katlanır (Mango usulü; kullanıcıyı kod avına itmez) */}
+                {/* TEK KUTU: indirim VEYA hediye çeki kodu — ne girilirse otomatik algılanır
+                    (kullanıcı isteği: iki ayrı alan yerine tek alan; kod hangi türse o uygulanır). */}
                 <div className="px-5 pt-4">
-                  {(showCoupon || appliedCoupon) ? (
+                  {/* Uygulanmış hediye çeki (varsa) ayrı satırda gösterilir + kaldırılabilir */}
+                  {bizRules["giftcard.enabled"] !== false && giftCardApplied && (
+                    <div className="mb-2 flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded px-3 py-2 text-xs" data-testid="gift-card-applied">
+                      <span className="text-emerald-800">
+                        🎁 {giftCardApplied.kind === "credit" ? "Mağaza kredisi" : "Hediye çeki"} <b>{giftCardApplied.code}</b> — bakiye {Number(giftCardApplied.balance).toFixed(2)} TL
+                      </span>
+                      <button type="button" onClick={() => setGiftCardApplied(null)}
+                        className="text-emerald-700 underline" data-testid="remove-gift-card-btn">Kaldır</button>
+                    </div>
+                  )}
+                  {(showCoupon || appliedCoupon || giftCardApplied) ? (
                     <div className="flex gap-2">
                       <input type="text" value={couponCode}
                         onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                        placeholder="Promosyon kodu"
+                        onKeyDown={(e) => { if (e.key === "Enter" && !appliedCoupon && !giftCardBusy) applyCode(couponCode); }}
+                        placeholder="İndirim veya hediye çeki kodu"
                         className="flex-1 border rounded px-3 py-2 text-sm"
                         data-testid="manual-coupon-input" />
                       {appliedCoupon
                         ? <button type="button" onClick={handleRemoveCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="remove-coupon-btn">Kaldır</button>
-                        : <button type="button" onClick={handleApplyCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="apply-coupon-btn">Uygula</button>}
+                        : <button type="button" onClick={() => applyCode(couponCode)} disabled={giftCardBusy || !couponCode.trim()}
+                            className="text-xs px-3 border rounded hover:bg-stone-50 disabled:opacity-50" data-testid="apply-coupon-btn">
+                            {giftCardBusy ? "..." : "Uygula"}
+                          </button>}
                     </div>
                   ) : (
                     <button type="button" onClick={() => setShowCoupon(true)}
                       className="text-xs text-gray-500 underline hover:text-stone-900"
-                      data-testid="show-coupon-btn">Promosyon kodun var mı?</button>
-                  )}
-                  {/* C2: Hediye çeki / mağaza kredisi (İşletme Kuralları ile açılır/kapanır) */}
-                  {bizRules["giftcard.enabled"] !== false && (
-                    giftCardApplied ? (
-                      <div className="mt-2 flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded px-3 py-2 text-xs" data-testid="gift-card-applied">
-                        <span className="text-emerald-800">
-                          🎁 {giftCardApplied.kind === "credit" ? "Mağaza kredisi" : "Hediye çeki"} <b>{giftCardApplied.code}</b> — bakiye {Number(giftCardApplied.balance).toFixed(2)} TL
-                        </span>
-                        <button type="button" onClick={() => { setGiftCardApplied(null); setGiftCardCode(""); }}
-                          className="text-emerald-700 underline" data-testid="remove-gift-card-btn">Kaldır</button>
-                      </div>
-                    ) : (
-                      <div className="mt-2 flex gap-2">
-                        <input type="text" value={giftCardCode}
-                          onChange={(e) => setGiftCardCode(e.target.value.toUpperCase())}
-                          placeholder="Hediye çeki kodu (HED-...)"
-                          className="flex-1 border rounded px-3 py-2 text-sm"
-                          data-testid="gift-card-input" />
-                        <button type="button" onClick={handleApplyGiftCard} disabled={giftCardBusy || !giftCardCode.trim()}
-                          className="text-xs px-3 border rounded hover:bg-stone-50 disabled:opacity-50"
-                          data-testid="apply-gift-card-btn">
-                          {giftCardBusy ? "..." : "Uygula"}
-                        </button>
-                      </div>
-                    )
+                      data-testid="show-coupon-btn">İndirim / hediye çeki kodun var mı?</button>
                   )}
                 </div>
 
