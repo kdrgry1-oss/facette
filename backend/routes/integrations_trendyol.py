@@ -605,6 +605,21 @@ async def validate_products_for_trendyol(
                 if local_attr:
                     has_val = bool(local_vals.get(local_attr.lower()))
                 if not has_val:
+                    # PUSH PARİTESİ: FACETTE sabit varsayılanı bu zorunlu alanı gap-fill ile
+                    # dolduruyor ve Trendyol'a çözülüyorsa (ya da alan serbest-metin ise) "eksik"
+                    # SAYMA — aksi halde push gönderdiği hâlde rapor yanlış-pozitif "zorunlu eksik" der
+                    # (kullanıcı: "Cinsiyet zaten otomatik Kadın atanmalıydı, nasıl eksik diyor?").
+                    _fv = facette_fixed_value_for(ra_name)
+                    if _fv:
+                        if bool(ra.get("allowCustom") or ra.get("attribute", {}).get("allowCustom")):
+                            continue
+                        _vmap = {
+                            _norm_val(v.get("name")): str(v.get("id"))
+                            for v in (ra.get("attributeValues") or [])
+                            if v.get("id") is not None and v.get("name")
+                        }
+                        if _resolve_value_id(_vmap, _fv):
+                            continue
                     missing_required_attrs.append({
                         "id": ra_id,
                         "name": ra_name,

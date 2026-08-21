@@ -143,6 +143,9 @@ _VALUE_SYNONYMS = {
     # Sinonim yalnız hedef ad o attribute'ün name_map'inde varsa devreye girer (başka alanı bozmaz).
     "yok": ["ekozellikmevcutdegil"],
     "mevcutdegil": ["ekozellikmevcutdegil"],
+    "kadin": ["kadinkiz"],        # Cinsiyet "Kadın"      → Trendyol "Kadın / Kız" (zorunlu, allowCustom=False)
+    "turkiye": ["tr"],            # Menşei "Türkiye"      → Trendyol "TR" (zorunlu)
+    "casualgunluk": ["gunluk"],   # Ortam "Casual/Günlük" → Trendyol "Günlük" (opsiyonel)
 }
 def _resolve_value_id(name_map: dict, local_val: str):
     """local_val'i Trendyol value_id'ye çöz: önce birebir (norm), sonra eşanlamlı."""
