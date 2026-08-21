@@ -1,7 +1,7 @@
 """
 Product Attributes routes - CRUD and Sync
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -253,13 +253,21 @@ async def delete_attribute(attr_id: str, current_user: dict = Depends(require_ad
         raise HTTPException(status_code=500, detail="Özellik silinemedi.")
 
 @router.post("/sync-from-trendyol")
-async def sync_attributes_from_trendyol(current_user: dict = Depends(require_admin)):
-    """Pull ALL attributes and values from cached Trendyol categories into the global attributes list"""
+async def sync_attributes_from_trendyol(payload: dict = Body(default={}), current_user: dict = Depends(require_admin)):
+    """Trendyol kategori cache'lerinden özellik DEĞERLERİNİ global attributes'a çeker.
+
+    SCOPE: `attribute_name` GÖNDERİLİRSE (Ayar Kartı 'Trendyol'dan Aktar' butonu SEÇİLİ
+    özelliğin adını yollar) YALNIZ o özellik doldurulur — Türkçe-duyarsız isim eşleşen
+    Trendyol attribute'larının değerleri o özelliğe eklenir; BAŞKA özellik OLUŞTURULMAZ/
+    KİRLETİLMEZ. `attribute_name` yoksa eski davranış (tümü) korunur (geri uyumluluk)."""
     try:
+        scope_name = str((payload or {}).get("attribute_name") or "").strip()
+        scope_norm = _norm_attr(scope_name) if scope_name else ""
+
         trendyol_caches = await db.trendyol_attributes.find({}).to_list(1000)
         if not trendyol_caches:
             return {"success": False, "message": "Trendyol'dan çekilmiş kategori özelliği bulunamadı. Önce kategorilerde 'Özellikler' butonuna tıklayarak bazı kategorileri çekin."}
-            
+
         # Extract unique names and unique values per name
         attribute_map = {}
         for cache in trendyol_caches:
@@ -269,20 +277,33 @@ async def sync_attributes_from_trendyol(current_user: dict = Depends(require_adm
                 attr_name = attr.get("name") or (attr.get("attribute", {}).get("name"))
                 if not attr_name:
                     continue
-                    
+
                 attr_name = attr_name.strip()
+                # SCOPE: yalnız seçili özelliğin Trendyol karşılığındaki değerleri topla.
+                if scope_norm and _norm_attr(attr_name) != scope_norm:
+                    continue
                 if attr_name not in attribute_map:
                     attribute_map[attr_name] = set()
-                    
+
                 vals = attr.get("attributeValues", [])
                 for val in vals:
                     val_name = val.get("name")
                     if val_name:
                         attribute_map[attr_name].add(str(val_name).strip())
-                        
+
         if not attribute_map:
+            if scope_norm:
+                return {"success": False, "message": f"'{scope_name}' için Trendyol'da eşleşen özellik/değer bulunamadı. Bu özelliği içeren bir kategoriyi 'Özellikler'den çekin."}
             return {"success": False, "message": "Kategorilerin içinde geçerli bir özellik veya değer bulunamadı."}
-            
+
+        # SCOPE: değerleri TEK hedef özelliğe (kullanıcının seçtiği ad) yaz — Trendyol'da
+        # ad farklı yazılmış olabilir (ör. "Beden" vs "Beden Grubu"); hepsini seçili özelliğe topla.
+        if scope_norm:
+            merged = set()
+            for _vs in attribute_map.values():
+                merged |= _vs
+            attribute_map = {scope_name: merged}
+
         # Upsert into db.attributes
         new_count = 0
         update_count = 0
@@ -309,6 +330,12 @@ async def sync_attributes_from_trendyol(current_user: dict = Depends(require_adm
                 })
                 new_count += 1
                 
+        if scope_norm:
+            _tot = sum(len(v) for v in attribute_map.values())
+            _msg = (f"'{scope_name}' özelliğine Trendyol'dan {_tot} değer eklendi/güncellendi."
+                    if (new_count or update_count) else
+                    f"'{scope_name}' için yeni değer yok (zaten güncel).")
+            return {"success": True, "message": _msg}
         return {"success": True, "message": f"Trendyol'dan {new_count} yeni özellik eklendi, {update_count} özellik güncellendi."}
     except Exception as e:
         logger.error(f"Error syncing from trendyol: {e}")

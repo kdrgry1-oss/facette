@@ -114,9 +114,18 @@ export default function ProductAttributes() {
   };
 
   const syncFromTrendyol = async () => {
+    // SCOPE: yalnız SEÇİLİ özelliğin Trendyol değerleri çekilir; diğer özellikler kirlenmez.
+    if (!selectedAttr?.name) {
+      toast.error('Önce soldan bir özellik seçin — Trendyol değerleri yalnız o özelliğe eklenir.');
+      return;
+    }
     try {
       setSyncing(true);
-      const res = await axios.post(`${API}/attributes/sync-from-trendyol`, {}, { headers: authHeaders() });
+      const res = await axios.post(
+        `${API}/attributes/sync-from-trendyol`,
+        { attribute_name: selectedAttr.name },
+        { headers: authHeaders() }
+      );
       toast.success(res.data.message || 'Senkronizasyon tamamlandı');
       fetchAttributes();
     } catch (err) {
@@ -292,11 +301,14 @@ export default function ProductAttributes() {
           </button>
           <button
             onClick={syncFromTrendyol}
-            disabled={syncing}
+            disabled={syncing || !selectedAttr?.name}
+            title={selectedAttr?.name
+              ? `Yalnız "${selectedAttr.name}" özelliğine Trendyol değerleri eklenir`
+              : 'Önce soldan bir özellik seçin'}
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg shadow-sm text-sm font-medium hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50"
           >
             <DownloadCloud size={16} className={syncing ? 'animate-bounce' : ''} />
-            Trendyol'dan Aktar
+            {selectedAttr?.name ? `Trendyol'dan Aktar (${selectedAttr.name})` : "Trendyol'dan Aktar"}
           </button>
         </div>
       </div>
