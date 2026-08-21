@@ -31,9 +31,16 @@ export default function ProductAttributes() {
   const [requiredIn, setRequiredIn] = useState({ grouped: {}, loading: false });
   const [defaultValueDraft, setDefaultValueDraft] = useState('');
   const [savingSetting, setSavingSetting] = useState(false);
+  const [categories, setCategories] = useState([]);        // kategori-bazlı zorunlu seçici için
+  const [catPickerOpen, setCatPickerOpen] = useState(false);
+  const [catSearch, setCatSearch] = useState('');
 
   useEffect(() => {
     fetchAttributes();
+    // Kategori-bazlı "bizim için zorunlu" seçici için yerel kategoriler.
+    axios.get(`${API}/categories`, { headers: authHeaders() })
+      .then((res) => setCategories(Array.isArray(res.data) ? res.data : (res.data?.categories || [])))
+      .catch(() => setCategories([]));
   }, []);
 
   // Seçili özellik değişince: ayar kartı alanlarını doldur + zorunlu-pazaryeri listesini çek.
@@ -75,6 +82,16 @@ export default function ProductAttributes() {
     const next = (defaultValueDraft || '').trim();
     if (next === (selectedAttr?.default_value || '')) return;  // değişmediyse boşuna PUT etme
     patchSetting({ default_value: next }, next ? 'Varsayılan değer kaydedildi' : 'Varsayılan değer temizlendi');
+  };
+
+  // Kategori-bazlı "bizim için zorunlu": bu özelliğin category_required listesine
+  // yerel kategori id ekle/çıkar → anında PUT (senkron yansıma).
+  const toggleCategoryRequired = (catId) => {
+    if (!selectedAttr?.id) return;
+    const cur = Array.isArray(selectedAttr.category_required) ? selectedAttr.category_required.map(String) : [];
+    const id = String(catId);
+    const next = cur.includes(id) ? cur.filter((c) => c !== id) : [...cur, id];
+    patchSetting({ category_required: next }, cur.includes(id) ? 'Kategori zorunluluğu kaldırıldı' : 'Kategoride zorunlu yapıldı');
   };
 
   const fetchAttributes = async () => {
@@ -510,6 +527,108 @@ export default function ProductAttributes() {
                     "Bizim için zorunlu": pazaryeri zorunlu tutmasa da bu özellik boşsa doğrulama/eksik
                     raporunda uyarı verilir.
                   </p>
+
+                  {/* 5) İLGİLİ KATEGORİDE ZORUNLU (kategori-bazlı) */}
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                      İlgili kategoride zorunlu
+                    </label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {(selectedAttr.category_required || []).length === 0 ? (
+                        <span className="text-xs text-gray-500 bg-gray-100 rounded-lg px-3 py-1.5">
+                          Belirli bir kategoride zorunlu değil.
+                        </span>
+                      ) : (
+                        (selectedAttr.category_required || []).map((cid) => {
+                          const c = categories.find((x) => String(x.id) === String(cid));
+                          return (
+                            <span key={cid} className="inline-flex items-center gap-1.5 text-xs bg-orange-50 border border-orange-200 text-orange-800 rounded-lg px-2.5 py-1.5">
+                              {c?.name || cid}
+                              <button
+                                type="button"
+                                disabled={savingSetting}
+                                onClick={() => toggleCategoryRequired(cid)}
+                                className="text-orange-500 hover:text-orange-700 disabled:opacity-50"
+                                title="Kaldır"
+                              >
+                                <X size={12} />
+                              </button>
+                            </span>
+                          );
+                        })
+                      )}
+                    </div>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        disabled={savingSetting}
+                        onClick={() => setCatPickerOpen((o) => !o)}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:border-orange-400 disabled:opacity-50"
+                      >
+                        <Plus size={13} /> Kategori ekle
+                      </button>
+                      {catPickerOpen && (
+                        <div className="absolute z-20 mt-1 w-72 max-h-72 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg p-2">
+                          <input
+                            type="text"
+                            autoFocus
+                            placeholder="Kategori ara..."
+                            value={catSearch}
+                            onChange={(e) => setCatSearch(e.target.value)}
+                            className="w-full mb-2 px-2.5 py-1.5 border border-gray-300 rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          />
+                          {categories
+                            .filter((c) => (c.name || '').toLowerCase().includes(catSearch.toLowerCase()))
+                            .slice(0, 200)
+                            .map((c) => {
+                              const on = (selectedAttr.category_required || []).map(String).includes(String(c.id));
+                              return (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  disabled={savingSetting}
+                                  onClick={() => toggleCategoryRequired(c.id)}
+                                  className={`w-full text-left flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs disabled:opacity-50 ${on ? 'bg-orange-50 text-orange-800' : 'hover:bg-gray-50 text-gray-700'}`}
+                                >
+                                  <span className="truncate">{c.name}</span>
+                                  {on && <Check size={13} className="text-orange-600 shrink-0" />}
+                                </button>
+                              );
+                            })}
+                          {categories.length === 0 && (
+                            <div className="text-xs text-gray-400 px-2 py-3 text-center">Kategori yüklenemedi.</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-2">
+                      Seçilen kategori(ler)deki ürünlerde bu özellik boşsa doğrulama panelinde
+                      "bu kategoride zorunlu" uyarısı verilir. "Bizim için zorunlu"dan farkı: tüm sistem
+                      değil, yalnız seçtiğiniz kategori(ler).
+                    </p>
+                  </div>
+
+                  {/* 6) ÜRÜN VERİSİNDEN ÇEK (kartta gösterme) */}
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <button
+                      type="button"
+                      disabled={savingSetting}
+                      onClick={() => patchSetting(
+                        { collect_from_products: !(selectedAttr.collect_from_products === true) },
+                        'Kaydedildi'
+                      )}
+                      className={`w-full sm:w-auto flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors disabled:opacity-50 ${selectedAttr.collect_from_products === true ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-gray-50 border-gray-300 text-gray-500'}`}
+                    >
+                      <span>Ürün verisinden çek (kartta gösterme)</span>
+                      <span className={`inline-flex items-center h-5 w-9 rounded-full transition-colors ${selectedAttr.collect_from_products === true ? 'bg-blue-500' : 'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 bg-white rounded-full shadow transform transition-transform ${selectedAttr.collect_from_products === true ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      </span>
+                    </button>
+                    <p className="text-[11px] text-gray-400 mt-2">
+                      Değerler ürün verisinden (varyant/özellik) otomatik toplanır — Beden/Renk gibi.
+                      Ürün kartında gizlemek için ayrıca "Ürün kartında göster"i kapatın.
+                    </p>
+                  </div>
                 </div>
 
                 {selVals.size > 0 && (

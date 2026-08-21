@@ -535,6 +535,23 @@ async def validate_products_for_trendyol(
     except Exception:
         _our_required_norms = set()
 
+    # 🟠 KATEGORİ-BAZLI "bizim için zorunlu": attributes.category_required = [yerel_kategori_id].
+    # cat_id (str) → o kategoride zorunlu sayılan özellik adları (normalize) kümesi.
+    _cat_required_map: dict = {}
+    try:
+        _cr_rows = await db.attributes.find(
+            {"category_required": {"$exists": True, "$ne": []}},
+            {"_id": 0, "name": 1, "category_required": 1},
+        ).to_list(length=2000)
+        for _r in _cr_rows:
+            _n = _normalize_attr_key(_r.get("name") or "")
+            if not _n:
+                continue
+            for _cid in (_r.get("category_required") or []):
+                _cat_required_map.setdefault(str(_cid), set()).add(_n)
+    except Exception:
+        _cat_required_map = {}
+
     # Trendyol mp_cat -> required attribute listesini cache'le
     attr_cache: dict = {}
 
@@ -769,7 +786,19 @@ async def validate_products_for_trendyol(
         # Bu özelliği TAŞIMAYAN üründe UYARI üret (eksik raporunda görünür). Ürünün kendi değeri
         # yoksa VE DB varsayılanı (default_value) da bu özelliği dolduramıyorsa uyar — aksi halde
         # push yine dolacağından yanlış-pozitif uyarı vermeyiz.
-        if _our_required_norms:
+        # Bu ürünün kategori-bazlı zorunlu özellik adları (yerel kategori id VEYA atalarıyla eşleşir).
+        _cat_req_norms: set = set()
+        if _cat_required_map:
+            _prod_cat_ids = set()
+            if cat_id:
+                _prod_cat_ids.add(str(cat_id))
+            for _ci in (p.get("category_ids") or []):
+                if _ci not in (None, ""):
+                    _prod_cat_ids.add(str(_ci))
+            for _cid in _prod_cat_ids:
+                _cat_req_norms |= _cat_required_map.get(_cid, set())
+
+        if _our_required_norms or _cat_req_norms:
             _have_norms: set = set()
 
             def _collect_names(attrs):
@@ -808,6 +837,17 @@ async def validate_products_for_trendyol(
                 _our_missing.append(_nm)
             if _our_missing:
                 warnings.append(f"{len(_our_missing)} 'bizim için zorunlu' özellik boş")
+
+            # Kategori-bazlı zorunlu (bu kategoride) — tüm-sistem our_required ile ÇAKIŞMAYANLAR.
+            _cat_missing = []
+            for _nm in _cat_req_norms:
+                if _nm in _have_norms or _nm in _our_required_norms:
+                    continue
+                if _attr_default_map.get(_nm):
+                    continue
+                _cat_missing.append(_nm)
+            if _cat_missing:
+                warnings.append(f"{len(_cat_missing)} 'bu kategoride zorunlu' özellik boş")
 
         is_valid = len(errors) == 0
         if is_valid:

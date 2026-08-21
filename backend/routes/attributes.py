@@ -31,6 +31,12 @@ class AttributeUpdate(BaseModel):
     default_value: Optional[str] = None
     show_in_product_card: Optional[bool] = None
     our_required: Optional[bool] = None
+    # Kategori-bazlı "bizim için zorunlu": bu özelliğin ZORUNLU sayılacağı YEREL kategori
+    # id'lerinin listesi. our_required (tüm-sistem) yanına EK; doğrulama her ikisini de üretir.
+    category_required: Optional[List[str]] = None
+    # "Ürün verisinden çek ama ürün kartında gösterme": değerleri variants/attributes'tan
+    # otomatik toplanır (Beden/Renk gibi), ama kartta gizlenir (show_in_product_card ile birlikte).
+    collect_from_products: Optional[bool] = None
 
 
 def _norm_attr(s: str) -> str:
@@ -47,6 +53,8 @@ def _with_setting_defaults(attr: dict) -> dict:
     attr.setdefault("default_value", "")
     attr.setdefault("show_in_product_card", True)
     attr.setdefault("our_required", False)
+    attr.setdefault("category_required", [])
+    attr.setdefault("collect_from_products", False)
     return attr
 
 
@@ -123,6 +131,20 @@ async def update_attribute(attr_id: str, req: AttributeUpdate, current_user: dic
 
         if req.our_required is not None:
             update["our_required"] = bool(req.our_required)
+
+        if req.category_required is not None:
+            # Yerel kategori id'lerini temizle + tekilleştir (sıra korunur).
+            _seen = set()
+            _cats = []
+            for _c in req.category_required:
+                _cid = str(_c).strip()
+                if _cid and _cid not in _seen:
+                    _seen.add(_cid)
+                    _cats.append(_cid)
+            update["category_required"] = _cats
+
+        if req.collect_from_products is not None:
+            update["collect_from_products"] = bool(req.collect_from_products)
 
         if not update:
             return {"success": True, "message": "Değişiklik yok"}

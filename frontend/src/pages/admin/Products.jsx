@@ -3224,6 +3224,15 @@ export default function AdminProducts() {
                     }
                   };
 
+                  // 🔗 KATALOG SENKRONU: Katalog → Ürün Özellikleri → Ayar Kartı'nda kullanıcı
+                  // her özellik için "Tüm sistemde varsayılan değer" (default_value) girebilir.
+                  // Ürün kartı BU değeri AYNI kaynaktan (globalAttributes = GET /api/attributes)
+                  // okur → ürün o özelliği taşımıyorsa katalog varsayılanı DOLU görünür (senkron).
+                  // İsimle eşleşir (Türkçe-duyarsız). FIXED_DEFAULT_ATTRS yalnız fallback'tir.
+                  const _catalogDefaults = {};
+                  (globalAttributes || []).forEach(a => {
+                    if (a && a.name && a.default_value) _catalogDefaults[a.name] = a.default_value;
+                  });
                   // 🎯 Ortak SABİT varsayılanlar — HER pazaryeri bölümünde DOLU görünmeli.
                   const FIXED_DEFAULT_ATTRS = {
                     "Menşei": "TR", "Cinsiyet": "Kadın", "Yaş Grubu": "Yetişkin",
@@ -3340,7 +3349,8 @@ export default function AdminProducts() {
                     // 🎯 Değer çözümü: önce pazaryerine-özel harita, yoksa NÖTR formData.attributes,
                     // yoksa sabit varsayılan, yoksa GPSR üretici/ithalatçı sabiti → DOLU görünür.
                     const _effVal = (name) =>
-                      valuesMap[name] || (formData.attributes || {})[name] || FIXED_DEFAULT_ATTRS[name]
+                      valuesMap[name] || (formData.attributes || {})[name]
+                      || _catalogDefaults[name] || FIXED_DEFAULT_ATTRS[name]
                       || _companyValFor(name) || "";
                     // Sabit varsayılanları bu bölümün listesinde yoksa DOLU satır olarak ekle
                     // (özellikle HB: kategori seçilmeden liste boş kalıyordu).
@@ -3368,14 +3378,17 @@ export default function AdminProducts() {
                     })
                     // Beden ürün kartından gizlenir: pazaryeri varyant (beden) alanından eşleştiriliyor.
                     .filter(x => (x.attr.name || '').toLocaleLowerCase('tr').trim() !== 'beden')
-                    // Mükerrer dedup YALNIZ opsiyonel alanlara: ZORUNLU pazaryeri alanı Teknik Detay
-                    // etiketiyle çakışsa bile GİZLENMEZ (gizli+boş = sessiz red riski). Değer tek
-                    // kaynaktan (_effVal) dolar; satır görünür kalır → kullanıcı görüp doğrular.
-                    // İSTİSNA (Kadir): 'Kalıp' Teknik Detay'da olsa/opsiyonel olsa bile pazaryeri
-                    // özellik bölümünde HER ZAMAN görünür (kullanıcı buradan da seçip aktarabilsin).
+                    // Mükerrer dedup YALNIZ opsiyonel VE BOŞ alanlara: Teknik Detay paneli
+                    // KALDIRILDIĞI için (bkz. ~3529) teknik-etiketli bir özelliğin görüneceği
+                    // BAŞKA yer kalmadı. Dolayısıyla DEĞERİ OLAN hiçbir özellik dedup ile
+                    // GİZLENMEZ — aksi hâlde "Materyal Bileşeni" gibi teknik-etiketle eşleşen
+                    // (Materyal→"matery" substring) dolu özellikler karttan tümüyle kaybolur.
+                    // ZORUNLU pazaryeri alanı (gizli+boş = sessiz red riski) ve 'Kalıp' da
+                    // istisna olarak HER ZAMAN görünür. Yalnız OPSİYONEL + BOŞ + teknik-etiketli
+                    // satırlar (mükerrer gürültü) elenir.
                     .filter(x => {
                       const _nm = (x.attr.name || '').toLocaleLowerCase('tr').trim();
-                      return x.isRequired || _nm === 'kalıp' || !_techNames.has(_nm);
+                      return x.isRequired || x.hasValue || _nm === 'kalıp' || !_techNames.has(_nm);
                     });
                     const filledAttrs = processed.filter(a => a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
                     const requiredEmpty = processed.filter(a => a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
