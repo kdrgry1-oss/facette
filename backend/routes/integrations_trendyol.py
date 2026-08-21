@@ -824,6 +824,52 @@ async def validate_products_for_trendyol(
             if _opt_unmatched:
                 warnings.append(f"{len(_opt_unmatched)} opsiyonel değerin karşılığı yok (aktarımda atlanır)")
 
+            # ✅ BEDEN (varyant ekseni) VALIDATE/PUSH TUTARLILIĞI: push, çözülemeyen Beden'de
+            # patlıyordu ("ürün bulunamadı"/red) ama validate Beden'i kontrol etmiyordu → "HAZIR"
+            # derken push patlıyordu. Artık validate de push ile AYNI çözümü dener: kategori Beden
+            # attribute'unun her varyant bedeni value_mapping (rakam value_id) VEYA isim/alias/
+            # eşanlamlı ile Trendyol value_id'sine çözülüyor mu — ya da allowCustom mu? Çözülemezse
+            # ZORUNLU varyant ekseni eksik → HATA (push da patlayacaktı).
+            if variants and (_cache_attrs or {}).get("attributes"):
+                _beden_meta = None
+                for _a in _cache_attrs["attributes"]:
+                    _an = (_a.get("name") or (_a.get("attribute") or {}).get("name") or "")
+                    if "beden" not in _an.lower():
+                        continue
+                    _aid = _a.get("id") or (_a.get("attribute") or {}).get("id")
+                    if _aid is None:
+                        continue
+                    _nmap = {}
+                    for _v in (_a.get("attributeValues") or []):
+                        if _v.get("id") is not None and _v.get("name"):
+                            _nmap[_norm_val(_v["name"])] = str(_v["id"])
+                    _beden_meta = {
+                        "id": str(_aid),
+                        "allow_custom": bool(_a.get("allowCustom") or (_a.get("attribute") or {}).get("allowCustom")),
+                        "name_map": _nmap,
+                    }
+                    break
+                if _beden_meta:
+                    _unres_sizes = []
+                    for _v in variants:
+                        _sz = str(_v.get("size") or "").strip()
+                        if not _sz:
+                            continue
+                        _mv = val_mappings_v.get(f"{_beden_meta['id']}|{_sz}")
+                        if _mv and str(_mv).isdigit():
+                            continue
+                        if _resolve_value_id(_beden_meta["name_map"], _sz) or _resolve_size_value_id(_beden_meta["name_map"], _sz):
+                            continue
+                        if _beden_meta["allow_custom"]:
+                            continue
+                        _unres_sizes.append(_sz)
+                    if _unres_sizes:
+                        _uniq = sorted(set(_unres_sizes))
+                        errors.append(
+                            f"{len(_uniq)} beden Trendyol Beden değerine eşlenemedi: "
+                            f"{', '.join(_uniq[:6])} (Kategori Eşleştirme > Değerler'den eşleyin)"
+                        )
+
         # 🟠 "BİZİM İÇİN ZORUNLU" (our_required): pazaryeri zorunlu tutmasa da biz tutuyoruz.
         # Bu özelliği TAŞIMAYAN üründe UYARI üret (eksik raporunda görünür). Ürünün kendi değeri
         # yoksa VE DB varsayılanı (default_value) da bu özelliği dolduramıyorsa uyar — aksi halde

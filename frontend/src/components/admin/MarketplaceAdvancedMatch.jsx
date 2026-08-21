@@ -710,6 +710,9 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
   // Attribute değiştiğinde aramayı sıfırla
   useEffect(() => { setValSearch(""); }, [selectedAttrId]);
   const color = MP_COLORS[marketplace] || "orange";
+  // Pazaryeri adı — modal metinleri için (eskiden "HB" sabitti; Trendyol modalında YANLIŞ
+  // görünüyordu. Kaynak değerler zaten seçili pazaryerinin enum'undan gelir).
+  const mpLabel = { trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu" }[marketplace] || marketplace;
 
   const load = useCallback(async () => {
     if (!category) return;
@@ -1095,7 +1098,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                           value={curDef}
                           options={_enrichWithLocalVals(mpVals, attrName, currentAttr)}
                           onChange={setDef}
-                          placeholder="— HB değeri seç —"
+                          placeholder={`— ${mpLabel} değeri seç —`}
                           seed={mpVals.length > 200 ? (attrName || "") : ""}
                           color={color}
                           testId={`adv-val-default-${aid}`}
@@ -1123,7 +1126,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       <span className="text-[11px] text-blue-700">(Sistem sabiti: "{fixed}" zaten gönderiliyor)</span>
                     )}
                     {mpVals.length > 0 && (
-                      <span className="ml-auto text-[10px] text-gray-400 shrink-0">{mpVals.length} HB değeri çekildi</span>
+                      <span className="ml-auto text-[10px] text-gray-400 shrink-0">{mpVals.length} {mpLabel} değeri çekildi</span>
                     )}
                   </div>
                 );
@@ -1134,9 +1137,9 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                 <div className="bg-blue-50 border-b border-blue-200 px-3 py-2 text-[11px] text-blue-800 flex items-start gap-1.5" data-testid="adv-freetext-info">
                   <AlertCircle size={12} className="mt-0.5 shrink-0" />
                   <span>
-                    <b>{attrName}</b> HB'de <b>serbest metin</b> alanı — kapalı (seçmeli) liste yok.
-                    Yazdığın her değer geçerlidir (ör. "normal"); HB'nin hazır "kabul edilen değer" listesi yoktur.
-                    Kapalı listeli alanlarda dropdown zaten yalnız HB'nin kabul ettiği değerleri gösterir.
+                    <b>{attrName}</b> {mpLabel}'de <b>serbest metin</b> alanı — kapalı (seçmeli) liste yok.
+                    Yazdığın her değer geçerlidir (ör. "normal"); {mpLabel}'nin hazır "kabul edilen değer" listesi yoktur.
+                    Kapalı listeli alanlarda dropdown zaten yalnız {mpLabel}'nin kabul ettiği değerleri gösterir.
                   </span>
                 </div>
               )}
