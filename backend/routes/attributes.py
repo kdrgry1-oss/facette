@@ -7,6 +7,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from bson.objectid import ObjectId
 import logging
+import re
 
 from .deps import db, require_admin, generate_id
 
@@ -21,14 +22,41 @@ class AttributeBase(BaseModel):
 class AttributeCreate(AttributeBase):
     pass
 
-class AttributeUpdate(AttributeBase):
-    pass
+class AttributeUpdate(BaseModel):
+    # Kısmi güncelleme: yalnız gönderilen alanlar yazılır. Eski istemciler
+    # {name, values} gönderir → değişmez çalışır. Ayar kartı yalnız tek alan
+    # (default_value / show_in_product_card / our_required) gönderebilir.
+    name: Optional[str] = None
+    values: Optional[List[str]] = None
+    default_value: Optional[str] = None
+    show_in_product_card: Optional[bool] = None
+    our_required: Optional[bool] = None
+
+
+def _norm_attr(s: str) -> str:
+    """Türkçe-duyarsız normalize (İ/ı/ş/ğ/ü/ö/ç + birleşik nokta). İsim eşleştirme için."""
+    s = (s or "").casefold()
+    for a, b in (("ı", "i"), ("İ", "i"), ("ş", "s"), ("ğ", "g"),
+                 ("ü", "u"), ("ö", "o"), ("ç", "c"), ("̇", "")):
+        s = s.replace(a, b)
+    return s.strip()
+
+
+def _with_setting_defaults(attr: dict) -> dict:
+    """Ayar kartı alanları için güvenli varsayılanlar (eski dokümanlar için)."""
+    attr.setdefault("default_value", "")
+    attr.setdefault("show_in_product_card", True)
+    attr.setdefault("our_required", False)
+    return attr
+
 
 @router.get("")
 async def get_attributes(current_user: dict = Depends(require_admin)):
     """Get all global product attributes"""
     try:
         attrs = await db.attributes.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
+        for a in attrs:
+            _with_setting_defaults(a)
         return {"success": True, "attributes": attrs}
     except Exception as e:
         logger.error(f"Error fetching attributes: {e}")
@@ -60,35 +88,133 @@ async def create_attribute(req: AttributeCreate, current_user: dict = Depends(re
 
 @router.put("/{attr_id}")
 async def update_attribute(attr_id: str, req: AttributeUpdate, current_user: dict = Depends(require_admin)):
-    """Update an existing global product attribute (e.g. add/remove values)"""
+    """KISMİ güncelleme: yalnız gönderilen alanları yazar.
+    Eski istemci {name, values} gönderir → aynen çalışır. Ayar kartı tek bir alanı
+    (default_value / show_in_product_card / our_required) da gönderebilir; diğerlerine dokunulmaz.
+    default_value BOŞ string gönderilebilir (kullanıcı varsayılanı SİLER) → DB'de "" olarak tutulur
+    ve seed bunu yeniden DAYATMAZ (default_value alanı artık mevcut)."""
     try:
         existing = await db.attributes.find_one({"id": attr_id})
         if not existing:
             raise HTTPException(status_code=404, detail="Özellik bulunamadı.")
-            
-        duplicate = await db.attributes.find_one({
-            "id": {"$ne": attr_id},
-            "name": {"$regex": f"^{req.name}$", "$options": "i"}
-        })
-        if duplicate:
-            raise HTTPException(status_code=400, detail="Bu isimde başka bir özellik zaten mevcut.")
 
-        cleaned_values = list(set([str(v).strip() for v in req.values if str(v).strip()]))
-        
-        await db.attributes.update_one(
-            {"id": attr_id},
-            {"$set": {
-                "name": req.name.strip(),
-                "values": cleaned_values,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }}
-        )
+        update: dict = {}
+
+        if req.name is not None:
+            new_name = req.name.strip()
+            if new_name:
+                duplicate = await db.attributes.find_one({
+                    "id": {"$ne": attr_id},
+                    "name": {"$regex": f"^{re.escape(new_name)}$", "$options": "i"}
+                })
+                if duplicate:
+                    raise HTTPException(status_code=400, detail="Bu isimde başka bir özellik zaten mevcut.")
+                update["name"] = new_name
+
+        if req.values is not None:
+            update["values"] = list(set([str(v).strip() for v in req.values if str(v).strip()]))
+
+        if req.default_value is not None:
+            # Boş string DE geçerlidir (kullanıcı siler) → alanı "" olarak yaz.
+            update["default_value"] = str(req.default_value).strip()
+
+        if req.show_in_product_card is not None:
+            update["show_in_product_card"] = bool(req.show_in_product_card)
+
+        if req.our_required is not None:
+            update["our_required"] = bool(req.our_required)
+
+        if not update:
+            return {"success": True, "message": "Değişiklik yok"}
+
+        update["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.attributes.update_one({"id": attr_id}, {"$set": update})
         return {"success": True, "message": "Özellik güncellendi"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error updating attribute: {e}")
         raise HTTPException(status_code=500, detail="Özellik güncellenemedi.")
+
+
+@router.get("/{attr_id}/required-in")
+async def get_attribute_required_in(attr_id: str, current_user: dict = Depends(require_admin)):
+    """Bu özelliğin ADIYLA eşleşerek hangi pazaryerinin hangi kategorilerinde ZORUNLU olduğunu
+    listeler. Kaynak: category_mappings (matched) + pazaryeri kategori-attribute cache'leri
+    (trendyol/hepsiburada/temu_category_attributes). İsim eşleştirme Türkçe-duyarsız normalize."""
+    attr = await db.attributes.find_one({"id": attr_id}, {"_id": 0})
+    if not attr:
+        raise HTTPException(status_code=404, detail="Özellik bulunamadı.")
+    target = _norm_attr(attr.get("name") or "")
+    if not target:
+        return {"success": True, "attribute": attr.get("name"), "grouped": {}, "required_in": []}
+
+    marketplaces = [
+        ("trendyol", "trendyol_category_attributes"),
+        ("hepsiburada", "hepsiburada_category_attributes"),
+        ("temu", "temu_category_attributes"),
+    ]
+
+    grouped: dict = {}
+    flat: list = []
+
+    for mp, coll in marketplaces:
+        try:
+            mappings = await db.category_mappings.find(
+                {"marketplace": mp, "marketplace_category_id": {"$nin": [None, ""]}},
+                {"_id": 0, "category_name": 1, "marketplace_category_id": 1},
+            ).to_list(length=5000)
+        except Exception:
+            mappings = []
+        if not mappings:
+            continue
+
+        # mp_cat_id -> bu kategoride hedef özellik zorunlu mu? (cache'i tekilleştir)
+        req_cache: dict = {}
+
+        async def _is_required(mp_cat_id) -> bool:
+            key = str(mp_cat_id)
+            if key in req_cache:
+                return req_cache[key]
+            required = False
+            try:
+                cache_key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
+                doc = await db[coll].find_one({"category_id": cache_key}, {"_id": 0, "attributes": 1})
+            except Exception:
+                doc = None
+            for a in (doc or {}).get("attributes", []) or []:
+                if not isinstance(a, dict):
+                    continue
+                aname = a.get("name") or (a.get("attribute", {}) or {}).get("name") or ""
+                if _norm_attr(aname) != target:
+                    continue
+                is_req = bool(
+                    a.get("required") or a.get("mandatory") or a.get("mandatoryVariant")
+                    or (a.get("attribute", {}) or {}).get("required")
+                )
+                if is_req:
+                    required = True
+                    break
+            req_cache[key] = required
+            return required
+
+        seen_cats = set()
+        cat_names = []
+        for cm in mappings:
+            mp_cat_id = cm.get("marketplace_category_id")
+            cname = (cm.get("category_name") or "").strip()
+            dedup = (str(mp_cat_id), cname)
+            if dedup in seen_cats:
+                continue
+            seen_cats.add(dedup)
+            if await _is_required(mp_cat_id):
+                if cname and cname not in cat_names:
+                    cat_names.append(cname)
+                flat.append({"marketplace": mp, "category_name": cname})
+        if cat_names:
+            grouped[mp] = sorted(cat_names)
+
+    return {"success": True, "attribute": attr.get("name"), "grouped": grouped, "required_in": flat}
 
 @router.delete("/{attr_id}")
 async def delete_attribute(attr_id: str, current_user: dict = Depends(require_admin)):
@@ -314,3 +440,61 @@ async def bulk_set_default_attributes(current_user: dict = Depends(require_admin
             })
 
     return {"success": True, "updated": updated, "message": f"{updated} ürüne Yaş Grubu ve Menşei eklendi"}
+
+
+async def seed_attribute_defaults():
+    """Koddaki FACETTE sabit varsayılanlarını (facette_defaults.FACETTE_FIXED_ATTR_DEFAULTS —
+    Cinsiyet=Kadın, Menşei=Türkiye, Yaş Grubu=Yetişkin, Ek Özellik=Yok, Ortam/Koleksiyon=
+    Casual/Günlük, Kutu Durumu=Kutu Yok, Persona=Fashion Forward, Performans=Cool & Comfort,
+    Sürdürülebilirlik Detayı=Hayır) attributes koleksiyonunun `default_value` alanına TOHUMLAR.
+
+    Böylece bu kurallar Özellik Ayar Kartı'nda GÖRÜNÜR ve kullanıcı düzenleyebilir/silebilir.
+
+    İDEMPOTENT + DB-OTORİTE:
+      - Yalnız `default_value` alanı HİÇ YOKSA yazar. Kullanıcı UI'dan silince alan "" olarak
+        KALIR (mevcut) → seed bir daha DAYATMAZ. Yani DB otoritedir, kod yeniden empoze etmez.
+      - Eşleşen özellik yoksa OLUŞTURUR (görünür/düzenlenebilir olsun diye), values=[].
+    İsim eşleştirme Türkçe-duyarsız normalize ile yapılır (mevcut kayıt varsa ona yazar).
+    """
+    try:
+        from facette_defaults import FACETTE_FIXED_ATTR_DEFAULTS
+    except Exception as e:
+        logger.error(f"seed_attribute_defaults: facette_defaults import edilemedi: {e}")
+        return {"created": 0, "seeded": 0}
+
+    existing = await db.attributes.find({}, {"_id": 0, "id": 1, "name": 1, "default_value": 1}).to_list(5000)
+    by_norm = {}
+    for a in existing:
+        by_norm.setdefault(_norm_attr(a.get("name") or ""), a)
+
+    created = 0
+    seeded = 0
+    now = datetime.now(timezone.utc).isoformat()
+    for name, value in FACETTE_FIXED_ATTR_DEFAULTS.items():
+        norm = _norm_attr(name)
+        doc = by_norm.get(norm)
+        if doc:
+            # Alan HİÇ yoksa tohumla; "" (kullanıcı silmiş) ise DOKUNMA.
+            if "default_value" not in doc:
+                await db.attributes.update_one(
+                    {"id": doc["id"]},
+                    {"$set": {"default_value": value, "updated_at": now}},
+                )
+                seeded += 1
+        else:
+            new_doc = {
+                "id": generate_id(),
+                "name": name,
+                "values": [],
+                "default_value": value,
+                "show_in_product_card": True,
+                "our_required": False,
+                "seeded_default": True,
+                "created_at": now,
+                "updated_at": now,
+            }
+            await db.attributes.insert_one(new_doc)
+            by_norm[norm] = new_doc
+            created += 1
+
+    return {"created": created, "seeded": seeded}
