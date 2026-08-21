@@ -15,9 +15,66 @@ import httpx
 import hashlib
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, get_effective_permissions
-from facette_defaults import facette_fixed_value_for  # tüm-pazaryeri sabit varsayılan (gap-fill)
+from facette_defaults import (
+    facette_company_value,     # yalnız GPSR (Üretici/İthalatçı) — beyaz-etiket, dinamik
+    FACETTE_FIXED_ATTR_DEFAULTS,  # statik seed haritası (yalnız DB'de doküman YOKSA fallback)
+)
 
 router = APIRouter(tags=["Integrations-Trendyol"])
+
+# Statik FACETTE sabitlerinin (seed kaynağı) normalize haritası. TEK OTORİTE artık DB
+# attributes.default_value'dür; bu harita SADECE DB'de HİÇ dokümanı olmayan (seed henüz
+# çalışmamış edge-case) özellik için son-çare fallback olarak kullanılır.
+_STATIC_FIXED_NORM = {_normalize_attr_key(k): v for k, v in FACETTE_FIXED_ATTR_DEFAULTS.items()}
+
+
+async def _load_attr_defaults():
+    """attributes koleksiyonundan gap-fill için TEK OTORİTE veriyi yükler.
+
+    Döner: (default_map, doc_norms)
+      - default_map: {normalize(ad) -> default_value} yalnız DOLU (boş olmayan) default_value'lar.
+        Kullanıcı UI'dan bir varsayılanı silince ("") bu haritaya GİRMEZ → push onu dayatmaz.
+      - doc_norms: attributes'ta dokümanı OLAN tüm normalize adlar (default_value boş olsa da).
+        Statik seed fallback'i yalnız buraya GİRMEYEN adlar için devreye girer.
+    """
+    default_map: dict = {}
+    doc_norms: set = set()
+    try:
+        rows = await db.attributes.find(
+            {}, {"_id": 0, "name": 1, "default_value": 1}
+        ).to_list(length=5000)
+    except Exception:
+        rows = []
+    for a in rows:
+        nm = _normalize_attr_key(a.get("name") or "")
+        if not nm:
+            continue
+        doc_norms.add(nm)
+        dv = a.get("default_value")
+        if isinstance(dv, str) and dv.strip():
+            default_map[nm] = dv.strip()
+    return default_map, doc_norms
+
+
+def _resolve_gap_default(attr_name, default_map, doc_norms):
+    """Gap-fill için TEK OTORİTE zinciri (kod hiçbir değeri sessizce EZMEZ — bu yalnız BOŞ
+    kalan / processed olmayan özelliğe uygulanır):
+      1) DB attributes.default_value (kullanıcı düzenleyebilir/silebilir — DB otorite)
+      2) GPSR şirket bilgisi (Üretici/İthalatçı — beyaz-etiket, dinamik)
+      3) Statik FACETTE seed fallback — YALNIZ DB'de o özelliğin dokümanı hiç yoksa
+    Döner: değer (str) veya None."""
+    norm = _normalize_attr_key(attr_name or "")
+    if not norm:
+        return None
+    dv = default_map.get(norm)
+    if dv:
+        return dv
+    cv = facette_company_value(attr_name)
+    if cv:
+        return cv
+    if norm not in doc_norms:
+        return _STATIC_FIXED_NORM.get(norm)
+    return None
 
 from .integrations_common import (
     _BAD_COMPOSITION_VALUES,
@@ -457,6 +514,21 @@ async def validate_products_for_trendyol(
         if nm and str(c.get("id")) in cm_by_local:
             cm_by_name[nm] = cm_by_local[str(c.get("id"))]
 
+    # Gap-fill / "bizim için zorunlu" TEK OTORİTE veri: attributes.default_value (DB) + our_required.
+    _attr_default_map, _attr_doc_norms = await _load_attr_defaults()
+    # "Bizim için zorunlu" (pazaryeri zorunlu tutmasa da biz tutuyoruz) özellik adları (normalize).
+    _our_required_norms: set = set()
+    try:
+        _our_rows = await db.attributes.find(
+            {"our_required": True}, {"_id": 0, "name": 1}
+        ).to_list(length=2000)
+        for _r in _our_rows:
+            _n = _normalize_attr_key(_r.get("name") or "")
+            if _n:
+                _our_required_norms.add(_n)
+    except Exception:
+        _our_required_norms = set()
+
     # Trendyol mp_cat -> required attribute listesini cache'le
     attr_cache: dict = {}
 
@@ -605,11 +677,12 @@ async def validate_products_for_trendyol(
                 if local_attr:
                     has_val = bool(local_vals.get(local_attr.lower()))
                 if not has_val:
-                    # PUSH PARİTESİ: FACETTE sabit varsayılanı bu zorunlu alanı gap-fill ile
-                    # dolduruyor ve Trendyol'a çözülüyorsa (ya da alan serbest-metin ise) "eksik"
-                    # SAYMA — aksi halde push gönderdiği hâlde rapor yanlış-pozitif "zorunlu eksik" der
-                    # (kullanıcı: "Cinsiyet zaten otomatik Kadın atanmalıydı, nasıl eksik diyor?").
-                    _fv = facette_fixed_value_for(ra_name)
+                    # PUSH PARİTESİ: gap-fill varsayılanı (DB attributes.default_value > GPSR >
+                    # statik seed) bu zorunlu alanı doldurup Trendyol'a çözülüyorsa (ya da alan
+                    # serbest-metin ise) "eksik" SAYMA — push gönderdiği hâlde rapor yanlış-pozitif
+                    # "zorunlu eksik" dememeli. Otorite artık DB: kullanıcı UI'dan varsayılanı silince
+                    # gap-fill de dolmaz → rapor doğru şekilde "eksik" gösterir.
+                    _fv = _resolve_gap_default(ra_name, _attr_default_map, _attr_doc_norms)
                     if _fv:
                         if bool(ra.get("allowCustom") or ra.get("attribute", {}).get("allowCustom")):
                             continue
@@ -685,6 +758,50 @@ async def validate_products_for_trendyol(
                 })
             if unmatched_values:
                 errors.append(f"{len(unmatched_values)} değerin Trendyol karşılığı yok (eşleştirme gerekli)")
+
+        # 🟠 "BİZİM İÇİN ZORUNLU" (our_required): pazaryeri zorunlu tutmasa da biz tutuyoruz.
+        # Bu özelliği TAŞIMAYAN üründe UYARI üret (eksik raporunda görünür). Ürünün kendi değeri
+        # yoksa VE DB varsayılanı (default_value) da bu özelliği dolduramıyorsa uyar — aksi halde
+        # push yine dolacağından yanlış-pozitif uyarı vermeyiz.
+        if _our_required_norms:
+            _have_norms: set = set()
+
+            def _collect_names(attrs):
+                if isinstance(attrs, dict):
+                    for k, v in attrs.items():
+                        if isinstance(v, dict):
+                            nm = v.get("label") or v.get("name") or k
+                            vv = v.get("value") or v.get("attribute_value")
+                        else:
+                            nm, vv = k, v
+                        if nm and vv not in (None, ""):
+                            _have_norms.add(_normalize_attr_key(str(nm)))
+                elif isinstance(attrs, list):
+                    for a in attrs:
+                        if isinstance(a, dict):
+                            nm = a.get("label") or a.get("name") or a.get("type") or a.get("attribute_name")
+                            vv = a.get("value") or a.get("attribute_value")
+                            if nm and vv not in (None, ""):
+                                _have_norms.add(_normalize_attr_key(str(nm)))
+
+            _collect_names(p.get("attributes"))
+            for _v in (p.get("variants") or []):
+                _collect_names(_v.get("attributes"))
+                if _v.get("color"):
+                    _have_norms.add(_normalize_attr_key("Renk"))
+                if _v.get("size"):
+                    _have_norms.add(_normalize_attr_key("Beden"))
+
+            _our_missing = []
+            for _nm in _our_required_norms:
+                if _nm in _have_norms:
+                    continue
+                # DB default_value bu özelliği dolduruyorsa uyarma (push dolduracak)
+                if _attr_default_map.get(_nm):
+                    continue
+                _our_missing.append(_nm)
+            if _our_missing:
+                warnings.append(f"{len(_our_missing)} 'bizim için zorunlu' özellik boş")
 
         is_valid = len(errors) == 0
         if is_valid:
@@ -1274,6 +1391,10 @@ async def sync_products_to_trendyol(
     # Trendyol kategori özellik cache'lerini bu sync için yükle (attribute meta + geçerli value_id'ler)
     _attr_meta_cache: dict = {}
 
+    # 🔑 GAP-FILL TEK OTORİTE: attributes.default_value (DB). Kullanıcı UI'dan düzenler/siler;
+    # kod yeniden dayatmaz. Statik FACETTE seed yalnız DB'de dokümanı olmayan özellik için fallback.
+    _attr_default_map, _attr_doc_norms = await _load_attr_defaults()
+
     async def _get_attr_meta(mp_cat_id):
         if mp_cat_id in _attr_meta_cache:
             return _attr_meta_cache[mp_cat_id]
@@ -1518,16 +1639,17 @@ async def sync_products_to_trendyol(
             else:
                 _push(m_ty_id, custom=lval)
 
-        # 🎯 FACETTE SABİT VARSAYILANLAR (gap-fill, EN SON):
-        # Menşei=Türkiye · Cinsiyet=Kadın · Yaş Grubu=Yetişkin · Ortam/Koleksiyon=Casual/Günlük ·
-        # Ek Özellik=Mevcut Değil · Kutu Durumu=Kutu Yok · Persona=Fashion Forward ·
-        # Performans=Cool & Comfort · Üretici/İthalatçı (GPSR)=FACETTE bilgileri.
-        # Yalnız ürünün DOLDURMADIĞI (processed olmayan) Trendyol özelliğine yazılır; listeli
-        # alanlar ADIYLA value_id'ye çözülür (Türkiye→TR), serbest alanlar custom gider.
+        # 🎯 VARSAYILAN DEĞER GAP-FILL (EN SON, TEK OTORİTE ZİNCİRİ):
+        #   1) DB attributes.default_value (kullanıcı UI'dan düzenler/siler — DB OTORİTEDİR)
+        #   2) GPSR şirket bilgisi (Üretici/İthalatçı — beyaz-etiket, dinamik)
+        #   3) Statik FACETTE seed fallback (yalnız DB'de o özelliğin dokümanı hiç yoksa)
+        # Yalnız ürünün DOLDURMADIĞI (processed olmayan) Trendyol özelliğine yazılır → hiçbir
+        # değer sessizce EZİLMEZ. Listeli alanlar ADIYLA value_id'ye çözülür (Türkiye→TR),
+        # serbest alanlar custom gider. Kullanıcı bir varsayılanı UI'dan silince kod DAYATMAZ.
         for m_ty_id, m_meta in meta.items():
             if m_ty_id in processed:
                 continue
-            fv = facette_fixed_value_for(m_meta.get("name") or "")
+            fv = _resolve_gap_default(m_meta.get("name") or "", _attr_default_map, _attr_doc_norms)
             if not fv:
                 continue
             name_map = m_meta.get("value_name_to_id") or {}

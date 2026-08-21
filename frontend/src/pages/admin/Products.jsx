@@ -3149,6 +3149,9 @@ export default function AdminProducts() {
                   const _isHiddenAttr = (nm) => hiddenAttrNames.includes(_attrNorm(nm));
 
                   const baseList = globalAttributes
+                    // "Ürün kartında göster" kapalı (show_in_product_card===false) özellikleri gizle.
+                    // Ayar: Katalog → Ürün Özellikleri → özellik ayar kartı. Varsayılan (alan yok) = göster.
+                    .filter(a => a.show_in_product_card !== false)
                     .filter(a => !_isHiddenAttr(a.name))
                     .filter(a => a.name.toLowerCase().includes(attributeSearchTerm.toLowerCase()));
 
