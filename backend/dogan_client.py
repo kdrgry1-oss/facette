@@ -1581,10 +1581,11 @@ class DoganClient:
       <cac:AdditionalItemIdentification>
         <cbc:ID schemeID="GTIN">{escape(_barcode)}</cbc:ID>
       </cac:AdditionalItemIdentification>""" if _barcode else "")
-            # NOT: AdditionalItemProperty (Renk/Beden) EKLENMEZ — GİB UBL-TR Item şeması bu
-            # pozisyonda kabul etmiyor ("INVALID XML: Expected AdditionalItemIdentification /
-            # OriginCountry"). Sütun doldurma denemesi faturayı bozuyordu → geri alındı.
-            # Fatura ÇALIŞIR halde; Renk/Beden bilgisi fatura-altı Note'ta zaten var.
+            # NOT: Barkod/Renk/Beden fatura SATIR SÜTUNLARINI, Doğan şablonu SATIR NOTUNDAN
+            # (cbc:Note) parse eder — e-Arşiv'de kanıtlanmış yöntem. Bu yüzden Renk/Beden/Barkod
+            # AdditionalItemProperty olarak EKLENMEZ (GİB e-Fatura Item şeması sıra/validasyonu riskli);
+            # bunun yerine caller satır notunu 'Renk:..;Beden:..:Barcode:..' formatında geçirir ve
+            # yukarıdaki note_xml (cbc:Note) ile yazılır. Barkod ayrıca GTIN olarak da verilir (std_item_xml).
             item_props_xml = ""
 
             invoice_lines_xml.append(f"""<cac:InvoiceLine>

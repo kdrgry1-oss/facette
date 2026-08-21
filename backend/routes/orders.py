@@ -4342,9 +4342,14 @@ async def create_invoice_for_order(
                 "barcode": (it.get("barcode") or "").strip(),
                 "color": (it.get("color") or "").strip(),
                 "size": (it.get("size") or "").strip(),
-                # Barkod/Renk/Beden/Stok Kodu satır notuna DEĞİL, builder'da header Note[0]'a
-                # yazılır (gerçek çalışan e-Faturadaki format FCE...016). Satır notu boş kalır.
-                "note": "",
+                # Barkod/Renk/Beden fatura SATIR SÜTUNLARI → Doğan şablonu satır notundan (cbc:Note)
+                # PARSE eder (e-Arşiv'de kanıtlanmış format). e-Fatura'da sütunlar boş çıkıyordu çünkü
+                # not boş bırakılıyordu; artık e-Arşiv ile AYNI formatta doldurulur.
+                "note": ((
+                    f"Renk:{(it.get('color') or '').strip()};"
+                    f"Beden:{(it.get('size') or '').strip()}:"
+                    f"Barcode:{(it.get('barcode') or '').strip()}"
+                ) if (it.get('color') or it.get('size') or (it.get('barcode') or '').strip()) else ""),
             })
 
         # DENETİM FIX: e-Fatura'da da kupon/kampanya/havale indirimini UYGULA. Eskiden discount=0.0
@@ -4478,6 +4483,29 @@ async def create_invoice_for_order(
             ubl_xml, invoice_uuid, invoice_number,
             customer_vkn, receiver_alias, sender_alias, cust_email,
         )
+        # KRİTİK: "UUID/ID daha önce gönderilmiş bir faturayla eşleşmektedir" hatası, faturanın
+        # Doğan'da ZATEN OLUŞTUĞU (ilk denememiz timeout/kesinti ile sonucu alınamamış olabilir)
+        # anlamına gelir. Eskiden bu 'gerçek hata' sanılıp invoice_issued yazılmıyor, panel
+        # "kesilmemiş" gösteriyordu (W11242 vakası). Mesajdan MEVCUT fatura no'yu çıkarıp BAŞARI say —
+        # numarayı artırıp İKİNCİ fatura kesme.
+        if not (dogan_result or {}).get("success"):
+            import re as _re_inv
+            _m_txt = str((dogan_result or {}).get("message", "") or "")
+            _m_low = _m_txt.lower()
+            _already = any(_t in _m_low for _t in (
+                "daha önce gönder", "daha once gonder", "eşleş", "eslesme", "eslesmekte",
+                "zaten gönder", "zaten gonder", "zaten", "mükerrer", "mukerrer", "duplicate",
+                "already", "kayıtlı", "kayitli", "mevcut", "10009"))
+            _mm = _re_inv.search(r'((?:FCE|FCT|FCA|EAR|FAT)\w*\d{6,})', _m_txt)
+            if _already and _mm:
+                _exist_no = _mm.group(1)
+                logger.warning(f"e-Fatura zaten kayıtlı ({_exist_no}) → başarı sayıldı, mevcut no kaydedildi (order {order_id})")
+                invoice_number = _exist_no
+                _mu = _re_inv.search(r'UUID[:\s]*([0-9a-fA-F-]{16,})', _m_txt)
+                if _mu:
+                    invoice_uuid = _mu.group(1)
+                dogan_result = {**(dogan_result or {}), "success": True, "already_sent": True,
+                                "existing_number": _exist_no, "message": _m_txt}
         _ef_tries = 0
         while (not dogan_result.get("success")) and _ef_tries < 5 and any(_t in str(dogan_result.get("message","")).lower() for _t in ("zaten","mükerrer","mukerrer","duplicate","already","10009","kayıtlı","kayitli","mevcut")):
             _ef_tries += 1
