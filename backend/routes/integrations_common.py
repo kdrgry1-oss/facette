@@ -147,8 +147,12 @@ _VALUE_SYNONYMS = {
     "turkiye": ["tr"],            # Menşei "Türkiye"      → Trendyol "TR" (zorunlu)
     "casualgunluk": ["gunluk"],   # Ortam "Casual/Günlük" → Trendyol "Günlük" (opsiyonel)
 }
+# DB-DRIVEN EŞANLAMLILAR (kullanıcının UI/DB'den eklediği; koddakilere EK). Modül-cache;
+# refresh_value_synonyms() ile ~60sn'de bir tazelenir (sync _resolve_value_id await edemez).
+_DB_VALUE_SYN = {"map": {}, "ts": 0.0}
 def _resolve_value_id(name_map: dict, local_val: str):
-    """local_val'i Trendyol value_id'ye çöz: önce birebir (norm), sonra eşanlamlı."""
+    """local_val'i Trendyol value_id'ye çöz: önce birebir (norm), sonra KOD eşanlamlısı,
+    sonra DB eşanlamlısı (kullanıcının eklediği). Hiçbiri değilse None."""
     if not name_map or local_val in (None, ""):
         return None
     nv = _norm_val(str(local_val))
@@ -157,7 +161,31 @@ def _resolve_value_id(name_map: dict, local_val: str):
     for syn in _VALUE_SYNONYMS.get(nv, []):
         if syn in name_map:
             return name_map[syn]
+    for syn in _DB_VALUE_SYN["map"].get(nv, []):
+        if syn in name_map:
+            return name_map[syn]
     return None
+
+async def refresh_value_synonyms():
+    """db.value_synonyms → {from_norm: [to_norm,...]} modül-cache (~60sn). Değer-çözümleme
+    ağırlıklı yolların (Trendyol push/validate) başında çağrılır; _resolve_value_id bu cache'i
+    sync okur. Kod _VALUE_SYNONYMS'e EK — çakışırsa kod birebir eşleşmesi zaten önce döner."""
+    import time as _t
+    now = _t.monotonic()
+    if _DB_VALUE_SYN["map"] and (now - _DB_VALUE_SYN["ts"] < 60):
+        return _DB_VALUE_SYN["map"]
+    m = {}
+    try:
+        async for s in db.value_synonyms.find({}, {"_id": 0, "from_val": 1, "to_val": 1}):
+            fn = _norm_val(str(s.get("from_val") or ""))
+            tn = _norm_val(str(s.get("to_val") or ""))
+            if fn and tn:
+                m.setdefault(fn, []).append(tn)
+    except Exception:
+        pass
+    _DB_VALUE_SYN["map"] = m
+    _DB_VALUE_SYN["ts"] = now
+    return m
 
 _ATTR_DEF_CACHE = {"map": {}, "ts": 0.0}
 async def db_attr_default_map():

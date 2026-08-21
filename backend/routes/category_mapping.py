@@ -36,6 +36,41 @@ MARKETPLACES = ["trendyol", "hepsiburada", "temu", "n11", "amazon-tr",
                 "fruugo", "emag", "trendyol-ihracat", "ciceksepeti"]
 
 
+# ── DEĞER EŞANLAMLILARI (DB-driven) — koddaki _VALUE_SYNONYMS'e EK; UI'dan yönetilebilir.
+# NOT: /{marketplace} catch-all'dan ÖNCE tanımlı (path çakışması olmasın).
+@router.get("/value-synonyms")
+async def list_value_synonyms(current_user: dict = Depends(require_admin)):
+    """DB eşanlamlıları (düzenlenebilir) + koddakiler (salt-okunur 'sistem')."""
+    from .integrations_common import _VALUE_SYNONYMS as _CODE_SYN
+    db_rows = await db.value_synonyms.find({}, {"_id": 0}).sort("from_val", 1).to_list(2000)
+    code = [{"from_val": frm, "to_val": to, "source": "sistem"}
+            for frm, tos in _CODE_SYN.items() for to in tos]
+    return {"db": db_rows, "code": code}
+
+
+@router.post("/value-synonyms")
+async def add_value_synonym(payload: dict, current_user: dict = Depends(require_admin)):
+    frm = str((payload or {}).get("from_val") or "").strip()
+    to = str((payload or {}).get("to_val") or "").strip()
+    if not frm or not to:
+        raise HTTPException(status_code=400, detail="from_val ve to_val gerekli")
+    import uuid as _u
+    doc = {"id": _u.uuid4().hex[:12], "from_val": frm, "to_val": to,
+           "created_by": current_user.get("email", ""),
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.value_synonyms.update_one({"from_val": frm, "to_val": to},
+                                       {"$setOnInsert": doc}, upsert=True)
+    return {"success": True, "synonym": doc}
+
+
+@router.delete("/value-synonyms/{sid}")
+async def delete_value_synonym(sid: str, current_user: dict = Depends(require_admin)):
+    res = await db.value_synonyms.delete_one({"id": sid})
+    if not res.deleted_count:
+        raise HTTPException(status_code=404, detail="Eşanlamlı bulunamadı")
+    return {"success": True}
+
+
 @router.get("/{marketplace}")
 async def list_mappings(
     marketplace: str,

@@ -45,6 +45,7 @@ from .integrations_common import (
     _resolve_value_id,
     _search_tr_regex,
     log_integration_event,
+    refresh_value_synonyms,
     restock_claim_once,
 )
 
@@ -520,6 +521,7 @@ async def validate_products_for_trendyol(
 
     # Gap-fill / "bizim için zorunlu" TEK OTORİTE veri: attributes.default_value (DB) + our_required.
     _attr_default_map, _attr_doc_norms = await _load_attr_defaults()
+    await refresh_value_synonyms()  # DB-driven değer eşanlamlılarını cache'e tazele (sync resolver okur)
     # "Bizim için zorunlu" (pazaryeri zorunlu tutmasa da biz tutuyoruz) özellik adları (normalize).
     _our_required_norms: set = set()
     try:
@@ -1398,6 +1400,7 @@ async def sync_products_to_trendyol(
     # 🔑 GAP-FILL TEK OTORİTE: attributes.default_value (DB). Kullanıcı UI'dan düzenler/siler;
     # kod yeniden dayatmaz. Statik FACETTE seed yalnız DB'de dokümanı olmayan özellik için fallback.
     _attr_default_map, _attr_doc_norms = await _load_attr_defaults()
+    await refresh_value_synonyms()  # DB-driven değer eşanlamlılarını cache'e tazele (sync resolver okur)
 
     async def _get_attr_meta(mp_cat_id):
         if mp_cat_id in _attr_meta_cache:
