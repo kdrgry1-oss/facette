@@ -296,40 +296,41 @@ async def sync_attributes_from_trendyol(current_user: dict = Depends(require_adm
 async def sync_attributes_from_products(current_user: dict = Depends(require_admin)):
     """Scan all existing products' attributes arrays and populate the global attributes list"""
     try:
-        products = await db.products.find({"attributes": {"$exists": True, "$ne": []}}).to_list(None)
-        
+        # PERF/GÜVENLİK: yalnız gerekli alanları çek (base64 görselli tam doküman çekmek
+        # belleği/aktarımı aşıp 500 veriyordu). Filtre YOK: Beden/Renk varyantlarda olduğundan
+        # attributes'ı olmayan ürünler de taranmalı.
         attribute_map = {}
-        for product in products:
-            attrs = product.get("attributes", [])
-            for attr in attrs:
-                # attr format: {"type": "Beden", "value": "M"}
-                attr_type = attr.get("type")
-                attr_val = attr.get("value")
-                
-                if not attr_type:
-                    continue
-                    
-                attr_type = str(attr_type).strip()
-                if attr_type not in attribute_map:
-                    attribute_map[attr_type] = set()
-                    
-                if attr_val:
-                    attribute_map[attr_type].add(str(attr_val).strip())
-
-            # BEDEN/RENK VARYANTTA DURUR: attributes[] yerine variants[].size/color'dan topla
-            # (aksi halde 'Beden' özelliği hep 0 değer görünüyordu — kullanıcı bildirdi).
-            for _v in (product.get("variants") or []):
-                if not isinstance(_v, dict):
-                    continue
-                _sz = str(_v.get("size") or "").strip()
-                if _sz:
-                    attribute_map.setdefault("Beden", set()).add(_sz)
-                _cl = str(_v.get("color") or _v.get("renk") or "").strip()
-                if _cl:
-                    attribute_map.setdefault("Renk", set()).add(_cl)
-            _pc = str(product.get("color") or "").strip()
-            if _pc:
-                attribute_map.setdefault("Renk", set()).add(_pc)
+        async for product in db.products.find(
+                {}, {"_id": 0, "attributes": 1, "variants.size": 1, "variants.color": 1, "color": 1}):
+            try:
+                attrs = product.get("attributes")
+                if isinstance(attrs, list):
+                    for attr in attrs:
+                        if not isinstance(attr, dict):
+                            continue
+                        attr_type = attr.get("type") or attr.get("name")
+                        if not attr_type:
+                            continue
+                        attr_type = str(attr_type).strip()
+                        attribute_map.setdefault(attr_type, set())
+                        attr_val = attr.get("value")
+                        if attr_val:
+                            attribute_map[attr_type].add(str(attr_val).strip())
+                # BEDEN/RENK VARYANTTA DURUR → variants[].size/color'dan da topla (kullanıcı bildirdi).
+                for _v in (product.get("variants") or []):
+                    if not isinstance(_v, dict):
+                        continue
+                    _sz = str(_v.get("size") or "").strip()
+                    if _sz:
+                        attribute_map.setdefault("Beden", set()).add(_sz)
+                    _cl = str(_v.get("color") or _v.get("renk") or "").strip()
+                    if _cl:
+                        attribute_map.setdefault("Renk", set()).add(_cl)
+                _pc = str(product.get("color") or "").strip()
+                if _pc:
+                    attribute_map.setdefault("Renk", set()).add(_pc)
+            except Exception:
+                continue  # bir ürün bozuksa atla, tarama devam etsin
 
         if not attribute_map:
             return {"success": False, "message": "Ürünlerinizin içinde herhangi bir özellik (Beden, Renk vb.) bulunamadı."}
