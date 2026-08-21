@@ -137,6 +137,12 @@ def _norm_val(s: str) -> str:
 _VALUE_SYNONYMS = {
     "yakasiz": ["sifiryaka", "yakayok"],
     "sifiryaka": ["yakasiz"],
+    # "Ek Özellik" (Trendyol attr 124, allowCustom=False) enum'unda "hiçbiri" değerinin
+    # gerçek adı "Ek Özellik Mevcut Değil" (value_id 1178759). Bizdeki "Yok" / "Mevcut Değil"
+    # buna çözülmüyordu → hem eksik raporunda flag'leniyor hem push'ta sessizce düşüyordu (143 ürün).
+    # Sinonim yalnız hedef ad o attribute'ün name_map'inde varsa devreye girer (başka alanı bozmaz).
+    "yok": ["ekozellikmevcutdegil"],
+    "mevcutdegil": ["ekozellikmevcutdegil"],
 }
 def _resolve_value_id(name_map: dict, local_val: str):
     """local_val'i Trendyol value_id'ye çöz: önce birebir (norm), sonra eşanlamlı."""

@@ -1067,9 +1067,10 @@ async def bulk_auto_match_attributes(
         nm = (mp_name or "").lower().strip()
         if not nm:
             return None
-        # Trendyol "Materyal Bileşeni" → bizdeki veri "Ürün İçerik Bilgisi"nde durur
+        # Trendyol "Materyal Bileşeni" — global katalogdaki TEK terim (id 6981); lokal attribute
+        # adı da buna sabitlenir (tekilleştirme: "Ürün İçerik Bilgisi" ikinci terimi kaldırıldı).
         if "materyal bileşeni" in nm:
-            return "Ürün İçerik Bilgisi"
+            return "Materyal Bileşeni"
         for ga in global_attrs:
             gn = (ga.get("name") or "").lower().strip()
             if not gn:
@@ -1443,7 +1444,7 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
         if not n:
             return None
         if "materyal bileşeni" in n:
-            return "Ürün İçerik Bilgisi"
+            return "Materyal Bileşeni"
         for ga in global_attrs:
             gn = (ga.get("name") or "").lower().strip()
             if not gn:
