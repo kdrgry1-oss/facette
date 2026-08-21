@@ -17,7 +17,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
-  Search, RefreshCw, Check, X, Store, AlertCircle, ArrowRight, Link as LinkIcon, FileJson, ChevronsUpDown,
+  Search, RefreshCw, Check, X, Store, AlertCircle, ArrowRight, Link as LinkIcon, FileJson, ChevronsUpDown, Trash2,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -786,6 +786,23 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
     } finally { setSaving(false); }
   };
 
+  // ── KATEGORİ-SCOPED SİLME (yalnız BU kategorinin category_mappings belgesini değiştirir;
+  // auto-save otomatik yazar. Diğer kategoriler ETKİLENMEZ). ──────────────────────────────
+  const deleteAttrMappings = (attrId, attrName) => {
+    if (!window.confirm(`"${attrName}" özelliğinin BU KATEGORİDEKİ tüm değer eşleştirmeleri ve varsayılanı kaldırılsın mı? (Diğer kategoriler etkilenmez)`)) return;
+    setValueMappings((p) => {
+      const n = {};
+      for (const k of Object.keys(p)) if (!k.startsWith(`${attrId}|`)) n[k] = p[k];
+      return n;
+    });
+    setDefaults((p) => { const n = { ...p }; delete n[attrId]; delete n[String(attrId)]; return n; });
+    toast.success(`"${attrName}" bu kategoride temizlendi`);
+  };
+  const deleteValueMapping = (attrId, lv) => {
+    setValueMappings((p) => { const n = { ...p }; delete n[`${attrId}|${lv}`]; return n; });
+    toast.success(`"${lv}" eşleştirmesi bu kategoride kaldırıldı`);
+  };
+
   // Otomatik değer eşleştirme — TÜM attribute'lardaki TÜM değerleri tarar.
   // ÖNCELİK: birebir (normalize) eşleşme > eşanlamlı > tek-aday substring.
   // Ayrıca: yanlış kaydedilmiş (substring kaynaklı, örn. "Cepli"→"Kargo Cepli")
@@ -1007,10 +1024,10 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                   const isActive = id === String(selectedAttrId);
                   const isVariant = a.variant === true || /_variant_property$/i.test(id);
                   return (
+                    <div key={id} className="flex items-stretch">
                     <button
-                      key={id}
                       onClick={() => setSelectedAttrId(id)}
-                      className={`w-full text-left px-3 py-2 text-xs transition flex items-center justify-between gap-2 ${
+                      className={`flex-1 min-w-0 text-left px-3 py-2 text-xs transition flex items-center justify-between gap-2 ${
                         isActive
                           ? `bg-${color}-50 border-l-2 border-${color}-500 font-semibold text-${color}-900`
                           : "hover:bg-gray-50 border-l-2 border-transparent text-gray-700"
@@ -1038,6 +1055,14 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                         <span className="text-[9px] text-gray-400">{localCount}</span>
                       </span>
                     </button>
+                    <span role="button" tabIndex={0}
+                      title="Bu özelliğin BU kategorideki eşleştirmelerini/varsayılanını sil (diğer kategoriler etkilenmez)"
+                      onClick={(e) => { e.stopPropagation(); deleteAttrMappings(id, name); }}
+                      className="shrink-0 w-7 flex items-center justify-center text-gray-300 hover:text-red-600 hover:bg-red-50 cursor-pointer border-l"
+                      data-testid={`adv-attr-del-${id}`}>
+                      <Trash2 size={13} />
+                    </span>
+                    </div>
                   );
                   });
                 })()}
@@ -1183,6 +1208,13 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                               ) : (
                                 <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-bold">✓ EŞLEŞTİ</span>
                               ))}
+                              <button type="button"
+                                title="Bu değerin BU kategorideki eşleştirmesini kaldır (diğer kategoriler etkilenmez)"
+                                onClick={() => deleteValueMapping(selectedAttrId, lv)}
+                                className="ml-auto shrink-0 w-6 h-6 flex items-center justify-center rounded text-gray-300 hover:text-red-600 hover:bg-red-50"
+                                data-testid={`adv-valmap-del-${lv}`}>
+                                <Trash2 size={12} />
+                              </button>
                             </div>
                           </td>
                           <td className="px-4 py-2">
