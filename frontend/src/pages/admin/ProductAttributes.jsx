@@ -27,55 +27,9 @@ export default function ProductAttributes() {
   const [selAttrIds, setSelAttrIds] = useState(new Set());   // toplu ÖZELLİK seçimi
   const [selVals, setSelVals] = useState(new Set());         // toplu DEĞER seçimi
 
-  // ── ÖZELLİK AYAR KARTI durumu ──────────────────────────────────────────────
-  const [requiredIn, setRequiredIn] = useState({ grouped: {}, loading: false });
-  const [defaultValueDraft, setDefaultValueDraft] = useState('');
-  const [savingSetting, setSavingSetting] = useState(false);
-
   useEffect(() => {
     fetchAttributes();
   }, []);
-
-  // Seçili özellik değişince: ayar kartı alanlarını doldur + zorunlu-pazaryeri listesini çek.
-  useEffect(() => {
-    if (!selectedAttr?.id) {
-      setRequiredIn({ grouped: {}, loading: false });
-      setDefaultValueDraft('');
-      return;
-    }
-    setDefaultValueDraft(selectedAttr.default_value || '');
-    let cancelled = false;
-    setRequiredIn({ grouped: {}, loading: true });
-    axios.get(`${API}/attributes/${selectedAttr.id}/required-in`, { headers: authHeaders() })
-      .then((res) => { if (!cancelled) setRequiredIn({ grouped: res.data.grouped || {}, loading: false }); })
-      .catch(() => { if (!cancelled) setRequiredIn({ grouped: {}, loading: false }); });
-    return () => { cancelled = true; };
-  }, [selectedAttr?.id]);
-
-  // Ayar kartı KISMİ kaydı: yalnız değişen alan(lar) PUT edilir (name/values korunur).
-  const patchSetting = async (fields, okMsg) => {
-    if (!selectedAttr?.id) return;
-    try {
-      setSavingSetting(true);
-      await axios.put(`${API}/attributes/${selectedAttr.id}`, fields, { headers: authHeaders() });
-      // Optimistik: yerel state'i güncelle (yeniden çekmeye gerek yok — hızlı his)
-      setSelectedAttr((prev) => (prev ? { ...prev, ...fields } : prev));
-      setAttributes((prev) => prev.map((a) => (a.id === selectedAttr.id ? { ...a, ...fields } : a)));
-      if (okMsg) toast.success(okMsg);
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Ayar kaydedilemedi');
-      // Hata halinde sunucu gerçeğiyle tazele
-      fetchAttributes();
-    } finally {
-      setSavingSetting(false);
-    }
-  };
-
-  const saveDefaultValue = () => {
-    const next = (defaultValueDraft || '').trim();
-    if (next === (selectedAttr?.default_value || '')) return;  // değişmediyse boşuna PUT etme
-    patchSetting({ default_value: next }, next ? 'Varsayılan değer kaydedildi' : 'Varsayılan değer temizlendi');
-  };
 
   const fetchAttributes = async () => {
     try {
@@ -406,112 +360,6 @@ export default function ProductAttributes() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-6">
-                {/* ── ÖZELLİK AYAR KARTI ─────────────────────────────────────── */}
-                <div className="mb-6 rounded-xl border border-gray-200 bg-gradient-to-b from-gray-50 to-white p-5 shadow-sm">
-                  <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
-                    <span className="inline-block w-1.5 h-4 bg-orange-500 rounded-full" />
-                    "{selectedAttr.name}" Ayar Kartı
-                  </h3>
-
-                  {/* 1) Zorunlu olduğu pazaryeri/kategoriler (salt-okunur) */}
-                  <div className="mb-4">
-                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-                      Zorunlu olduğu pazaryeri / kategoriler
-                    </label>
-                    {requiredIn.loading ? (
-                      <div className="text-xs text-gray-400">Yükleniyor...</div>
-                    ) : Object.keys(requiredIn.grouped).length === 0 ? (
-                      <div className="text-xs text-gray-500 bg-gray-100 rounded-lg px-3 py-2">
-                        Hiçbir pazaryerinde zorunlu değil.
-                      </div>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(requiredIn.grouped).map(([mp, cats]) => {
-                          const label = { trendyol: 'Trendyol', hepsiburada: 'Hepsiburada', temu: 'Temu' }[mp] || mp;
-                          return (
-                            <div key={mp} className="text-xs bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-1.5">
-                              <span className="font-semibold">{label}:</span> {cats.join(', ')}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 2) Tüm sistemde varsayılan değer (input) */}
-                  <div className="mb-4">
-                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-                      Tüm sistemde varsayılan değer
-                    </label>
-                    {(selectedAttr.values || []).length > 0 ? (
-                      <select
-                        value={defaultValueDraft}
-                        disabled={savingSetting}
-                        onChange={(e) => { setDefaultValueDraft(e.target.value); }}
-                        onBlur={saveDefaultValue}
-                        className="w-full max-w-sm border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-50"
-                      >
-                        <option value="">— Yok (boş) —</option>
-                        {[...(selectedAttr.values || [])].sort().map((v, i) => (
-                          <option key={i} value={v}>{v}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type="text"
-                        value={defaultValueDraft}
-                        disabled={savingSetting}
-                        placeholder="Örn. Yetişkin (boş bırakılırsa varsayılan uygulanmaz)"
-                        onChange={(e) => setDefaultValueDraft(e.target.value)}
-                        onBlur={saveDefaultValue}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } }}
-                        className="w-full max-w-sm border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-50"
-                      />
-                    )}
-                    <p className="text-[11px] text-gray-400 mt-1">
-                      Push sırasında ürün bu özelliği taşımıyorsa bu değer kullanılır. Boşaltırsanız
-                      sistem bir daha dayatmaz.
-                    </p>
-                  </div>
-
-                  {/* 3 & 4) Toggle'lar */}
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <button
-                      type="button"
-                      disabled={savingSetting}
-                      onClick={() => patchSetting(
-                        { show_in_product_card: !(selectedAttr.show_in_product_card !== false) },
-                        'Kaydedildi'
-                      )}
-                      className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors disabled:opacity-50 ${selectedAttr.show_in_product_card !== false ? 'bg-green-50 border-green-300 text-green-800' : 'bg-gray-50 border-gray-300 text-gray-500'}`}
-                    >
-                      <span>Ürün kartında göster</span>
-                      <span className={`inline-flex items-center h-5 w-9 rounded-full transition-colors ${selectedAttr.show_in_product_card !== false ? 'bg-green-500' : 'bg-gray-300'}`}>
-                        <span className={`inline-block h-4 w-4 bg-white rounded-full shadow transform transition-transform ${selectedAttr.show_in_product_card !== false ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={savingSetting}
-                      onClick={() => patchSetting(
-                        { our_required: !(selectedAttr.our_required === true) },
-                        'Kaydedildi'
-                      )}
-                      className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors disabled:opacity-50 ${selectedAttr.our_required === true ? 'bg-orange-50 border-orange-300 text-orange-800' : 'bg-gray-50 border-gray-300 text-gray-500'}`}
-                    >
-                      <span>Bizim için zorunlu</span>
-                      <span className={`inline-flex items-center h-5 w-9 rounded-full transition-colors ${selectedAttr.our_required === true ? 'bg-orange-500' : 'bg-gray-300'}`}>
-                        <span className={`inline-block h-4 w-4 bg-white rounded-full shadow transform transition-transform ${selectedAttr.our_required === true ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                      </span>
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-gray-400 mt-2">
-                    "Bizim için zorunlu": pazaryeri zorunlu tutmasa da bu özellik boşsa doğrulama/eksik
-                    raporunda uyarı verilir.
-                  </p>
-                </div>
-
                 {selVals.size > 0 && (
                   <div className="flex items-center justify-between px-3 py-2 mb-3 bg-red-50 border border-red-200 rounded-lg">
                     <span className="text-xs font-medium text-red-700">{selVals.size} değer seçili</span>

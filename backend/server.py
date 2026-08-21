@@ -216,19 +216,6 @@ async def lifespan(app: FastAPI):
         except Exception as _rfe:
             logger.error(f"[odeme-telafi] reclassify hatasi: {_rfe}")
 
-        # ÖZELLİK VARSAYILANLARI: koddaki FACETTE sabit varsayılanlarını (Cinsiyet=Kadın,
-        # Menşei=Türkiye, Yaş Grubu=Yetişkin, Ek Özellik=Yok …) attributes.default_value alanına
-        # İDEMPOTENT tohumla → Özellik Ayar Kartı'nda görünür/düzenlenebilir. DB OTORİTEDİR:
-        # yalnız alan HİÇ yoksa yazar, kullanıcı silince ("") yeniden dayatmaz.
-        try:
-            from routes.attributes import seed_attribute_defaults
-            _sd = await seed_attribute_defaults()
-            if _sd.get("created") or _sd.get("seeded"):
-                logger.info(f"[ozellik-seed] {_sd.get('created', 0)} yeni ozellik olusturuldu, "
-                            f"{_sd.get('seeded', 0)} varsayilan deger tohumlandi.")
-        except Exception as _se:
-            logger.error(f"[ozellik-seed] hata: {_se}")
-
         # Create indexes
         await db.products.create_index("slug")
         await db.products.create_index("stock_code")
