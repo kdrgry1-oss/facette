@@ -623,10 +623,27 @@ async def get_orders(
         # kayıtlar (ör. Ticimax'tan taşınanlar) string tarihlerin üstüne çıkar ve liste
         # gerçek tarih sırasını kaybeder. Bu yüzden created_at'i $convert ile Date'e
         # normalize edip ona göre sıralarız (EN YENİ EN ÜSTTE), tip ne olursa olsun.
+        # TZ TUTARLILIĞI (sıralama = ekrandaki TR saati): Pazaryeri (Trendyol/HB/Temu/N11/Amazon)
+        # siparişlerinin created_at'i TR duvar-saatiyle "+00:00" etiketli saklanıyor; site
+        # siparişleri ise GERÇEK UTC. Ham UTC'ye göre sıralayınca site siparişi olduğundan eski
+        # sanılıp yanlış yere (aşağı) düşüyordu. Sıralamayı ekranla aynı TR çerçevesine getiririz:
+        # pazaryeri olduğu gibi, site siparişine +3 saat → liste görünen saate göre "en yeni en üstte".
+        _mkt_platforms = ["trendyol", "hepsiburada", "temu", "n11", "amazon"]
         _pipe = [
             {"$match": query},
-            {"$addFields": {"_sort_dt": {"$convert": {
-                "input": "$created_at", "to": "date", "onError": None, "onNull": None
+            {"$addFields": {"_sort_dt": {"$let": {
+                "vars": {
+                    "d": {"$convert": {"input": "$created_at", "to": "date", "onError": None, "onNull": None}},
+                    "mkt": {"$in": [
+                        {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", ""]}]}},
+                        _mkt_platforms,
+                    ]},
+                },
+                "in": {"$cond": [
+                    {"$or": ["$$mkt", {"$eq": ["$$d", None]}]},
+                    "$$d",
+                    {"$add": ["$$d", 3 * 60 * 60 * 1000]},
+                ]},
             }}}},
             {"$sort": {"_sort_dt": -1, "created_at": -1, "_id": -1}},
             {"$skip": skip},
