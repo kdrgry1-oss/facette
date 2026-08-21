@@ -299,33 +299,40 @@ async def upsert_pixel(req: PixelReq, current_user: dict = Depends(require_admin
         "updated_at": now_iso,
         "updated_by": current_user.get("email", ""),
     }
-    # Access token: vault'a şifreli olarak yazılır; plain MongoDB'de tutulmaz
-    if req.access_token:
-        # Eğer vault_key belirtilmemişse otomatik üret (SaaS-safe)
-        if not (req.vault_key or req.env_token_key):
+    # Access token: vault'a şifreli olarak yazılır; plain MongoDB'de tutulmaz.
+    _incoming = (req.access_token or "").strip()
+    # GET yanıtı token'ı '***' maskeler. Kullanıcı değeri değiştirmeden tekrar kaydederse
+    # bu maskeli değer geri gelir → token'ı BOZMA/atma, dokunma (mevcut vault/env korunur).
+    _masked = (not _incoming) or _incoming in ("***", "********") or set(_incoming) <= {"*", "•", "·", " "}
+    if not _masked:
+        # KULLANICI PANELDEN GERÇEK TOKEN GİRDİ → onu kullan. Eskiden env_token_key dolu olunca
+        # bu token vault'a YAZILMADAN atılıyordu ('kaydolmuyor' şikayeti). Artık: env_token_key
+        # dolu OLSA BİLE token vault'a yazılır ve env_token_key TEMİZLENİR — panelden girilen token
+        # env yaklaşımının yerini alır; env öncelik girilen token'ı gölgelemesin.
+        if not (req.vault_key or "").strip():
             from hashlib import sha1
             sig = sha1(f"{req.provider}-{(req.tag_id or '').strip()}-{req.tenant_id or 'default'}".encode()).hexdigest()[:10]
             req.vault_key = f"capi_{req.provider}_{sig}"
-            data["vault_key"] = req.vault_key
-        # Vault'a yaz (env_token_key yoksa)
-        if req.vault_key and not req.env_token_key:
-            try:
-                from security.crypto import encrypt as _vault_encrypt
-                enc = _vault_encrypt(req.access_token.strip())
-                await db.vault_secrets.update_one(
-                    {"key": req.vault_key.strip()},
-                    {"$set": {
-                        "key": req.vault_key.strip(),
-                        "value_enc": enc,
-                        "description": f"CAPI {req.provider} token — {req.name or req.tag_id}",
-                        "scope": "capi",
-                        "updated_by": current_user.get("email"),
-                        "updated_at": now_iso,
-                    }, "$setOnInsert": {"created_at": now_iso}},
-                    upsert=True,
-                )
-            except Exception as e:
-                logger.warning(f"Vault upsert failed: {e}")
+        data["vault_key"] = req.vault_key
+        try:
+            from security.crypto import encrypt as _vault_encrypt
+            enc = _vault_encrypt(_incoming)
+            await db.vault_secrets.update_one(
+                {"key": req.vault_key.strip()},
+                {"$set": {
+                    "key": req.vault_key.strip(),
+                    "value_enc": enc,
+                    "description": f"CAPI {req.provider} token — {req.name or req.tag_id}",
+                    "scope": "capi",
+                    "updated_by": current_user.get("email"),
+                    "updated_at": now_iso,
+                }, "$setOnInsert": {"created_at": now_iso}},
+                upsert=True,
+            )
+            # Panelden token girildi → env_token_key'e gerek yok; öncelik çakışmasını da önle.
+            data["env_token_key"] = None
+        except Exception as e:
+            logger.warning(f"Vault upsert failed: {e}")
         # PLAIN text token'ı MongoDB'de tutma
         data["access_token"] = ""
 
