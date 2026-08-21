@@ -57,6 +57,35 @@ from .integrations_common import (
 # çalışmamış edge-case) özellik için son-çare fallback olarak kullanılır.
 _STATIC_FIXED_NORM = {_normalize_attr_key(k): v for k, v in FACETTE_FIXED_ATTR_DEFAULTS.items()}
 
+# Beden (size) alias çiftleri — normalize edilmiş (_norm_val: küçük harf + alfasayısal).
+# XXS↔2XS gibi aynı bedenin farklı yazımları. SADECE bu çiftlerde köprü; substring YOK
+# (S↔XS gibi yanlış eşleşme olmasın). category_mapping._SIZE_ALIAS_PAIRS ile aynı mantık,
+# ama modüller-arası import (başlatma-güvenliği: forward-reference) yapmamak için burada
+# yerel tanımlı.
+_SIZE_ALIAS_GROUPS = [
+    {"xxs", "2xs"}, {"xxxs", "3xs"},
+    {"xxl", "2xl"}, {"xxxl", "3xl"}, {"xxxxl", "4xl"}, {"xxxxxl", "5xl"},
+]
+
+
+def _resolve_size_value_id(name_map: dict, size_val):
+    """Beden değerini Trendyol value_id'ye çöz: birebir (normalize) → alias çifti.
+    name_map: {_norm_val(değer adı) -> value_id}. Substring/fuzzy YOK (yanlış beden riski).
+    _resolve_value_id (kod+DB eşanlamlı) yolunu TAMAMLAR; beden-özel alias'ları ekler."""
+    if not name_map or size_val in (None, ""):
+        return None
+    nv = _norm_val(str(size_val))
+    if not nv:
+        return None
+    if nv in name_map:
+        return name_map[nv]
+    for grp in _SIZE_ALIAS_GROUPS:
+        if nv in grp:
+            for alt in grp:
+                if alt != nv and alt in name_map:
+                    return name_map[alt]
+    return None
+
 
 async def _load_attr_defaults():
     """attributes koleksiyonundan gap-fill için TEK OTORİTE veriyi yükler.
@@ -1636,8 +1665,13 @@ async def sync_products_to_trendyol(
                 # Örn. local "Dokuma"/"Örme"/"Kısa" → Trendyol value_id (Türkçe/boşluk duyarsız).
                 am_meta = meta.get(ty_id) or {}
                 name_map = am_meta.get("value_name_to_id") or {}
+                _is_size_attr = local_key in ("beden", "size") or "beden" in (am_meta.get("name") or "").lower()
                 if name_map:
                     auto_vid = _resolve_value_id(name_map, local_val)
+                    # Beden: kayıtlı eşleştirme yoksa birebir/alias ile de dene (S↔XS DEĞİL,
+                    # yalnız XXS↔2XS gibi güvenli çiftler) → beden asla sessizce düşmesin.
+                    if not auto_vid and _is_size_attr:
+                        auto_vid = _resolve_size_value_id(name_map, local_val)
                     if auto_vid and _push(ty_id, value_id=auto_vid, custom=local_val):
                         continue
                 # Mapping yok ama allow_custom varsa local_val'i custom olarak yolla
@@ -1694,6 +1728,8 @@ async def sync_products_to_trendyol(
                 continue
             name_map = m_meta.get("value_name_to_id") or {}
             auto_vid = _resolve_value_id(name_map, lval)
+            if not auto_vid and "beden" in (m_meta.get("name") or "").lower():
+                auto_vid = _resolve_size_value_id(name_map, lval)
             if auto_vid:
                 _push(m_ty_id, value_id=auto_vid, custom=lval)
             else:
@@ -1969,8 +2005,27 @@ async def sync_products_to_trendyol(
                         item["stockCode"] = v.get("barcode")
                     item["quantity"] = int(v.get("stock", 0))
                     item["attributes"] = resolve_attributes(attributes, product, v, category, meta)
+                    # 🛡️ BEDEN GÜVENCESİ (TÜM KATEGORİLER): Varyantlı üründe Beden, Trendyol'un
+                    # zorunlu varyant eksenidir. Kategori meta'sında bir "Beden" attribute'u VARSA
+                    # ama bu item'ın attributes'ına EKLENEMEDİYSE (değer eşleşmedi + allowCustom
+                    # değil → sessizce düştü), Trendyol ürünü ya reddeder ya "ürün bulunamadı" gibi
+                    # opak hata verir. Bu item'ı SESSİZ göndermek yerine NET hata ver + ATLA →
+                    # kullanıcı hangi bedenin eşleşmediğini görüp Kategori Eşleştirme > Değerler'den
+                    # eşler. (meta boşsa/Beden attribute'u yoksa müdahale etme — eski davranış.)
+                    if v.get("size") and meta:
+                        _beden_ids = {mid for mid, mm in meta.items()
+                                      if "beden" in (mm.get("name") or "").lower()}
+                        if _beden_ids:
+                            _sent_ids = {int(a["attributeId"]) for a in item["attributes"]
+                                         if "attributeId" in a}
+                            if not (_beden_ids & _sent_ids):
+                                errors.append(
+                                    f"{product.get('name')} - Beden '{v.get('size')}' Trendyol Beden "
+                                    f"değerine eşlenemedi (Kategori Eşleştirme > Değerler'den eşleyin)."
+                                )
+                                continue
                     items_to_send.append(item)
-                    
+
         except Exception as e:
             errors.append(f"{product.get('name')} - Hazırlama Hatası: {str(e)}")
             
