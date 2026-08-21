@@ -315,7 +315,22 @@ async def sync_attributes_from_products(current_user: dict = Depends(require_adm
                     
                 if attr_val:
                     attribute_map[attr_type].add(str(attr_val).strip())
-                    
+
+            # BEDEN/RENK VARYANTTA DURUR: attributes[] yerine variants[].size/color'dan topla
+            # (aksi halde 'Beden' özelliği hep 0 değer görünüyordu — kullanıcı bildirdi).
+            for _v in (product.get("variants") or []):
+                if not isinstance(_v, dict):
+                    continue
+                _sz = str(_v.get("size") or "").strip()
+                if _sz:
+                    attribute_map.setdefault("Beden", set()).add(_sz)
+                _cl = str(_v.get("color") or _v.get("renk") or "").strip()
+                if _cl:
+                    attribute_map.setdefault("Renk", set()).add(_cl)
+            _pc = str(product.get("color") or "").strip()
+            if _pc:
+                attribute_map.setdefault("Renk", set()).add(_pc)
+
         if not attribute_map:
             return {"success": False, "message": "Ürünlerinizin içinde herhangi bir özellik (Beden, Renk vb.) bulunamadı."}
             
