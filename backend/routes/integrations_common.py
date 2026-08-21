@@ -158,6 +158,30 @@ def _resolve_value_id(name_map: dict, local_val: str):
         if syn in name_map:
             return name_map[syn]
     return None
+
+_ATTR_DEF_CACHE = {"map": {}, "ts": 0.0}
+async def db_attr_default_map():
+    """TÜM pazaryeri push'ları için TEK DB varsayılan kaynağı: attributes.default_value →
+    {normalize(ad): değer} (yalnız DOLU olanlar). ~60sn cache (bulk push'ta ürün başına
+    sorgu atmaz). Kullanıcı Özellik Ayar Kartı'ndan düzenler/siler → tüm pazaryerlerine
+    (Trendyol/HB/Temu) yansır. DB otorite; kod sabiti yalnız DB dokümanı yoksa fallback."""
+    import time as _t
+    now = _t.monotonic()
+    if _ATTR_DEF_CACHE["map"] and (now - _ATTR_DEF_CACHE["ts"] < 60):
+        return _ATTR_DEF_CACHE["map"]
+    m = {}
+    try:
+        async for a in db.attributes.find({}, {"_id": 0, "name": 1, "default_value": 1}):
+            dv = a.get("default_value")
+            dv = dv.strip() if isinstance(dv, str) else dv
+            if dv:
+                m[_normalize_attr_key(a.get("name") or "")] = dv
+    except Exception:
+        pass
+    _ATTR_DEF_CACHE["map"] = m
+    _ATTR_DEF_CACHE["ts"] = now
+    return m
+
 def _closest_trendyol_value(local_val: str, ty_values: list):
     """Yerel değere en yakın Trendyol değerini ÖNER (birebir yoksa alt-dizi/örtüşme skoru).
     ty_values: [{"id","name"}]. Dönüş: {"id","name"} veya None.

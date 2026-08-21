@@ -27,8 +27,10 @@ from .integrations_common import (
     _facette_match_for_codes,
     _facette_product_image,
     _hb_norm,
+    _normalize_attr_key,
     _resolve_stock_code,
     _to_float_tr,
+    db_attr_default_map,
     log_integration_event,
 )
 
@@ -1339,6 +1341,10 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
     if not hb_cat:
         return [], "HB kategori eşleşmesi yok (Kategori Eşleştirme ekranından eşleyin)"
 
+    # TEK OTORİTE DB VARSAYILANLARI: Özellik Ayar Kartı'ndan girilen attributes.default_value
+    # (Trendyol ile aynı kaynak). Kod sabiti (facette_fixed_value_for) yalnız DB boşsa fallback.
+    _db_defs = await db_attr_default_map()
+
     hb_attrs_list, ferr = await _hb_category_attributes_for(hb_cat)
     if not hb_attrs_list:
         return [], f"HB kategori özellikleri çekilemedi: {ferr or 'boş'}"
@@ -1491,6 +1497,7 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                        or local.get(anorm)
                        or defaults.get(aname) or defaults.get(aid) or defaults_norm.get(anorm)
                        or gad.get(anorm)
+                       or _db_defs.get(_normalize_attr_key(aname))
                        or facette_fixed_value_for(aname))
                 if not raw:
                     m = map_by_attr_id.get(aid)
