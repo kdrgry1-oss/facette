@@ -2782,7 +2782,10 @@ async def sync_single_product_inventory(
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     return await _sync_inventory_to_trendyol([product])
-async def _sync_inventory_to_trendyol(products: list):
+async def _sync_inventory_to_trendyol(products: list, force_quantity: int = None):
+    """Ürünlerin stok+fiyatını Trendyol'a gönderir. force_quantity verilirse (ör. 0)
+    her kalemin miktarı DB stoğu yerine o değere ZORLANIR (pasife-alma → 0 stok).
+    Fiyat mantığı (markup/price_diff) DEĞİŞMEZ — Trendyol salePrice/listPrice zorunlu."""
     config = await get_trendyol_config()
     if not config["is_active"]:
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
@@ -2815,7 +2818,7 @@ async def _sync_inventory_to_trendyol(products: list):
             if product.get("barcode"):
                 items_to_send.append({
                     "barcode": product["barcode"],
-                    "quantity": int(product.get("stock", 0)),
+                    "quantity": (int(force_quantity) if force_quantity is not None else int(product.get("stock", 0))),
                     "salePrice": round(sale_price, 2),
                     "listPrice": round(base_price, 2)
                 })
@@ -2825,7 +2828,7 @@ async def _sync_inventory_to_trendyol(products: list):
                     diff = float(v.get("price_diff") or 0)
                     items_to_send.append({
                         "barcode": v["barcode"],
-                        "quantity": int(v.get("stock", 0)),
+                        "quantity": (int(force_quantity) if force_quantity is not None else int(v.get("stock", 0))),
                         "salePrice": round(sale_price + diff, 2),
                         "listPrice": round(base_price + diff, 2)
                     })

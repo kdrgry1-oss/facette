@@ -15,6 +15,18 @@ import io
 router = APIRouter(prefix="/products", tags=["Products"])
 
 
+def _fire_stock_zero_on_passive(product: dict):
+    """Ürün PASİFE alınınca (is_active True→FALSE) pazaryerlerine 0 stok gönderimini
+    FIRE-AND-FORGET başlatır — kullanıcı yanıtını BLOKLAMAZ, DB stoğuna DOKUNMAZ.
+    Import fonksiyon-içi (modül-seviyesi döngüsel import / başlatma riski YOK)."""
+    try:
+        import asyncio
+        from .integrations_common import on_product_deactivated
+        asyncio.create_task(on_product_deactivated(dict(product or {})))
+    except Exception as _e:
+        logger.warning(f"[pasif-stok0] görev başlatılamadı ({(product or {}).get('id')}): {_e}")
+
+
 # ---------------------------------------------------------------------------
 # XML ürün feed'leri (Google Merchant / Facebook Katalog / Genel)
 # Çoklu feed: her feed bir "target" ile public URL üretir → /products/feed/<slug>.xml
@@ -2373,6 +2385,12 @@ async def update_product(
             (current_user or {}).get("email") or (current_user or {}).get("username") or "",
         )
 
+    # ⛔→0 PASİFE ALMA KANCASI: yalnız is_active TRUE→FALSE GEÇİŞİNDE (spam yok) pazaryerlerine
+    # 0 stok gönder. DB stoğu KORUNUR (helper dokunmaz) → tekrar aktifte cron gerçek stoğu geri
+    # yazar. Fire-and-forget (yanıtı bloklamaz); barkodlar için pre-update 'existing' yeterli.
+    if existing.get("is_active") and ("is_active" in product_data) and not product_data.get("is_active"):
+        _fire_stock_zero_on_passive(dict(existing))
+
     # İMALAT SENKRONU (kullanıcı isteği): bu üründen oluşturulmuş imalat kaydı varsa,
     # üründeki KİMLİK değişiklikleri (ürün adı, stok kodu, renkler) imalata da yansır.
     # Üretim/maliyet alanları (unit_price, size_distribution, ödeme, tarihler vb.) DEĞİŞMEZ.
@@ -2457,7 +2475,8 @@ async def delete_product(
     current_user: dict = Depends(require_admin)
 ):
     """Ürünü çöp kutusuna taşır (soft delete). Kalıcı silme için /permanent kullanın."""
-    product = await db.products.find_one({"id": product_id}, {"_id": 0, "is_active": 1})
+    # Full doc: pazaryeri 0-stok kancası barkod/varyant/isim ister.
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     await db.products.update_one(
@@ -2471,6 +2490,9 @@ async def delete_product(
             "manual_deleted": True,
         }}
     )
+    # Çöpe atma da bir TRUE→FALSE geçişidir → aktifti ise pazaryerlerine 0 stok.
+    if product.get("is_active"):
+        _fire_stock_zero_on_passive(dict(product))
     return {"message": "Ürün çöp kutusuna taşındı"}
 
 @router.post("/{product_id}/restore")
@@ -2522,6 +2544,10 @@ async def toggle_product_active(
         _op = {"$set": {"is_active": False, "manual_deactivated": True,
                         "manual_deactivated_at": _now, "updated_at": _now}}
     await db.products.update_one({"id": product_id}, _op)
+
+    # TRUE→FALSE geçişi (new_status False = önceki aktifti) → pazaryerlerine 0 stok.
+    if not new_status:
+        _fire_stock_zero_on_passive(dict(product))
 
     return {"is_active": new_status}
 
@@ -3695,6 +3721,7 @@ async def _selective_import(file: UploadFile, sel_cols: list, sel_cats: set):
 
     stats = {"updated_rows": 0, "skipped": 0, "no_match": 0, "errors": 0}
     updated_products = set()
+    _deact_fired = set()   # toplu import'ta pasife-alma kancası ürün başına 1 kez
     _now = datetime.now(timezone.utc).isoformat()
 
     def _num(row, col):
@@ -3764,6 +3791,10 @@ async def _selective_import(file: UploadFile, sel_cols: list, sel_cats: set):
             await db.products.update_one({"id": p["id"], "variants.barcode": bc}, {"$set": _upd})
             stats["updated_rows"] += 1
             updated_products.add(p["id"])
+            # Toplu import ile is_active TRUE→FALSE geçişi → pazaryerlerine 0 stok (ürün başına 1 kez).
+            if pset.get("is_active") is False and p.get("is_active") and p["id"] not in _deact_fired:
+                _deact_fired.add(p["id"])
+                _fire_stock_zero_on_passive(dict(p))
         except Exception as row_err:
             logger.error(f"Selective import row error ({bc}): {row_err}")
             stats["errors"] += 1

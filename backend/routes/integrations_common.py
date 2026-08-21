@@ -428,6 +428,96 @@ async def log_integration_event(platform: str, action: str, entity_type: str, en
         })
     except Exception as e:
         logger.error(f"Failed to log integration event: {str(e)}")
+
+
+async def on_product_deactivated(product: dict):
+    """Ürün PASİFE alınınca (is_active True→FALSE) — merkezî kanca.
+
+    Ürünün barkodlarına TÜM AKTİF/BAĞLI pazaryerlerinde quantity=0 gönderir.
+    DB STOĞUNA DOKUNMAZ (gerçek stok korunur → ürün tekrar aktif edilince mevcut
+    ~2 dk'lık cron gerçek stoğu geri yazar). Idempotent (0 push tekrar 0 push zararsız).
+
+    FIRE-AND-FORGET olarak çağrılmalı (asyncio.create_task) — kullanıcı yanıtını
+    BLOKLAMAZ. Her pazaryeri izole try/except; biri hata verse diğerleri etkilenmez.
+    Pazaryerinde olmayan ürün "ürün bulunamadı" dönebilir → zararsız, yutulur.
+    TÜM importlar fonksiyon-içi (modül-seviyesi döngüsel import / başlatma riski YOK).
+    """
+    pid = str(product.get("id") or "")
+    name = product.get("name") or ""
+    results: dict = {}
+
+    # 1) TRENDYOL — _sync_inventory_to_trendyol(force_quantity=0): fiyat mantığı aynen,
+    #    quantity=0. Fiyat (salePrice/listPrice) Trendyol'da zorunlu olduğundan korunur.
+    try:
+        from .integrations_trendyol import _sync_inventory_to_trendyol, get_trendyol_config
+        cfg = await get_trendyol_config()
+        if cfg.get("is_active"):
+            r = await _sync_inventory_to_trendyol([product], force_quantity=0)
+            results["trendyol"] = {"batch_id": (r or {}).get("batch_id"), "ok": (r or {}).get("success")}
+        else:
+            results["trendyol"] = {"skipped": "not active"}
+    except Exception as e:
+        results["trendyol"] = {"error": str(e)[:300]}
+
+    # 2) HEPSIBURADA — mevcut listing kalemlerini üret, availableStock=0 yap, yalnız stok gönder.
+    try:
+        from .category_mapping import _get_hb_client
+        from .integrations_hepsiburada import (
+            _hb_listing_items_from_product, _hb_markup, _hb_price_source,
+            _hb_sku_source, _hb_push_stock_price,
+        )
+        client, err = await _get_hb_client()
+        if err:
+            results["hepsiburada"] = {"skipped": err}
+        else:
+            items = _hb_listing_items_from_product(
+                product, await _hb_markup(), await _hb_price_source(), await _hb_sku_source()
+            )
+            for it in items:
+                it["availableStock"] = 0
+                it.pop("price", None)  # fiyat gönderme — yalnız stok 0
+            if items:
+                r = await _hb_push_stock_price(client, items, do_price=False, do_stock=True)
+                results["hepsiburada"] = {"stock_upload_id": (r or {}).get("stock_upload_id"),
+                                          "errors": (r or {}).get("errors") or []}
+            else:
+                results["hepsiburada"] = {"skipped": "no items (sku/barkod yok)"}
+    except Exception as e:
+        results["hepsiburada"] = {"error": str(e)[:300]}
+
+    # 3) TEMU — best-effort (scaffold). Hesap aktif değilse config exception → atla/log.
+    try:
+        from .integrations_temu import _temu_request, _get_temu_config
+        await _get_temu_config()  # aktif değilse burada raise → skip
+        barcodes = []
+        if product.get("barcode"):
+            barcodes.append(str(product["barcode"]))
+        for v in (product.get("variants") or []):
+            if v.get("barcode"):
+                barcodes.append(str(v["barcode"]))
+        sent = 0
+        for bc in barcodes:
+            try:
+                await _temu_request("POST", "/inventory/update-stock",
+                                    json_body={"sku": bc, "quantity": 0})
+                sent += 1
+            except Exception:
+                pass  # pazaryerinde yoksa/hata → zararsız yut
+        results["temu"] = {"barcodes": len(barcodes), "sent": sent}
+    except Exception as e:
+        results["temu"] = {"skipped_or_error": str(e)[:200]}
+
+    try:
+        await log_integration_event(
+            "all", "stock_zero_on_passive", "product", pid, "success",
+            f"Ürün pasife alındı → pazaryeri stok 0 gönderildi: {name}",
+            {"product_id": pid, "results": results},
+        )
+    except Exception as e:
+        logger.error(f"stock_zero_on_passive log failed: {e}")
+    return results
+
+
 def _ms_to_iso(v):
     """Trendyol ms-epoch (int) → ISO string; sayı değilse olduğu gibi/boş döner."""
     if v is None or v == "":
