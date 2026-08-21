@@ -770,17 +770,30 @@ async def validate_products_for_trendyol(
                 ]
                 # Kullanıcıya kolaylık: yazım/normalizasyon olarak en yakın Trendyol değeri öner
                 _suggest = _closest_trendyol_value(lval, _ty_vals)
+                _is_req = bool(
+                    a.get("required") or a.get("mandatory") or a.get("mandatoryVariant")
+                    or (a.get("attribute", {}) or {}).get("required")
+                )
                 unmatched_values.append({
                     "mp_attr_id": int(aid),
                     "attr_name": aname,
                     "local_value": lval,
-                    "required": bool(a.get("required")),
+                    "required": _is_req,
                     "allow_custom": bool(a.get("allowCustom") or a.get("attribute", {}).get("allowCustom")),
                     "trendyol_values": _ty_vals,       # Trendyol'un kabul ettiği tüm değerler
                     "suggested_value": _suggest,        # en olası eşleşme (yoksa None)
                 })
-            if unmatched_values:
-                errors.append(f"{len(unmatched_values)} değerin Trendyol karşılığı yok (eşleştirme gerekli)")
+            # MANTIK FİX: Karşılığı olmayan OPSİYONEL (required=False, allowCustom=False) enum
+            # değerleri push'ta _push() tarafından SESSİZCE ATLANIR (aktarımı bozmaz) — bu yüzden
+            # ürünü GEÇERSİZ yapan bir HATA değil, yalnız UYARIdır. Aktarımı gerçekten engelleyen
+            # tek durum ZORUNLU alanın karşılığının olmamasıdır → o HATA olarak raporlanır.
+            # (unmatched_values listesi UI'da eşleştirme için yine tam döner.)
+            _req_unmatched = [u for u in unmatched_values if u.get("required")]
+            _opt_unmatched = [u for u in unmatched_values if not u.get("required")]
+            if _req_unmatched:
+                errors.append(f"{len(_req_unmatched)} zorunlu değerin Trendyol karşılığı yok (eşleştirme gerekli)")
+            if _opt_unmatched:
+                warnings.append(f"{len(_opt_unmatched)} opsiyonel değerin karşılığı yok (aktarımda atlanır)")
 
         # 🟠 "BİZİM İÇİN ZORUNLU" (our_required): pazaryeri zorunlu tutmasa da biz tutuyoruz.
         # Bu özelliği TAŞIMAYAN üründe UYARI üret (eksik raporunda görünür). Ürünün kendi değeri
