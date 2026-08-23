@@ -80,6 +80,9 @@ export default function Checkout() {
 
   // Coupons
   const [couponCode, setCouponCode] = useState("");
+  // İlk-siparişe-özel bir kod kimlik (giriş/e-posta) yokken reddedildiyse burada tutulur;
+  // müşteri giriş yapınca / e-postasını girince OTOMATİK yeniden uygulanır (destek talebi).
+  const [pendingCode, setPendingCode] = useState("");
   const [showCoupon, setShowCoupon] = useState(false); // Mango usulü katlanır promosyon alanı
   const [discount, setDiscount] = useState(0);
   const [appliedCoupon, setAppliedCoupon] = useState(null);
@@ -493,6 +496,19 @@ export default function Checkout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, total, user?.id, appliedCoupon?.code, paymentMethod, excludedIds, shippingAddress?.email]);
 
+  // İLK-SİPARİŞ KODU OTOMATİK YENİDEN UYGULAMA: müşteri kodu kimlik yokken girip
+  // reddedildiyse (pendingCode), sonradan GİRİŞ yapınca (user.id) veya GEÇERLİ bir üyelik
+  // e-postası girince kodu otomatik yeniden uygular. Böylece "uygulanamadı" deneyimi biter.
+  useEffect(() => {
+    if (!pendingCode || appliedCoupon) return;
+    const em = (shippingAddress?.email || user?.email || "").trim();
+    const emailValid = /.+@.+\..+/.test(em);
+    if (user?.id || emailValid) {
+      applyCode(pendingCode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, shippingAddress?.email]);
+
   // Payment callback — iyzico → backend → storefront'a ?status=success|fail&order=.. ile döner
   useEffect(() => {
     const status = searchParams.get("status");
@@ -596,13 +612,23 @@ export default function Checkout() {
     if (hit) {
       setAppliedCoupon({ code });
       setCouponCode(rawCode);
+      setPendingCode(""); // uygulandı → bekleyen kod kalmasın
       toast.success(`Kupon uygulandı: ${Number(hit.discount).toFixed(2)} TL indirim`);
       return;
     }
     const rej = (d.rejected || []).find((r) => foldCode(r.code) === code);
     if (rej) {
       // Kod GEÇERLİ bir kupon ama bu sepete uygulanamıyor (ör. kampanya çakışması / ilk sipariş).
-      toast.error(rej.reason || "Bu kupon şu an bu sepete uygulanamıyor.");
+      // İLK-SİPARİŞ + KİMLİK YOK: kodu HATIRLA; müşteri giriş yapınca/e-posta girince otomatik uygulanır.
+      const _em = (shippingAddress?.email || user?.email || "").trim();
+      const _noIdentity = !(user?.id) && !_em;
+      if (_noIdentity && /giriş yap|ilk sipariş/i.test(rej.reason || "")) {
+        setPendingCode(code);
+        toast.error("Bu kod ilk siparişe özeldir — giriş yapın ya da üyelik e-postanızı girin; kod otomatik uygulanacak.");
+      } else {
+        setPendingCode(""); // kimlik var ama yine reddedildi → gerçekten uygulanamıyor
+        toast.error(rej.reason || "Bu kupon şu an bu sepete uygulanamıyor.");
+      }
       return;
     }
     // Kod hiçbir kampanyayla eşleşmedi → belki HEDİYE ÇEKİdir; giftcard olarak dene (döngü yok).
