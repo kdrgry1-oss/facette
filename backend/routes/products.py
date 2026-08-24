@@ -1802,6 +1802,144 @@ async def get_color_siblings(product_id: str):
     return {"siblings": siblings}
 
 
+# ── BENZER ÜRÜNLER (similar) — promo/sanal kategorileri HARİÇ tutup GERÇEK ürün-tipini kullanır.
+# Kök promo kategorileri (İNDİRİM/KOLEKSİYONLAR/EN YENİLER…) ve tüm alt ağaçları benzerlik
+# temeli OLAMAZ; ürünün en spesifik GERÇEK tip kategorisi (Şort/Etek/Elbise…) esas alınır.
+_PROMO_ROOT_NAMES = {
+    "indirim", "indirimler", "koleksiyon", "koleksiyonlar", "en yeniler", "yeniler",
+    "yeni gelenler", "yeni", "outlet", "firsat", "firsatlar", "kampanya", "kampanyalar",
+    "cok satanlar", "one cikanlar", "one cikan", "populer", "sepette indirim", "tum urunler",
+}
+# Ürün ADINDAN tip çıkarımı — (normalize anahtar, kanonik tip kategori adı). Sıra: SPESİFİK önce.
+_TYPE_KEYWORDS = [
+    ("sortolon", "Şortolon"), ("sweatshirt", "Sweatshirt"), ("trenckot", "Trençkot"),
+    ("trench", "Trençkot"), ("tisort", "Tişört"), ("t-shirt", "Tişört"), ("tshirt", "Tişört"),
+    ("bermuda", "Şort"), ("kapri", "Şort"), ("sort", "Şort"), ("etek", "Etek"),
+    ("elbise", "Elbise"), ("gomlek", "Gömlek"), ("ceket", "Ceket"), ("pantolon", "Pantolon"),
+    ("jean", "Pantolon"), ("kot", "Pantolon"), ("tayt", "Tayt"), ("bluz", "Bluz"),
+    ("kazak", "Kazak"), ("hirka", "Hırka"), ("yelek", "Yelek"), ("tunik", "Tunik"),
+    ("sweat", "Sweatshirt"), ("mont", "Mont"), ("kaban", "Kaban"), ("body", "Body"),
+    ("takim", "Takım"), ("pelerin", "Pelerin"), ("fular", "Fular"), ("atki", "Atkı"),
+    ("canta", "Çanta"), ("bodi", "Body"),
+]
+
+
+def _cnorm(s: str) -> str:
+    """Türkçe-duyarsız normalize (kategori/tip isim eşleştirme için)."""
+    s = (s or "").casefold()
+    for a, b in (("ı", "i"), ("İ", "i"), ("ş", "s"), ("ğ", "g"), ("ü", "u"),
+                 ("ö", "o"), ("ç", "c"), ("â", "a"), ("î", "i")):
+        s = s.replace(a, b)
+    return " ".join(s.split()).strip()
+
+
+@router.get("/{product_id}/similar")
+async def get_similar_products(product_id: str, limit: int = 4):
+    """Benzer ürünler: ürünün GERÇEK tip kategorisindeki (promo/sanal kategoriler HARİÇ)
+    ürünleri döndürür. Tip kategorisi yoksa ürün ADINDAN tip çıkarır. Hiçbiri tutmazsa
+    BOŞ döner (rastgele promo ürünüyle DOLDURMAZ — yanlış öneriden iyidir). PUBLIC."""
+    try:
+        limit = max(1, min(int(limit or 4), 24))
+    except Exception:
+        limit = 4
+    p = await db.products.find_one(
+        {"$or": [{"id": product_id}, {"slug": product_id}]},
+        {"_id": 0, "id": 1, "name": 1, "category_ids": 1, "category_id": 1, "category_name": 1},
+    )
+    if not p:
+        return {"similar": [], "basis": None}
+
+    cats = await db.categories.find({}, {"_id": 0, "id": 1, "name": 1, "parent_id": 1}).to_list(5000)
+    by_id = {str(c.get("id")): c for c in cats if c.get("id") is not None}
+    name_to_cat = {}
+    for c in cats:
+        nm = _cnorm(c.get("name"))
+        # Aynı isimden birden çok varsa promo-olmayanı tercih et (aşağıda kök kontrolü ile).
+        name_to_cat.setdefault(nm, c)
+
+    def _root_name(cid):
+        cur = by_id.get(str(cid)); g = 0
+        while cur and cur.get("parent_id") and g < 25:
+            nxt = by_id.get(str(cur.get("parent_id")))
+            if not nxt:
+                break
+            cur = nxt; g += 1
+        return _cnorm((cur or {}).get("name"))
+
+    def _depth(cid):
+        cur = by_id.get(str(cid)); d = 0; g = 0
+        while cur and cur.get("parent_id") and g < 25:
+            cur = by_id.get(str(cur.get("parent_id"))); d += 1; g += 1
+        return d
+
+    def _is_promo_cat(cid):
+        c = by_id.get(str(cid))
+        if not c:
+            return False
+        # Kategorinin KENDİSİ promo-kök adı VEYA kök atası promo → benzerlik temeli olamaz.
+        return _cnorm(c.get("name")) in _PROMO_ROOT_NAMES or _root_name(cid) in _PROMO_ROOT_NAMES
+
+    # 1) Ürünün category_ids'inden GERÇEK (promo olmayan) tip kategorilerini süz, EN SPESİFİK (derin) seç.
+    cand_ids = [str(x) for x in (p.get("category_ids") or []) if x not in (None, "")]
+    if not cand_ids and p.get("category_id"):
+        cand_ids = [str(p.get("category_id"))]
+    real_ids = [cid for cid in cand_ids if cid in by_id and not _is_promo_cat(cid)]
+    basis_cat_id = None
+    basis = None
+    if real_ids:
+        basis_cat_id = max(real_ids, key=_depth)  # en spesifik tip
+        basis = {"type": "category", "category_id": basis_cat_id,
+                 "category_name": (by_id.get(basis_cat_id) or {}).get("name")}
+
+    # 2) Gerçek kategori yoksa: ADINDAN tip çıkar → o tip kategorisini bul.
+    if not basis_cat_id:
+        nm = _cnorm(p.get("name"))
+        for kw, canon in _TYPE_KEYWORDS:
+            if kw in nm:
+                cat = name_to_cat.get(_cnorm(canon))
+                if cat and not _is_promo_cat(str(cat.get("id"))):
+                    basis_cat_id = str(cat.get("id"))
+                    basis = {"type": "name->category", "keyword": kw,
+                             "category_id": basis_cat_id, "category_name": cat.get("name")}
+                else:
+                    # Tip kategorisi yoksa ürün ADINDA tipi geçen ürünleri getir (regex fallback).
+                    basis = {"type": "name->regex", "keyword": kw, "canonical": canon}
+                break
+
+    _PROJ = {"_id": 0, "id": 1, "slug": 1, "name": 1, "price": 1, "sale_price": 1,
+             "market_price": 1, "images": 1, "image": 1, "thumbnail": 1, "stock": 1,
+             "variants": 1, "is_new": 1, "is_featured": 1, "category_name": 1,
+             "discount_percentage": 1, "brand": 1}
+
+    results = []
+    base_q = {"is_active": True, "is_deleted": {"$ne": True}, "id": {"$ne": p["id"]}}
+    if basis_cat_id:
+        cur = db.products.find(
+            {**base_q, "$or": [{"category_ids": basis_cat_id}, {"category_id": basis_cat_id}]},
+            _PROJ).limit(limit * 3)
+        async for s in cur:
+            results.append(s)
+    elif basis and basis.get("type") == "name->regex":
+        import re as _re2
+        rx = _re2.escape(basis["keyword"])
+        cur = db.products.find(
+            {**base_q, "name": {"$regex": rx, "$options": "i"}}, _PROJ).limit(limit * 3)
+        async for s in cur:
+            results.append(s)
+
+    # Dedup + kırp. (Kaynak yoksa BOŞ döner — rastgele doldurma YOK.)
+    seen = set()
+    out = []
+    for s in results:
+        if s["id"] in seen:
+            continue
+        seen.add(s["id"])
+        out.append(s)
+        if len(out) >= limit:
+            break
+    return {"similar": out, "basis": basis}
+
+
 # Türkçe moda renk sözlüğü — ad-tabanlı renk-kardeşi eşleştirmesi için (sondaki renk sözcüğü).
 _TR_COLOR_WORDS = {
     "siyah", "beyaz", "ekru", "krem", "krem rengi", "bej", "kahverengi", "kahve", "vizon",

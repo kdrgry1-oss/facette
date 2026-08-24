@@ -449,13 +449,13 @@ export default function ProductDetail() {
           setSelectedSize(defaultVariant.size);
         }
 
-        // Benzer ürünler — kategori bazlı. (Eski /similar endpoint'i backend'de
-        // yok ve her seferinde 404 dönüyordu; doğrudan kategori sorgusu kullanılıyor.)
+        // Benzer ürünler — GERÇEK ürün-tipi kategorisinden (promo/sanal kategoriler HARİÇ).
+        // Backend /products/{id}/similar: category_ids içinden en spesifik gerçek tip
+        // kategoriyi seçer; yoksa ürün adından tip çıkarır; hiçbiri tutmazsa BOŞ döner
+        // (İNDİRİM/KOLEKSİYONLAR gibi promo birincil-kategori kaynaklı alakasız öneri düzeltmesi).
         try {
-          if (res.data?.category_name) {
-            const fallbackRes = await axios.get(`${API}/products?category=${encodeURIComponent(res.data.category_name)}&limit=4`);
-            setSimilarProducts(fallbackRes.data?.products?.filter(p => p.id !== res.data.id) || []);
-          }
+          const simRes = await axios.get(`${API}/products/${res.data.id}/similar?limit=4`);
+          setSimilarProducts((simRes.data?.similar || []).filter(p => p.id !== res.data.id));
         } catch {
           // benzer ürün getirilemezse sessizce geç
         }
