@@ -1298,7 +1298,7 @@ export default function AdminOrders({ unpaidView = false }) {
                                 <div className="w-6 h-6 bg-gray-100 rounded flex items-center justify-center text-[8px] text-gray-400">—</div>
                               )}
                               {qty > 1 && (
-                                <span className="absolute -top-1 -left-1 min-w-[14px] h-[14px] px-0.5 bg-black text-white text-[9px] leading-[14px] text-center rounded-full font-bold">{qty}</span>
+                                <span className="absolute -top-2 -left-2 min-w-[20px] h-[20px] px-1 bg-red-600 text-white text-[11px] leading-[20px] text-center rounded-full font-extrabold ring-2 ring-white shadow-md">{qty}</span>
                               )}
                             </div>
                             <span className="truncate max-w-[120px]">{item.productName || item.product_name || item.name || 'Ürün'}</span>
