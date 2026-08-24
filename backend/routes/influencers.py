@@ -236,6 +236,8 @@ async def update_influencer(influencer_id: str, payload: dict, current_user: dic
         # Kadir PR alanları: anlaşma şekli, beden alt+üst, influencer_turu (artık ELLE seçilir —
         # dropdown'dan; takipçiden yalnız ÖNERİ olarak türetilir, kaydedilen değer korunur).
         "anlasma_sekli", "beden_alt", "beden_ust", "influencer_turu",
+        # Excel "Kayıtlı Influencer" formu: üst düzey serbest-metin adres (liste sütunu).
+        "adres",
     }
     update = {k: v for k, v in payload.items() if k in allowed}
     if "follower_count" in update:

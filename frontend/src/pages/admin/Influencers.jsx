@@ -577,6 +577,17 @@ function InfluencerListTab() {
   useEffect(() => { load(""); }, [load]);
   useEffect(() => { const t = setTimeout(() => load(q), 350); return () => clearTimeout(t); }, [q, load]);
 
+  const removeInf = async (inf) => {
+    if (!window.confirm(`"${inf.name}" kaydı silinsin mi? (Geri alınamaz)`)) return;
+    try {
+      await axios.delete(`${API}/influencers/${inf.id}`, auth());
+      toast.success("Influencer silindi");
+      load(q);
+    } catch {
+      toast.error("Silinemedi");
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
@@ -606,45 +617,67 @@ function InfluencerListTab() {
           {q.trim() ? "Aramayla eşleşen influencer yok." : 'Henüz influencer eklenmedi. "Yeni Influencer" ile başlayın.'}
         </div>
       ) : (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {list.map((inf) => (
-            <div
-              key={inf.id}
-              data-testid={`influencer-card-${inf.id}`}
-              className="relative bg-white border rounded-xl p-4 hover:border-black transition-colors"
-            >
-              <button
-                onClick={(e) => { e.stopPropagation(); setEditTarget(inf); setShowForm(true); }}
-                title="Düzenle"
-                className="absolute top-3 right-3 text-gray-400 hover:text-black"
-                data-testid={`influencer-edit-${inf.id}`}
-              >
-                <Pencil size={14} />
-              </button>
-              <button onClick={() => setSelected(inf.id)} className="text-left w-full">
-                <div className="flex items-center gap-2 pr-6">
-                  <span className="font-semibold">{inf.name}</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${inf.is_active ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                    {inf.platform}
-                  </span>
-                </div>
-                <div className="flex flex-col gap-0.5 mt-1 text-xs text-gray-500">
-                  {inf.instagram && <span className="flex items-center gap-1"><Instagram size={11} /> {inf.instagram}</span>}
-                  {inf.tiktok && <span className="flex items-center gap-1"><TikTokIcon size={11} /> {inf.tiktok}</span>}
-                  {!inf.instagram && !inf.tiktok && <span>{inf.handle || "—"}</span>}
-                  {inf.birthday && <span className="flex items-center gap-1"><Calendar size={11} /> {fmtDate(inf.birthday)}</span>}
-                </div>
-                <div className="flex flex-wrap gap-2 mt-3 text-[11px]">
-                  {inf.coupon_code && <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded">Kupon: {inf.coupon_code}</span>}
-                  {inf.aff_id && <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded">aff: {inf.aff_id}</span>}
-                  <span className="bg-gray-50 text-gray-600 px-2 py-0.5 rounded">{(inf.follower_count || 0).toLocaleString("tr-TR")} takipçi</span>
-                  <span className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded" title="Takipçiye göre: Nano/Micro/Makro">{inf.influencer_turu || influencerTuru(inf.follower_count)}</span>
-                  {inf.anlasma_sekli && <span className="bg-teal-50 text-teal-700 px-2 py-0.5 rounded">{inf.anlasma_sekli}</span>}
-                  {(inf.beden_alt || inf.beden_ust) && <span className="bg-gray-50 text-gray-600 px-2 py-0.5 rounded">Beden {inf.beden_alt || "—"}/{inf.beden_ust || "—"}</span>}
-                </div>
-              </button>
-            </div>
-          ))}
+        <div className="border rounded-xl overflow-x-auto bg-white">
+          <table className="w-full text-sm min-w-[1100px]">
+            <thead>
+              <tr className="bg-gray-50 text-gray-600 text-left text-xs uppercase tracking-wide">
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">İsim Soyisim</th>
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Kullanıcı Adı</th>
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Platform</th>
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Influencer Türü</th>
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Telefon</th>
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Adres</th>
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">İş Birliği Türü</th>
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Beden Üst</th>
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Beden Alt</th>
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Not</th>
+                <th className="px-3 py-2.5 font-semibold whitespace-nowrap text-right">İşlemler</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((inf) => {
+                const uname = inf.handle || inf.instagram || inf.tiktok || "—";
+                const adres = inf.adres || (inf.shipping_address && inf.shipping_address.adres) || "—";
+                return (
+                  <tr key={inf.id} data-testid={`influencer-row-${inf.id}`} className="border-t hover:bg-gray-50/60">
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <button onClick={() => setSelected(inf.id)} className="font-medium text-gray-900 hover:underline text-left" title="Detay">
+                        {inf.name}
+                      </button>
+                      {inf.is_active === false && <span className="ml-2 text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">pasif</span>}
+                    </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{uname}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.platform || "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.influencer_turu || influencerTuru(inf.follower_count)}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.phone || "—"}</td>
+                    <td className="px-3 py-2.5 max-w-[220px] truncate text-gray-600" title={adres}>{adres}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.anlasma_sekli || "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.beden_ust || "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.beden_alt || "—"}</td>
+                    <td className="px-3 py-2.5 max-w-[240px] truncate text-gray-600" title={inf.notes || ""}>{inf.notes || "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-right">
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          onClick={() => { setEditTarget(inf); setShowForm(true); }}
+                          title="Düzenle" data-testid={`influencer-edit-${inf.id}`}
+                          className="text-gray-400 hover:text-black p-1"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => removeInf(inf)}
+                          title="Sil" data-testid={`influencer-del-${inf.id}`}
+                          className="text-gray-400 hover:text-red-600 p-1"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -745,8 +778,11 @@ function ShipmentsTab() {
 }
 
 /* ======================= INFLUENCER EKLE/DÜZENLE ======================= */
-// Kadir: influencer anlaşma şekilleri + türü (takipçiden türetilir).
-const ANLASMA_SEKLI = ["Barter", "İş birliği", "PR", "Aylık ücretli", "Açıkta"];
+// Excel "Kayıtlı Influencer" seçenekleri (dropdown). Serbest-metin alanlar kişi tarafından dolar.
+const ANLASMA_SEKLI = ["Barter", "PR", "Ücretli İş Birliği"];       // İş Birliği Türü
+const PLATFORM_OPTS = ["İnstagram", "Tiktok"];                       // Platform
+const INF_TURU_BASE = ["Mikro", "Makro", "Nano/UGC", "Mid-Tier"];   // Influencer Türü
+const BEDEN_OPTS = ["XXS", "XS", "S", "M", "L", "XL"];              // Beden Üst / Alt
 const influencerTuru = (fc) => {
   const n = parseInt(String(fc ?? "").replace(/[^\d]/g, ""), 10) || 0;
   return n >= 100000 ? "Makro" : n >= 10000 ? "Micro" : "Nano";
@@ -768,15 +804,25 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
     beden_alt: initial?.beden_alt || "", beden_ust: initial?.beden_ust || "",
     notes: initial?.notes || "",
     address_full_name: addr.full_name || "", address_phone: addr.phone || "",
-    il: addr.il || "", ilce: addr.ilce || "", adres: addr.adres || "",
+    il: addr.il || "", ilce: addr.ilce || "", adres: initial?.adres || addr.adres || "",
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const [turuTypes, setTuruTypes] = useState(["Nano", "Micro", "Makro"]);
+  // Influencer Türü seçenekleri: Excel tabanı + backend'in eklediği özel tipler (tekilleştirilmiş).
+  const [turuTypes, setTuruTypes] = useState(INF_TURU_BASE);
+  const mergeTuru = (extra) => {
+    const seen = new Set();
+    return [...INF_TURU_BASE, ...(extra || [])].filter((t) => {
+      const k = String(t).toLowerCase();
+      if (!t || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
   useEffect(() => {
     axios.get(`${API}/influencer-types`, auth())
-      .then((r) => setTuruTypes(r.data?.types || ["Nano", "Micro", "Makro"]))
-      .catch(() => {});
+      .then((r) => setTuruTypes(mergeTuru(r.data?.types)))
+      .catch(() => setTuruTypes(INF_TURU_BASE));
   }, []);
   const addTuruType = async () => {
     const name = window.prompt("Yeni influencer türü:");
@@ -802,9 +848,10 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
       influencer_turu: form.influencer_turu || influencerTuru(form.follower_count),
       beden_alt: form.beden_alt, beden_ust: form.beden_ust,
       notes: form.notes,
+      adres: form.adres,   // Excel "Adres" (serbest metin) — üst düzey alan (liste sütunu)
       shipping_address: {
         full_name: form.address_full_name || form.name, phone: form.address_phone || form.phone,
-        il: form.il, ilce: form.ilce, adres: form.adres,
+        il: form.il, ilce: form.ilce, adres: form.adres,   // kargo akışı için de yaz (senkron)
       },
     };
     try {
@@ -826,17 +873,16 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
   return (
     <Modal title={isEdit ? "Influencer Düzenle" : "Yeni Influencer"} onClose={onClose}>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="İsim *"><input data-testid="inf-name" className="inp" value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
-        <Field label="Birincil Platform">
-          <select className="inp" value={form.platform} onChange={(e) => set("platform", e.target.value)}>
-            <option value="instagram">Instagram</option>
-            <option value="tiktok">TikTok</option>
-            <option value="youtube">YouTube</option>
-            <option value="x">X</option>
+        <Field label="İsim Soyisim *"><input data-testid="inf-name" className="inp" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Ad Soyad" /></Field>
+        <Field label="Kullanıcı Adı (@)"><input data-testid="inf-handle" className="inp" value={form.handle} onChange={(e) => set("handle", e.target.value)} placeholder="@kullanici" /></Field>
+        <Field label="Platform">
+          <select data-testid="inf-platform" className="inp" value={form.platform} onChange={(e) => set("platform", e.target.value)}>
+            <option value="">— Seçin —</option>
+            {PLATFORM_OPTS.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </Field>
-        <Field label="Instagram (@)"><input className="inp" value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="@kullanici" /></Field>
-        <Field label="TikTok (@)"><input className="inp" value={form.tiktok} onChange={(e) => set("tiktok", e.target.value)} placeholder="@kullanici" /></Field>
+        <Field label="Instagram (@) (opsiyonel)"><input className="inp" value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="@kullanici" /></Field>
+        <Field label="TikTok (@) (opsiyonel)"><input className="inp" value={form.tiktok} onChange={(e) => set("tiktok", e.target.value)} placeholder="@kullanici" /></Field>
         <Field label="Doğum Günü"><input type="date" className="inp" value={form.birthday} onChange={(e) => set("birthday", e.target.value)} /></Field>
         <Field label="Takipçi"><input type="text" inputMode="numeric" className="inp" value={form.follower_count} onChange={(e) => set("follower_count", e.target.value)} placeholder="Örn. 125.500" /></Field>
         <Field label="Telefon"><input className="inp" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
@@ -844,13 +890,13 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
         <Field label="Kupon Kodu"><input data-testid="inf-coupon" className="inp uppercase" value={form.coupon_code} onChange={(e) => set("coupon_code", e.target.value)} placeholder="MELIS10" /></Field>
         <Field label="aff_id (takip linki)"><input className="inp" value={form.aff_id} onChange={(e) => set("aff_id", e.target.value)} placeholder="melis" /></Field>
         <Field label="Komisyon %"><input type="number" className="inp" value={form.commission_rate} onChange={(e) => set("commission_rate", e.target.value)} /></Field>
-        <Field label="Anlaşma Şekli">
+        <Field label="İş Birliği Türü">
           <select className="inp" value={form.anlasma_sekli} onChange={(e) => set("anlasma_sekli", e.target.value)} data-testid="inf-anlasma">
             <option value="">— Seçin —</option>
             {ANLASMA_SEKLI.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
         </Field>
-        <Field label={`Influencer Türü (öneri: ${influencerTuru(form.follower_count)})`}>
+        <Field label="Influencer Türü">
           <div className="flex gap-1">
             <select className="inp flex-1" value={form.influencer_turu} onChange={(e) => set("influencer_turu", e.target.value)} data-testid="inf-turu">
               <option value="">— Seçin —</option>
@@ -859,19 +905,31 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
             <button type="button" onClick={addTuruType} title="Yeni tip ekle" className="px-3 border rounded-lg hover:bg-gray-50">+</button>
           </div>
         </Field>
-        <Field label="Beden — Alt"><input className="inp" value={form.beden_alt} onChange={(e) => set("beden_alt", e.target.value)} placeholder="Örn. S / 36" /></Field>
-        <Field label="Beden — Üst"><input className="inp" value={form.beden_ust} onChange={(e) => set("beden_ust", e.target.value)} placeholder="Örn. M / 38" /></Field>
+        <Field label="Beden Üst">
+          <select className="inp" value={form.beden_ust} onChange={(e) => set("beden_ust", e.target.value)} data-testid="inf-beden-ust">
+            <option value="">— Seçin —</option>
+            {BEDEN_OPTS.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+        </Field>
+        <Field label="Beden Alt">
+          <select className="inp" value={form.beden_alt} onChange={(e) => set("beden_alt", e.target.value)} data-testid="inf-beden-alt">
+            <option value="">— Seçin —</option>
+            {BEDEN_OPTS.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+        </Field>
+        <Field label="Adres" full>
+          <textarea data-testid="inf-adres" className="inp h-16" value={form.adres} onChange={(e) => set("adres", e.target.value)} placeholder="Kargo/teslim adresi" />
+        </Field>
       </div>
-      <p className="text-xs font-semibold text-gray-500 mt-4 mb-2">Kargo Adresi (seeding için)</p>
+      <p className="text-xs font-semibold text-gray-500 mt-4 mb-2">Kargo Detayı (seeding için — İl/İlçe MNG kargo barkodu üretimi için gerekir)</p>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Alıcı Adı (boşsa isim)"><input className="inp" value={form.address_full_name} onChange={(e) => set("address_full_name", e.target.value)} /></Field>
         <Field label="Alıcı Telefon (boşsa telefon)"><input className="inp" value={form.address_phone} onChange={(e) => set("address_phone", e.target.value)} /></Field>
         <Field label="İl"><input className="inp" value={form.il} onChange={(e) => set("il", e.target.value)} /></Field>
         <Field label="İlçe"><input className="inp" value={form.ilce} onChange={(e) => set("ilce", e.target.value)} /></Field>
-        <Field label="Adres" full><input className="inp" value={form.adres} onChange={(e) => set("adres", e.target.value)} /></Field>
       </div>
-      <Field label="Not / Genel Direktif" full>
-        <textarea className="inp h-20" value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Bu influencer'a özel notlar…" />
+      <Field label="Not" full>
+        <textarea data-testid="inf-not" className="inp h-20" value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Bu influencer'a özel notlar…" />
       </Field>
       <div className="flex justify-end gap-2 mt-5">
         <button onClick={onClose} className="px-4 py-2 text-sm border rounded-lg">İptal</button>
