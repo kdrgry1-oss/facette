@@ -1728,7 +1728,8 @@ async def get_color_siblings(product_id: str):
     import re as _re
     p = await db.products.find_one(
         {"$or": [{"id": product_id}, {"slug": product_id}]},
-        {"_id": 0, "id": 1, "csv_card_id": 1, "urun_karti_id": 1, "name": 1, "color": 1, "stock_code": 1}
+        {"_id": 0, "id": 1, "csv_card_id": 1, "urun_karti_id": 1, "name": 1, "color": 1,
+         "stock_code": 1, "variants": 1, "attributes": 1}  # variants/attributes: model-guard renk çözümü
     )
     if not p:
         return {"siblings": []}
@@ -1777,13 +1778,26 @@ async def get_color_siblings(product_id: str):
     #    DENETİM FIX: anchor (kart id) TUTARSIZ olabilir (ör. Beyaz=2698 ama Acı Kahve/Siyah=2696)
     #    → yalnız kart id ile gruplayınca Beyaz DÜŞÜYORDU. Artık stok kodu + model adı eşleşmesini
     #    anchor ile BİRLİKTE kullanıp birleştiriyoruz (seen_ids dedup) → 3 renk de görünür.
+    #    İSİM GUARD (Kadir): aynı stock_code'u FARKLI modeller paylaşabiliyor (ör.
+    #    "Siyah Bermuda Şort" ile "Mini Bermuda Şort" ikisi de FCSS2700004). Bu yüzden
+    #    stock_code eşleşmesi TEK BAŞINA yeterli değil — adayın "tüm renkler soyulmuş model
+    #    adı", mevcut ürününkiyle EŞLEŞMELİ (renk konumdan bağımsız). Böylece farklı model
+    #    aynı SKU'da olsa bile renk swatch'ına KARIŞMAZ; gerçek renk aileleri korunur.
+    #    Not: color-siblings YALNIZ ürün-seviyesi stock_code kullanır (varyant-seviyesi merge yok).
     _sc = str(p.get("stock_code") or "").strip()
     if _sc:
+        _self_model = _model_key(p)
         cur = db.products.find(
             {"stock_code": _sc, "id": {"$ne": p["id"]}, "is_active": True}, _PROJ).limit(20)
         async for s in cur:
             if s["id"] in seen_ids:
                 continue
+            # Her iki taraf da anlamlı model kimliğine indirgenebiliyorsa VE farklıysa →
+            # aynı SKU olsa da FARKLI ürün → renk swatch'ına katma.
+            if _self_model:
+                _cand_model = _model_key(s)
+                if _cand_model and _cand_model != _self_model:
+                    continue
             seen_ids.add(s["id"]); siblings.append(_row(s))
 
     # 3) MODEL ADI ile eşleştir (renk kelimesi soyulmuş taban ad) — kart id VE stok kodu farklı
@@ -1955,6 +1969,11 @@ _TR_COLOR_WORDS = {
     "fusya", "somon", "mor", "lila", "leylak", "turuncu", "sarı", "sari", "hardal", "altın",
     "altin", "gold", "gümüş", "gumus", "silver", "metalik", "leopar", "zebra", "yılan",
     "çok renkli", "desenli", "ebru", "koyu gri", "açık gri", "menekşe", "nar çiçeği",
+    # Ek yaygın renkler (color-siblings model-guard'ı için — eksik renk aileyi BÖLMESİN).
+    # SADECE net renkler; tip/kumaş sözcükleri (kot, jean…) EKLENMEZ.
+    "acı kahve", "aci kahve", "koyu kahve", "açık kahve", "acik kahve", "mürdüm", "murdum",
+    "vişne", "visne", "indigo", "kiremit", "tarçın", "tarcin", "bakır", "bakir",
+    "fıstık", "fistik", "gece mavisi", "koyu bordo", "bronz",
 }
 
 
@@ -1983,6 +2002,72 @@ def _trailing_color(name: str) -> str:
     if words[-1].lower() in _TR_COLOR_WORDS:
         return words[-1]
     return ""
+
+
+def _strip_all_colors(name: str) -> str:
+    """Addaki TÜM renk sözcüklerini (KONUMDAN BAĞIMSIZ — başta/sonda/ortada; çok-kelimeli
+    renkler dahil) çıkarıp Türkçe-duyarsız normalize eder → model kimliği.
+
+    color-siblings adım (2) guard'ı için: aynı stock_code'u paylaşan ama FARKLI model olan
+    ürünler (ör. "Siyah Bermuda Şort" vs "Mini Bermuda Şort Siyah") birbirine karışmasın.
+      "Siyah Bermuda Şort"       → "bermuda sort"
+      "Mini Bermuda Şort Siyah"  → "mini bermuda sort"   (eşleşmez → ayrılır)
+    Ad tamamen renkten ibaretse '' döner → çağıran guard'ı UYGULAMAZ (yanlış boş-eşleşme yok)."""
+    words = (name or "").strip().split()
+    if not words:
+        return ""
+    low = [w.lower() for w in words]
+    n = len(words)
+    keep = [True] * n
+    i = 0
+    while i < n:
+        # Önce 2-kelimeli renkler ("Açık Mavi", "Gül Kurusu", "Krem Rengi"…).
+        if i + 1 < n and f"{low[i]} {low[i + 1]}" in _TR_COLOR_WORDS:
+            keep[i] = keep[i + 1] = False
+            i += 2
+            continue
+        if low[i] in _TR_COLOR_WORDS:
+            keep[i] = False
+        i += 1
+    base = " ".join(w for w, k in zip(words, keep) if k)
+    return _cnorm(base)  # küçük harf + Türkçe-duyarsız + boşluk normalize
+
+
+def _resolve_prod_color(prod: dict) -> str:
+    """Ürünün rengini bulur: color alanı → varyant color → 'Web Color'/'Renk' attribute →
+    son çare addaki sondaki renk sözcüğü. (Statik sözlükten BAĞIMSIZ — asıl renk verisi.)"""
+    c = (prod.get("color") or "").strip()
+    if c:
+        return c
+    for v in (prod.get("variants") or []):
+        if isinstance(v, dict) and (v.get("color") or "").strip():
+            return v["color"].strip()
+    for a in (prod.get("attributes") or []):
+        if isinstance(a, dict) and (a.get("name") or a.get("type") or "").strip().lower() in (
+                "web color", "renk", "color"):
+            if (a.get("value") or "").strip():
+                return str(a["value"]).strip()
+    return _trailing_color(prod.get("name") or "")
+
+
+def _model_key(prod: dict) -> str:
+    """Ürünün RENK-BAĞIMSIZ model kimliği — color-siblings adım (2) guard'ı için.
+
+    SAĞLAM: önce ürünün KENDİ rengini (color/variant/attribute) addan çıkarır (statik
+    sözlük eksikse bile Acı Kahve/Mürdüm gibi renkler doğru soyulur), sonra kalanı statik
+    renk sözlüğüyle de temizler (renk-önde 'Siyah X' gibi durumlar). Böylece aynı SKU'yu
+    paylaşan FARKLI modeller ('Siyah Bermuda Şort' vs 'Mini Bermuda Şort') ayrılır; gerçek
+    çok-renkli aileler ('...Ceket Bej' / '...Ceket Mürdüm') AYNI kimliğe iner → bozulmaz."""
+    name = prod.get("name") or ""
+    if not name.strip():
+        return ""
+    color = _resolve_prod_color(prod)
+    base = name
+    if color:
+        cwords = set(_cnorm(color).split())
+        if cwords:
+            base = " ".join(w for w in name.split() if _cnorm(w) not in cwords)
+    return _strip_all_colors(base)
 
 async def _expand_category_ids(selected_ids):
     """Seçilen kategori id'lerini atalarıyla birlikte düzleştirir (vitrin category_ids için)."""
