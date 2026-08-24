@@ -1825,11 +1825,16 @@ _TYPE_KEYWORDS = [
 
 
 def _cnorm(s: str) -> str:
-    """Türkçe-duyarsız normalize (kategori/tip isim eşleştirme için)."""
-    s = (s or "").casefold()
-    for a, b in (("ı", "i"), ("İ", "i"), ("ş", "s"), ("ğ", "g"), ("ü", "u"),
-                 ("ö", "o"), ("ç", "c"), ("â", "a"), ("î", "i")):
-        s = s.replace(a, b)
+    """Türkçe-duyarsız normalize (kategori/tip isim eşleştirme için).
+
+    KRİTİK: Türkçe 'İ'.casefold() → 'i' + U+0307 (birleşik nokta) üretir; düz harf-değişimi
+    bu birleşik noktayı BIRAKIR → 'İNDİRİM'/'KOLEKSİYONLAR' promo setine EŞLEŞMEZDİ. Bu yüzden
+    ı/İ elle 'i'ye çevrilir, sonra NFKD + birleşik-işaret (combining) temizliğiyle ş/ğ/ü/ö/ç
+    aksanları da güvenle soyulur."""
+    import unicodedata as _ud
+    s = (s or "").replace("ı", "i").replace("İ", "i")
+    s = _ud.normalize("NFKD", s.casefold())
+    s = "".join(ch for ch in s if not _ud.combining(ch))
     return " ".join(s.split()).strip()
 
 
