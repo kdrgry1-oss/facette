@@ -11,6 +11,7 @@ import {
   Plus, TrendingUp, CheckCircle, Trash2, X,
   Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Package,
   ClipboardList, ExternalLink, History, Filter, Download,
+  ChevronRight, ChevronDown, Barcode,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -78,7 +79,7 @@ export default function Influencers() {
       {/* Sekmeler */}
       <div className="flex gap-2 border-b mb-5">
         <TabBtn active={tab === "pr"} onClick={() => setTab("pr")} icon={<ClipboardList size={15} />} testid="tab-pr">
-          PR Takip
+          Gönderi Takibi
         </TabBtn>
         <TabBtn active={tab === "shipments"} onClick={() => setTab("shipments")} icon={<Package size={15} />} testid="tab-shipments">
           Ürün Gönderimleri
@@ -193,9 +194,15 @@ function PRTrackTab() {
   useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [load]);
 
   const del = async (id) => {
-    if (!window.confirm("Bu PR kaydı silinsin mi?")) return;
+    if (!window.confirm("Bu gönderi kaydı silinsin mi?")) return;
     try { await axios.delete(`${API}/influencer-pr/${id}`, auth()); toast.success("Silindi"); load(); }
     catch { toast.error("Silinemedi"); }
+  };
+
+  // Inline düzenleme (Paylaşma Tarihi / Not / İletişim Tarihi) — kısmi PUT, sonra tazele.
+  const patchEntry = async (id, patch) => {
+    try { await axios.put(`${API}/influencer-pr/${id}`, patch, auth()); load(); }
+    catch { toast.error("Kaydedilemedi"); }
   };
 
   const quick = (kind) => { setStart(periodStart(kind)); setEnd(""); };
@@ -289,12 +296,12 @@ function PRTrackTab() {
         </div>
       ) : (
         <div className="overflow-x-auto border rounded-xl bg-white" data-testid="pr-list">
-          <table className="w-full text-sm whitespace-nowrap">
+          <table className="w-full text-sm min-w-[1180px]">
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500 text-left">
               <tr>
-                {["İsim Soyisim", "Kullanıcı Adı", "Telefon", "Adres", "Ürün", "Beden",
-                  "Anlaşma", "Durum", "Tarih", "İletişim", "Teklif", "Cevap", "Follow-up", "Not", ""].map((h, i) => (
-                  <th key={i} className="px-3 py-2 font-semibold">{h}</th>
+                {["Influencer", "İletişim Tarihi", "İletişim", "Ürün", "Beden", "Gönderim Tarihi",
+                  "Gönderim Durumu", "Paylaşma Tarihi", "Not", "İşlemler"].map((h, i) => (
+                  <th key={i} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -304,6 +311,7 @@ function PRTrackTab() {
                        onEdit={() => { setEditTarget(e); setShowForm(true); }}
                        onDelete={() => del(e.id)}
                        onShip={() => shipPR(e)}
+                       onPatch={patchEntry}
                        onHistory={() => e.influencer_id && setHistoryFor({ id: e.influencer_id, name: e.influencer_name })} />
               ))}
             </tbody>
@@ -323,47 +331,113 @@ function PRTrackTab() {
   );
 }
 
-// Basılı PR listesi gibi TABLO satırı (kart yerine) — Kadir: sayfaya yayılan geniş tablo.
-function PRRow({ e, onEdit, onDelete, onHistory, onShip }) {
+// Gönderi Takibi satırı (Excel düzeni): görünür sütunlar + çoklu ürün kalemleri +
+// detaya-basınca (expand) profil alanları + inline düzenlenebilir Paylaşma Tarihi/Not/İletişim Tarihi.
+function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
+  const [open, setOpen] = useState(false);
   const st = prStatusMeta(e.status);
-  const td = "px-3 py-2 align-top";
-  const canShip = (e.products && e.products.length > 0 && e.influencer_id);
+  const td = "px-3 py-2.5 align-top";
+  const items = Array.isArray(e.products) && e.products.length ? e.products : null;
+  const canShip = (items && e.influencer_id);
+  const barcoded = !!e.cargo_barcode;
+  const platform = e.platform || (e.instagram ? "İnstagram" : e.tiktok ? "Tiktok" : "—");
+  const uname = e.handle || e.instagram || e.tiktok || "—";
+
+  // İnline kaydet: dokunulmadıysa PUT etme.
+  const saveField = (key, val) => { if ((e[key] || "") !== (val || "")) onPatch(e.id, { [key]: val }); };
+
   return (
-    <tr className="border-t hover:bg-gray-50" data-testid={`pr-row-${e.id}`}>
-      <td className={`${td} font-medium`}>
-        {e.influencer_name || "—"}
-        {e.influencer_turu && <span className="ml-1 text-[10px] text-purple-600">({e.influencer_turu})</span>}
-      </td>
-      <td className={td}><SocialLinks instagram={e.instagram} tiktok={e.tiktok} /></td>
-      <td className={`${td} text-gray-600`}>{e.phone || "—"}</td>
-      <td className={`${td} whitespace-normal max-w-[220px] text-gray-600`}>{e.adres || "—"}</td>
-      <td className={`${td} whitespace-normal max-w-[220px]`}>{e.urun || "—"}</td>
-      <td className={td}>{e.beden || "—"}</td>
-      <td className={td}>{e.anlasma_sekli || "—"}</td>
-      <td className={td}><span className={`text-[10px] px-2 py-0.5 rounded-full ${st.c}`}>{st.l}</span></td>
-      <td className={`${td} text-gray-500`}>{fmtDate(e.date)}</td>
-      <td className={td}>{e.contact || "—"}</td>
-      <td className={td}>{e.offer || "—"}</td>
-      <td className={td}>{e.response || "—"}</td>
-      <td className={td}>{e.follow_up || "—"}</td>
-      <td className={`${td} whitespace-normal max-w-[200px] text-gray-600`}>{e.note || "—"}</td>
-      <td className={`${td} whitespace-nowrap`}>
-        <div className="flex items-center gap-1">
-          {canShip && (
-            e.cargo_barcode
-              ? <span className="text-[10px] text-green-700 bg-green-50 rounded px-1.5 py-0.5" title={`Kargolandı · barkod ${e.cargo_barcode}`}>Kargoda</span>
-              : <button onClick={onShip} title="Kargoya ver — stok düşer + MNG barkod oluşur"
-                        className="inline-flex items-center text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded px-1.5 py-1"
-                        data-testid={`pr-ship-${e.id}`}><Truck size={14} /><Plus size={10} /></button>
-          )}
-          {e.influencer_id && (
-            <button onClick={onHistory} title="Geçmiş" className="text-gray-400 hover:text-black p-1" data-testid={`pr-history-${e.id}`}><History size={14} /></button>
-          )}
-          <button onClick={onEdit} title="Düzenle" className="text-gray-400 hover:text-black p-1"><Pencil size={13} /></button>
-          <button onClick={onDelete} title="Sil" className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={13} /></button>
-        </div>
-      </td>
-    </tr>
+    <>
+      <tr className="border-t hover:bg-gray-50/60" data-testid={`pr-row-${e.id}`}>
+        {/* Influencer + expand */}
+        <td className={`${td} whitespace-nowrap`}>
+          <button onClick={() => setOpen((o) => !o)} className="inline-flex items-center gap-1 font-medium text-gray-900 hover:underline" data-testid={`pr-expand-${e.id}`}>
+            {open ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
+            {e.influencer_name || "—"}
+          </button>
+        </td>
+        {/* İletişim Tarihi — inline date */}
+        <td className={td}>
+          <input type="date" defaultValue={(e.date || "").slice(0, 10)} onBlur={(ev) => saveField("date", ev.target.value ? `${ev.target.value}T00:00:00` : "")}
+                 className="border rounded px-1.5 py-1 text-xs w-[130px] focus:outline-none focus:border-black" data-testid={`pr-date-${e.id}`} />
+        </td>
+        {/* İletişim (platform) */}
+        <td className={`${td} whitespace-nowrap`}>
+          <span className="text-gray-700">{platform}</span>
+          <div className="mt-0.5"><SocialLinks instagram={e.instagram} tiktok={e.tiktok} /></div>
+        </td>
+        {/* Ürün (çoklu kalem) */}
+        <td className={`${td} whitespace-normal max-w-[240px]`}>
+          {items ? (
+            <div className="space-y-1">
+              {items.map((p, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <span className="text-gray-800">{p.name || p.barcode}</span>
+                  {(p.barkod || barcoded) && <span title={`Barkod: ${p.barkod || e.cargo_barcode}`} className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-0.5 text-[9px]"><Barcode size={10} className="mr-0.5" />Barkod</span>}
+                </div>
+              ))}
+            </div>
+          ) : (e.urun || "—")}
+        </td>
+        {/* Beden (çoklu kalem) */}
+        <td className={td}>
+          {items ? <div className="space-y-1">{items.map((p, i) => <div key={i} className="text-gray-700">{p.size || "—"}</div>)}</div> : (e.beden || "—")}
+        </td>
+        {/* Gönderim Tarihi (çoklu kalem) */}
+        <td className={`${td} whitespace-nowrap text-gray-600`}>
+          {items ? <div className="space-y-1">{items.map((p, i) => <div key={i}>{p.gonderim_tarihi ? fmtDate(p.gonderim_tarihi) : (e.shipped_at ? fmtDate(e.shipped_at) : "—")}</div>)}</div>
+                 : (e.shipped_at ? fmtDate(e.shipped_at) : "—")}
+        </td>
+        {/* Gönderim Durumu — sipariş listesi gibi rozet + inline değiştir */}
+        <td className={`${td} whitespace-nowrap`}>
+          <select value={e.status || "beklemede"} onChange={(ev) => onPatch(e.id, { status: ev.target.value })}
+                  className={`text-[11px] rounded-full px-2 py-1 border-0 focus:outline-none cursor-pointer ${st.c}`} data-testid={`pr-status-cell-${e.id}`}>
+            {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+          </select>
+        </td>
+        {/* Paylaşma Tarihi — inline date (düzenlenebilir) */}
+        <td className={td}>
+          <input type="date" defaultValue={(e.paylasma_tarihi || "").slice(0, 10)} onBlur={(ev) => saveField("paylasma_tarihi", ev.target.value)}
+                 className="border rounded px-1.5 py-1 text-xs w-[130px] focus:outline-none focus:border-black" data-testid={`pr-share-${e.id}`} />
+        </td>
+        {/* Not — inline text (düzenlenebilir) */}
+        <td className={td}>
+          <input type="text" defaultValue={e.note || ""} onBlur={(ev) => saveField("note", ev.target.value)} placeholder="Not…"
+                 className="border rounded px-1.5 py-1 text-xs w-[160px] focus:outline-none focus:border-black" data-testid={`pr-note-${e.id}`} />
+        </td>
+        {/* İşlemler: Barkod Çıkart / Düzenle / Sil (+ Geçmiş) */}
+        <td className={`${td} whitespace-nowrap`}>
+          <div className="flex items-center gap-1">
+            {canShip && (
+              barcoded
+                ? <span className="inline-flex items-center gap-1 text-[10px] text-green-700 bg-green-50 rounded px-1.5 py-1" title={`Barkod çıkarıldı · ${e.cargo_barcode}`}><Barcode size={12} />Çıkarıldı</span>
+                : <button onClick={onShip} title="Barkod Çıkart — stok düşer + MNG kargo barkodu oluşur"
+                          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded px-1.5 py-1 text-[11px]"
+                          data-testid={`pr-ship-${e.id}`}><Barcode size={13} /> Barkod Çıkart</button>
+            )}
+            {e.influencer_id && (
+              <button onClick={onHistory} title="Geçmiş" className="text-gray-400 hover:text-black p-1" data-testid={`pr-history-${e.id}`}><History size={14} /></button>
+            )}
+            <button onClick={onEdit} title="Düzenle" className="text-gray-400 hover:text-black p-1" data-testid={`pr-edit-${e.id}`}><Pencil size={13} /></button>
+            <button onClick={onDelete} title="Sil" className="text-gray-400 hover:text-red-600 p-1" data-testid={`pr-del-${e.id}`}><Trash2 size={13} /></button>
+          </div>
+        </td>
+      </tr>
+      {open && (
+        <tr className="bg-gray-50/70 border-t" data-testid={`pr-detail-${e.id}`}>
+          <td colSpan={10} className="px-4 py-3">
+            <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
+              <div><span className="text-gray-400">Kullanıcı Adı: </span><span className="font-medium text-gray-800">{uname}</span></div>
+              <div><span className="text-gray-400">Influencer Türü: </span><span className="font-medium text-gray-800">{e.influencer_turu || "—"}</span></div>
+              <div><span className="text-gray-400">İş Birliği Türü: </span><span className="font-medium text-gray-800">{e.anlasma_sekli || "—"}</span></div>
+              <div><span className="text-gray-400">Telefon: </span><span className="font-medium text-gray-800">{e.phone || "—"}</span></div>
+              {e.adres && <div className="w-full"><span className="text-gray-400">Adres: </span><span className="text-gray-700">{e.adres}</span></div>}
+              {e.cargo_barcode && <div className="w-full"><span className="text-gray-400">Kargo barkodu: </span><span className="font-mono text-gray-800">{e.cargo_barcode}</span>{e.cargo_tracking_no ? <span className="text-gray-400"> · Takip: {e.cargo_tracking_no}</span> : null}</div>}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -388,6 +462,7 @@ function PRFormModal({ initial, onClose, onSaved }) {
     anlasma_sekli: initial?.anlasma_sekli || "",
     phone: initial?.phone || "",
     adres: initial?.adres || "",
+    paylasma_tarihi: (initial?.paylasma_tarihi || "").slice(0, 10),
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -456,8 +531,9 @@ function PRFormModal({ initial, onClose, onSaved }) {
           <ProductPicker picked={products} setPicked={setProducts} />
         </Field>
         <Field label="Adres" full><input className="inp" value={form.adres} onChange={(e) => set("adres", e.target.value)} placeholder="Kargo adresi" /></Field>
-        <Field label="Tarih"><input type="date" className="inp" value={form.date} onChange={(e) => set("date", e.target.value)} /></Field>
-        <Field label="Durum">
+        <Field label="İletişim Tarihi"><input type="date" className="inp" value={form.date} onChange={(e) => set("date", e.target.value)} /></Field>
+        <Field label="Paylaşma Tarihi"><input type="date" className="inp" value={form.paylasma_tarihi} onChange={(e) => set("paylasma_tarihi", e.target.value)} data-testid="pr-share-date" /></Field>
+        <Field label="Gönderim Durumu">
           <select className="inp" value={form.status} onChange={(e) => set("status", e.target.value)} data-testid="pr-status">
             {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
           </select>

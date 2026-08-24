@@ -279,6 +279,10 @@ _PR_FIELDS = ("influencer_id", "influencer_name", "influencer_type", "date",
               # Kadir: bu alanlar da PR kaydına DOĞRUDAN girilebilsin (bağlı influencer
               # yoksa/boşsa elle) — tablo sütunları form'dan doldurulabilir olsun.
               "urun", "beden", "anlasma_sekli", "phone", "adres",
+              # Gönderi Takibi (Excel): paylaşma tarihi — kullanıcı DÜZENLEYEBİLİR (inline).
+              # İletişim tarihi = date, gönderim durumu = status. Çoklu ürün = products[]
+              # (her kalem {name,barcode,size,qty,gonderim_tarihi,barkod}).
+              "paylasma_tarihi",
               # Kargo: ürün girilmiş PR'dan gönderim yapılınca (kampanya+MNG barkod) işlenir.
               "campaign_id", "cargo_barcode", "cargo_tracking_no", "shipped_at")
 
@@ -333,10 +337,16 @@ async def _pr_enrich(docs: list) -> None:
         d["adres"] = d.get("adres") or _pr_addr(inf)
         d["beden"] = d.get("beden") or _pr_beden(inf, d)
         d["anlasma_sekli"] = d.get("anlasma_sekli") or inf.get("anlasma_sekli") or ""
-        d["influencer_turu"] = _influencer_turu(inf.get("follower_count")) if inf else ""
+        # Influencer Türü: profildeki KAYITLI değer (Mikro/Makro/Nano-UGC/Mid-Tier) öncelikli;
+        # yoksa takipçiden türetilen ÖNERİ. (Gönderi Takibi detayında profilden gösterilir.)
+        d["influencer_turu"] = (inf.get("influencer_turu")
+                                or (_influencer_turu(inf.get("follower_count")) if inf else "") or "")
         d["urun"] = d.get("urun") or _pr_urun(d)
         d["instagram"] = d.get("instagram") or inf.get("instagram") or ""
         d["tiktok"] = d.get("tiktok") or inf.get("tiktok") or ""
+        # Gönderi Takibi detay alanları — profilden (expand satırında gösterilir).
+        d["platform"] = d.get("platform") or inf.get("platform") or ""
+        d["handle"] = d.get("handle") or inf.get("handle") or ""
 
 
 async def _pr_period_summary() -> dict:
@@ -609,9 +619,18 @@ async def ship_pr_entry(entry_id: str, current_user: dict = Depends(require_admi
     # 3) MNG barkod + takip (influencer'ın yapılandırılmış kargo adresi gerekir).
     cg = await create_campaign_cargo(cid, current_user)
 
-    upd = {"campaign_id": cid, "cargo_barcode": cg.get("cargo_barcode") or "",
+    # Gönderi Takibi: her ürün kalemine barkod + gönderim tarihi işaretle (kalem rozeti/tarihi).
+    _bc = cg.get("cargo_barcode") or ""
+    _today = _now_iso()[:10]
+    _stamped = []
+    for _p in (e.get("products") or []):
+        if isinstance(_p, dict):
+            _p = {**_p, "barkod": _p.get("barkod") or _bc,
+                  "gonderim_tarihi": _p.get("gonderim_tarihi") or _today}
+        _stamped.append(_p)
+    upd = {"campaign_id": cid, "cargo_barcode": _bc,
            "cargo_tracking_no": cg.get("tracking_no") or "", "shipped_at": _now_iso(),
-           "status": "gonderildi", "updated_at": _now_iso()}
+           "status": "gonderildi", "updated_at": _now_iso(), "products": _stamped}
     await db.influencer_pr.update_one({"id": entry_id}, {"$set": upd})
     return {"success": True, "cargo_barcode": upd["cargo_barcode"],
             "tracking_no": upd["cargo_tracking_no"], "shipped_at": upd["shipped_at"]}
