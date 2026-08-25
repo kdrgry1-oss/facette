@@ -519,7 +519,8 @@ async def get_orders(
         # Böylece iade TALEBİ oluşan sipariş de ana listede KALMAZ, İadeler sayfasına "gider".
         # (return_requested/in_transit/rejected/partial_refunded dahil — hepsi İadeler'de listelenir.)
         query["status"] = {"$nin": [
-            "cancelled", "returned", "refunded", "return_approved",
+            "cancelled", "cancel_refunded",  # iptal + "Ödemeli İptal Onaylandı" → ana listede DEĞİL, İptaller sekmesinde
+            "returned", "refunded", "return_approved",
             "return_requested", "return_in_transit", "return_rejected", "partial_refunded",
             "payment_failed",  # ödemesi hiç alınamamış (başarısız kart) sipariş → ana listede GÖRÜNMEZ
         ]}

@@ -44,6 +44,7 @@ const STATUS_OPTIONS = [
   { key: "refunded", label: "İade Bedeli Ödendi" },
   { key: "partial_refunded", label: "Kısmi İade Yapıldı" },
   { key: "cancelled", label: "İptal Edildi" },
+  { key: "cancel_refunded", label: "Ödemeli İptal Onaylandı" },
 ];
 
 function platformLabel(p) {
@@ -116,7 +117,7 @@ export default function Cancellations() {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      let url = `${API}/orders?page=${page}&limit=${pageSize}&status=cancelled`;
+      let url = `${API}/orders?page=${page}&limit=${pageSize}&status=cancelled,cancel_refunded`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
       if (payFilter) url += `&payment_method=${encodeURIComponent(payFilter)}`;  // #21
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
