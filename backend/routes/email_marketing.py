@@ -186,15 +186,43 @@ async def audience(current_user: dict = Depends(require_admin)):
     return {"total": total, "eligible": eligible, "suppressed": suppressed}
 
 
+def _is_full_html_document(html: str) -> bool:
+    """İçerik TAM BİR HTML BELGESİ mi? (kendi <head>/logo/footer'ı olan, komple sayfa).
+    Büyük/küçük harf duyarsız `<!doctype` VEYA `<html` içeriyorsa tam belge sayılır."""
+    low = (html or "").lower()
+    return ("<!doctype" in low) or ("<html" in low)
+
+
+def _inject_unsub_into_full(html: str, unsub_html: str) -> str:
+    """Tam-HTML belgesine abonelikten-çık satırını `</body>`'den hemen ÖNCE enjekte eder;
+    `</body>` yoksa gövde sonuna ekler. (İYS/KVKK: ticari e-postada zorunlu.)"""
+    if not unsub_html:
+        return html
+    import re as _re
+    m = _re.search(r"</body\s*>", html or "", _re.IGNORECASE)
+    if m:
+        return (html[:m.start()] + unsub_html + html[m.start():])
+    return (html or "") + unsub_html
+
+
 def _wrap(subject: str, body_html: str, unsub_url: str) -> str:
     """Kampanya HTML'ini FACETTE marka kabuğuna sarar (işlemsel maillerle aynı görünüm) +
-    abonelikten-çık satırı ekler (İYS/KVKK gereği ticari e-postada zorunlu)."""
+    abonelikten-çık satırı ekler (İYS/KVKK gereği ticari e-postada zorunlu).
+
+    ÇİFT-FACETTE FİKSİ: İçerik TAM BİR HTML BELGESİ ise (kullanıcı kendi FACETTE logo/footer'ı
+    olan komple sayfayı yapıştırmış) panel kabuğu (render_email = ikinci FACETTE header+footer)
+    EKLENMEZ; HTML olduğu gibi gönderilir, YALNIZ abonelikten-çık satırı </body> öncesine enjekte
+    edilir. İç-gövde/parça ise eski davranış: render_email ile FACETTE kabuğuna sarılır."""
     unsub = ""
     if unsub_url:
         unsub = (f'<p style="text-align:center;font-size:11px;color:#9a9a9a;margin-top:24px">'
                  f'Bu e-postayı Facette Kulübü üyesi olduğunuz için aldınız. '
                  f'<a href="{unsub_url}" style="color:#9a9a9a;text-decoration:underline">Abonelikten çık</a></p>')
-    content = (body_html or "") + unsub
+    body = body_html or ""
+    if _is_full_html_document(body):
+        # Tam belge → kabuk YOK (çift FACETTE önlenir), abonelikten-çık VAR.
+        return _inject_unsub_into_full(body, unsub)
+    content = body + unsub
     try:
         from email_layout import render_email
         return render_email(subject, content)
