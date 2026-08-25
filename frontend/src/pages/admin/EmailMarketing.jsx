@@ -5,11 +5,12 @@
  * bülten abonelerine toplu kampanya gönderimi + geçmiş. Alıcılar backend'de
  * yalnız active + consent olanlardan seçilir; her maile abonelikten-çık linki eklenir.
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Mail, Send, Save, Users, RefreshCw, CheckCircle2, AlertTriangle,
-  FileText, Eye, Copy, Trash2, X, Star } from "lucide-react";
+  FileText, Eye, Copy, Trash2, X, Star,
+  Bold, Italic, List, Link2, AlignLeft, AlignCenter, AlignRight, Heading, Code, SquarePlus } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const h = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -25,6 +26,73 @@ export default function EmailMarketing() {
   const [templates, setTemplates] = useState([]);
   const [previewHtml, setPreviewHtml] = useState("");   // canlı önizleme (editörün altında)
   const [previewModal, setPreviewModal] = useState(null); // {html, subject} tam ekran modal
+  const [editMode, setEditMode] = useState("visual");   // "visual" (WYSIWYG) | "html" (ham)
+
+  // Görsel (WYSIWYG) editör — hafif contentEditable + execCommand (yeni npm paketi YOK).
+  const visualRef = useRef(null);
+  const lastEditorHtml = useRef("");   // editörün DIŞARI yazdığı son html (dış değişimi ayırt et)
+
+  // camp.html DIŞARIDAN değişince (şablon "Kullan" / HTML modda yazma) görsel alanı senkronla.
+  useEffect(() => {
+    if (editMode !== "visual") return;
+    const el = visualRef.current;
+    if (!el) return;
+    if (camp.html !== lastEditorHtml.current) {
+      el.innerHTML = camp.html || "";
+      lastEditorHtml.current = camp.html || "";
+    }
+  }, [camp.html, editMode]);
+
+  const onVisualInput = () => {
+    const el = visualRef.current;
+    if (!el) return;
+    const html = el.innerHTML;
+    lastEditorHtml.current = html;
+    setCamp((p) => ({ ...p, html }));
+  };
+
+  const exec = (cmd, val = null) => {
+    const el = visualRef.current;
+    if (el) el.focus();
+    try { document.execCommand(cmd, false, val); } catch {}
+    onVisualInput();
+  };
+  const addLink = () => {
+    const url = window.prompt("Bağlantı (URL) — placeholder bırakabilirsin:", "URUN_LINKI");
+    if (url === null) return;
+    exec("createLink", url.trim() || "URUN_LINKI");
+  };
+  const addButton = () => {
+    const text = window.prompt("Buton yazısı:", "Koleksiyonu Keşfet");
+    if (text === null) return;
+    const url = window.prompt("Buton bağlantısı (URL):", "URUN_LINKI") || "URUN_LINKI";
+    const btn = `<div style="text-align:center;margin:22px 0;"><a href="${(url || "URUN_LINKI").trim()}" style="display:inline-block;background:#1a1a1a;color:#ffffff;text-decoration:none;padding:15px 44px;font-size:13px;font-weight:500;letter-spacing:1.5px;text-transform:uppercase;border-radius:2px;">${(text || "Buton").trim()}</a></div>`;
+    exec("insertHTML", btn + "<p><br></p>");
+  };
+  const insertPlaceholder = (ph) => { if (ph) exec("insertText", ph); };
+
+  // ── Canlı önizleme: 600px e-postayı panele SIĞDIR (transform: scale) — yatay kırpma yok ──
+  const EMAIL_W = 600;
+  const previewBoxRef = useRef(null);
+  const [pvScale, setPvScale] = useState(1);
+  const [pvH, setPvH] = useState(760);
+  useEffect(() => {
+    const el = previewBoxRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth || EMAIL_W;
+      setPvScale(Math.min(1, Math.max(0.2, (w - 4) / EMAIL_W)));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const onPreviewLoad = (ev) => {
+    try {
+      const doc = ev.target.contentWindow.document;
+      const hh = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight, 400);
+      setPvH(hh + 8);
+    } catch {}
+  };
 
   const load = async () => {
     try {
@@ -246,23 +314,77 @@ export default function EmailMarketing() {
             <Save size={13} /> Şablon olarak kaydet
           </button>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Editör */}
-          <div className="space-y-3">
-            <input value={camp.subject} onChange={(e) => setCamp((p) => ({ ...p, subject: e.target.value }))}
-              placeholder="Konu (ör. Yeni Sezon Geldi)" className="w-full border rounded-lg px-3 py-2 text-sm" data-testid="camp-subject" />
-            <textarea value={camp.html} onChange={(e) => setCamp((p) => ({ ...p, html: e.target.value }))}
-              placeholder="HTML içerik — <p>Merhaba {ad}...</p> (marka kabuğu: logo + footer + abonelikten-çık otomatik eklenir)"
-              rows={16} className="w-full border rounded-lg px-3 py-2 text-sm font-mono" data-testid="camp-html" />
-          </div>
-          {/* Canlı önizleme (tam markalı) */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs text-gray-500">
-              <Eye size={13} /> Canlı Önizleme (gönderilecek gerçek görünüm)
+        <input value={camp.subject} onChange={(e) => setCamp((p) => ({ ...p, subject: e.target.value }))}
+          placeholder="Konu (ör. Yeni Sezon Geldi)" className="w-full border rounded-lg px-3 py-2 text-sm" data-testid="camp-subject" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          {/* Editör: Görsel (WYSIWYG) / HTML modu */}
+          <div className="space-y-2 min-w-0">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="inline-flex rounded-lg border overflow-hidden text-xs">
+                <button onClick={() => setEditMode("visual")} data-testid="mode-visual"
+                  className={`px-3 py-1.5 font-medium ${editMode === "visual" ? "bg-black text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>Görsel</button>
+                <button onClick={() => setEditMode("html")} data-testid="mode-html"
+                  className={`px-3 py-1.5 font-medium inline-flex items-center gap-1 ${editMode === "html" ? "bg-black text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}><Code size={12} /> HTML</button>
+              </div>
+              <select onChange={(e) => { insertPlaceholder(e.target.value); e.target.value = ""; }} defaultValue=""
+                disabled={editMode !== "visual"} className="border rounded-lg px-2 py-1.5 text-xs disabled:opacity-40" title="İmleç konumuna placeholder ekle">
+                <option value="" disabled>+ Placeholder</option>
+                <option value="{ad}">{"{ad}"} — abone adı</option>
+                <option value="{kod}">{"{kod}"} — kupon kodu</option>
+                <option value="{indirim}">{"{indirim}"} — indirim oranı</option>
+                <option value="URUN_LINKI">URUN_LINKI — bağlantı</option>
+                <option value="GORSEL_URL">GORSEL_URL — görsel</option>
+              </select>
             </div>
-            <div className="border rounded-lg overflow-hidden bg-gray-50" style={{ height: 420 }}>
+
+            {editMode === "visual" ? (
+              <div className="border rounded-lg overflow-hidden">
+                {/* Araç çubuğu */}
+                <div className="flex flex-wrap items-center gap-0.5 bg-gray-50 border-b px-1.5 py-1">
+                  {[
+                    { t: "Kalın", i: <Bold size={14} />, run: () => exec("bold") },
+                    { t: "İtalik", i: <Italic size={14} />, run: () => exec("italic") },
+                    { t: "Başlık", i: <Heading size={14} />, run: () => exec("formatBlock", "H2") },
+                    { t: "Liste", i: <List size={14} />, run: () => exec("insertUnorderedList") },
+                    { t: "Link", i: <Link2 size={14} />, run: addLink },
+                    { t: "Sola", i: <AlignLeft size={14} />, run: () => exec("justifyLeft") },
+                    { t: "Ortala", i: <AlignCenter size={14} />, run: () => exec("justifyCenter") },
+                    { t: "Sağa", i: <AlignRight size={14} />, run: () => exec("justifyRight") },
+                  ].map((b) => (
+                    <button key={b.t} type="button" title={b.t} onMouseDown={(e) => e.preventDefault()} onClick={b.run}
+                      className="p-1.5 rounded hover:bg-gray-200 text-gray-700">{b.i}</button>
+                  ))}
+                  <span className="w-px h-4 bg-gray-300 mx-1" />
+                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={addButton} title="CTA butonu ekle"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-200 text-gray-700 text-xs"><SquarePlus size={13} /> Buton</button>
+                </div>
+                {/* Düzenlenebilir gövde (yalnız iç gövde — marka kabuğu gönderimde eklenir) */}
+                <div ref={visualRef} contentEditable suppressContentEditableWarning onInput={onVisualInput}
+                  data-testid="visual-editor"
+                  className="p-4 text-sm text-gray-800 leading-relaxed focus:outline-none overflow-auto bg-white"
+                  style={{ minHeight: 360, maxHeight: 460 }} />
+                <div className="text-[11px] text-gray-400 px-3 py-1.5 border-t bg-gray-50">
+                  Yalnız iç gövdeyi düzenlersiniz; FACETTE başlık/footer gönderimde otomatik eklenir. Placeholder'lar düz metindir.
+                </div>
+              </div>
+            ) : (
+              <textarea value={camp.html} onChange={(e) => setCamp((p) => ({ ...p, html: e.target.value }))}
+                placeholder="HTML içerik — <p>Merhaba {ad}...</p> (marka kabuğu: logo + footer + abonelikten-çık otomatik eklenir)"
+                rows={20} className="w-full border rounded-lg px-3 py-2 text-sm font-mono" style={{ minHeight: 400 }} data-testid="camp-html" />
+            )}
+          </div>
+
+          {/* Canlı önizleme (tam markalı) — 600px e-posta panele ölçeklenir, yatay kırpma yok */}
+          <div className="space-y-2 min-w-0">
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <Eye size={13} /> Canlı Önizleme (gönderilecek gerçek görünüm) — %{Math.round(pvScale * 100)}
+            </div>
+            <div ref={previewBoxRef} className="border rounded-lg overflow-auto bg-gray-100" style={{ height: 480 }}>
               {previewHtml ? (
-                <iframe title="onizleme" srcDoc={previewHtml} className="w-full h-full bg-white" data-testid="live-preview" />
+                <div style={{ width: EMAIL_W * pvScale, height: pvH * pvScale, margin: "0 auto" }}>
+                  <iframe title="onizleme" srcDoc={previewHtml} onLoad={onPreviewLoad} data-testid="live-preview"
+                    style={{ width: EMAIL_W, height: pvH, transform: `scale(${pvScale})`, transformOrigin: "top left", border: 0, background: "#fff", display: "block" }} />
+                </div>
               ) : (
                 <div className="h-full flex items-center justify-center text-xs text-gray-400 text-center px-4">
                   Konu / içerik yazınca ya da bir şablonu "Kullan" deyince markalı önizleme burada görünür.
