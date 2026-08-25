@@ -83,7 +83,7 @@ export default function Influencers() {
           Gönderi Takibi
         </TabBtn>
         <TabBtn active={tab === "shipments"} onClick={() => setTab("shipments")} icon={<Package size={15} />} testid="tab-shipments">
-          Ürün Gönderimleri
+          Takvim
         </TabBtn>
         <TabBtn active={tab === "influencers"} onClick={() => setTab("influencers")} icon={<Instagram size={15} />} testid="tab-influencers">
           Kayıtlı Influencerlar
@@ -933,18 +933,17 @@ function ShipmentCalendar({ entries }) {
               const list = byDay[key] || [];
               return (
                 <button key={i} onClick={() => list.length && openDay(key)} data-testid={`cal-day-${key}`}
-                  className={`min-h-[74px] border-t border-l p-1.5 text-left align-top ${inMonth ? "bg-white" : "bg-gray-50/60"} ${list.length ? "hover:bg-amber-50 cursor-pointer" : "cursor-default"}`}>
-                  {/* Üst satır SABİT yükseklik (h-5): gün no SOL-ÜST, rozet SAĞ-ÜST — her hücrede
-                      AYNI hizada. Gün no her zaman 20px kutu (bugün kırmızı daire, diğerleri şeffaf)
-                      → bugün vurgusu satır yüksekliğini DEĞİŞTİRMEZ, rozet kaymaz. */}
-                  <div className="flex items-center justify-between h-5">
-                    <span className={`text-[11px] w-5 h-5 inline-flex items-center justify-center rounded-full ${key === todayKey ? "bg-red-600 text-white font-semibold" : inMonth ? "text-gray-900" : "text-gray-400"}`}>{d.getDate()}</span>
-                    {list.length > 0
-                      ? <span className="text-[9px] leading-none bg-black text-white rounded-full min-w-[18px] h-[18px] inline-flex items-center justify-center px-1">{list.length}</span>
-                      : <span className="w-[18px] h-[18px]" aria-hidden />}
-                  </div>
+                  className={`relative min-h-[74px] border-t border-l p-1.5 pt-7 text-left ${inMonth ? "bg-white" : "bg-gray-50/60"} ${list.length ? "hover:bg-amber-50 cursor-pointer" : "cursor-default"}`}>
+                  {/* Gün no — HER hücrede SABİT sol-üst (absolute); içerik/rozet konumunu ETKİLEMEZ.
+                      Bugün kırmızı daire aynı 20px kutuda → diğer numaralarla BİREBİR aynı konum. */}
+                  <span className={`absolute top-1 left-1 text-[11px] w-5 h-5 inline-flex items-center justify-center rounded-full ${key === todayKey ? "bg-red-600 text-white font-semibold" : inMonth ? "text-gray-900" : "text-gray-400"}`}>{d.getDate()}</span>
+                  {/* İşlem-sayısı rozeti — SABİT sağ-üst (absolute) */}
                   {list.length > 0 && (
-                    <div className="mt-1 space-y-0.5">
+                    <span className="absolute top-1 right-1 text-[9px] leading-none bg-black text-white rounded-full min-w-[18px] h-[18px] inline-flex items-center justify-center px-1">{list.length}</span>
+                  )}
+                  {/* İçerik — numaranın ALTINDA (pt-7 sabit boşluk), numarayı İTMEZ */}
+                  {list.length > 0 && (
+                    <div className="space-y-0.5">
                       {list.slice(0, 2).map((e) => <div key={e.id} className="text-[10px] leading-4 text-gray-900 truncate">{e.influencer_name || "—"}</div>)}
                       {list.length > 2 && <div className="text-[9px] leading-4 text-gray-500">+{list.length - 2} daha</div>}
                     </div>
