@@ -1249,7 +1249,7 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
       adres: form.adres,   // Excel "Adres" (serbest metin) — üst düzey alan (liste sütunu)
       shipping_address: {
         // Alıcı Adı alanı KALKTI → her zaman influencer'ın İsim Soyisim'i.
-        full_name: form.name, phone: form.address_phone || form.phone,
+        full_name: form.name, phone: form.phone,   // alıcı telefonu = influencer ana telefonu (ayrı alan yok)
         il: form.il, ilce: form.ilce, adres: form.adres,   // kargo akışı için de yaz (senkron)
       },
     };
@@ -1320,9 +1320,8 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
             placeholder="Kargo/teslim adresi (ör. … Mah. … Sok. No:2 Kadıköy/İstanbul)" />
         </Field>
       </div>
-      <p className="text-xs font-semibold text-gray-500 mt-4 mb-2">Kargo Detayı (seeding için — İl/İlçe MNG kargo barkodu için; Adres'ten otomatik doldurulur, düzenlenebilir)</p>
+      <p className="text-xs font-semibold text-gray-500 mt-4 mb-2">Kargo Detayı (MNG barkodu için İl/İlçe — Adres'ten otomatik dolar, düzenlenebilir; alıcı adı=İsim Soyisim, telefon=Telefon)</p>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Alıcı Telefon (boşsa telefon)"><input className="inp" value={form.address_phone} onChange={(e) => set("address_phone", e.target.value)} /></Field>
         <Field label="İl"><input className="inp" value={form.il} onChange={(e) => set("il", e.target.value)} data-testid="inf-il" /></Field>
         <Field label="İlçe"><input className="inp" value={form.ilce} onChange={(e) => set("ilce", e.target.value)} data-testid="inf-ilce" /></Field>
       </div>
