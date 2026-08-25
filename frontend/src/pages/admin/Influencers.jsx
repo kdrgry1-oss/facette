@@ -296,12 +296,12 @@ function PRTrackTab() {
         </div>
       ) : (
         <div className="overflow-x-auto border rounded-xl bg-white" data-testid="pr-list">
-          <table className="w-full text-sm min-w-[1180px]">
+          <table className="w-full text-sm min-w-[920px]">
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500 text-left">
               <tr>
                 {["Influencer", "İletişim Tarihi", "İletişim", "Ürün", "Beden", "Gönderim Tarihi",
                   "Gönderim Durumu", "Paylaşma Tarihi", "Not", "İşlemler"].map((h, i) => (
-                  <th key={i} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>
+                  <th key={i} className="px-2 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -336,7 +336,7 @@ function PRTrackTab() {
 function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
   const [open, setOpen] = useState(false);
   const st = prStatusMeta(e.status);
-  const td = "px-3 py-2.5 align-top";
+  const td = "px-2 py-2 align-top";
   const items = Array.isArray(e.products) && e.products.length ? e.products : null;
   const canShip = (items && e.influencer_id);
   const barcoded = !!e.cargo_barcode;
@@ -359,25 +359,25 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
         {/* İletişim Tarihi — inline date */}
         <td className={td}>
           <input type="date" defaultValue={(e.date || "").slice(0, 10)} onBlur={(ev) => saveField("date", ev.target.value ? `${ev.target.value}T00:00:00` : "")}
-                 className="border rounded px-1.5 py-1 text-xs w-[130px] focus:outline-none focus:border-black" data-testid={`pr-date-${e.id}`} />
+                 className="border rounded px-1 py-1 text-xs w-[112px] focus:outline-none focus:border-black" data-testid={`pr-date-${e.id}`} />
         </td>
         {/* İletişim (platform) */}
         <td className={`${td} whitespace-nowrap`}>
           <span className="text-gray-700">{platform}</span>
           <div className="mt-0.5"><SocialLinks instagram={e.instagram} tiktok={e.tiktok} /></div>
         </td>
-        {/* Ürün (çoklu kalem) */}
-        <td className={`${td} whitespace-normal max-w-[240px]`}>
+        {/* Ürün (çoklu kalem) — kompakt, uzun adlar kırpılır (tooltip tam ad) */}
+        <td className={`${td} max-w-[180px]`}>
           {items ? (
             <div className="space-y-1">
               {items.map((p, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <span className="text-gray-800">{p.name || p.barcode}</span>
-                  {(p.barkod || barcoded) && <span title={`Barkod: ${p.barkod || e.cargo_barcode}`} className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-0.5 text-[9px]"><Barcode size={10} className="mr-0.5" />Barkod</span>}
+                <div key={i} className="flex items-center gap-1">
+                  <span className="text-gray-800 truncate max-w-[130px]" title={p.name || p.barcode}>{p.name || p.barcode}</span>
+                  {(p.barkod || barcoded) && <span title={`Barkod: ${p.barkod || e.cargo_barcode}`} className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-0.5 text-[9px] shrink-0"><Barcode size={10} className="mr-0.5" />Barkod</span>}
                 </div>
               ))}
             </div>
-          ) : (e.urun || "—")}
+          ) : <span className="truncate block max-w-[170px]" title={e.urun || ""}>{e.urun || "—"}</span>}
         </td>
         {/* Beden (çoklu kalem) */}
         <td className={td}>
@@ -398,22 +398,22 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
         {/* Paylaşma Tarihi — inline date (düzenlenebilir) */}
         <td className={td}>
           <input type="date" defaultValue={(e.paylasma_tarihi || "").slice(0, 10)} onBlur={(ev) => saveField("paylasma_tarihi", ev.target.value)}
-                 className="border rounded px-1.5 py-1 text-xs w-[130px] focus:outline-none focus:border-black" data-testid={`pr-share-${e.id}`} />
+                 className="border rounded px-1 py-1 text-xs w-[112px] focus:outline-none focus:border-black" data-testid={`pr-share-${e.id}`} />
         </td>
         {/* Not — inline text (düzenlenebilir) */}
         <td className={td}>
           <input type="text" defaultValue={e.note || ""} onBlur={(ev) => saveField("note", ev.target.value)} placeholder="Not…"
-                 className="border rounded px-1.5 py-1 text-xs w-[160px] focus:outline-none focus:border-black" data-testid={`pr-note-${e.id}`} />
+                 className="border rounded px-1.5 py-1 text-xs w-[120px] focus:outline-none focus:border-black" data-testid={`pr-note-${e.id}`} />
         </td>
         {/* İşlemler: Barkod Çıkart / Düzenle / Sil (+ Geçmiş) */}
         <td className={`${td} whitespace-nowrap`}>
           <div className="flex items-center gap-1">
             {canShip && (
               barcoded
-                ? <span className="inline-flex items-center gap-1 text-[10px] text-green-700 bg-green-50 rounded px-1.5 py-1" title={`Barkod çıkarıldı · ${e.cargo_barcode}`}><Barcode size={12} />Çıkarıldı</span>
+                ? <span className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-1" title={`Barkod çıkarıldı · ${e.cargo_barcode}`}><Barcode size={14} /></span>
                 : <button onClick={onShip} title="Barkod Çıkart — stok düşer + MNG kargo barkodu oluşur"
-                          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded px-1.5 py-1 text-[11px]"
-                          data-testid={`pr-ship-${e.id}`}><Barcode size={13} /> Barkod Çıkart</button>
+                          className="inline-flex items-center text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded px-1.5 py-1"
+                          data-testid={`pr-ship-${e.id}`}><Barcode size={15} /></button>
             )}
             {e.influencer_id && (
               <button onClick={onHistory} title="Geçmiş" className="text-gray-400 hover:text-black p-1" data-testid={`pr-history-${e.id}`}><History size={14} /></button>
@@ -431,6 +431,10 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
               <div><span className="text-gray-400">Influencer Türü: </span><span className="font-medium text-gray-800">{e.influencer_turu || "—"}</span></div>
               <div><span className="text-gray-400">İş Birliği Türü: </span><span className="font-medium text-gray-800">{e.anlasma_sekli || "—"}</span></div>
               <div><span className="text-gray-400">Telefon: </span><span className="font-medium text-gray-800">{e.phone || "—"}</span></div>
+              <div><span className="text-gray-400">İletişim (kanal): </span><span className="font-medium text-gray-800">{e.contact || "—"}</span></div>
+              <div><span className="text-gray-400">Teklif: </span><span className="text-gray-700">{e.offer || "—"}</span></div>
+              <div><span className="text-gray-400">Cevap: </span><span className="text-gray-700">{e.response || "—"}</span></div>
+              <div><span className="text-gray-400">Follow-up: </span><span className="text-gray-700">{e.follow_up || "—"}</span></div>
               {e.adres && <div className="w-full"><span className="text-gray-400">Adres: </span><span className="text-gray-700">{e.adres}</span></div>}
               {e.cargo_barcode && <div className="w-full"><span className="text-gray-400">Kargo barkodu: </span><span className="font-mono text-gray-800">{e.cargo_barcode}</span>{e.cargo_tracking_no ? <span className="text-gray-400"> · Takip: {e.cargo_tracking_no}</span> : null}</div>}
             </div>
