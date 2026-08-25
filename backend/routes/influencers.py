@@ -279,10 +279,10 @@ _PR_FIELDS = ("influencer_id", "influencer_name", "influencer_type", "date",
               # Kadir: bu alanlar da PR kaydına DOĞRUDAN girilebilsin (bağlı influencer
               # yoksa/boşsa elle) — tablo sütunları form'dan doldurulabilir olsun.
               "urun", "beden", "anlasma_sekli", "phone", "adres",
-              # Gönderi Takibi (Excel): paylaşma tarihi — kullanıcı DÜZENLEYEBİLİR (inline).
-              # İletişim tarihi = date, gönderim durumu = status. Çoklu ürün = products[]
+              # Gönderi Takibi: "Paylaştı mı?" — BOOLEAN tik (inline PUT). Eski paylasma_tarihi
+              # alanı korunur (görmezden gelinir). Gönderim durumu = status; çoklu ürün = products[]
               # (her kalem {name,barcode,size,qty,gonderim_tarihi,barkod}).
-              "paylasma_tarihi",
+              "paylasma_tarihi", "shared",
               # Kargo: ürün girilmiş PR'dan gönderim yapılınca (kampanya+MNG barkod) işlenir.
               "campaign_id", "cargo_barcode", "cargo_tracking_no", "shipped_at")
 

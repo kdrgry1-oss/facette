@@ -300,8 +300,8 @@ function PRTrackTab() {
           <table className="w-full text-sm min-w-[920px]">
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500 text-left">
               <tr>
-                {["Influencer", "İletişim Tarihi", "İletişim", "Ürün", "Beden", "Gönderim Tarihi",
-                  "Gönderim Durumu", "Paylaşma Tarihi", "Not", "İşlemler"].map((h, i) => (
+                {["Influencer", "İletişim", "Ürün", "Beden", "Gönderim Tarihi",
+                  "Gönderim Durumu", "Paylaştı", "Not", "İşlemler"].map((h, i) => (
                   <th key={i} className="px-2 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -387,11 +387,6 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
             {e.influencer_name || "—"}
           </button>
         </td>
-        {/* İletişim Tarihi — inline date */}
-        <td className={td}>
-          <input type="date" defaultValue={(e.date || "").slice(0, 10)} onBlur={(ev) => saveField("date", ev.target.value ? `${ev.target.value}T00:00:00` : "")}
-                 className="border rounded px-1 py-1 text-xs w-[104px] focus:outline-none focus:border-black" data-testid={`pr-date-${e.id}`} />
-        </td>
         {/* İletişim (platform) */}
         <td className={`${td} whitespace-nowrap`}>
           <span className="text-gray-900">{platform}</span>
@@ -428,10 +423,13 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
             {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
           </select>
         </td>
-        {/* Paylaşma Tarihi — inline date (düzenlenebilir) */}
+        {/* Paylaştı mı? — boolean tik (inline PUT) */}
         <td className={td}>
-          <input type="date" defaultValue={(e.paylasma_tarihi || "").slice(0, 10)} onBlur={(ev) => saveField("paylasma_tarihi", ev.target.value)}
-                 className="border rounded px-1 py-1 text-xs w-[104px] focus:outline-none focus:border-black" data-testid={`pr-share-${e.id}`} />
+          <label className="inline-flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" checked={!!e.shared} onChange={(ev) => onPatch(e.id, { shared: ev.target.checked })}
+                   className="w-4 h-4 accent-black" data-testid={`pr-shared-${e.id}`} />
+            <span className="text-[11px] text-gray-600">{e.shared ? "Evet" : "Hayır"}</span>
+          </label>
         </td>
         {/* Not — inline text (düzenlenebilir) */}
         <td className={td}>
@@ -458,7 +456,7 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
       </tr>
       {open && (
         <tr className="bg-gray-50/70 border-t" data-testid={`pr-detail-${e.id}`}>
-          <td colSpan={10} className="px-4 py-3">
+          <td colSpan={9} className="px-4 py-3">
             <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
               <div><span className="text-gray-400">Kullanıcı Adı: </span><span className="font-medium text-gray-900">{uname}</span></div>
               <div><span className="text-gray-400">Influencer Türü: </span><span className="font-medium text-gray-900">{e.influencer_turu || "—"}</span></div>
@@ -499,7 +497,7 @@ function PRFormModal({ initial, onClose, onSaved }) {
     anlasma_sekli: initial?.anlasma_sekli || "",
     phone: initial?.phone || "",
     adres: initial?.adres || "",
-    paylasma_tarihi: (initial?.paylasma_tarihi || "").slice(0, 10),
+    shared: !!initial?.shared,   // "Paylaştı mı?" boolean (Paylaşma Tarihi yerine)
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -568,8 +566,12 @@ function PRFormModal({ initial, onClose, onSaved }) {
           <ProductPicker picked={products} setPicked={setProducts} />
         </Field>
         <Field label="Adres" full><input className="inp" value={form.adres} onChange={(e) => set("adres", e.target.value)} placeholder="Kargo adresi" /></Field>
-        <Field label="İletişim Tarihi"><input type="date" className="inp" value={form.date} onChange={(e) => set("date", e.target.value)} /></Field>
-        <Field label="Paylaşma Tarihi"><input type="date" className="inp" value={form.paylasma_tarihi} onChange={(e) => set("paylasma_tarihi", e.target.value)} data-testid="pr-share-date" /></Field>
+        <Field label="Paylaştı mı?">
+          <label className="inp flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={!!form.shared} onChange={(e) => set("shared", e.target.checked)} className="w-4 h-4 accent-black" data-testid="pr-shared-form" />
+            <span className="text-sm text-gray-700">{form.shared ? "Paylaştı" : "Paylaşmadı"}</span>
+          </label>
+        </Field>
         <Field label="Gönderim Durumu">
           <select className="inp" value={form.status} onChange={(e) => set("status", e.target.value)} data-testid="pr-status">
             {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
@@ -813,11 +815,12 @@ const CAL_GUN = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
 const _pad2 = (n) => String(n).padStart(2, "0");
 const _ymd = (dt) => `${dt.getFullYear()}-${_pad2(dt.getMonth() + 1)}-${_pad2(dt.getDate())}`;
 const _startOfWeek = (dt) => { const d = new Date(dt); const wd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wd); d.setHours(0, 0, 0, 0); return d; };
-// Kaydın takvim tarihi: kalem gonderim_tarihi → shipped_at → iletisim tarihi (date).
+// Kaydın takvim tarihi: kalem gonderim_tarihi → shipped_at → (eski) date → created_at.
+// İletişim tarihi (date) alanı UI'dan kalktı; tarihsiz kayıtlar created_at'e düşer.
 const _prEvDate = (e) => {
   const items = Array.isArray(e.products) ? e.products : [];
   const g = items.map((p) => p && p.gonderim_tarihi).find(Boolean);
-  return String(g || e.shipped_at || e.date || "").slice(0, 10);
+  return String(g || e.shipped_at || e.date || e.created_at || "").slice(0, 10);
 };
 
 function CalEventCard({ e, onOpen }) {
