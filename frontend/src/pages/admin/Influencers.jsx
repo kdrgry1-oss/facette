@@ -1123,6 +1123,37 @@ const influencerTuru = (fc) => {
   return n >= 100000 ? "Makro" : n >= 10000 ? "Micro" : "Nano";
 };
 
+// TR 81 il — adresten İl/İlçe best-effort çıkarımı için (MNG kargo barkodu İl/İlçe ister).
+const TR_ILLER = ["Adana", "Adıyaman", "Afyonkarahisar", "Ağrı", "Amasya", "Ankara", "Antalya", "Artvin", "Aydın", "Balıkesir", "Bilecik", "Bingöl", "Bitlis", "Bolu", "Burdur", "Bursa", "Çanakkale", "Çankırı", "Çorum", "Denizli", "Diyarbakır", "Edirne", "Elazığ", "Erzincan", "Erzurum", "Eskişehir", "Gaziantep", "Giresun", "Gümüşhane", "Hakkari", "Hatay", "Isparta", "Mersin", "İstanbul", "İzmir", "Kars", "Kastamonu", "Kayseri", "Kırklareli", "Kırşehir", "Kocaeli", "Konya", "Kütahya", "Malatya", "Manisa", "Kahramanmaraş", "Mardin", "Muğla", "Muş", "Nevşehir", "Niğde", "Ordu", "Rize", "Sakarya", "Samsun", "Siirt", "Sinop", "Sivas", "Tekirdağ", "Tokat", "Trabzon", "Tunceli", "Şanlıurfa", "Uşak", "Van", "Yozgat", "Zonguldak", "Aksaray", "Bayburt", "Karaman", "Kırıkkale", "Batman", "Şırnak", "Bartın", "Ardahan", "Iğdır", "Yalova", "Karabük", "Kilis", "Osmaniye", "Düzce"];
+const _trNorm = (s) => String(s || "").toLocaleLowerCase("tr")
+  .replace(/i̇/g, "i").replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g")
+  .replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c").trim();
+
+// Adresten İl/İlçe çıkar (best-effort). "…Kadıköy/İstanbul" veya adreste geçen il adı.
+function parseIlIlce(adres) {
+  const s = String(adres || "").trim();
+  if (!s) return { il: "", ilce: "" };
+  let il = "", ilce = "";
+  const m = s.match(/([A-Za-zÇĞİÖŞÜçğıöşü.\s]+?)\s*\/\s*([A-Za-zÇĞİÖŞÜçğıöşü.\s]+?)\s*$/);
+  if (m) {
+    const cand = m[2].trim();
+    const prov = TR_ILLER.find((p) => _trNorm(p) === _trNorm(cand) || _trNorm(cand).endsWith(_trNorm(p)));
+    if (prov) { il = prov; ilce = m[1].trim().split(/\s+/).slice(-1)[0]; }
+  }
+  if (!il) {
+    const ns = _trNorm(s); let best = -1;
+    for (const p of TR_ILLER) { const pos = ns.lastIndexOf(_trNorm(p)); if (pos > best) { best = pos; il = p; } }
+    if (best < 0) il = "";
+  }
+  if (il && !ilce) {
+    const re = new RegExp("([A-Za-zÇĞİÖŞÜçğıöşü.]+)\\s*[\\/, ]\\s*" + il.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const mm = s.match(re);
+    if (mm) ilce = mm[1].trim();
+  }
+  ilce = String(ilce || "").replace(/[.,]/g, "").trim();
+  return { il, ilce };
+}
+
 function InfluencerFormModal({ initial, onClose, onSaved }) {
   const isEdit = !!initial;
   const addr = initial?.shipping_address || {};
@@ -1173,7 +1204,8 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
     if (!form.name.trim()) return toast.error("İsim gerekli");
     setSaving(true);
     const body = {
-      name: form.name, platform: form.platform, handle: form.handle,
+      // handle formdan KALKTI → Instagram (yoksa TikTok) handle olarak kullanılır (ekranlar bozulmasın).
+      name: form.name, platform: form.platform, handle: form.handle || form.instagram || form.tiktok || "",
       instagram: form.instagram, tiktok: form.tiktok, birthday: form.birthday || null,
       phone: form.phone, email: form.email,
       follower_count: parseInt(String(form.follower_count).replace(/[^\d]/g, ""), 10) || 0,
@@ -1185,7 +1217,8 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
       notes: form.notes,
       adres: form.adres,   // Excel "Adres" (serbest metin) — üst düzey alan (liste sütunu)
       shipping_address: {
-        full_name: form.address_full_name || form.name, phone: form.address_phone || form.phone,
+        // Alıcı Adı alanı KALKTI → her zaman influencer'ın İsim Soyisim'i.
+        full_name: form.name, phone: form.address_phone || form.phone,
         il: form.il, ilce: form.ilce, adres: form.adres,   // kargo akışı için de yaz (senkron)
       },
     };
@@ -1209,22 +1242,16 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
     <Modal title={isEdit ? "Influencer Düzenle" : "Yeni Influencer"} onClose={onClose}>
       <div className="grid grid-cols-2 gap-3">
         <Field label="İsim Soyisim *"><input data-testid="inf-name" className="inp" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Ad Soyad" /></Field>
-        <Field label="Kullanıcı Adı (@)"><input data-testid="inf-handle" className="inp" value={form.handle} onChange={(e) => set("handle", e.target.value)} placeholder="@kullanici" /></Field>
         <Field label="Platform">
           <select data-testid="inf-platform" className="inp" value={form.platform} onChange={(e) => set("platform", e.target.value)}>
             <option value="">— Seçin —</option>
             {PLATFORM_OPTS.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </Field>
-        <Field label="Instagram (@) (opsiyonel)"><input className="inp" value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="@kullanici" /></Field>
+        <Field label="Instagram (@)"><input data-testid="inf-handle" className="inp" value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="@kullanici" /></Field>
         <Field label="TikTok (@) (opsiyonel)"><input className="inp" value={form.tiktok} onChange={(e) => set("tiktok", e.target.value)} placeholder="@kullanici" /></Field>
         <Field label="Doğum Günü"><input type="date" className="inp" value={form.birthday} onChange={(e) => set("birthday", e.target.value)} /></Field>
-        <Field label="Takipçi"><input type="text" inputMode="numeric" className="inp" value={form.follower_count} onChange={(e) => set("follower_count", e.target.value)} placeholder="Örn. 125.500" /></Field>
         <Field label="Telefon"><input className="inp" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
-        <Field label="E-posta"><input className="inp" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
-        <Field label="Kupon Kodu"><input data-testid="inf-coupon" className="inp uppercase" value={form.coupon_code} onChange={(e) => set("coupon_code", e.target.value)} placeholder="MELIS10" /></Field>
-        <Field label="aff_id (takip linki)"><input className="inp" value={form.aff_id} onChange={(e) => set("aff_id", e.target.value)} placeholder="melis" /></Field>
-        <Field label="Komisyon %"><input type="number" className="inp" value={form.commission_rate} onChange={(e) => set("commission_rate", e.target.value)} /></Field>
         <Field label="İş Birliği Türü">
           <select className="inp" value={form.anlasma_sekli} onChange={(e) => set("anlasma_sekli", e.target.value)} data-testid="inf-anlasma">
             <option value="">— Seçin —</option>
@@ -1253,15 +1280,20 @@ function InfluencerFormModal({ initial, onClose, onSaved }) {
           </select>
         </Field>
         <Field label="Adres" full>
-          <textarea data-testid="inf-adres" className="inp h-16" value={form.adres} onChange={(e) => set("adres", e.target.value)} placeholder="Kargo/teslim adresi" />
+          <textarea data-testid="inf-adres" className="inp h-16" value={form.adres}
+            onChange={(e) => {
+              const v = e.target.value;
+              const g = parseIlIlce(v);   // adresten İl/İlçe çıkar (best-effort, yalnız boş alanları doldur)
+              setForm((f) => ({ ...f, adres: v, il: f.il || g.il, ilce: f.ilce || g.ilce }));
+            }}
+            placeholder="Kargo/teslim adresi (ör. … Mah. … Sok. No:2 Kadıköy/İstanbul)" />
         </Field>
       </div>
-      <p className="text-xs font-semibold text-gray-500 mt-4 mb-2">Kargo Detayı (seeding için — İl/İlçe MNG kargo barkodu üretimi için gerekir)</p>
+      <p className="text-xs font-semibold text-gray-500 mt-4 mb-2">Kargo Detayı (seeding için — İl/İlçe MNG kargo barkodu için; Adres'ten otomatik doldurulur, düzenlenebilir)</p>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Alıcı Adı (boşsa isim)"><input className="inp" value={form.address_full_name} onChange={(e) => set("address_full_name", e.target.value)} /></Field>
         <Field label="Alıcı Telefon (boşsa telefon)"><input className="inp" value={form.address_phone} onChange={(e) => set("address_phone", e.target.value)} /></Field>
-        <Field label="İl"><input className="inp" value={form.il} onChange={(e) => set("il", e.target.value)} /></Field>
-        <Field label="İlçe"><input className="inp" value={form.ilce} onChange={(e) => set("ilce", e.target.value)} /></Field>
+        <Field label="İl"><input className="inp" value={form.il} onChange={(e) => set("il", e.target.value)} data-testid="inf-il" /></Field>
+        <Field label="İlçe"><input className="inp" value={form.ilce} onChange={(e) => set("ilce", e.target.value)} data-testid="inf-ilce" /></Field>
       </div>
       <Field label="Not" full>
         <textarea data-testid="inf-not" className="inp h-20" value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Bu influencer'a özel notlar…" />
