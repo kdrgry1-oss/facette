@@ -528,6 +528,64 @@ _AY_TR = ["", "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz",
           "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
 
 
+# ── Export ortak yardımcıları (Gönderi Takibi / Takvim / Kayıtlı Influencer) ──
+def _exp_uname(e, inf) -> str:
+    """@kullanıcı adı: kaydın handle/instagram/tiktok → yoksa influencer master."""
+    return (e.get("handle") or e.get("instagram") or e.get("tiktok")
+            or (inf or {}).get("handle") or (inf or {}).get("instagram") or (inf or {}).get("tiktok") or "")
+
+
+def _exp_products(e) -> str:
+    prods = e.get("products")
+    if isinstance(prods, list) and prods:
+        return " • ".join(
+            (str(p.get("name") or p.get("barcode")) if isinstance(p, dict) else str(p))
+            for p in prods)
+    return e.get("urun") or e.get("offer") or ""
+
+
+def _exp_bedens(e) -> str:
+    prods = e.get("products")
+    if isinstance(prods, list) and prods:
+        sizes = [str(p.get("size")) for p in prods if isinstance(p, dict) and p.get("size")]
+        if sizes:
+            return " • ".join(sizes)
+    return e.get("beden") or ""
+
+
+def _exp_effdate(e) -> str:
+    """Takvim tarihi: kalem gonderim_tarihi → shipped_at → (eski) date → created_at."""
+    prods = e.get("products") or []
+    g = next((str(p.get("gonderim_tarihi")) for p in prods
+              if isinstance(p, dict) and p.get("gonderim_tarihi")), "")
+    return str(g or e.get("shipped_at") or e.get("date") or e.get("created_at") or "")[:10]
+
+
+def _exp_shared(e) -> str:
+    return "Evet" if e.get("shared") else "Hayır"
+
+
+def _xlsx_response(ws_title, headers, rows, widths, filename):
+    import openpyxl
+    from io import BytesIO
+    from fastapi.responses import Response
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = ws_title
+    ws.append(headers)
+    for r in rows:
+        ws.append(r)
+    for idx, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(idx)].width = w
+    buf = BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
 @router.get("/influencer-pr/export")
 async def export_pr_entries(
     q: Optional[str] = Query(None),
@@ -537,14 +595,8 @@ async def export_pr_entries(
     end_date: Optional[str] = Query(None),
     current_user: dict = Depends(require_admin),
 ):
-    """PR Listesi Excel çıktısı — ekrandaki FİLTREYLE AYNI kayıtlar (durum/tarih/arama).
-    Bağlı influencer master'ından telefon/adres/beden/anlaşma/türü join edilir. Aya göre
-    sıralı. Kolonlar Kadir'in basılı PR listesiyle aynı + PR detay alanları."""
-    import openpyxl
-    from io import BytesIO
-    from fastapi.responses import Response
-    from openpyxl.utils import get_column_letter
-
+    """GÖNDERİ TAKİBİ Excel — ekrandaki filtreyle (durum/tarih/arama) AYNI kayıtlar.
+    Güncel sütunlar: İletişim Tarihi ÇIKTI, Paylaştı EKLENDİ. Çoklu ürün tek hücrede '•' ile."""
     query: dict = {}
     if influencer_id:
         query["influencer_id"] = influencer_id
@@ -566,73 +618,98 @@ async def export_pr_entries(
             dr["$lte"] = end_date
         query["date"] = dr
     entries = await db.influencer_pr.find(query, {"_id": 0}).sort("date", 1).to_list(5000)
+    await _pr_enrich(entries)  # influencer master + görsel/handle/platform join
 
-    inf_ids = list({e.get("influencer_id") for e in entries if e.get("influencer_id")})
-    inf_map: dict = {}
-    if inf_ids:
-        async for i in db.influencers.find({"id": {"$in": inf_ids}}, {"_id": 0}):
-            inf_map[i["id"]] = i
+    rows = []
+    for e in entries:
+        rows.append([
+            e.get("influencer_name") or "",
+            _exp_uname(e, None),
+            e.get("platform") or "",
+            _exp_products(e),
+            _exp_bedens(e),
+            _PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or ""),
+            _exp_shared(e),
+            e.get("note") or "",
+            _exp_effdate(e),
+        ])
+    return _xlsx_response(
+        "Gönderi Takibi",
+        ["Influencer", "Kullanıcı Adı", "Platform", "Ürün(ler)", "Beden(ler)",
+         "Gönderim Durumu", "Paylaştı mı", "Not", "Gönderim Tarihi"],
+        rows, [22, 20, 12, 40, 18, 16, 12, 34, 14], "gonderi-takibi.xlsx")
 
-    def _ay(dstr):
-        try:
-            return _AY_TR[int(str(dstr)[5:7])]
-        except Exception:
-            return ""
 
-    def _addr(inf):
-        sa = (inf or {}).get("shipping_address") or {}
+@router.get("/influencer-pr/calendar-export")
+async def export_calendar_entries(current_user: dict = Depends(require_admin)):
+    """TAKVİM Excel — tüm gönderim kayıtları TARİHE göre sıralı düz liste (kime ne zaman
+    ne gönderildi). Tarih önceliği: kalem gonderim_tarihi → shipped_at → created_at.
+    Filtre YOK: takvim tümünü gösterir → export da tümü (tarihe göre artan)."""
+    entries = await db.influencer_pr.find({}, {"_id": 0}).to_list(5000)
+    await _pr_enrich(entries)
+    entries.sort(key=lambda e: _exp_effdate(e) or "9999")
+    rows = []
+    for e in entries:
+        rows.append([
+            _exp_effdate(e),
+            e.get("influencer_name") or "",
+            _exp_uname(e, None),
+            _exp_products(e),
+            _exp_bedens(e),
+            _PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or ""),
+            _exp_shared(e),
+        ])
+    return _xlsx_response(
+        "Gönderim Takvimi",
+        ["Tarih", "Influencer", "Kullanıcı Adı", "Ürün(ler)", "Beden(ler)",
+         "Gönderim Durumu", "Paylaştı mı"],
+        rows, [14, 22, 20, 40, 18, 16, 12], "gonderim-takvimi.xlsx")
+
+
+@router.get("/influencer-registry/export")
+async def export_influencers(q: Optional[str] = Query(None), current_user: dict = Depends(require_admin)):
+    """KAYITLI INFLUENCERLAR Excel — tablodaki görünür sütunlarla (arama filtresine uyar).
+    Yol '/influencers/export' DEĞİL (o /influencers/{id} ile çakışırdı) → '/influencer-registry/export'."""
+    query: dict = {}
+    if q:
+        query["$or"] = [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"handle": {"$regex": q, "$options": "i"}},
+            {"instagram": {"$regex": q, "$options": "i"}},
+            {"tiktok": {"$regex": q, "$options": "i"}},
+            {"phone": {"$regex": q, "$options": "i"}},
+            {"coupon_code": {"$regex": q, "$options": "i"}},
+        ]
+    docs = await db.influencers.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+
+    def _addr(d):
+        a = (d.get("adres") or "").strip()
+        if a:
+            return a
+        sa = d.get("shipping_address") or {}
         if isinstance(sa, dict):
             return ", ".join(str(p) for p in [sa.get("adres"), sa.get("ilce"), sa.get("il")] if p)
-        return str(sa or "")
+        return ""
 
-    def _beden(inf, e):
-        alt = (inf or {}).get("beden_alt") or ""
-        ust = (inf or {}).get("beden_ust") or ""
-        if alt or ust:
-            return f"Alt: {alt} / Üst: {ust}"
-        return e.get("beden") or ""
-
-    def _urun(e):
-        prods = e.get("products")
-        if isinstance(prods, list) and prods:
-            return ", ".join(
-                (str(p.get("name") or p.get("barcode")) if isinstance(p, dict) else str(p))
-                for p in prods)
-        return e.get("offer") or ""
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "PR Listesi"
-    ws.append(["Ay", "İsim Soyisim", "Kullanıcı Adı", "Telefon", "Adres", "Ürün", "Beden",
-               "Anlaşma Türü", "Influencer Türü", "Durum", "Tarih", "İletişim", "Teklif",
-               "Cevap", "Follow-up", "Not"])
-    for e in entries:
-        inf = inf_map.get(e.get("influencer_id")) or {}
-        uname = (e.get("instagram") or e.get("tiktok")
-                 or inf.get("instagram") or inf.get("tiktok") or "")
-        ws.append([
-            _ay(e.get("date")),
-            e.get("influencer_name") or inf.get("name") or "",
-            uname,
-            inf.get("phone") or "",
-            _addr(inf),
-            _urun(e),
-            _beden(inf, e),
-            inf.get("anlasma_sekli") or e.get("anlasma_sekli") or "",
-            _influencer_turu(inf.get("follower_count")) if inf else "",
-            _PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or ""),
-            str(e.get("date") or "")[:10],
-            e.get("contact") or "", e.get("offer") or "", e.get("response") or "",
-            e.get("follow_up") or "", e.get("note") or "",
+    rows = []
+    for d in docs:
+        rows.append([
+            d.get("name") or "",
+            d.get("handle") or d.get("instagram") or d.get("tiktok") or "",
+            d.get("platform") or "",
+            d.get("influencer_turu") or _influencer_turu(d.get("follower_count")),
+            d.get("phone") or "",
+            _addr(d),
+            d.get("anlasma_sekli") or "",
+            d.get("beden_ust") or "",
+            d.get("beden_alt") or "",
+            d.get("notes") or "",
         ])
-    for idx, w in enumerate([10, 20, 16, 14, 30, 34, 16, 14, 14, 14, 12, 16, 20, 20, 16, 30], 1):
-        ws.column_dimensions[get_column_letter(idx)].width = w
-    buf = BytesIO()
-    wb.save(buf)
-    return Response(
-        content=buf.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=pr-listesi.xlsx"})
+    return _xlsx_response(
+        "Kayıtlı Influencerlar",
+        ["İsim Soyisim", "Kullanıcı Adı", "Platform", "Influencer Türü", "Telefon",
+         "Adres", "İş Birliği Türü", "Beden Üst", "Beden Alt", "Not"],
+        rows, [22, 20, 12, 16, 16, 40, 18, 12, 12, 34], "kayitli-influencerlar.xlsx")
 
 
 @router.put("/influencer-pr/{entry_id}")

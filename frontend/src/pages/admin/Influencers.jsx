@@ -220,7 +220,7 @@ function PRTrackTab() {
       const r = await axios.get(`${API}/influencer-pr/export`, { ...auth(), params, responseType: "blob" });
       const url = URL.createObjectURL(r.data);
       const a = document.createElement("a");
-      a.href = url; a.download = "pr-listesi.xlsx"; a.click();
+      a.href = url; a.download = "gonderi-takibi.xlsx"; a.click();
       URL.revokeObjectURL(url);
     } catch { toast.error("Excel oluşturulamadı"); }
   };
@@ -703,6 +703,16 @@ function InfluencerListTab() {
     }
   };
 
+  const exportRegistry = async () => {
+    try {
+      const r = await axios.get(`${API}/influencer-registry/export`, { ...auth(), params: q.trim() ? { q: q.trim() } : {}, responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = "kayitli-influencerlar.xlsx"; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("Excel oluşturulamadı"); }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
@@ -716,13 +726,19 @@ function InfluencerListTab() {
             className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-black"
           />
         </div>
-        <button
-          onClick={() => { setEditTarget(null); setShowForm(true); }}
-          data-testid="new-influencer-btn"
-          className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800"
-        >
-          <Plus size={16} /> Yeni Influencer
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={exportRegistry} data-testid="registry-export-btn"
+            className="inline-flex items-center gap-2 border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">
+            <Download size={15} /> Excel'e Aktar
+          </button>
+          <button
+            onClick={() => { setEditTarget(null); setShowForm(true); }}
+            data-testid="new-influencer-btn"
+            className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800"
+          >
+            <Plus size={16} /> Yeni Influencer
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1082,17 +1098,33 @@ function ShipmentsTab() {
 
   useEffect(() => { load(); }, [load]);
 
+  const exportCalendar = async () => {
+    try {
+      const r = await axios.get(`${API}/influencer-pr/calendar-export`, { ...auth(), responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = "gonderim-takvimi.xlsx"; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("Excel oluşturulamadı"); }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <div className="text-sm text-gray-500">Gönderim takvimi — kime ne zaman ne gönderildiği (Gönderi Takibi kayıtları).</div>
-        <button
-          onClick={() => setShowCreate(true)}
-          data-testid="new-shipment-btn"
-          className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800"
-        >
-          <Plus size={16} /> Yeni Gönderim
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={exportCalendar} data-testid="calendar-export-btn"
+            className="inline-flex items-center gap-2 border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">
+            <Download size={15} /> Excel'e Aktar
+          </button>
+          <button
+            onClick={() => setShowCreate(true)}
+            data-testid="new-shipment-btn"
+            className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800"
+          >
+            <Plus size={16} /> Yeni Gönderim
+          </button>
+        </div>
       </div>
 
       {loading ? (
