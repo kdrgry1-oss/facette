@@ -1202,7 +1202,7 @@ export default function PageDesign() {
                       type="text"
                       value={formData.settings?.fallback_text || ""}
                       onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, fallback_text: e.target.value } })}
-                      placeholder="500 TL Üzeri Ücretsiz Kargo"
+                      placeholder="Bar pasifken gösterilecek metin (opsiyonel)"
                       className="w-full border border-gray-300 px-3 py-2 rounded text-sm"
                     />
                     <p className="text-[10px] text-gray-500 mt-1">Boşsa pasif iken bar tamamen gizli.</p>
@@ -1247,7 +1247,7 @@ export default function PageDesign() {
                             arr[i] = e.target.value;
                             setFormData({ ...formData, settings: { ...formData.settings, texts: arr } });
                           }}
-                          placeholder="Örn: 500 TL Üzeri Ücretsiz Kargo"
+                          placeholder="Örn: Yeni Sezon Geldi"
                           className="flex-1 border border-gray-300 px-3 py-2 rounded text-sm"
                           data-testid={`rotating-text-input-${i}`}
                         />

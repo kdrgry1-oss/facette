@@ -116,7 +116,7 @@ export default function CountdownBar() {
     (!endAt   || now <= endAt.getTime());
 
   let rawText;
-  if (!block)          rawText = "500 TL Üzeri Ücretsiz Kargo"; // statik varsayılan
+  if (!block)          rawText = "";                             // blok yok → metin yok (yedek metin kaldırıldı)
   else if (!inWindow)  rawText = s.fallback_text || "";          // pencere dışı
   else                 rawText = s.left_text || "";              // aktif
 
@@ -144,15 +144,8 @@ export default function CountdownBar() {
     return <div className="bg-black" data-testid="topbar-loading" aria-hidden="true" style={{ minHeight: 38 }} />;
   }
 
-  // Hiç blok yok → orijinal statik metin, vatkali tarzı SÜREKLİ kayan marquee.
-  if (!block) {
-    return (
-      <div className="bg-black text-white py-2 md:py-2.5" data-testid="topbar-static">
-        <Marquee items={messages} fg="#ffffff"
-          className="text-[13px] md:text-[17px] uppercase fct-topbar-heavy" />
-      </div>
-    );
-  }
+  // Hiç blok yok → hiçbir şey gösterme (yedek/statik metin kaldırıldı).
+  if (!block) return null;
 
   if (!inWindow) {
     // Bar pasif (planlanmış ya da süresi dolmuş) → fallback metin (kayan marquee)
@@ -181,7 +174,7 @@ export default function CountdownBar() {
       <div className="max-w-screen-2xl mx-auto px-3 md:px-6 flex items-center justify-center md:justify-between gap-3 flex-wrap">
         {currentMsg && (
           <Rotator idx={msgIdx} text={currentMsg} multi={multi}
-             className="text-[13px] md:text-[17px] uppercase fct-topbar-heavy flex-shrink-0" />
+             className="text-xs md:text-sm font-medium tracking-wide flex-shrink-0" />
         )}
         <div className="flex items-center gap-2 md:gap-3">
           {timerLbl && (

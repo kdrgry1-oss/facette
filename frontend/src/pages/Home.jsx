@@ -846,7 +846,7 @@ function VideoBanner({ block }) {
 
 function RotatingText({ block }) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const texts = (block?.settings?.texts || ["500 TL Üzeri Ücretsiz Kargo"]).filter((t) => (t || "").trim());
+  const texts = (block?.settings?.texts || []).filter((t) => (t || "").trim());
 
   useEffect(() => {
     if (texts.length < 2) return;
