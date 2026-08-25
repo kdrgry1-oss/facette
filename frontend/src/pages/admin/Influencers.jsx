@@ -390,26 +390,27 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
         {/* İletişim Tarihi — inline date */}
         <td className={td}>
           <input type="date" defaultValue={(e.date || "").slice(0, 10)} onBlur={(ev) => saveField("date", ev.target.value ? `${ev.target.value}T00:00:00` : "")}
-                 className="border rounded px-1 py-1 text-xs w-[112px] focus:outline-none focus:border-black" data-testid={`pr-date-${e.id}`} />
+                 className="border rounded px-1 py-1 text-xs w-[104px] focus:outline-none focus:border-black" data-testid={`pr-date-${e.id}`} />
         </td>
         {/* İletişim (platform) */}
         <td className={`${td} whitespace-nowrap`}>
           <span className="text-gray-900">{platform}</span>
           <div className="mt-0.5"><SocialLinks instagram={e.instagram} tiktok={e.tiktok} /></div>
         </td>
-        {/* Ürün (çoklu kalem) — solda thumbnail (hover büyük), ad TEK SATIR (truncate + tooltip) */}
-        <td className={`${td} max-w-[220px]`}>
+        {/* Ürün (çoklu kalem) — solda thumbnail; ürün adı TEK SATIR ve TAM (kırpma YOK).
+            Sütun içeriğe göre genişler; yer için Not + tarih inputları daraltıldı. */}
+        <td className={td}>
           {items ? (
             <div className="space-y-1">
               {items.map((p, i) => (
                 <div key={i} className="flex items-center gap-1.5 h-7">
                   <PRThumb src={p.image} name={p.name || p.barcode} />
-                  <span className="text-gray-900 truncate whitespace-nowrap max-w-[120px]" title={p.name || p.barcode}>{p.name || p.barcode}</span>
+                  <span className="text-gray-900 whitespace-nowrap" title={p.name || p.barcode}>{p.name || p.barcode}</span>
                   {(p.barkod || barcoded) && <span title={`Barkod: ${p.barkod || e.cargo_barcode}`} className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-0.5 text-[9px] shrink-0"><Barcode size={10} className="mr-0.5" />Barkod</span>}
                 </div>
               ))}
             </div>
-          ) : <span className="truncate block max-w-[190px]" title={e.urun || ""}>{e.urun || "—"}</span>}
+          ) : <span className="whitespace-nowrap" title={e.urun || ""}>{e.urun || "—"}</span>}
         </td>
         {/* Beden (çoklu kalem) — ürün satırlarıyla HİZALI (h-7) */}
         <td className={td}>
@@ -430,12 +431,12 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
         {/* Paylaşma Tarihi — inline date (düzenlenebilir) */}
         <td className={td}>
           <input type="date" defaultValue={(e.paylasma_tarihi || "").slice(0, 10)} onBlur={(ev) => saveField("paylasma_tarihi", ev.target.value)}
-                 className="border rounded px-1 py-1 text-xs w-[112px] focus:outline-none focus:border-black" data-testid={`pr-share-${e.id}`} />
+                 className="border rounded px-1 py-1 text-xs w-[104px] focus:outline-none focus:border-black" data-testid={`pr-share-${e.id}`} />
         </td>
         {/* Not — inline text (düzenlenebilir) */}
         <td className={td}>
           <input type="text" defaultValue={e.note || ""} onBlur={(ev) => saveField("note", ev.target.value)} placeholder="Not…"
-                 className="border rounded px-1.5 py-1 text-xs w-[120px] focus:outline-none focus:border-black" data-testid={`pr-note-${e.id}`} />
+                 className="border rounded px-1.5 py-1 text-xs w-[92px] focus:outline-none focus:border-black" data-testid={`pr-note-${e.id}`} />
         </td>
         {/* İşlemler: Barkod Çıkart / Düzenle / Sil (+ Geçmiş) */}
         <td className={`${td} whitespace-nowrap`}>
