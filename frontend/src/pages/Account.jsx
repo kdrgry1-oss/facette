@@ -592,6 +592,30 @@ function OrderCard({ order, expanded, onToggle, onChanged }) {
   // Müşteri iptali: yalnızca "Hazırlanıyor" durumuna geçmeden. Backend guard ile birebir aynı set.
   const CANCELLABLE = ["pending", "awaiting_payment", "payment_notified", "confirmed"];
   const canCancel = CANCELLABLE.includes(order.status);
+  // İade talebi hâlâ AKTİF mi (iptal edilmemiş)? İptal edilince re-request mümkün.
+  const _rrStatus = order.return_request?.status || "";
+  const hasActiveReturn = !!order.return_request && _rrStatus !== "cancelled";
+  // Bekleyen (henüz onaylanmamış/işlenmemiş) iade talebi → müşteri iptal edebilir.
+  const _rrBlocked = ["approved", "return_approved", "rejected", "return_rejected",
+    "in_transit", "return_in_transit", "returned", "refunded", "partial_refunded", "cancelled", "expired"];
+  const canCancelReturn = hasActiveReturn && order.status === "return_requested" && !_rrBlocked.includes(_rrStatus);
+  const [cancellingReturn, setCancellingReturn] = useState(false);
+  const handleCancelReturn = async () => {
+    if (!window.confirm("İade talebinizi iptal etmek istediğinize emin misiniz? (İade işlemi henüz başlamadı — para/stok hareketi olmaz.)")) return;
+    setCancellingReturn(true);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.post(`${API}/orders/${order.id || order.order_number}/return-request/cancel`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      toast.success("İade talebiniz iptal edildi");
+      onChanged && onChanged();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "İade talebi iptal edilemedi");
+    } finally {
+      setCancellingReturn(false);
+    }
+  };
   const [cancelling, setCancelling] = useState(false);
   const handleCancel = async () => {
     if (!window.confirm("Siparişinizi iptal etmek istediğinize emin misiniz?")) return;
@@ -689,10 +713,19 @@ function OrderCard({ order, expanded, onToggle, onChanged }) {
           {order.status === "payment_notified" && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900">Ödeme bildiriminiz alındı, en kısa sürede kontrol edilecek.</div>
           )}
-          {order.return_request ? (
+          {hasActiveReturn ? (
             <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
               <span className="text-sm text-rose-900">İade talebiniz oluşturuldu · Kod: <b className="font-mono">{order.return_request.return_code}</b></span>
-              <a href={`/iade/${order.order_number}`} className="inline-block bg-rose-600 text-white px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-rose-700 shrink-0">Barkodu Gör</a>
+              <div className="flex items-center gap-2 shrink-0">
+                <a href={`/iade/${order.order_number}`} className="inline-block bg-rose-600 text-white px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-rose-700">Barkodu Gör</a>
+                {canCancelReturn && (
+                  <button onClick={handleCancelReturn} disabled={cancellingReturn}
+                    data-testid="cancel-return-btn"
+                    className="inline-block border border-rose-300 text-rose-700 px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-rose-100 disabled:opacity-50">
+                    {cancellingReturn ? "İptal ediliyor…" : "İade talebini iptal et"}
+                  </button>
+                )}
+              </div>
             </div>
           ) : canReturn ? (
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">

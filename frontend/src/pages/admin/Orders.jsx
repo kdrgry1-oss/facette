@@ -1434,9 +1434,11 @@ export default function AdminOrders({ unpaidView = false }) {
                           // Barkod var ama etiket henüz YAZDIRILMADI → kamyon SARI (aksiyon gerek).
                           // Etiket yazdırıldıysa (cargo_label_printed_at) → YEŞİL, takip no beklenir.
                           const printed = !!order.cargo_label_printed_at;
+                          const pc = Number(order.cargo_label_print_count || 0);
                           return printed ? (
-                            <span className="inline-flex items-center gap-1.5" title={`Barkod yazdırıldı: ${barcodeNo} — kargo firması takip no'yu henüz üretmedi`}>
+                            <span className="inline-flex items-center gap-1.5" title={`Barkod yazdırıldı: ${barcodeNo}${pc > 0 ? ` · ${pc} defa` : ""} — kargo firması takip no'yu henüz üretmedi`}>
                               <Truck size={16} className="text-emerald-500" />
+                              {pc > 0 && <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 rounded-full px-1.5" title={`${pc} defa yazdırıldı`}>×{pc}</span>}
                               <span className="text-[10px] text-gray-400">takip bekleniyor</span>
                             </span>
                           ) : (
@@ -1625,13 +1627,20 @@ export default function AdminOrders({ unpaidView = false }) {
                         Trendyol Etiketi Yazdır
                       </button>
                     ) : (
-                      <button
-                        onClick={() => handlePrintLabel(selectedOrder.id)}
-                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
-                      >
-                        <Tag size={16} />
-                        Etiket Yazdır
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handlePrintLabel(selectedOrder.id)}
+                          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+                        >
+                          <Tag size={16} />
+                          Etiket Yazdır
+                        </button>
+                        {Number(selectedOrder.cargo_label_print_count || 0) > 0 && (
+                          <span className="text-xs font-medium text-gray-500" data-testid="label-print-count">
+                            {selectedOrder.cargo_label_print_count} defa yazdırıldı
+                          </span>
+                        )}
+                      </div>
                     )}
                     <button
                       onClick={() => handleSendShippingSMS(selectedOrder.id)}

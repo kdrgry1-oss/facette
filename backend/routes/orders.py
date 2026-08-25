@@ -6321,6 +6321,12 @@ async def get_cargo_label(order_id: str, token: str = None):
         )
     except Exception:
         pass  # damga başarısız olsa da etiket üretimi engellenmez
+    # YAZDIRMA SAYACI: her etiket çekiminde (tekli + toplu) +1. İlk-damga mantığından
+    # AYRI update — kaç defa yazdırıldığı panelde görünsün (ödeme/statü/stok'a DOKUNMAZ).
+    try:
+        await db.orders.update_one({"id": order_id}, {"$inc": {"cargo_label_print_count": 1}})
+    except Exception:
+        pass
 
     barkod = order.get("cargo_tracking_number") or ""
     cargo_obj = order.get("cargo") or {}
@@ -7030,6 +7036,8 @@ async def _build_return_for_order(order: dict, payload: dict, actor: dict) -> di
             "iade_no": iade_no, "gonderi_no": gonderi_no,
             "valid_until": valid_until, "reason": reason, "reason_code": reason_code,
             "created_at": now_iso, "status": "created", "items_count": len(items),
+            # Talep iptal edilirse sipariş bu statüye geri döner (müşteri iade-iptal için).
+            "prev_status": order.get("status") or "delivered",
         },
         "status": "return_requested", "updated_at": now_iso,
     }})
@@ -7138,6 +7146,94 @@ async def create_guest_return_request(order_number: str, payload: dict, request:
     actor = {"id": order.get("user_id"), "email": email or order.get("email") or "",
              "name": "Misafir", "guest": True}
     return await _build_return_for_order(order, payload, actor)
+
+
+async def _cancel_return_for_order(order: dict, actor: dict) -> dict:
+    """Müşteri İADE TALEBİNİ İPTAL — YALNIZ hâlâ BEKLEMEDEYSE (talep oluşturuldu ama HENÜZ
+    onaylanmadı / kargo geri gelmedi / iade ödemesi YAPILMADI → customer_returns.status='created').
+    PARA/STOK/ÖDEME mantığına ASLA DOKUNMAZ (talep aşamasında iade yapılmadı). Yalnız talebi
+    'cancelled' yapar ve siparişi talep-öncesi statüsüne (prev_status) döndürür; payment_status
+    değişmez. Onaylanmış/işlenmiş/iade-ödemesi yapılmış talep iptal EDİLEMEZ (400)."""
+    rr = order.get("return_request") or {}
+    rid = rr.get("return_id")
+    rec = None
+    if rid:
+        rec = await db.customer_returns.find_one({"id": rid}, {"_id": 0})
+    if not rec:
+        rec = await db.customer_returns.find_one(
+            {"order_id": order["id"], "status": "created"}, {"_id": 0})
+    rec_st = str((rec or {}).get("status") or "")
+    rr_st = str(rr.get("status") or "")
+    order_st = str(order.get("status") or "")
+
+    # İptal EDİLEBİLİR mi? YALNIZ bekleyen (created) talep.
+    _cancelable = (rec_st == "created") or (
+        not rec and rr_st in ("created", "return_requested") and order_st == "return_requested")
+    if not _cancelable:
+        if rec_st == "cancelled" or rr_st == "cancelled":
+            raise HTTPException(status_code=400, detail="İade talebi zaten iptal edilmiş.")
+        if rec or order_st.startswith("return_") or order_st in ("returned", "refunded"):
+            raise HTTPException(status_code=400,
+                                detail="Bu iade talebi işlenmeye başlandı/onaylandı — iptal edilemez.")
+        raise HTTPException(status_code=400, detail="İptal edilebilecek bekleyen iade talebi yok.")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    # 1) İade kaydını iptal et (PARA/STOK YOK).
+    if rec:
+        await db.customer_returns.update_one(
+            {"id": rec["id"]},
+            {"$set": {"status": "cancelled", "cancelled_at": now_iso,
+                      "cancelled_by": (actor or {}).get("email") or "customer"}})
+    # 2) Siparişi talep-öncesi statüsüne döndür — payment_status'e DOKUNMA.
+    prev = rr.get("prev_status") or "delivered"
+    await db.orders.update_one({"id": order["id"]}, {"$set": {
+        "return_request.status": "cancelled", "return_request.cancelled_at": now_iso,
+        "status": prev, "updated_at": now_iso,
+    }})
+    await _log_order_event(order["id"], "return", "İade talebi müşteri tarafından iptal edildi",
+                           actor, {"return_id": (rec or {}).get("id"),
+                                   "return_code": rr.get("return_code")},
+                           order_number=order.get("order_number", ""))
+    return {"success": True, "status": prev, "message": "İade talebi iptal edildi."}
+
+
+@router.post("/{order_id}/return-request/cancel")
+async def cancel_return_request(order_id: str, current_user: dict = Depends(get_current_user)):
+    """Üye müşteri: KENDİ siparişinin BEKLEYEN iade talebini iptal eder."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        order = await db.orders.find_one({"order_number": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    # SAHİPLİK (BOLA): üyeli siparişte user_id, misafir siparişte iletişim eşleşmeli.
+    if order.get("user_id"):
+        if current_user.get("id") and order["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
+    else:
+        if not _order_contact_matches(order, current_user.get("email", ""), current_user.get("phone", "")):
+            raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
+    return await _cancel_return_for_order(order, current_user)
+
+
+@router.post("/by-number/{order_number}/return-request/cancel")
+async def cancel_guest_return_request(order_number: str, payload: dict = Body(default={})):
+    """Misafir müşteri: sipariş no + e-posta/telefon doğrulamasıyla bekleyen iade talebini iptal eder."""
+    order = await db.orders.find_one({"order_number": order_number}, {"_id": 0})
+    if not order:
+        order = await db.orders.find_one({"id": order_number}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    email = ((payload or {}).get("email") or "").strip()
+    phone = ((payload or {}).get("phone") or "").strip()
+    if not email and not phone:
+        raise HTTPException(status_code=400, detail="Doğrulama için e-posta veya telefon giriniz.")
+    if not _order_contact_matches(order, email, phone):
+        raise HTTPException(status_code=403, detail="Girdiğiniz bilgiler sipariş kayıtları ile eşleşmiyor.")
+    actor = {"id": order.get("user_id"), "email": email or order.get("email") or "",
+             "name": "Misafir", "guest": True}
+    return await _cancel_return_for_order(order, actor)
 
 
 @router.post("/{order_id}/admin-return")
