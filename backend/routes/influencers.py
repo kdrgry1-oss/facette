@@ -279,10 +279,10 @@ _PR_FIELDS = ("influencer_id", "influencer_name", "influencer_type", "date",
               # Kadir: bu alanlar da PR kaydına DOĞRUDAN girilebilsin (bağlı influencer
               # yoksa/boşsa elle) — tablo sütunları form'dan doldurulabilir olsun.
               "urun", "beden", "anlasma_sekli", "phone", "adres",
-              # Gönderi Takibi: "Paylaştı mı?" — BOOLEAN tik (inline PUT). Eski paylasma_tarihi
-              # alanı korunur (görmezden gelinir). Gönderim durumu = status; çoklu ürün = products[]
-              # (her kalem {name,barcode,size,qty,gonderim_tarihi,barkod}).
-              "paylasma_tarihi", "shared",
+              # Paylaşım artık KALEM-BAZLI (products[].shared). Kayıt-seviyesi "shared"
+              # _PR_FIELDS'ten ÇIKARILDI (eski değer görmezden gelinir); paylasma_tarihi legacy.
+              # Çoklu ürün = products[] (her kalem {name,barcode,size,qty,gonderim_tarihi,barkod,shared}).
+              "paylasma_tarihi",
               # Kargo: ürün girilmiş PR'dan gönderim yapılınca (kampanya+MNG barkod) işlenir.
               "campaign_id", "cargo_barcode", "cargo_tracking_no", "shipped_at")
 
@@ -562,6 +562,11 @@ def _exp_effdate(e) -> str:
 
 
 def _exp_shared(e) -> str:
+    """KALEM-BAZLI paylaşım — her ürün için Evet/Hayır, ürün sırasıyla '•' birleşik
+    (Ürün(ler)/Beden(ler) sütunlarıyla AYNI sıra → hizalı). Ürün yoksa eski kayıt-shared."""
+    prods = e.get("products")
+    if isinstance(prods, list) and prods:
+        return " • ".join("Evet" if (isinstance(p, dict) and p.get("shared")) else "Hayır" for p in prods)
     return "Evet" if e.get("shared") else "Hayır"
 
 
@@ -722,6 +727,29 @@ async def update_pr_entry(entry_id: str, payload: dict, current_user: dict = Dep
         update.pop("status")
     update["updated_at"] = _now_iso()
     await db.influencer_pr.update_one({"id": entry_id}, {"$set": update})
+    doc = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
+    return {"success": True, "entry": doc}
+
+
+@router.put("/influencer-pr/{entry_id}/item-shared")
+async def update_pr_item_shared(entry_id: str, payload: dict, current_user: dict = Depends(require_admin)):
+    """KALEM-BAZLI 'Paylaştı mı?' — yalnız BELİRTİLEN ürün kaleminin `shared`'ını değiştirir;
+    kaydın DİĞER kalemleri etkilenmez. body: {index:int, shared:bool}. Ürün dizisi sunucuda
+    güncellenir (istemci diziyi resend etmez → hiza/veri güvenli)."""
+    existing = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="PR kaydı bulunamadı")
+    try:
+        idx = int((payload or {}).get("index"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Geçersiz kalem index")
+    shared = bool((payload or {}).get("shared"))
+    prods = list(existing.get("products") or [])
+    if idx < 0 or idx >= len(prods) or not isinstance(prods[idx], dict):
+        raise HTTPException(status_code=400, detail="Kalem bulunamadı")
+    prods[idx] = {**prods[idx], "shared": shared}
+    await db.influencer_pr.update_one(
+        {"id": entry_id}, {"$set": {"products": prods, "updated_at": _now_iso()}})
     doc = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
     return {"success": True, "entry": doc}
 

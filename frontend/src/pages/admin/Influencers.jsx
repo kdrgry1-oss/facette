@@ -205,6 +205,11 @@ function PRTrackTab() {
     try { await axios.put(`${API}/influencer-pr/${id}`, patch, auth()); load(); }
     catch { toast.error("Kaydedilemedi"); }
   };
+  // Kalem-bazlı "Paylaştı" — yalnız o ürün kaleminin shared'ı (diğer kalemler etkilenmez).
+  const patchItemShared = async (id, index, shared) => {
+    try { await axios.put(`${API}/influencer-pr/${id}/item-shared`, { index, shared }, auth()); load(); }
+    catch { toast.error("Kaydedilemedi"); }
+  };
 
   const quick = (kind) => { setStart(periodStart(kind)); setEnd(""); };
 
@@ -313,6 +318,7 @@ function PRTrackTab() {
                        onDelete={() => del(e.id)}
                        onShip={() => shipPR(e)}
                        onPatch={patchEntry}
+                       onItemShared={patchItemShared}
                        onHistory={() => e.influencer_id && setHistoryFor({ id: e.influencer_id, name: e.influencer_name })} />
               ))}
             </tbody>
@@ -364,7 +370,7 @@ function PRThumb({ src, name }) {
 
 // Gönderi Takibi satırı (Excel düzeni): görünür sütunlar + çoklu ürün kalemleri +
 // detaya-basınca (expand) profil alanları + inline düzenlenebilir Paylaşma Tarihi/Not/İletişim Tarihi.
-function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
+function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }) {
   const [open, setOpen] = useState(false);
   const st = prStatusMeta(e.status);
   const td = "px-2 py-2 align-top";
@@ -423,13 +429,20 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
             {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
           </select>
         </td>
-        {/* Paylaştı mı? — boolean tik (inline PUT) */}
+        {/* Paylaştı — KALEM BAZLI (her ürün AYRI); Beden/Gönderim Tarihi ile hizalı (h-7) */}
         <td className={td}>
-          <label className="inline-flex items-center gap-1.5 cursor-pointer">
-            <input type="checkbox" checked={!!e.shared} onChange={(ev) => onPatch(e.id, { shared: ev.target.checked })}
-                   className="w-4 h-4 accent-black" data-testid={`pr-shared-${e.id}`} />
-            <span className="text-[11px] text-gray-600">{e.shared ? "Evet" : "Hayır"}</span>
-          </label>
+          {items ? (
+            <div className="space-y-1">
+              {items.map((p, i) => (
+                <label key={i} className="h-7 flex items-center gap-1 cursor-pointer">
+                  <input type="checkbox" checked={!!p.shared}
+                         onChange={(ev) => onItemShared(e.id, i, ev.target.checked)}
+                         className="w-4 h-4 accent-black" data-testid={`pr-item-shared-${e.id}-${i}`} />
+                  <span className="text-[10px] text-gray-600">{p.shared ? "Evet" : "Hayır"}</span>
+                </label>
+              ))}
+            </div>
+          ) : <span className="text-[11px] text-gray-400">—</span>}
         </td>
         {/* Not — inline text (düzenlenebilir) */}
         <td className={td}>
@@ -497,7 +510,6 @@ function PRFormModal({ initial, onClose, onSaved }) {
     anlasma_sekli: initial?.anlasma_sekli || "",
     phone: initial?.phone || "",
     adres: initial?.adres || "",
-    shared: !!initial?.shared,   // "Paylaştı mı?" boolean (Paylaşma Tarihi yerine)
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -566,12 +578,6 @@ function PRFormModal({ initial, onClose, onSaved }) {
           <ProductPicker picked={products} setPicked={setProducts} />
         </Field>
         <Field label="Adres" full><input className="inp" value={form.adres} onChange={(e) => set("adres", e.target.value)} placeholder="Kargo adresi" /></Field>
-        <Field label="Paylaştı mı?">
-          <label className="inp flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={!!form.shared} onChange={(e) => set("shared", e.target.checked)} className="w-4 h-4 accent-black" data-testid="pr-shared-form" />
-            <span className="text-sm text-gray-700">{form.shared ? "Paylaştı" : "Paylaşmadı"}</span>
-          </label>
-        </Field>
         <Field label="Gönderim Durumu">
           <select className="inp" value={form.status} onChange={(e) => set("status", e.target.value)} data-testid="pr-status">
             {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
