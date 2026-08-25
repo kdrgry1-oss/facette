@@ -4,7 +4,7 @@
  *   2) Ürün Gönderimleri → tüm gönderim geçmişi (kim, ne, ne zaman, paylaşıldı mı) +
  *      "Yeni Gönderim" (influencer seç → ürün seç → stok düş → kargo).
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
 import { toast } from "sonner";
@@ -394,7 +394,7 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
         </td>
         {/* İletişim (platform) */}
         <td className={`${td} whitespace-nowrap`}>
-          <span className="text-gray-700">{platform}</span>
+          <span className="text-gray-900">{platform}</span>
           <div className="mt-0.5"><SocialLinks instagram={e.instagram} tiktok={e.tiktok} /></div>
         </td>
         {/* Ürün (çoklu kalem) — solda thumbnail (hover büyük), ad TEK SATIR (truncate + tooltip) */}
@@ -404,7 +404,7 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
               {items.map((p, i) => (
                 <div key={i} className="flex items-center gap-1.5 h-7">
                   <PRThumb src={p.image} name={p.name || p.barcode} />
-                  <span className="text-gray-800 truncate whitespace-nowrap max-w-[120px]" title={p.name || p.barcode}>{p.name || p.barcode}</span>
+                  <span className="text-gray-900 truncate whitespace-nowrap max-w-[120px]" title={p.name || p.barcode}>{p.name || p.barcode}</span>
                   {(p.barkod || barcoded) && <span title={`Barkod: ${p.barkod || e.cargo_barcode}`} className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-0.5 text-[9px] shrink-0"><Barcode size={10} className="mr-0.5" />Barkod</span>}
                 </div>
               ))}
@@ -413,10 +413,10 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
         </td>
         {/* Beden (çoklu kalem) — ürün satırlarıyla HİZALI (h-7) */}
         <td className={td}>
-          {items ? <div className="space-y-1">{items.map((p, i) => <div key={i} className="h-7 flex items-center text-gray-700">{p.size || "—"}</div>)}</div> : (e.beden || "—")}
+          {items ? <div className="space-y-1">{items.map((p, i) => <div key={i} className="h-7 flex items-center text-gray-900">{p.size || "—"}</div>)}</div> : (e.beden || "—")}
         </td>
         {/* Gönderim Tarihi (çoklu kalem) — hizalı */}
-        <td className={`${td} whitespace-nowrap text-gray-600`}>
+        <td className={`${td} whitespace-nowrap text-gray-900`}>
           {items ? <div className="space-y-1">{items.map((p, i) => <div key={i} className="h-7 flex items-center">{p.gonderim_tarihi ? fmtDate(p.gonderim_tarihi) : (e.shipped_at ? fmtDate(e.shipped_at) : "—")}</div>)}</div>
                  : (e.shipped_at ? fmtDate(e.shipped_at) : "—")}
         </td>
@@ -459,15 +459,15 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
         <tr className="bg-gray-50/70 border-t" data-testid={`pr-detail-${e.id}`}>
           <td colSpan={10} className="px-4 py-3">
             <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
-              <div><span className="text-gray-400">Kullanıcı Adı: </span><span className="font-medium text-gray-800">{uname}</span></div>
-              <div><span className="text-gray-400">Influencer Türü: </span><span className="font-medium text-gray-800">{e.influencer_turu || "—"}</span></div>
-              <div><span className="text-gray-400">İş Birliği Türü: </span><span className="font-medium text-gray-800">{e.anlasma_sekli || "—"}</span></div>
-              <div><span className="text-gray-400">Telefon: </span><span className="font-medium text-gray-800">{e.phone || "—"}</span></div>
-              <div><span className="text-gray-400">İletişim (kanal): </span><span className="font-medium text-gray-800">{e.contact || "—"}</span></div>
-              <div><span className="text-gray-400">Teklif: </span><span className="text-gray-700">{e.offer || "—"}</span></div>
-              <div><span className="text-gray-400">Cevap: </span><span className="text-gray-700">{e.response || "—"}</span></div>
-              <div><span className="text-gray-400">Follow-up: </span><span className="text-gray-700">{e.follow_up || "—"}</span></div>
-              {e.adres && <div className="w-full"><span className="text-gray-400">Adres: </span><span className="text-gray-700">{e.adres}</span></div>}
+              <div><span className="text-gray-400">Kullanıcı Adı: </span><span className="font-medium text-gray-900">{uname}</span></div>
+              <div><span className="text-gray-400">Influencer Türü: </span><span className="font-medium text-gray-900">{e.influencer_turu || "—"}</span></div>
+              <div><span className="text-gray-400">İş Birliği Türü: </span><span className="font-medium text-gray-900">{e.anlasma_sekli || "—"}</span></div>
+              <div><span className="text-gray-400">Telefon: </span><span className="font-medium text-gray-900">{e.phone || "—"}</span></div>
+              <div><span className="text-gray-400">İletişim (kanal): </span><span className="font-medium text-gray-900">{e.contact || "—"}</span></div>
+              <div><span className="text-gray-400">Teklif: </span><span className="text-gray-900">{e.offer || "—"}</span></div>
+              <div><span className="text-gray-400">Cevap: </span><span className="text-gray-900">{e.response || "—"}</span></div>
+              <div><span className="text-gray-400">Follow-up: </span><span className="text-gray-900">{e.follow_up || "—"}</span></div>
+              {e.adres && <div className="w-full"><span className="text-gray-400">Adres: </span><span className="text-gray-900">{e.adres}</span></div>}
               {e.cargo_barcode && <div className="w-full"><span className="text-gray-400">Kargo barkodu: </span><span className="font-mono text-gray-800">{e.cargo_barcode}</span>{e.cargo_tracking_no ? <span className="text-gray-400"> · Takip: {e.cargo_tracking_no}</span> : null}</div>}
             </div>
           </td>
@@ -758,15 +758,15 @@ function InfluencerListTab() {
                       </button>
                       {inf.is_active === false && <span className="ml-2 text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">pasif</span>}
                     </td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{uname}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.platform || "—"}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.influencer_turu || influencerTuru(inf.follower_count)}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.phone || "—"}</td>
-                    <td className="px-3 py-2.5 max-w-[220px] truncate text-gray-600" title={adres}>{adres}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.anlasma_sekli || "—"}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.beden_ust || "—"}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{inf.beden_alt || "—"}</td>
-                    <td className="px-3 py-2.5 max-w-[240px] truncate text-gray-600" title={inf.notes || ""}>{inf.notes || "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{uname}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.platform || "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.influencer_turu || influencerTuru(inf.follower_count)}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.phone || "—"}</td>
+                    <td className="px-3 py-2.5 max-w-[220px] truncate text-gray-900" title={adres}>{adres}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.anlasma_sekli || "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.beden_ust || "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.beden_alt || "—"}</td>
+                    <td className="px-3 py-2.5 max-w-[240px] truncate text-gray-900" title={inf.notes || ""}>{inf.notes || "—"}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-right">
                       <div className="inline-flex items-center gap-1.5">
                         <button
@@ -806,46 +806,277 @@ function InfluencerListTab() {
 }
 
 /* ======================= SEKME 2: ÜRÜN GÖNDERİMLERİ (GEÇMİŞ) ======================= */
+/* ===== GÖNDERİM TAKVİMİ (Ürün Gönderimleri sekmesi) — veri: influencer_pr ===== */
+const CAL_AY = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+const CAL_GUN = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
+const _pad2 = (n) => String(n).padStart(2, "0");
+const _ymd = (dt) => `${dt.getFullYear()}-${_pad2(dt.getMonth() + 1)}-${_pad2(dt.getDate())}`;
+const _startOfWeek = (dt) => { const d = new Date(dt); const wd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wd); d.setHours(0, 0, 0, 0); return d; };
+// Kaydın takvim tarihi: kalem gonderim_tarihi → shipped_at → iletisim tarihi (date).
+const _prEvDate = (e) => {
+  const items = Array.isArray(e.products) ? e.products : [];
+  const g = items.map((p) => p && p.gonderim_tarihi).find(Boolean);
+  return String(g || e.shipped_at || e.date || "").slice(0, 10);
+};
+
+function CalEventCard({ e, onOpen }) {
+  const st = prStatusMeta(e.status);
+  const uname = e.handle || e.instagram || e.tiktok || "";
+  const items = Array.isArray(e.products) ? e.products : [];
+  return (
+    <button onClick={() => onOpen && onOpen(e)} data-testid={`cal-event-${e.id}`}
+      className="w-full text-left border rounded-lg p-2 hover:border-black transition-colors bg-white">
+      <div className="flex items-center gap-1.5">
+        <span className="font-medium text-gray-900 text-xs truncate">{e.influencer_name || "—"}</span>
+        {uname && <span className="text-[10px] text-gray-500 truncate">{uname}</span>}
+        <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded-full shrink-0 ${st.c}`}>{st.l}</span>
+      </div>
+      {items.length > 0 && (
+        <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+          {items.slice(0, 4).map((p, i) => (
+            p.image
+              ? <img key={i} src={p.image} alt={p.name || ""} title={`${p.name || ""}${p.size ? " · " + p.size : ""}`} className="w-6 h-6 rounded object-cover border border-gray-200" />
+              : <span key={i} className="w-6 h-6 rounded bg-gray-100 border border-gray-200" title={p.name || ""} />
+          ))}
+          {items.length > 4 && <span className="text-[10px] text-gray-500">+{items.length - 4}</span>}
+        </div>
+      )}
+    </button>
+  );
+}
+
+function ShipmentCalendar({ entries }) {
+  const [view, setView] = useState("aylik"); // gunluk | haftalik | aylik | yillik
+  const [anchor, setAnchor] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
+  const [dayModal, setDayModal] = useState(null); // {key, list}
+  const [detail, setDetail] = useState(null);      // tek etkinlik detayı
+
+  const byDay = useMemo(() => {
+    const m = {};
+    for (const e of entries || []) {
+      const k = _prEvDate(e);
+      if (!k) continue;
+      (m[k] = m[k] || []).push(e);
+    }
+    return m;
+  }, [entries]);
+  const byMonth = useMemo(() => {
+    const m = {};
+    for (const e of entries || []) { const k = _prEvDate(e).slice(0, 7); if (k) (m[k] = m[k] || []).push(e); }
+    return m;
+  }, [entries]);
+
+  const shift = (dir) => {
+    const d = new Date(anchor);
+    if (view === "gunluk") d.setDate(d.getDate() + dir);
+    else if (view === "haftalik") d.setDate(d.getDate() + dir * 7);
+    else if (view === "aylik") d.setMonth(d.getMonth() + dir);
+    else d.setFullYear(d.getFullYear() + dir);
+    setAnchor(d);
+  };
+  const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); setAnchor(d); };
+
+  const title = view === "gunluk" ? `${anchor.getDate()} ${CAL_AY[anchor.getMonth()]} ${anchor.getFullYear()}`
+    : view === "haftalik" ? (() => { const s = _startOfWeek(anchor); const e = new Date(s); e.setDate(s.getDate() + 6); return `${s.getDate()} ${CAL_AY[s.getMonth()]} – ${e.getDate()} ${CAL_AY[e.getMonth()]} ${e.getFullYear()}`; })()
+    : view === "aylik" ? `${CAL_AY[anchor.getMonth()]} ${anchor.getFullYear()}`
+    : `${anchor.getFullYear()}`;
+
+  const todayKey = _ymd(new Date());
+
+  // AY ızgarası hücreleri
+  const monthCells = useMemo(() => {
+    const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    const lead = (first.getDay() + 6) % 7; // Pzt=0
+    const start = new Date(first); start.setDate(first.getDate() - lead);
+    return Array.from({ length: 42 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
+  }, [anchor]);
+
+  const weekCells = useMemo(() => {
+    const s = _startOfWeek(anchor);
+    return Array.from({ length: 7 }, (_, i) => { const d = new Date(s); d.setDate(s.getDate() + i); return d; });
+  }, [anchor]);
+
+  const openDay = (key) => { const list = byDay[key] || []; setDayModal({ key, list }); };
+
+  return (
+    <div data-testid="shipment-calendar">
+      {/* Başlık + görünüm toggle + navigasyon */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <div className="inline-flex rounded-lg border overflow-hidden text-xs">
+          {[["gunluk", "Günlük"], ["haftalik", "Haftalık"], ["aylik", "Aylık"], ["yillik", "Yıllık"]].map(([k, l]) => (
+            <button key={k} onClick={() => setView(k)} data-testid={`cal-view-${k}`}
+              className={`px-3 py-1.5 font-medium ${view === k ? "bg-black text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>{l}</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1 ml-auto">
+          <button onClick={() => shift(-1)} className="p-1.5 border rounded-lg hover:bg-gray-50" title="Önceki" data-testid="cal-prev"><ChevronRight size={16} className="rotate-180" /></button>
+          <div className="text-sm font-semibold text-gray-900 min-w-[150px] text-center">{title}</div>
+          <button onClick={() => shift(1)} className="p-1.5 border rounded-lg hover:bg-gray-50" title="Sonraki" data-testid="cal-next"><ChevronRight size={16} /></button>
+          <button onClick={today} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-gray-50" data-testid="cal-today">Bugün</button>
+        </div>
+      </div>
+
+      {/* AYLIK */}
+      {view === "aylik" && (
+        <div className="border rounded-xl overflow-hidden">
+          <div className="grid grid-cols-7 bg-gray-50 text-[11px] font-semibold text-gray-500">
+            {CAL_GUN.map((g) => <div key={g} className="px-2 py-2 text-center">{g}</div>)}
+          </div>
+          <div className="grid grid-cols-7">
+            {monthCells.map((d, i) => {
+              const key = _ymd(d);
+              const inMonth = d.getMonth() === anchor.getMonth();
+              const list = byDay[key] || [];
+              return (
+                <button key={i} onClick={() => list.length && openDay(key)} data-testid={`cal-day-${key}`}
+                  className={`min-h-[70px] border-t border-l p-1.5 text-left align-top ${inMonth ? "bg-white" : "bg-gray-50/60"} ${list.length ? "hover:bg-amber-50 cursor-pointer" : "cursor-default"}`}>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[11px] ${key === todayKey ? "bg-black text-white rounded-full w-5 h-5 inline-flex items-center justify-center" : inMonth ? "text-gray-900" : "text-gray-400"}`}>{d.getDate()}</span>
+                    {list.length > 0 && <span className="text-[9px] bg-black text-white rounded-full px-1.5 py-0.5">{list.length}</span>}
+                  </div>
+                  {list.length > 0 && (
+                    <div className="mt-1 space-y-0.5">
+                      {list.slice(0, 2).map((e) => <div key={e.id} className="text-[10px] text-gray-900 truncate">{e.influencer_name || "—"}</div>)}
+                      {list.length > 2 && <div className="text-[9px] text-gray-500">+{list.length - 2} daha</div>}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* HAFTALIK */}
+      {view === "haftalik" && (
+        <div className="grid grid-cols-1 sm:grid-cols-7 gap-2">
+          {weekCells.map((d, i) => {
+            const key = _ymd(d);
+            const list = byDay[key] || [];
+            return (
+              <div key={i} className="border rounded-lg p-2 min-h-[120px]">
+                <div className={`text-[11px] font-semibold mb-2 ${key === todayKey ? "text-black" : "text-gray-500"}`}>{CAL_GUN[i]} · {d.getDate()} {CAL_AY[d.getMonth()].slice(0, 3)}</div>
+                <div className="space-y-1.5">
+                  {list.length === 0 ? <div className="text-[10px] text-gray-300">—</div>
+                    : list.map((e) => <CalEventCard key={e.id} e={e} onOpen={setDetail} />)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* GÜNLÜK */}
+      {view === "gunluk" && (() => {
+        const key = _ymd(anchor);
+        const list = byDay[key] || [];
+        return (
+          <div className="space-y-2">
+            {list.length === 0 ? <div className="border border-dashed rounded-xl py-16 text-center text-gray-500">Bu gün gönderim yok.</div>
+              : list.map((e) => <CalEventCard key={e.id} e={e} onOpen={setDetail} />)}
+          </div>
+        );
+      })()}
+
+      {/* YILLIK */}
+      {view === "yillik" && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {CAL_AY.map((ay, mi) => {
+            const key = `${anchor.getFullYear()}-${_pad2(mi + 1)}`;
+            const cnt = (byMonth[key] || []).length;
+            return (
+              <button key={mi} onClick={() => { const d = new Date(anchor.getFullYear(), mi, 1); setAnchor(d); setView("aylik"); }}
+                data-testid={`cal-month-${mi + 1}`}
+                className={`border rounded-lg p-4 text-left hover:border-black transition-colors ${cnt ? "bg-white" : "bg-gray-50/60"}`}>
+                <div className="text-sm font-semibold text-gray-900">{ay}</div>
+                <div className="text-xs text-gray-500 mt-1">{cnt ? `${cnt} gönderim` : "—"}</div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Gün detay modalı */}
+      {dayModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" onClick={() => setDayModal(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-xl w-full max-w-lg max-h-[80vh] flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()} data-testid="cal-day-modal">
+            <div className="flex items-center justify-between px-4 py-3 border-b">
+              <div className="text-sm font-semibold text-gray-900">{dayModal.key} — {dayModal.list.length} gönderim</div>
+              <button onClick={() => setDayModal(null)} className="text-gray-400 hover:text-black"><X size={18} /></button>
+            </div>
+            <div className="p-3 space-y-2 overflow-y-auto">
+              {dayModal.list.map((e) => <CalDetail key={e.id} e={e} />)}
+            </div>
+          </div>
+        </div>
+      )}
+      {detail && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" onClick={() => setDetail(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-xl w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b">
+              <div className="text-sm font-semibold text-gray-900">Gönderim Detayı</div>
+              <button onClick={() => setDetail(null)} className="text-gray-400 hover:text-black"><X size={18} /></button>
+            </div>
+            <div className="p-3"><CalDetail e={detail} /></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalDetail({ e }) {
+  const st = prStatusMeta(e.status);
+  const uname = e.handle || e.instagram || e.tiktok || "";
+  const items = Array.isArray(e.products) ? e.products : [];
+  return (
+    <div className="border rounded-lg p-3">
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-gray-900">{e.influencer_name || "—"}</span>
+        {uname && <span className="text-xs text-gray-500">{uname}</span>}
+        <span className={`ml-auto text-[10px] px-2 py-0.5 rounded-full ${st.c}`}>{st.l}</span>
+      </div>
+      <div className="text-[11px] text-gray-500 mt-0.5">Tarih: {_prEvDate(e) || "—"}</div>
+      <div className="mt-2 space-y-1.5">
+        {items.length === 0 ? <div className="text-xs text-gray-400">Ürün yok</div>
+          : items.map((p, i) => (
+            <div key={i} className="flex items-center gap-2">
+              {p.image ? <img src={p.image} alt={p.name || ""} className="w-8 h-8 rounded object-cover border border-gray-200" />
+                : <span className="w-8 h-8 rounded bg-gray-100 border border-gray-200" />}
+              <span className="text-xs text-gray-900 truncate">{p.name || p.barcode}</span>
+              {p.size && <span className="text-[11px] text-gray-600 ml-auto">Beden: {p.size}</span>}
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
 function ShipmentsTab() {
-  const [rows, setRows] = useState([]);
+  const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [q, setQ] = useState("");
-  const [filter, setFilter] = useState("all"); // all | shared | pending
   const [showCreate, setShowCreate] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = {};
-      if (q.trim()) params.q = q.trim();
-      if (filter === "shared") params.shared = true;
-      if (filter === "pending") params.shared = false;
-      const r = await axios.get(`${API}/influencer-campaigns`, { ...auth(), params });
-      setRows(r.data?.campaigns || []);
+      const r = await axios.get(`${API}/influencer-pr`, { ...auth() });
+      setEntries(r.data?.entries || []);
     } catch {
       toast.error("Gönderimler yüklenemedi");
     } finally {
       setLoading(false);
     }
-  }, [q, filter]);
+  }, []);
 
-  useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [load]);
-
-  const act = makeCampaignActions(load);
+  useEffect(() => { load(); }, [load]);
 
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-        <div className="relative flex-1 min-w-[240px] max-w-md">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            data-testid="shipment-search"
-            placeholder="Influencer, gönderim başlığı veya ürün ara…"
-            className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-black"
-          />
-        </div>
+        <div className="text-sm text-gray-500">Gönderim takvimi — kime ne zaman ne gönderildiği (Gönderi Takibi kayıtları).</div>
         <button
           onClick={() => setShowCreate(true)}
           data-testid="new-shipment-btn"
@@ -855,28 +1086,10 @@ function ShipmentsTab() {
         </button>
       </div>
 
-      {/* Filtre */}
-      <div className="flex gap-1.5 mb-4">
-        {[["all", "Tümü"], ["pending", "Paylaşım Bekleyen"], ["shared", "Paylaşıldı"]].map(([k, lbl]) => (
-          <button key={k} onClick={() => setFilter(k)}
-            className={`text-xs px-3 py-1.5 rounded-full border ${filter === k ? "bg-black text-white border-black" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
-            {lbl}
-          </button>
-        ))}
-      </div>
-
       {loading ? (
         <div className="text-gray-400 text-sm py-12 text-center">Yükleniyor...</div>
-      ) : rows.length === 0 ? (
-        <div className="border border-dashed rounded-xl py-16 text-center text-gray-500">
-          {q.trim() || filter !== "all"
-            ? "Eşleşen gönderim yok."
-            : 'Henüz ürün gönderimi yok. "Yeni Gönderim" ile influencer seçip ürün yollayın.'}
-        </div>
       ) : (
-        <div className="space-y-2">
-          {rows.map((c) => <CampaignCard key={c.id} c={c} act={act} showInfluencer />)}
-        </div>
+        <ShipmentCalendar entries={entries} />
       )}
 
       {showCreate && (
