@@ -930,15 +930,20 @@ function ShipmentCalendar({ entries }) {
               const list = byDay[key] || [];
               return (
                 <button key={i} onClick={() => list.length && openDay(key)} data-testid={`cal-day-${key}`}
-                  className={`min-h-[70px] border-t border-l p-1.5 text-left align-top ${inMonth ? "bg-white" : "bg-gray-50/60"} ${list.length ? "hover:bg-amber-50 cursor-pointer" : "cursor-default"}`}>
-                  <div className="flex items-center justify-between">
-                    <span className={`text-[11px] ${key === todayKey ? "bg-black text-white rounded-full w-5 h-5 inline-flex items-center justify-center" : inMonth ? "text-gray-900" : "text-gray-400"}`}>{d.getDate()}</span>
-                    {list.length > 0 && <span className="text-[9px] bg-black text-white rounded-full px-1.5 py-0.5">{list.length}</span>}
+                  className={`min-h-[74px] border-t border-l p-1.5 text-left align-top ${inMonth ? "bg-white" : "bg-gray-50/60"} ${list.length ? "hover:bg-amber-50 cursor-pointer" : "cursor-default"}`}>
+                  {/* Üst satır SABİT yükseklik (h-5): gün no SOL-ÜST, rozet SAĞ-ÜST — her hücrede
+                      AYNI hizada. Gün no her zaman 20px kutu (bugün kırmızı daire, diğerleri şeffaf)
+                      → bugün vurgusu satır yüksekliğini DEĞİŞTİRMEZ, rozet kaymaz. */}
+                  <div className="flex items-center justify-between h-5">
+                    <span className={`text-[11px] w-5 h-5 inline-flex items-center justify-center rounded-full ${key === todayKey ? "bg-red-600 text-white font-semibold" : inMonth ? "text-gray-900" : "text-gray-400"}`}>{d.getDate()}</span>
+                    {list.length > 0
+                      ? <span className="text-[9px] leading-none bg-black text-white rounded-full min-w-[18px] h-[18px] inline-flex items-center justify-center px-1">{list.length}</span>
+                      : <span className="w-[18px] h-[18px]" aria-hidden />}
                   </div>
                   {list.length > 0 && (
                     <div className="mt-1 space-y-0.5">
-                      {list.slice(0, 2).map((e) => <div key={e.id} className="text-[10px] text-gray-900 truncate">{e.influencer_name || "—"}</div>)}
-                      {list.length > 2 && <div className="text-[9px] text-gray-500">+{list.length - 2} daha</div>}
+                      {list.slice(0, 2).map((e) => <div key={e.id} className="text-[10px] leading-4 text-gray-900 truncate">{e.influencer_name || "—"}</div>)}
+                      {list.length > 2 && <div className="text-[9px] leading-4 text-gray-500">+{list.length - 2} daha</div>}
                     </div>
                   )}
                 </button>
@@ -956,7 +961,7 @@ function ShipmentCalendar({ entries }) {
             const list = byDay[key] || [];
             return (
               <div key={i} className="border rounded-lg p-2 min-h-[120px]">
-                <div className={`text-[11px] font-semibold mb-2 ${key === todayKey ? "text-black" : "text-gray-500"}`}>{CAL_GUN[i]} · {d.getDate()} {CAL_AY[d.getMonth()].slice(0, 3)}</div>
+                <div className={`text-[11px] font-semibold mb-2 ${key === todayKey ? "text-red-600" : "text-gray-500"}`}>{CAL_GUN[i]} · {d.getDate()} {CAL_AY[d.getMonth()].slice(0, 3)}</div>
                 <div className="space-y-1.5">
                   {list.length === 0 ? <div className="text-[10px] text-gray-300">—</div>
                     : list.map((e) => <CalEventCard key={e.id} e={e} onOpen={setDetail} />)}
@@ -985,11 +990,12 @@ function ShipmentCalendar({ entries }) {
           {CAL_AY.map((ay, mi) => {
             const key = `${anchor.getFullYear()}-${_pad2(mi + 1)}`;
             const cnt = (byMonth[key] || []).length;
+            const isNowMonth = key === todayKey.slice(0, 7);   // içinde bulunduğumuz ay → kırmızı
             return (
               <button key={mi} onClick={() => { const d = new Date(anchor.getFullYear(), mi, 1); setAnchor(d); setView("aylik"); }}
                 data-testid={`cal-month-${mi + 1}`}
-                className={`border rounded-lg p-4 text-left hover:border-black transition-colors ${cnt ? "bg-white" : "bg-gray-50/60"}`}>
-                <div className="text-sm font-semibold text-gray-900">{ay}</div>
+                className={`border rounded-lg p-4 text-left hover:border-black transition-colors ${isNowMonth ? "ring-2 ring-red-500 border-red-500" : ""} ${cnt ? "bg-white" : "bg-gray-50/60"}`}>
+                <div className={`text-sm font-semibold ${isNowMonth ? "text-red-600" : "text-gray-900"}`}>{ay}</div>
                 <div className="text-xs text-gray-500 mt-1">{cnt ? `${cnt} gönderim` : "—"}</div>
               </button>
             );
