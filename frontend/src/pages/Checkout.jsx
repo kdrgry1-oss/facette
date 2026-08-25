@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CreditCard, Building, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
+import { CreditCard, Building, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil, Gift } from "lucide-react";
 import axios from "axios";
 import { useShipping } from "../lib/shipping";
 import { toast } from "sonner";
@@ -83,7 +83,6 @@ export default function Checkout() {
   // İlk-siparişe-özel bir kod kimlik (giriş/e-posta) yokken reddedildiyse burada tutulur;
   // müşteri giriş yapınca / e-postasını girince OTOMATİK yeniden uygulanır (destek talebi).
   const [pendingCode, setPendingCode] = useState("");
-  const [showCoupon, setShowCoupon] = useState(false); // Mango usulü katlanır promosyon alanı
   const [discount, setDiscount] = useState(0);
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [appliedPromotions, setAppliedPromotions] = useState([]); // Madde 4 motor sonucu
@@ -1067,7 +1066,7 @@ export default function Checkout() {
               {/* 1) İletişim — yalnızca misafir (üye girişliyse gizli; mail otomatik) */}
               {!user && (
               <section data-testid="contact-block">
-                <Step n={1} title="İletişim" icon={Mail} hint="üyeliksiz devam et" />
+                <Step n={1} title="İletişim" icon={Mail} />
                 <input
                   type="email"
                   value={shippingAddress.email || ""}
@@ -1079,7 +1078,7 @@ export default function Checkout() {
                   required
                 />
                 <p className="text-[11px] text-gray-500 mt-1.5">
-                  Sipariş onayı ve faturanız bu adrese gönderilir. <span className="text-black/70 font-medium">Üyelik gerekmez.</span>
+                  Sipariş onayı ve faturanız bu adrese gönderilir.
                 </p>
                 <p className="text-[11px] text-gray-600 mt-2">
                   Hesabın var mı?{" "}
@@ -1140,20 +1139,16 @@ export default function Checkout() {
                 )}
               </section>
 
-              {/* 2.b) Kurumsal Fatura */}
-              <div className="border border-stone-200 rounded-lg" data-testid="corporate-invoice-block">
-                <label className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-stone-50 transition-colors">
+              {/* 2.b) Kurumsal Fatura — sade/kompakt tik-kutu (üstteki 'aynı adres' satırıyla tutarlı) */}
+              <div data-testid="corporate-invoice-block">
+                <label className="inline-flex items-center gap-2 text-sm cursor-pointer pt-3">
                   <input type="checkbox" checked={corporateInvoice}
                     onChange={(e) => setCorporateInvoice(e.target.checked)}
                     className="accent-black" data-testid="corporate-invoice-checkbox" />
-                  <Building size={18} className="text-black" />
-                  <div className="flex-1">
-                    <div className="font-medium text-sm">Kurumsal Fatura İstiyorum</div>
-                    <div className="text-xs text-gray-500">Şirket adına fatura kesilecekse VKN ve vergi dairesi bilgilerinizi girin.</div>
-                  </div>
+                  <span>Kurumsal Fatura İstiyorum</span>
                 </label>
                 {corporateInvoice && (
-                  <div className="px-5 pb-5 border-t pt-4 space-y-3" data-testid="corporate-invoice-fields">
+                  <div className="mt-3 space-y-3" data-testid="corporate-invoice-fields">
                     <div className="grid md:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs text-gray-700 mb-1">Firma Ünvanı *</label>
@@ -1197,8 +1192,8 @@ export default function Checkout() {
                   {/* Method radios */}
                   <div className="grid sm:grid-cols-2 gap-3">
                     {[
-                      { key: "credit_card", label: "Kredi / Banka Kartı", icon: CreditCard },
                       { key: "bank_transfer", label: "Havale / EFT", icon: Building },
+                      { key: "credit_card", label: "Kredi / Banka Kartı", icon: CreditCard },
                     ].filter(({ key }) => enabledPM[key]).map(({ key, label, icon: Icon }) => (
                       <label key={key} className={`relative flex items-center gap-3 p-4 border rounded-xl cursor-pointer transition-all ${paymentMethod === key ? "border-stone-900 ring-1 ring-stone-900 bg-stone-50" : "border-stone-200 hover:border-stone-400"}`}>
                         <input type="radio" name="payment" value={key}
@@ -1239,17 +1234,12 @@ export default function Checkout() {
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
                             <span className="text-sm font-semibold text-stone-900">{label}</span>
-                            {key === "bank_transfer" && bankPct > 0 && (
-                              <span className="text-[10px] font-bold tracking-wide text-[#7b1e2b] bg-[#7b1e2b]/10 border border-[#7b1e2b]/25 px-1.5 py-0.5 rounded-full">
-                                %{bankPct} İNDİRİM
-                              </span>
-                            )}
                           </span>
                           <span className="block text-xs text-stone-500">
                             {key === "credit_card"
                               ? "Tek çekim veya taksit imkânı"
                               : (bankPct > 0
-                                  ? <>Havale/EFT'de <span className="text-[#7b1e2b] font-semibold">%{bankPct} indirim</span> · IBAN sipariş sonrası paylaşılır</>
+                                  ? <>Havale/EFT'de <span className="text-red-600 font-bold">%{bankPct} indirim</span> · IBAN sipariş sonrası paylaşılır</>
                                   : "Sipariş sonrası IBAN paylaşılır")}
                           </span>
                         </span>
@@ -1336,7 +1326,7 @@ export default function Checkout() {
 
               {/* 4) Hediye */}
               <section data-testid="gift-options-section">
-                <Step n={sBase + 3} title="Hediye Seçenekleri" hint="opsiyonel" />
+                <Step n={sBase + 3} title="Hediye Seçenekleri" icon={Gift} hint="opsiyonel" />
                 <div className="space-y-3">
                   {/* Sadeleştirildi (Zara/Mango): tek satır onay; not yalnızca paket seçilince görünür. */}
                   <label className="flex items-center justify-between gap-3 cursor-pointer">
@@ -1404,26 +1394,21 @@ export default function Checkout() {
                         className="text-emerald-700 underline" data-testid="remove-gift-card-btn">Kaldır</button>
                     </div>
                   )}
-                  {(showCoupon || appliedCoupon || giftCardApplied) ? (
-                    <div className="flex gap-2">
-                      <input type="text" value={couponCode}
-                        onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                        onKeyDown={(e) => { if (e.key === "Enter" && !appliedCoupon && !giftCardBusy) applyCode(couponCode); }}
-                        placeholder="İndirim veya hediye çeki kodu"
-                        className="flex-1 border rounded px-3 py-2 text-sm"
-                        data-testid="manual-coupon-input" />
-                      {appliedCoupon
-                        ? <button type="button" onClick={handleRemoveCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="remove-coupon-btn">Kaldır</button>
-                        : <button type="button" onClick={() => applyCode(couponCode)} disabled={giftCardBusy || !couponCode.trim()}
-                            className="text-xs px-3 border rounded hover:bg-stone-50 disabled:opacity-50" data-testid="apply-coupon-btn">
-                            {giftCardBusy ? "..." : "Uygula"}
-                          </button>}
-                    </div>
-                  ) : (
-                    <button type="button" onClick={() => setShowCoupon(true)}
-                      className="text-xs text-gray-500 underline hover:text-stone-900"
-                      data-testid="show-coupon-btn">İndirim / hediye çeki kodun var mı?</button>
-                  )}
+                  {/* Kupon/hediye çeki giriş alanı HER ZAMAN AÇIK (soru/toggle yok) — işlev aynı. */}
+                  <div className="flex gap-2">
+                    <input type="text" value={couponCode}
+                      onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !appliedCoupon && !giftCardBusy) applyCode(couponCode); }}
+                      placeholder="İndirim veya hediye çeki kodu"
+                      className="flex-1 border rounded px-3 py-2 text-sm"
+                      data-testid="manual-coupon-input" />
+                    {appliedCoupon
+                      ? <button type="button" onClick={handleRemoveCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="remove-coupon-btn">Kaldır</button>
+                      : <button type="button" onClick={() => applyCode(couponCode)} disabled={giftCardBusy || !couponCode.trim()}
+                          className="text-xs px-3 border rounded hover:bg-stone-50 disabled:opacity-50" data-testid="apply-coupon-btn">
+                          {giftCardBusy ? "..." : "Uygula"}
+                        </button>}
+                  </div>
                 </div>
 
                 {/* Totals */}
