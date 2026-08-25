@@ -135,7 +135,7 @@ export default function Checkout() {
   useEffect(() => { idemKeyRef.current = _getIdemKey(); }, [items]);
 
   // Payment options
-  const [paymentMethod, setPaymentMethod] = useState("credit_card");
+  const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
   const [use3DSecure, setUse3DSecure] = useState(true);
   const [card, setCard] = useState({ holder: "", number: "", expiry: "", cvc: "" });
   const [installments, setInstallments] = useState([{ number: 1 }]);
