@@ -322,14 +322,92 @@ def _pr_urun(e) -> str:
     return ""
 
 
+def _first_img_abs(imgs) -> str:
+    """Ürünün İLK geçerli görselini MUTLAK https URL'ye çevirir (base64/data: atlanır).
+    Dict {url} veya string; //→https, http→https, /→site kökü. Yoksa ''."""
+    for im in (imgs or []):
+        u = (im.get("url") if isinstance(im, dict) else im)
+        u = str(u or "").strip()
+        if not u or u.startswith("data:"):
+            continue
+        if u.startswith("//"):
+            return "https:" + u
+        if u.startswith("http://"):
+            return "https://" + u[len("http://"):]
+        if u.startswith("https://"):
+            return u
+        if u.startswith("/"):
+            return "https://facette.com.tr" + u
+        return u
+    return ""
+
+
+async def _pr_attach_product_images(docs: list) -> None:
+    """PR kayıtlarının products[] kalemlerine ürünün İLK görselini (mutlak https) ekler.
+    TEK sorguda çözer: kalem barcode → products.barcode / variants.barcode, yoksa ada göre.
+    Eşleşmeyen kalemde image boş kalır (frontend nötr placeholder gösterir). base64 YOK."""
+    barcodes: set = set()
+    names: set = set()
+    for d in docs:
+        for it in (d.get("products") or []):
+            if not isinstance(it, dict):
+                continue
+            bc = str(it.get("barcode") or "").strip()
+            if bc:
+                barcodes.add(bc)
+            nm = str(it.get("name") or "").strip()
+            if nm:
+                names.add(nm)
+    if not barcodes and not names:
+        return
+    _or = []
+    if barcodes:
+        _or.append({"barcode": {"$in": list(barcodes)}})
+        _or.append({"variants.barcode": {"$in": list(barcodes)}})
+    if names:
+        _or.append({"name": {"$in": list(names)}})
+    bc_img: dict = {}
+    name_img: dict = {}
+    try:
+        async for p in db.products.find(
+            {"$or": _or},
+            {"_id": 0, "name": 1, "barcode": 1, "images": 1, "variants.barcode": 1},
+        ):
+            img = _first_img_abs(p.get("images") or [])
+            if not img:
+                continue
+            pb = str(p.get("barcode") or "").strip()
+            if pb:
+                bc_img.setdefault(pb, img)
+            for v in (p.get("variants") or []):
+                vb = str((v or {}).get("barcode") or "").strip()
+                if vb:
+                    bc_img.setdefault(vb, img)
+            nm = str(p.get("name") or "").strip()
+            if nm:
+                name_img.setdefault(nm, img)
+    except Exception as e:
+        logger.warning(f"[influencer] PR ürün görseli çözülemedi: {e}")
+        return
+    for d in docs:
+        for it in (d.get("products") or []):
+            if not isinstance(it, dict) or it.get("image"):
+                continue
+            bc = str(it.get("barcode") or "").strip()
+            nm = str(it.get("name") or "").strip()
+            it["image"] = bc_img.get(bc) or name_img.get(nm) or ""
+
+
 async def _pr_enrich(docs: list) -> None:
     """PR kayıtlarına bağlı influencer master alanlarını (telefon/adres/beden/anlaşma/türü)
-    yerinde ekler — liste tablosu basılı PR listesi gibi görünsün diye."""
+    yerinde ekler — liste tablosu basılı PR listesi gibi görünsün diye. Ayrıca products[]
+    kalemlerine ürünün ilk görselini (thumbnail/hover için) çözer."""
     inf_ids = list({d.get("influencer_id") for d in docs if d.get("influencer_id")})
     inf_map: dict = {}
     if inf_ids:
         async for i in db.influencers.find({"id": {"$in": inf_ids}}, {"_id": 0}):
             inf_map[i["id"]] = i
+    await _pr_attach_product_images(docs)   # products[] kalemlerine image ekle
     for d in docs:
         inf = inf_map.get(d.get("influencer_id")) or {}
         # Önce KAYDIN kendi değeri (form'dan girilen), yoksa bağlı influencer master'ı.

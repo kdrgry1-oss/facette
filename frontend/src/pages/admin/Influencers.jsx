@@ -5,6 +5,7 @@
  *      "Yeni Gönderim" (influencer seç → ürün seç → stok düş → kargo).
  */
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -331,6 +332,36 @@ function PRTrackTab() {
   );
 }
 
+// Ürün kalemi thumbnail'ı + hover büyük önizleme (yeni npm YOK — createPortal + fixed div).
+// Görsel yoksa/kırıksa nötr gri placeholder (kırık görsel gösterilmez).
+function PRThumb({ src, name }) {
+  const [err, setErr] = useState(false);
+  const [pv, setPv] = useState(null); // {top,left}
+  const show = !!src && !err;
+  const onEnter = (ev) => {
+    if (!show) return;
+    const r = ev.currentTarget.getBoundingClientRect();
+    // Sağda yer yoksa sola aç (kırpılmasın).
+    const openLeft = r.right + 220 > window.innerWidth;
+    setPv({ top: Math.max(8, Math.min(r.top - 80, window.innerHeight - 224)), left: openLeft ? r.left - 212 : r.right + 8 });
+  };
+  return (
+    <span className="relative shrink-0" onMouseEnter={onEnter} onMouseLeave={() => setPv(null)}>
+      {show ? (
+        <img src={src} alt={name || ""} loading="lazy" onError={() => setErr(true)}
+          className="w-7 h-7 rounded object-cover bg-gray-100 border border-gray-200" data-testid="pr-thumb" />
+      ) : (
+        <span className="w-7 h-7 rounded bg-gray-100 border border-gray-200 block" aria-hidden data-testid="pr-thumb-empty" />
+      )}
+      {pv && show && createPortal(
+        <div style={{ position: "fixed", top: pv.top, left: pv.left, zIndex: 90 }}
+          className="pointer-events-none border border-gray-200 rounded-lg shadow-2xl bg-white p-1" data-testid="pr-thumb-preview">
+          <img src={src} alt={name || ""} className="w-[200px] h-[200px] object-cover rounded" />
+        </div>, document.body)}
+    </span>
+  );
+}
+
 // Gönderi Takibi satırı (Excel düzeni): görünür sütunlar + çoklu ürün kalemleri +
 // detaya-basınca (expand) profil alanları + inline düzenlenebilir Paylaşma Tarihi/Not/İletişim Tarihi.
 function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
@@ -366,26 +397,27 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch }) {
           <span className="text-gray-700">{platform}</span>
           <div className="mt-0.5"><SocialLinks instagram={e.instagram} tiktok={e.tiktok} /></div>
         </td>
-        {/* Ürün (çoklu kalem) — kompakt, uzun adlar kırpılır (tooltip tam ad) */}
-        <td className={`${td} max-w-[180px]`}>
+        {/* Ürün (çoklu kalem) — solda thumbnail (hover büyük), ad TEK SATIR (truncate + tooltip) */}
+        <td className={`${td} max-w-[220px]`}>
           {items ? (
             <div className="space-y-1">
               {items.map((p, i) => (
-                <div key={i} className="flex items-center gap-1">
-                  <span className="text-gray-800 truncate max-w-[130px]" title={p.name || p.barcode}>{p.name || p.barcode}</span>
+                <div key={i} className="flex items-center gap-1.5 h-7">
+                  <PRThumb src={p.image} name={p.name || p.barcode} />
+                  <span className="text-gray-800 truncate whitespace-nowrap max-w-[120px]" title={p.name || p.barcode}>{p.name || p.barcode}</span>
                   {(p.barkod || barcoded) && <span title={`Barkod: ${p.barkod || e.cargo_barcode}`} className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-0.5 text-[9px] shrink-0"><Barcode size={10} className="mr-0.5" />Barkod</span>}
                 </div>
               ))}
             </div>
-          ) : <span className="truncate block max-w-[170px]" title={e.urun || ""}>{e.urun || "—"}</span>}
+          ) : <span className="truncate block max-w-[190px]" title={e.urun || ""}>{e.urun || "—"}</span>}
         </td>
-        {/* Beden (çoklu kalem) */}
+        {/* Beden (çoklu kalem) — ürün satırlarıyla HİZALI (h-7) */}
         <td className={td}>
-          {items ? <div className="space-y-1">{items.map((p, i) => <div key={i} className="text-gray-700">{p.size || "—"}</div>)}</div> : (e.beden || "—")}
+          {items ? <div className="space-y-1">{items.map((p, i) => <div key={i} className="h-7 flex items-center text-gray-700">{p.size || "—"}</div>)}</div> : (e.beden || "—")}
         </td>
-        {/* Gönderim Tarihi (çoklu kalem) */}
+        {/* Gönderim Tarihi (çoklu kalem) — hizalı */}
         <td className={`${td} whitespace-nowrap text-gray-600`}>
-          {items ? <div className="space-y-1">{items.map((p, i) => <div key={i}>{p.gonderim_tarihi ? fmtDate(p.gonderim_tarihi) : (e.shipped_at ? fmtDate(e.shipped_at) : "—")}</div>)}</div>
+          {items ? <div className="space-y-1">{items.map((p, i) => <div key={i} className="h-7 flex items-center">{p.gonderim_tarihi ? fmtDate(p.gonderim_tarihi) : (e.shipped_at ? fmtDate(e.shipped_at) : "—")}</div>)}</div>
                  : (e.shipped_at ? fmtDate(e.shipped_at) : "—")}
         </td>
         {/* Gönderim Durumu — sipariş listesi gibi rozet + inline değiştir */}
