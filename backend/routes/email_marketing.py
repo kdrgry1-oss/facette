@@ -533,6 +533,64 @@ async def preview_email(payload: dict, current_user: dict = Depends(require_admi
     return {"html": full, "subject": subject}
 
 
+def _abs_img_url(imgs, base: str) -> str:
+    """Ürünün İLK geçerli görselini MUTLAK https URL'ye çevirir. Dict {url} veya string;
+    data: (base64) atlanır; '//x'→https, '/x'→site kökü. Yoksa ''."""
+    for im in (imgs or []):
+        u = (im.get("url") if isinstance(im, dict) else im)
+        u = str(u or "").strip()
+        if not u or u.startswith("data:"):
+            continue
+        if u.startswith("//"):
+            return "https:" + u
+        if u.startswith("http://"):
+            return "https://" + u[len("http://"):]
+        if u.startswith("https://"):
+            return u
+        if u.startswith("/"):
+            return base + u
+        return f"{base}/{u.lstrip('/')}"
+    return ""
+
+
+@admin_router.get("/products")
+async def picker_products(category: str = "", q: str = "", limit: int = 24,
+                          current_user: dict = Depends(require_admin)):
+    """E-posta composer ürün seçici için MİNİMAL ürün listesi. `category` = YEREL kategori id
+    (category_ids/category_id ile eşleşir). Yalnız aktif+görselli ürünler; base64 YOK — ilk
+    görsel MUTLAK https, ad, fiyat, satış fiyatı, slug, ürün URL'si döner (payload hafif)."""
+    try:
+        limit = max(1, min(int(limit or 24), 60))
+    except Exception:
+        limit = 24
+    query: dict = {"is_active": True, "is_deleted": {"$ne": True}, "images.0": {"$exists": True}}
+    ands: list = []
+    _catq = str(category or "").strip()
+    if _catq:
+        ands.append({"$or": [{"category_ids": _catq}, {"category_id": _catq}]})
+    if str(q or "").strip():
+        import re as _re
+        ands.append({"name": {"$regex": _re.escape(q.strip()), "$options": "i"}})
+    if ands:
+        query["$and"] = ands
+    rows = await db.products.find(
+        query, {"_id": 0, "id": 1, "name": 1, "images": 1, "slug": 1, "price": 1, "sale_price": 1},
+    ).limit(limit).to_list(limit)
+    base = await _site_base()
+    out = []
+    for p in rows:
+        img = _abs_img_url(p.get("images") or [], base)
+        if not img:
+            continue
+        slug = p.get("slug") or p.get("id")
+        out.append({
+            "id": p.get("id"), "name": p.get("name") or "", "image": img,
+            "slug": slug, "url": f"{base}/{slug}",
+            "price": p.get("price"), "sale_price": p.get("sale_price"),
+        })
+    return {"products": out, "total": len(out)}
+
+
 # ── SES BOUNCE / ŞİKÂYET BİLDİRİMİ (AWS SNS webhook) ──────────────────────────
 # AWS kurulumu: SES → Configuration set → Event destination → SNS topic →
 #   Subscription: HTTPS → https://api.facette.com.tr/api/email-marketing/ses-webhook?key=<SECRET>

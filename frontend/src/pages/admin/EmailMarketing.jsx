@@ -10,7 +10,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { Mail, Send, Save, Users, RefreshCw, CheckCircle2, AlertTriangle,
   FileText, Eye, Copy, Trash2, X, Star,
-  Bold, Italic, List, Link2, AlignLeft, AlignCenter, AlignRight, Heading, Code, SquarePlus } from "lucide-react";
+  Bold, Italic, List, Link2, AlignLeft, AlignCenter, AlignRight, Heading, Code, SquarePlus, Image } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const h = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -28,6 +28,13 @@ export default function EmailMarketing() {
   const [previewHtml, setPreviewHtml] = useState("");   // canlı önizleme (editörün altında)
   const [previewModal, setPreviewModal] = useState(null); // {html, subject} tam ekran modal
   const [editMode, setEditMode] = useState("visual");   // "visual" (WYSIWYG) | "html" (ham)
+  // ── Görselli ÜRÜN EKLE seçici ──
+  const [pickerCats, setPickerCats] = useState([]);
+  const [pickerCat, setPickerCat] = useState("");
+  const [pickerProducts, setPickerProducts] = useState([]);
+  const [pickerSel, setPickerSel] = useState(new Set());
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Görsel (WYSIWYG) editör — hafif contentEditable + execCommand (yeni npm paketi YOK).
   const visualRef = useRef(null);
@@ -132,6 +139,68 @@ export default function EmailMarketing() {
     } catch (e) { toast.error("Yüklenemedi"); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  // Ürün seçici için kategoriler (bir kez).
+  useEffect(() => {
+    axios.get(`${API}/categories`, { headers: h() })
+      .then((r) => setPickerCats((r.data || []).filter((c) => c.is_active !== false)))
+      .catch(() => {});
+  }, []);
+
+  const loadPickerProducts = async (catId) => {
+    setPickerCat(catId);
+    setPickerSel(new Set());
+    if (!catId) { setPickerProducts([]); return; }
+    setPickerLoading(true);
+    try {
+      const r = await axios.get(`${API}/admin/email-marketing/products`, { headers: h(), params: { category: catId, limit: 48 } });
+      setPickerProducts(r.data?.products || []);
+    } catch { toast.error("Ürünler yüklenemedi"); setPickerProducts([]); }
+    finally { setPickerLoading(false); }
+  };
+
+  const togglePick = (id) => setPickerSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  // E-posta-güvenli ÜRÜN-KARTI BLOĞU (tablo + inline style, 2 sütun). Görsel: mutlak https.
+  const _esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const _fmtTL = (v) => { const n = Number(v); return isFinite(n) ? n.toLocaleString("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + " TL" : ""; };
+  const buildProductCardsHtml = (prods) => {
+    const card = (p) => {
+      const hasSale = p.sale_price && Number(p.sale_price) > 0 && Number(p.sale_price) < Number(p.price);
+      const priceHtml = hasSale
+        ? `<span style="color:#1a1a1a;font-weight:600;font-size:14px;">${_fmtTL(p.sale_price)}</span> <span style="color:#9a9a9a;text-decoration:line-through;font-size:12px;">${_fmtTL(p.price)}</span>`
+        : `<span style="color:#1a1a1a;font-weight:600;font-size:14px;">${_fmtTL(p.price)}</span>`;
+      return `<td width="50%" valign="top" style="padding:8px;box-sizing:border-box;">`
+        + `<a href="${_esc(p.url)}" target="_blank" style="text-decoration:none;color:#1a1a1a;display:block;">`
+        + `<img src="${_esc(p.image)}" alt="${_esc(p.name)}" width="260" style="display:block;width:100%;max-width:260px;height:auto;border:0;border-radius:2px;margin:0 auto;" />`
+        + `<div style="font-size:13px;line-height:1.4;margin:10px 0 4px;color:#1a1a1a;">${_esc(p.name)}</div>`
+        + `<div style="margin:0 0 4px;">${priceHtml}</div>`
+        + `<div style="font-size:12px;color:#1a1a1a;text-decoration:underline;">İncele</div>`
+        + `</a></td>`;
+    };
+    let rows = "";
+    for (let i = 0; i < prods.length; i += 2) {
+      const a = card(prods[i]);
+      const b = prods[i + 1] ? card(prods[i + 1]) : '<td width="50%" style="padding:8px;"></td>';
+      rows += `<tr>${a}${b}</tr>`;
+    }
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0;border-collapse:collapse;"><tbody>${rows}</tbody></table>`;
+  };
+
+  const insertSelectedProducts = () => {
+    const chosen = pickerProducts.filter((p) => pickerSel.has(p.id));
+    if (!chosen.length) { toast.error("En az bir ürün seçin"); return; }
+    const block = buildProductCardsHtml(chosen);
+    if (editMode === "visual" && visualRef.current) {
+      visualRef.current.focus();
+      try { document.execCommand("insertHTML", false, block + "<p><br></p>"); } catch {}
+      onVisualInput();
+    } else {
+      setCamp((p) => ({ ...p, html: (p.html || "") + "\n" + block + "\n" }));
+    }
+    setPickerSel(new Set());
+    toast.success(`${chosen.length} ürün karta eklendi`);
+  };
 
   // Canlı önizleme — Konu/HTML değişince debounce ile tam markalı görünümü çek.
   useEffect(() => {
@@ -353,6 +422,63 @@ export default function EmailMarketing() {
         </div>
         <input value={camp.subject} onChange={(e) => setCamp((p) => ({ ...p, subject: e.target.value }))}
           placeholder="Konu (ör. Yeni Sezon Geldi)" className="w-full border rounded-lg px-3 py-2 text-sm" data-testid="camp-subject" />
+
+        {/* Görselli ÜRÜN EKLE seçici */}
+        <div className="border rounded-lg">
+          <button type="button" onClick={() => setPickerOpen((o) => !o)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50" data-testid="picker-toggle">
+            <Image size={15} className="text-gray-500" /> Görselli Ürün Ekle
+            <span className="text-[11px] text-gray-400">— kategori seç, ürünleri işaretle, karta ekle</span>
+            <span className="ml-auto text-gray-400">{pickerOpen ? "−" : "+"}</span>
+          </button>
+          {pickerOpen && (
+            <div className="border-t p-3 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={pickerCat} onChange={(e) => loadPickerProducts(e.target.value)}
+                  className="border rounded-lg px-2.5 py-2 text-sm min-w-[220px]" data-testid="picker-category">
+                  <option value="">Kategori seçin…</option>
+                  {pickerCats.map((c) => <option key={c.id} value={c.id}>{c.full_name || c.name}</option>)}
+                </select>
+                <button type="button" onClick={insertSelectedProducts} disabled={pickerSel.size === 0}
+                  className="inline-flex items-center gap-1.5 bg-black text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-gray-800 disabled:opacity-40" data-testid="picker-insert">
+                  <SquarePlus size={14} /> Seçilenleri Ekle ({pickerSel.size})
+                </button>
+              </div>
+              {pickerLoading ? (
+                <p className="text-xs text-gray-400 py-4 text-center">Ürünler yükleniyor…</p>
+              ) : !pickerCat ? (
+                <p className="text-xs text-gray-400 py-4 text-center">Ürünleri görmek için bir kategori seçin.</p>
+              ) : pickerProducts.length === 0 ? (
+                <p className="text-xs text-gray-400 py-4 text-center">Bu kategoride görselli aktif ürün bulunamadı.</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 max-h-72 overflow-y-auto" data-testid="picker-grid">
+                  {pickerProducts.map((p) => {
+                    const on = pickerSel.has(p.id);
+                    return (
+                      <button key={p.id} type="button" onClick={() => togglePick(p.id)}
+                        className={`text-left border rounded-lg overflow-hidden hover:border-black transition-colors ${on ? "ring-2 ring-black border-black" : "border-gray-200"}`}
+                        data-testid={`picker-item-${p.id}`}>
+                        <div className="relative">
+                          <img src={p.image} alt={p.name} loading="lazy" className="w-full aspect-[3/4] object-cover bg-gray-50" />
+                          {on && <span className="absolute top-1 right-1 bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]">✓</span>}
+                        </div>
+                        <div className="p-1.5">
+                          <div className="text-[11px] leading-tight text-gray-800 line-clamp-2">{p.name}</div>
+                          <div className="text-[11px] font-semibold mt-0.5">
+                            {p.sale_price && p.sale_price < p.price
+                              ? <>{Number(p.sale_price).toLocaleString("tr-TR")} TL <span className="text-gray-400 line-through font-normal">{Number(p.price).toLocaleString("tr-TR")}</span></>
+                              : <>{Number(p.price || 0).toLocaleString("tr-TR")} TL</>}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           {/* Editör: Görsel (WYSIWYG) / HTML modu */}
           <div className="space-y-2 min-w-0">
