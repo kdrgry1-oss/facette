@@ -136,14 +136,38 @@ async def save_settings(payload: dict, current_user: dict = Depends(require_admi
 
 @admin_router.post("/test")
 async def send_test(payload: dict, current_user: dict = Depends(require_admin)):
+    """Test e-postası gönderir. `subject`+`html` VERİLİRSE kullanıcının KAMPANYA İÇERİĞİNİ
+    (markalı kabukla) gönderir — composer'dan 'Test olarak gönder'. Verilmezse SES Ayarları'nın
+    sabit "SES Test" davranışı korunur. Placeholder'lar ({customer_name}/{kod}/{indirim}/URUN_LINKI)
+    testte HAM gider (kişiselleştirme gerçek kampanyada uygulanır). `to` zorunlu."""
     to = (payload or {}).get("to", "").strip()
     if not to:
         raise HTTPException(status_code=400, detail="Test için e-posta adresi gerekli.")
     cfg = await get_ses_config(db)
     if not is_configured(cfg):
         raise HTTPException(status_code=400, detail="SES ayarları eksik/pasif. Bölge, anahtarlar ve gönderen adresi girip aktifleştirin.")
-    html = _wrap("Facette — SES Test", "<p>Bu bir <b>AWS SES</b> test e-postasıdır. Bu mail size ulaştıysa pazarlama kanalı çalışıyor. 🎉</p>", unsub_url="")
-    r = await send_ses_email(cfg, to, "Facette — SES Test", html, cfg.get("reply_to") or "")
+    _subject = str((payload or {}).get("subject") or "").strip()
+    _body = str((payload or {}).get("html") or "")
+    if _subject and _body.strip():
+        # Test gönderiminde de {customer_name} makul bir örnekle dolsun (ham görünmesin):
+        # alıcının kayıtlı adı → yoksa "Değerli Üyemiz". {kod}/{indirim}/link ham kalır (kampanya-seviyesi).
+        _cn = "Değerli Üyemiz"
+        try:
+            _u = await db.users.find_one({"email": to}, {"_id": 0, "first_name": 1, "name": 1})
+            _cn = ((_u or {}).get("first_name") or (_u or {}).get("name") or "").strip() or "Değerli Üyemiz"
+        except Exception:
+            pass
+        try:
+            from notification_service import render_template as _render_tpl
+            subject = _render_tpl(_subject, {"customer_name": _cn})
+            _body = _render_tpl(_body, {"customer_name": _cn})
+        except Exception:
+            subject = _subject
+        html = _wrap(subject, _body, unsub_url="")
+    else:
+        subject = "Facette — SES Test"
+        html = _wrap(subject, "<p>Bu bir <b>AWS SES</b> test e-postasıdır. Bu mail size ulaştıysa pazarlama kanalı çalışıyor. 🎉</p>", unsub_url="")
+    r = await send_ses_email(cfg, to, subject, html, cfg.get("reply_to") or "")
     if not r.get("success"):
         raise HTTPException(status_code=400, detail=f"Gönderilemedi: {r.get('error') or 'bilinmeyen hata'}")
     return {"success": True, "message_id": r.get("message_id", "")}
@@ -204,10 +228,19 @@ async def _run_campaign(campaign_id: str):
     suppressed = await _suppressed_set()
     skipped = int(camp.get("skipped") or 0)
 
+    # KİŞİSELLEŞTİRME: bildirim sistemiyle AYNI motor (render_template) → {customer_name}
+    # her aboneye gerçek adıyla dolar. {kod}/{indirim}/URUN_LINKI/GORSEL_URL KAMPANYA-seviyesi
+    # (admin ne yazdıysa aynen gider — bilinmeyen placeholder render_template'te KORUNUR).
+    try:
+        from notification_service import render_template as _render_tpl
+    except Exception:
+        _render_tpl = None
+
     _q = {"active": {"$ne": False}, "consent": True}
     if _resume:
         _q["id"] = {"$gt": _resume}          # kaldığı yerden (id sırası deterministik)
-    cur = db.newsletter_subscribers.find(_q, {"_id": 0, "email": 1, "id": 1}).sort("id", 1)
+    cur = db.newsletter_subscribers.find(
+        _q, {"_id": 0, "email": 1, "id": 1, "name": 1, "first_name": 1, "full_name": 1}).sort("id", 1)
     async for s in cur:
         email = (s.get("email") or "").strip()
         if not email:
@@ -217,10 +250,21 @@ async def _run_campaign(campaign_id: str):
             skipped += 1
             continue
         n += 1
+        # customer_name: abone adı → yoksa users.first_name (e-posta ile) → yoksa nötr fallback.
+        _name = (s.get("name") or s.get("first_name") or s.get("full_name") or "").strip()
+        if not _name:
+            try:
+                _u = await db.users.find_one({"email": email}, {"_id": 0, "first_name": 1, "name": 1})
+                _name = ((_u or {}).get("first_name") or (_u or {}).get("name") or "").strip()
+            except Exception:
+                _name = ""
+        _cn = _name or "değerli müşterimiz"
+        _subj = _render_tpl(subject, {"customer_name": _cn}) if _render_tpl else subject
+        _body = _render_tpl(body, {"customer_name": _cn}) if _render_tpl else body
         unsub_url = f"{base}/api/email-marketing/unsubscribe?e={email}&t={s.get('id','')}"
-        html = _wrap(subject, body, unsub_url)
+        html = _wrap(_subj, _body, unsub_url)
         try:
-            r = await send_ses_email(cfg, email, subject, html, cfg.get("reply_to") or "")
+            r = await send_ses_email(cfg, email, _subj, html, cfg.get("reply_to") or "")
             if r.get("success"):
                 sent += 1
             else:
@@ -278,7 +322,8 @@ async def list_campaigns(limit: int = 50, current_user: dict = Depends(require_a
 # ── HAZIR KAMPANYA ŞABLONLARI (email_templates) + ÖNİZLEME ─────────────────────
 # Şablonlar YALNIZ iç gövde HTML'i tutar; gönderim/önizlemede _wrap → render_email
 # ile FACETTE marka kabuğuna (logo + sosyal footer + abonelikten-çık) sarılır.
-# Placeholder'lar ({ad}, {kod}, {indirim}, URUN_LINKI, GORSEL_URL) kullanıcı editörde doldurur.
+# Placeholder'lar: {customer_name} (bildirim sistemiyle AYNI — per-alıcı otomatik dolar),
+# {kod}/{indirim}/URUN_LINKI/GORSEL_URL (kampanya-seviyesi, admin editörde doldurur).
 _BTN_STYLE = ("display:inline-block;background:#1a1a1a;color:#ffffff;text-decoration:none;"
               "padding:15px 44px;font-size:13px;font-weight:500;letter-spacing:1.5px;"
               "text-transform:uppercase;border-radius:2px;")
@@ -293,8 +338,8 @@ def _seed_body(intro_html: str, cta_text: str, extra_html: str = "") -> str:
         f'{extra_html}'
         f'<a href="URUN_LINKI" style="{_BTN_STYLE}">{cta_text}</a>'
         f'<p style="{_HINT_STYLE}">↑ <b>URUN_LINKI</b> yazan yeri kendi kampanya/koleksiyon '
-        f'bağlantınızla değiştirin. {{ad}} yerine abonenin adı, {{kod}}/{{indirim}} yerine '
-        f'kendi kupon/oran bilginizi yazabilirsiniz.</p>'
+        f'bağlantınızla değiştirin. {{customer_name}} her aboneye adıyla OTOMATİK dolar; '
+        f'{{kod}}/{{indirim}} ve GORSEL_URL kendi bilginizle doldurulur (tüm alıcılarda aynı).</p>'
     )
 
 
@@ -315,7 +360,7 @@ _SEED_EMAIL_TEMPLATES = [
         "builtin_key": "ilk-kampanya", "name": "İlk Kampanya / Kulübe Merhaba",
         "category": "Tanıtım", "recommended": True, "subject": "Facette Kulübü'ne Hoş Geldiniz",
         "html": _seed_body(
-            "Merhaba {ad},<br><br>Biz FACETTE — zamansız kesimler ve yumuşak dokularla, "
+            "Merhaba {customer_name},<br><br>Biz FACETTE — zamansız kesimler ve yumuşak dokularla, "
             "günlük şıklığı sade bir dille anlatan bir kadın giyim markasıyız. "
             "Facette Kulübü'ne katıldığınız için çok mutluyuz.<br><br>"
             "Yeni koleksiyonlar, özel kampanyalar ve size özel fırsatlar ilk olarak burada. "
@@ -327,7 +372,7 @@ _SEED_EMAIL_TEMPLATES = [
         "builtin_key": "yeni-sezon", "name": "Yeni Sezon / Koleksiyon Lansmanı",
         "category": "Koleksiyon", "subject": "Yeni Sezon Geldi",
         "html": _seed_body(
-            "Merhaba {ad},<br>Yeni sezon parçalarımız FACETTE'de. Zamansız kesimler, "
+            "Merhaba {customer_name},<br>Yeni sezon parçalarımız FACETTE'de. Zamansız kesimler, "
             "yumuşak dokular ve sezonun en sevilen tonları seni bekliyor.",
             "Koleksiyonu Keşfet", _IMG_PLACEHOLDER),
     },
@@ -335,7 +380,7 @@ _SEED_EMAIL_TEMPLATES = [
         "builtin_key": "indirim", "name": "İndirim Kampanyası",
         "category": "İndirim", "subject": "%{indirim} İndirim Başladı",
         "html": _seed_body(
-            "Merhaba {ad},<br>Seçili ürünlerde <b>%{indirim} indirim</b> başladı. "
+            "Merhaba {customer_name},<br>Seçili ürünlerde <b>%{indirim} indirim</b> başladı. "
             "Sepette <b>{kod}</b> kodunu kullan, favori parçalarına şimdi sahip ol.",
             "Alışverişe Başla"),
     },
@@ -343,7 +388,7 @@ _SEED_EMAIL_TEMPLATES = [
         "builtin_key": "hosgeldin", "name": "Hoş Geldin / Yeni Üye",
         "category": "Üyelik", "subject": "FACETTE'ye Hoş Geldin",
         "html": _seed_body(
-            "Merhaba {ad},<br>Aramıza hoş geldin. İlk siparişine özel <b>{kod}</b> "
+            "Merhaba {customer_name},<br>Aramıza hoş geldin. İlk siparişine özel <b>{kod}</b> "
             "(HOSGELDIN) koduyla tanışma indirimini kullanabilirsin.",
             "İlk Siparişini Ver"),
     },
@@ -351,7 +396,7 @@ _SEED_EMAIL_TEMPLATES = [
         "builtin_key": "tekrar-stokta", "name": "Tekrar Stokta",
         "category": "Ürün", "subject": "Favorilerin Tekrar Stokta",
         "html": _seed_body(
-            "Merhaba {ad},<br>Beklediğin parçalar yeniden stokta. En sevilenler hızla "
+            "Merhaba {customer_name},<br>Beklediğin parçalar yeniden stokta. En sevilenler hızla "
             "tükeniyor — kaçırmadan incele.",
             "Şimdi İncele", _IMG_PLACEHOLDER),
     },
@@ -359,7 +404,7 @@ _SEED_EMAIL_TEMPLATES = [
         "builtin_key": "ozel-gun", "name": "Özel Gün (Bayram / Yılbaşı)",
         "category": "Özel Gün", "subject": "Sana Özel Kutlama İndirimi",
         "html": _seed_body(
-            "Merhaba {ad},<br>Bu özel günü birlikte kutlayalım. Sana özel <b>%{indirim}</b> "
+            "Merhaba {customer_name},<br>Bu özel günü birlikte kutlayalım. Sana özel <b>%{indirim}</b> "
             "hediye — <b>{kod}</b> koduyla kendine ya da sevdiklerine şık bir seçim yap.",
             "Kutlamaya Katıl"),
     },
@@ -367,7 +412,7 @@ _SEED_EMAIL_TEMPLATES = [
         "builtin_key": "vip-erken-erisim", "name": "VIP / Kulüp Erken Erişim",
         "category": "VIP", "subject": "Sana Özel Erken Erişim",
         "html": _seed_body(
-            "Merhaba {ad},<br>Facette Kulübü üyelerine özel: yeni koleksiyona <b>herkesten "
+            "Merhaba {customer_name},<br>Facette Kulübü üyelerine özel: yeni koleksiyona <b>herkesten "
             "önce</b> eriş. Sınırlı sayıda — senin için ayrı tuttuk.",
             "Erken Erişimi Aç"),
     },
@@ -375,7 +420,7 @@ _SEED_EMAIL_TEMPLATES = [
         "builtin_key": "sepette-unutulanlar", "name": "Sepette Unutulanlar",
         "category": "Hatırlatma", "subject": "Sepetinde Bir Şey Unuttun",
         "html": _seed_body(
-            "Merhaba {ad},<br>Beğendiğin parçalar sepetinde seni bekliyor. Stoklar "
+            "Merhaba {customer_name},<br>Beğendiğin parçalar sepetinde seni bekliyor. Stoklar "
             "sınırlı; dilersen alışverişini şimdi tamamlayabilirsin.",
             "Sepete Dön"),
     },

@@ -21,6 +21,7 @@ export default function EmailMarketing() {
   const [aud, setAud] = useState({ total: 0, eligible: 0 });
   const [testTo, setTestTo] = useState("");
   const [camp, setCamp] = useState({ subject: "", html: "" });
+  const [campTestTo, setCampTestTo] = useState(() => { try { return localStorage.getItem("emailTestTo") || ""; } catch { return ""; } });
   const [campaigns, setCampaigns] = useState([]);
   const [busy, setBusy] = useState("");
   const [templates, setTemplates] = useState([]);
@@ -72,25 +73,46 @@ export default function EmailMarketing() {
   const insertPlaceholder = (ph) => { if (ph) exec("insertText", ph); };
 
   // ── Canlı önizleme: 600px e-postayı panele SIĞDIR (transform: scale) — yatay kırpma yok ──
+  // TİTREME FİXİ: ResizeObserver YALNIZ layout-kaynaklı SÜTUN genişliğini gözler (scale/scrollbar'dan
+  // ETKİLENMEZ). Ölçeklenen kutu/iframe GÖZLENMEZ (geri-besleme döngüsü kaynağı buydu). Eşik + rAF ile
+  // aynı/çok küçük değişimde state güncellenmez → sabit durur, yalnız pencere/panel genişliği değişince
+  // bir kez yeniden ölçeklenir. Yükseklik değişse bile genişlik aynıysa scale SABİT kalır.
   const EMAIL_W = 600;
-  const previewBoxRef = useRef(null);
+  const previewColRef = useRef(null);   // önizleme SÜTUNU (layout genişliği)
+  const pvScaleRef = useRef(1);
   const [pvScale, setPvScale] = useState(1);
   const [pvH, setPvH] = useState(760);
+  const pvHRef = useRef(760);
   useEffect(() => {
-    const el = previewBoxRef.current;
+    const el = previewColRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
+    let raf = 0;
+    const measure = () => {
       const w = el.clientWidth || EMAIL_W;
-      setPvScale(Math.min(1, Math.max(0.2, (w - 4) / EMAIL_W)));
+      // Dikey scrollbar payı (~18px) düşülür → ölçekli e-posta + scrollbar YATAY taşmadan sığar.
+      const next = Math.min(1, Math.max(0.2, (w - 18) / EMAIL_W));
+      if (Math.abs(next - pvScaleRef.current) > 0.004) {   // eşik: mikro değişimde re-render yok
+        pvScaleRef.current = next;
+        setPvScale(next);
+      }
+    };
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);   // senkron ölçüm yok → "ResizeObserver loop" uyarısı yok
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    measure();
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
   const onPreviewLoad = (ev) => {
     try {
       const doc = ev.target.contentWindow.document;
-      const hh = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight, 400);
-      setPvH(hh + 8);
+      const hh = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight, 400) + 8;
+      // Yükseklik gerçekten değiştiyse güncelle (genişlik/scale'e DOKUNMAZ → titremez).
+      if (Math.abs(hh - pvHRef.current) > 2) {
+        pvHRef.current = hh;
+        setPvH(hh);
+      }
     } catch {}
   };
 
@@ -193,6 +215,21 @@ export default function EmailMarketing() {
       setTimeout(load, 1500);
     } catch (e) { toast.error(e.response?.data?.detail || "Başlatılamadı"); }
     finally { setBusy(""); }
+  };
+
+  // Composer'daki güncel içeriği TEST olarak kendine gönder (markalı).
+  const sendCampaignTest = async () => {
+    if (!camp.subject.trim() || !camp.html.trim()) { toast.error("Önce konu ve içerik girin"); return; }
+    const to = (campTestTo || "").trim();
+    if (!to) { toast.error("Test alıcısı e-posta adresi girin"); return; }
+    try { localStorage.setItem("emailTestTo", to); } catch {}
+    setBusy("camptest");
+    try {
+      await axios.post(`${API}/admin/email-marketing/test`, { to, subject: camp.subject, html: camp.html }, { headers: h() });
+      toast.success(`Test e-postası ${to} adresine gönderildi (markalı)`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Test gönderilemedi (SES sandbox'ta yalnız DOĞRULANMIŞ adrese gider)");
+    } finally { setBusy(""); }
   };
 
   const field = (label, key, type = "text", ph = "") => (
@@ -300,7 +337,7 @@ export default function EmailMarketing() {
           </div>
         )}
         <p className="text-[11px] text-gray-400 mt-3 leading-relaxed">
-          Placeholder'lar: <code>{"{ad}"}</code> (abone adı), <code>{"{kod}"}</code> (kupon), <code>{"{indirim}"}</code> (oran),
+          Placeholder'lar: <code>{"{customer_name}"}</code> (müşteri/abone adı — otomatik dolar), <code>{"{kod}"}</code> (kupon), <code>{"{indirim}"}</code> (oran),
           <code> URUN_LINKI</code> / <code>GORSEL_URL</code> (kendi bağlantın). "Kullan" ile editöre yükle, düzenle, önizle, sonra gönder.
         </p>
       </div>
@@ -329,7 +366,7 @@ export default function EmailMarketing() {
               <select onChange={(e) => { insertPlaceholder(e.target.value); e.target.value = ""; }} defaultValue=""
                 disabled={editMode !== "visual"} className="border rounded-lg px-2 py-1.5 text-xs disabled:opacity-40" title="İmleç konumuna placeholder ekle">
                 <option value="" disabled>+ Placeholder</option>
-                <option value="{ad}">{"{ad}"} — abone adı</option>
+                <option value="{customer_name}">{"{customer_name}"} — müşteri/abone adı (otomatik dolar)</option>
                 <option value="{kod}">{"{kod}"} — kupon kodu</option>
                 <option value="{indirim}">{"{indirim}"} — indirim oranı</option>
                 <option value="URUN_LINKI">URUN_LINKI — bağlantı</option>
@@ -369,17 +406,17 @@ export default function EmailMarketing() {
               </div>
             ) : (
               <textarea value={camp.html} onChange={(e) => setCamp((p) => ({ ...p, html: e.target.value }))}
-                placeholder="HTML içerik — <p>Merhaba {ad}...</p> (marka kabuğu: logo + footer + abonelikten-çık otomatik eklenir)"
+                placeholder="HTML içerik — <p>Merhaba {customer_name}...</p> (marka kabuğu: logo + footer + abonelikten-çık otomatik eklenir)"
                 rows={20} className="w-full border rounded-lg px-3 py-2 text-sm font-mono" style={{ minHeight: 400 }} data-testid="camp-html" />
             )}
           </div>
 
           {/* Canlı önizleme (tam markalı) — 600px e-posta panele ölçeklenir, yatay kırpma yok */}
-          <div className="space-y-2 min-w-0">
+          <div ref={previewColRef} className="space-y-2 min-w-0">
             <div className="flex items-center gap-2 text-xs text-gray-500">
               <Eye size={13} /> Canlı Önizleme (gönderilecek gerçek görünüm) — %{Math.round(pvScale * 100)}
             </div>
-            <div ref={previewBoxRef} className="border rounded-lg overflow-auto bg-gray-100" style={{ height: 480 }}>
+            <div className="border rounded-lg overflow-auto bg-gray-100" style={{ height: 480 }}>
               {previewHtml ? (
                 <div style={{ width: EMAIL_W * pvScale, height: pvH * pvScale, margin: "0 auto" }}>
                   <iframe title="onizleme" srcDoc={previewHtml} onLoad={onPreviewLoad} data-testid="live-preview"
@@ -393,11 +430,23 @@ export default function EmailMarketing() {
             </div>
           </div>
         </div>
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-1 border-t">
+          {/* Test olarak gönder — editördeki güncel içeriği kendine/doğrulanmış adrese */}
+          <div className="flex items-center gap-1.5 mr-auto">
+            <input type="email" value={campTestTo} onChange={(e) => setCampTestTo(e.target.value)}
+              placeholder="test@ornek.com" className="border rounded-lg px-2.5 py-2 text-sm w-52" data-testid="camp-test-to" />
+            <button onClick={sendCampaignTest} disabled={busy === "camptest" || !configured}
+              className="inline-flex items-center gap-1.5 border rounded-lg px-3 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50" data-testid="camp-test-btn">
+              <Send size={14} /> Test olarak gönder
+            </button>
+          </div>
           <button onClick={sendCampaign} disabled={busy === "campaign" || !configured} className="inline-flex items-center gap-2 bg-black text-white px-5 py-2 rounded-lg text-sm font-bold hover:bg-gray-800 disabled:opacity-50">
             <Send size={15} /> {aud.eligible} aboneye gönder
           </button>
         </div>
+        <p className="text-[11px] text-gray-400 text-right">
+          SES sandbox modunda test yalnız DOĞRULANMIŞ adrese gider (ör. kdrgry@gmail.com, club@facette.com.tr).
+        </p>
       </div>
 
       {/* Geçmiş */}
