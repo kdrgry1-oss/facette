@@ -171,14 +171,14 @@ export default function CountdownBar() {
       data-testid="topbar-countdown"
     >
       {fadeKeyframes}
-      <div className="max-w-screen-2xl mx-auto px-3 md:px-6 flex items-center justify-center md:justify-between gap-3 flex-wrap">
+      <div className="max-w-screen-2xl mx-auto px-3 md:px-6 flex items-center justify-center gap-3 md:gap-5 flex-wrap">
         {currentMsg && (
           <Rotator idx={msgIdx} text={currentMsg} multi={multi}
-             className="text-xs md:text-sm font-medium tracking-wide flex-shrink-0" />
+             className="text-xs md:text-sm font-semibold tracking-wide flex-shrink-0" />
         )}
         <div className="flex items-center gap-2 md:gap-3">
           {timerLbl && (
-            <span className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-medium hidden md:inline">
+            <span className="text-[11px] md:text-[13px] tracking-[0.22em] uppercase font-semibold hidden md:inline">
               {timerLbl}
             </span>
           )}
@@ -253,7 +253,7 @@ function CountUnit({ value, label, fg, bg }) {
       >
         {_pad(value)}
       </span>
-      <span className="text-[9px] md:text-[11px] tracking-[0.18em] uppercase font-light">{label}</span>
+      <span className="text-[9px] md:text-[11px] tracking-[0.18em] uppercase font-medium">{label}</span>
     </div>
   );
 }
