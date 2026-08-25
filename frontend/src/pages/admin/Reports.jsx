@@ -510,6 +510,13 @@ export function ProductsReport() {
       {children}{sortKey === k ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
     </th>
   );
+  // Tükenme (stok bitiş) tarihi = BUGÜN + kapsama(hafta). _cover SONLU değilse tarih yok
+  // (satmayan/stoksuz → ∞ / — Kapsama ile tutarlı). Türkçe kısa format: "12 Eyl 2026".
+  const depletionDate = (cover) => {
+    if (cover == null || !isFinite(cover)) return null;
+    const d = new Date(Date.now() + cover * 7 * 86400000);
+    return d.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" });
+  };
 
   return (
     <div className="space-y-5" data-testid="products-report-page">
@@ -606,6 +613,7 @@ export function ProductsReport() {
                 <SortTh k="revenue" right>Ciro (Net)</SortTh>
                 <SortTh k="current_stock" right>Güncel Stok</SortTh>
                 <SortTh k="_cover" right>Kapsama</SortTh>
+                <th className="p-3 text-right" title="Tahmini stok bitiş tarihi = bugün + kapsama (hafta)">Tükenme Tarihi</th>
                 <SortTh k="best_size">En Çok Beden</SortTh>
                 <SortTh k="top_platform">Platform</SortTh>
               </tr>
@@ -670,6 +678,19 @@ export function ProductsReport() {
                       <span className="tabular-nums">{p._cover.toFixed(1)} hf</span>
                     )}
                   </td>
+                  <td className="p-3 text-right text-xs whitespace-nowrap tabular-nums">
+                    {(() => {
+                      const dt = depletionDate(p._cover);
+                      if (!dt) {
+                        return ((p.velocity || {}).weekly_rate ?? 0) === 0 && (p.current_stock || 0) > 0
+                          ? <span className="text-gray-400" title="Bu aralıkta hiç satmadı — tükenme tarihi hesaplanamıyor">∞</span>
+                          : <span className="text-gray-400">—</span>;
+                      }
+                      return p._cover <= 4
+                        ? <span className="text-red-600 font-bold" title="Kritik: <4 hafta — üretim süresinden kısa">{dt}</span>
+                        : <span>{dt}</span>;
+                    })()}
+                  </td>
                   <td className="p-3">{p.best_size || "—"}</td>
                   <td className="p-3" title={(p.platform_breakdown || []).map(x => `${platLabel(x.platform)}: ${x.qty}`).join(", ")}>
                     {(p.platform_breakdown || []).map(x => platLabel(x.platform)).join(", ") || "—"}
@@ -677,7 +698,7 @@ export function ProductsReport() {
                 </tr>
                 {isOpen && (
                   <tr className="bg-gray-50/60">
-                    <td colSpan={14} className="px-8 py-3">
+                    <td colSpan={15} className="px-8 py-3">
                       <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
                         <div>
                           <div className="font-semibold text-gray-700 mb-1">Beden Bazında — Toplam / İptal / İade / Net / Kalan Stok</div>
@@ -739,7 +760,7 @@ export function ProductsReport() {
                 </Fragment>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={14} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={15} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
             </tbody>
           </table>
         </div>
