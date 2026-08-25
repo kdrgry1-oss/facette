@@ -89,6 +89,9 @@ const MENU_IMAGES = {
 // düzenini ve görsel kartını BURADAN alır — bölümler arası fark oluşmaz.
 const MEGA_LINK_GRID = "grid gap-x-14 gap-y-1";
 const megaCols = (n) => ({ gridTemplateColumns: `repeat(${n}, 180px)` });
+// Kullanıcının açık isteği: KOLEKSİYONLAR'daki "Downtown Code…" öğesi İTALİK görünsün.
+// İsim-tabanlı, Türkçe-duyarsız eşleşme (ileride admin "italik" toggle'ı ayrı iş).
+const _isDowntownCode = (s) => (s || "").toLocaleLowerCase("tr").trim().includes("downtown code");
 const MEGA_IMG_BOX = "w-52 aspect-[2/3] overflow-hidden";
 const MEGA_IMG = "w-full h-full object-cover object-top group-hover:scale-[1.04] transition-transform duration-500";
 
@@ -526,7 +529,7 @@ export default function Header({ hideMenu = false, announcement = null, announce
                     <div key={col.title} onMouseEnter={() => setHoveredCategory(col.slug)}>
                       <Link
                         to={col.link}
-                        className="block text-xs font-bold tracking-wider mb-3 text-gray-900 hover:underline cursor-pointer"
+                        className={`block text-xs font-bold tracking-wider mb-3 text-gray-900 hover:underline cursor-pointer${_isDowntownCode(col.title) ? " italic" : ""}`}
                         onClick={() => setActiveMenu(null)}
                         onMouseEnter={() => setHoveredCategory(col.slug)}
                       >
@@ -537,7 +540,7 @@ export default function Header({ hideMenu = false, announcement = null, announce
                           <li key={item.slug}>
                             <Link
                               to={item.link}
-                              className="block py-1 text-sm text-gray-600 hover:text-black transition-colors"
+                              className={`block py-1 text-sm text-gray-600 hover:text-black transition-colors${_isDowntownCode(item.name) ? " italic" : ""}`}
                               onClick={() => setActiveMenu(null)}
                               onMouseEnter={() => setHoveredCategory(item.slug)}
                             >
@@ -611,9 +614,9 @@ export default function Header({ hideMenu = false, announcement = null, announce
                             {/* Alt kategorisi olmayan kolon (ör. koleksiyon) normal satır linki olarak ALT ALTA */}
                             <Link
                               to={col.link}
-                              className={col.items.length
+                              className={`${col.items.length
                                 ? "block text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5 hover:underline"
-                                : "block py-1.5 text-[13px] font-light text-black/75"}
+                                : "block py-1.5 text-[13px] font-light text-black/75"}${_isDowntownCode(col.title) ? " italic" : ""}`}
                               onClick={() => setMobileMenuOpen(false)}
                             >
                               {col.title}
@@ -622,7 +625,7 @@ export default function Header({ hideMenu = false, announcement = null, announce
                               <Link
                                 key={item.slug}
                                 to={item.link}
-                                className="block py-1.5 text-[13px] font-light text-black/75"
+                                className={`block py-1.5 text-[13px] font-light text-black/75${_isDowntownCode(item.name) ? " italic" : ""}`}
                                 onClick={() => setMobileMenuOpen(false)}
                               >
                                 {item.name}
