@@ -997,8 +997,10 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-white" data-testid="home-page">
-      {rotatingBlock && <RotatingText block={rotatingBlock} />}
-      <Header />
+      {/* Üst Duyuru Barı (rotating_text) artık Header'ın FIXED sarmalayıcısı İÇİNDE
+          (CountdownBar'ın hemen ALTINDA, bitişik) render edilir → editorial-hero overlay
+          header'ı onu ÖRTMEZ; sayaç + duyuru barı ikisi de görünür ve boşluksuz altlı-üstlü durur. */}
+      <Header announcement={rotatingBlock ? <RotatingText block={rotatingBlock} /> : null} />
       
       {/* İlk yüklemede eski görsellerin (hardcoded default) flash etmemesi için
           page-blocks fetch tamamlanana kadar skeleton göster. */}

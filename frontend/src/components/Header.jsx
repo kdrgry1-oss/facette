@@ -131,7 +131,7 @@ function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNaviga
   ));
 }
 
-export default function Header({ hideMenu = false }) {
+export default function Header({ hideMenu = false, announcement = null }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   // Üst menü: Admin > Tasarım > Menü Yönetimi'nden (page-blocks/header-menu) beslenir.
   // Sekmeler dahil TÜM yapı panelden gelir; fetch gelene kadar varsayılan kullanılır.
@@ -326,8 +326,11 @@ export default function Header({ hideMenu = false }) {
           şeffaf/beyaz görselin üzerinde. Kaydırınca (overlay off): bar gizlenir, header beyaz sticky.
           Diğer sayfalarda: bar akışta + header sticky (klasik). */}
       <div className={heroPage ? "fixed inset-x-0 top-0 z-40" : ""}>
-        {/* Duyuru barı: ana-sayfa-hero'da yalnız EN ÜSTTE (overlay) görünür; diğer sayfalarda hep. */}
+        {/* Sayaç + Üst Duyuru Barı: SAYAÇ ÜSTTE, DUYURU BARI HEMEN ALTINDA — aralarında
+            margin/boşluk YOK (bitişik). Ana-sayfa-hero'da yalnız EN ÜSTTE (overlay) görünür;
+            diğer sayfalarda sayaç hep görünür. Duyuru barı (announcement) yalnız Home'dan gelir. */}
         {(heroPage ? heroOverlay : true) && !isCheckout && <CountdownBar />}
+        {(heroPage ? heroOverlay : true) && !isCheckout && announcement}
 
         <header
           className={`z-40 transition-colors duration-300 ${
