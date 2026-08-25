@@ -979,6 +979,11 @@ export default function Home() {
   // Üst duyuru barı (rotating_text) — orijinaldeki gibi en üstte (header üstü) gösterilir,
   // blok akışında tekrar render edilmemesi için ayrılır.
   const rotatingBlock = blocks.find(b => b.type === "rotating_text");
+  const countdownBlock = blocks.find(b => b.type === "countdown_bar");
+  // Üst bar SIRASI: Sayfa Tasarımı'ndaki blok sırasına (sort_order) göre — koda gömülü değil.
+  // Duyuru barı sayaçtan ÖNCE tasarlandıysa üstte gösterilir.
+  const announcementFirst = !!(rotatingBlock && countdownBlock)
+    && (Number(rotatingBlock.sort_order ?? 0) < Number(countdownBlock.sort_order ?? 0));
   const flowBlocks = blocks.filter(b => b.type !== "rotating_text");
 
   // İLK blok TAM EKRAN editorial hero mu? Öyleyse header şeffaf-overlay (beyaz logo/ikon) olur.
@@ -1000,7 +1005,7 @@ export default function Home() {
       {/* Üst Duyuru Barı (rotating_text) artık Header'ın FIXED sarmalayıcısı İÇİNDE
           (CountdownBar'ın hemen ALTINDA, bitişik) render edilir → editorial-hero overlay
           header'ı onu ÖRTMEZ; sayaç + duyuru barı ikisi de görünür ve boşluksuz altlı-üstlü durur. */}
-      <Header announcement={rotatingBlock ? <RotatingText block={rotatingBlock} /> : null} />
+      <Header announcement={rotatingBlock ? <RotatingText block={rotatingBlock} /> : null} announcementFirst={announcementFirst} />
       
       {/* İlk yüklemede eski görsellerin (hardcoded default) flash etmemesi için
           page-blocks fetch tamamlanana kadar skeleton göster. */}
