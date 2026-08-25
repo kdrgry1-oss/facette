@@ -275,6 +275,211 @@ async def list_campaigns(limit: int = 50, current_user: dict = Depends(require_a
     return {"campaigns": rows}
 
 
+# ── HAZIR KAMPANYA ŞABLONLARI (email_templates) + ÖNİZLEME ─────────────────────
+# Şablonlar YALNIZ iç gövde HTML'i tutar; gönderim/önizlemede _wrap → render_email
+# ile FACETTE marka kabuğuna (logo + sosyal footer + abonelikten-çık) sarılır.
+# Placeholder'lar ({ad}, {kod}, {indirim}, URUN_LINKI, GORSEL_URL) kullanıcı editörde doldurur.
+_BTN_STYLE = ("display:inline-block;background:#1a1a1a;color:#ffffff;text-decoration:none;"
+              "padding:15px 44px;font-size:13px;font-weight:500;letter-spacing:1.5px;"
+              "text-transform:uppercase;border-radius:2px;")
+_P_STYLE = "font-size:15px;line-height:1.75;color:#4a4a4a;margin:0 0 22px;"
+_HINT_STYLE = "font-size:12px;line-height:1.6;color:#9a9a9a;margin:24px 0 0;"
+
+
+def _seed_body(intro_html: str, cta_text: str, extra_html: str = "") -> str:
+    """Ortak iç-gövde iskeleti: kısa metin + CTA buton (link placeholder) + ipucu satırı."""
+    return (
+        f'<p style="{_P_STYLE}">{intro_html}</p>'
+        f'{extra_html}'
+        f'<a href="URUN_LINKI" style="{_BTN_STYLE}">{cta_text}</a>'
+        f'<p style="{_HINT_STYLE}">↑ <b>URUN_LINKI</b> yazan yeri kendi kampanya/koleksiyon '
+        f'bağlantınızla değiştirin. {{ad}} yerine abonenin adı, {{kod}}/{{indirim}} yerine '
+        f'kendi kupon/oran bilginizi yazabilirsiniz.</p>'
+    )
+
+
+_IMG_PLACEHOLDER = (
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+    'style="margin:0 0 22px;"><tr><td align="center">'
+    '<img src="GORSEL_URL" alt="Görsel" width="512" '
+    'style="display:block;width:100%;max-width:512px;height:auto;border:0;border-radius:2px;" />'
+    '<div style="font-size:11px;color:#b8b8b8;margin-top:6px;">GORSEL_URL → kendi görsel bağlantınız</div>'
+    '</td></tr></table>'
+)
+
+
+# Hazır (builtin) şablonlar — kadın giyim, sade/şık FACETTE sesi. builtin_key idempotent anahtar.
+_SEED_EMAIL_TEMPLATES = [
+    {
+        # İLK KAMPANYA — markanın ilk e-posta gönderimi için önerilen (listede EN ÜSTTE).
+        "builtin_key": "ilk-kampanya", "name": "İlk Kampanya / Kulübe Merhaba",
+        "category": "Tanıtım", "recommended": True, "subject": "Facette Kulübü'ne Hoş Geldiniz",
+        "html": _seed_body(
+            "Merhaba {ad},<br><br>Biz FACETTE — zamansız kesimler ve yumuşak dokularla, "
+            "günlük şıklığı sade bir dille anlatan bir kadın giyim markasıyız. "
+            "Facette Kulübü'ne katıldığınız için çok mutluyuz.<br><br>"
+            "Yeni koleksiyonlar, özel kampanyalar ve size özel fırsatlar ilk olarak burada. "
+            "Tanışmamıza özel <b>{kod}</b> koduyla ilk alışverişinizde küçük bir hoş geldin "
+            "hediyesi sizi bekliyor.",
+            "Koleksiyonu Keşfet", _IMG_PLACEHOLDER),
+    },
+    {
+        "builtin_key": "yeni-sezon", "name": "Yeni Sezon / Koleksiyon Lansmanı",
+        "category": "Koleksiyon", "subject": "Yeni Sezon Geldi",
+        "html": _seed_body(
+            "Merhaba {ad},<br>Yeni sezon parçalarımız FACETTE'de. Zamansız kesimler, "
+            "yumuşak dokular ve sezonun en sevilen tonları seni bekliyor.",
+            "Koleksiyonu Keşfet", _IMG_PLACEHOLDER),
+    },
+    {
+        "builtin_key": "indirim", "name": "İndirim Kampanyası",
+        "category": "İndirim", "subject": "%{indirim} İndirim Başladı",
+        "html": _seed_body(
+            "Merhaba {ad},<br>Seçili ürünlerde <b>%{indirim} indirim</b> başladı. "
+            "Sepette <b>{kod}</b> kodunu kullan, favori parçalarına şimdi sahip ol.",
+            "Alışverişe Başla"),
+    },
+    {
+        "builtin_key": "hosgeldin", "name": "Hoş Geldin / Yeni Üye",
+        "category": "Üyelik", "subject": "FACETTE'ye Hoş Geldin",
+        "html": _seed_body(
+            "Merhaba {ad},<br>Aramıza hoş geldin. İlk siparişine özel <b>{kod}</b> "
+            "(HOSGELDIN) koduyla tanışma indirimini kullanabilirsin.",
+            "İlk Siparişini Ver"),
+    },
+    {
+        "builtin_key": "tekrar-stokta", "name": "Tekrar Stokta",
+        "category": "Ürün", "subject": "Favorilerin Tekrar Stokta",
+        "html": _seed_body(
+            "Merhaba {ad},<br>Beklediğin parçalar yeniden stokta. En sevilenler hızla "
+            "tükeniyor — kaçırmadan incele.",
+            "Şimdi İncele", _IMG_PLACEHOLDER),
+    },
+    {
+        "builtin_key": "ozel-gun", "name": "Özel Gün (Bayram / Yılbaşı)",
+        "category": "Özel Gün", "subject": "Sana Özel Kutlama İndirimi",
+        "html": _seed_body(
+            "Merhaba {ad},<br>Bu özel günü birlikte kutlayalım. Sana özel <b>%{indirim}</b> "
+            "hediye — <b>{kod}</b> koduyla kendine ya da sevdiklerine şık bir seçim yap.",
+            "Kutlamaya Katıl"),
+    },
+    {
+        "builtin_key": "vip-erken-erisim", "name": "VIP / Kulüp Erken Erişim",
+        "category": "VIP", "subject": "Sana Özel Erken Erişim",
+        "html": _seed_body(
+            "Merhaba {ad},<br>Facette Kulübü üyelerine özel: yeni koleksiyona <b>herkesten "
+            "önce</b> eriş. Sınırlı sayıda — senin için ayrı tuttuk.",
+            "Erken Erişimi Aç"),
+    },
+    {
+        "builtin_key": "sepette-unutulanlar", "name": "Sepette Unutulanlar",
+        "category": "Hatırlatma", "subject": "Sepetinde Bir Şey Unuttun",
+        "html": _seed_body(
+            "Merhaba {ad},<br>Beğendiğin parçalar sepetinde seni bekliyor. Stoklar "
+            "sınırlı; dilersen alışverişini şimdi tamamlayabilirsin.",
+            "Sepete Dön"),
+    },
+]
+
+
+async def seed_email_templates() -> int:
+    """Hazır şablonları İDEMPOTENT ekler (builtin_key ile mükerrer engellenir). İlk GET'te
+    çağrılır → ayrı startup hook gerektirmez. Mevcut builtin kaydın adı/kategorisi güncel
+    tutulur; html/subject KULLANICI kopyalarına dokunmaz (builtin ayrı dokümanlar)."""
+    added = 0
+    for t in _SEED_EMAIL_TEMPLATES:
+        key = t["builtin_key"]
+        existing = await db.email_templates.find_one({"builtin_key": key}, {"_id": 0, "id": 1})
+        if existing:
+            continue
+        doc = {
+            "id": f"builtin:{key}", "builtin_key": key, "builtin": True,
+            "recommended": bool(t.get("recommended")),
+            "name": t["name"], "category": t.get("category", "Genel"),
+            "subject": t["subject"], "html": t["html"],
+            "created_at": _now(), "updated_at": _now(),
+        }
+        try:
+            await db.email_templates.insert_one(doc)
+            added += 1
+        except Exception as e:
+            logger.warning(f"[email-marketing] seed şablon eklenemedi {key}: {e}")
+    return added
+
+
+@admin_router.get("/templates")
+async def list_templates(current_user: dict = Depends(require_admin)):
+    """Hazır (builtin) + kullanıcının kaydettiği şablonlar. Builtin'ler önce, sonra en yeni."""
+    await seed_email_templates()  # idempotent: yoksa ekler
+    rows = await db.email_templates.find({}, {"_id": 0}).to_list(1000)
+    # Builtin'ler: önerilen (İlk Kampanya) EN ÜSTTE, sonra seed sırası; sonra kullanıcı (en yeni üstte).
+    _seed_order = {t["builtin_key"]: i for i, t in enumerate(_SEED_EMAIL_TEMPLATES)}
+    builtin = sorted([r for r in rows if r.get("builtin")],
+                     key=lambda r: (0 if r.get("recommended") else 1,
+                                    _seed_order.get(r.get("builtin_key"), 999)))
+    mine = sorted([r for r in rows if not r.get("builtin")],
+                  key=lambda r: r.get("created_at") or "", reverse=True)
+    return {"templates": builtin + mine}
+
+
+@admin_router.post("/templates")
+async def save_template(payload: dict, current_user: dict = Depends(require_admin)):
+    """Kullanıcı şablonu kaydet/güncelle. Builtin'ler DEĞİŞTİRİLEMEZ — builtin id gelirse
+    ya da id yoksa YENİ kullanıcı şablonu oluşturulur (kopyala-düzenle). Yalnız mevcut
+    bir KULLANICI şablonunun id'si güncellenir."""
+    p = payload or {}
+    name = str(p.get("name") or "").strip()
+    subject = str(p.get("subject") or "").strip()
+    html = str(p.get("html") or "").strip()
+    category = str(p.get("category") or "Genel").strip() or "Genel"
+    if not name or not html:
+        raise HTTPException(status_code=400, detail="Şablon adı ve içerik (HTML) zorunlu.")
+    tid = str(p.get("id") or "").strip()
+    now = _now()
+    # Güncelleme YALNIZ mevcut bir kullanıcı (builtin olmayan) şablonu için.
+    if tid and not tid.startswith("builtin:"):
+        existing = await db.email_templates.find_one({"id": tid, "builtin": {"$ne": True}}, {"_id": 0})
+        if existing:
+            await db.email_templates.update_one({"id": tid}, {"$set": {
+                "name": name, "subject": subject, "html": html, "category": category, "updated_at": now}})
+            doc = await db.email_templates.find_one({"id": tid}, {"_id": 0})
+            return {"success": True, "template": doc, "updated": True}
+    doc = {
+        "id": generate_id(), "builtin": False, "name": name, "category": category,
+        "subject": subject, "html": html,
+        "created_by": current_user.get("email", ""), "created_at": now, "updated_at": now,
+    }
+    await db.email_templates.insert_one(doc)
+    doc.pop("_id", None)
+    return {"success": True, "template": doc, "updated": False}
+
+
+@admin_router.delete("/templates/{template_id}")
+async def delete_template(template_id: str, current_user: dict = Depends(require_admin)):
+    """Kullanıcı şablonunu siler. Builtin (hazır) şablonlar SİLİNEMEZ."""
+    if str(template_id).startswith("builtin:"):
+        raise HTTPException(status_code=400, detail="Hazır şablonlar silinemez (kopyalayıp düzenleyin).")
+    doc = await db.email_templates.find_one({"id": template_id}, {"_id": 0, "builtin": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Şablon bulunamadı.")
+    if doc.get("builtin"):
+        raise HTTPException(status_code=400, detail="Hazır şablonlar silinemez.")
+    await db.email_templates.delete_one({"id": template_id})
+    return {"success": True}
+
+
+@admin_router.post("/preview")
+async def preview_email(payload: dict, current_user: dict = Depends(require_admin)):
+    """Verilen {subject, html} için TAM markalı e-postayı (logo + footer + abonelikten-çık)
+    döndürür — gönderim/secret YOK, sadece render. Kullanıcı göndermeden önce görür."""
+    p = payload or {}
+    subject = str(p.get("subject") or "").strip()
+    html = str(p.get("html") or "")
+    # Önizlemede örnek abonelikten-çık linki (gerçek gönderimde aboneye özel üretilir).
+    full = _wrap(subject, html, "https://facette.com.tr/ornek-abonelikten-cik")
+    return {"html": full, "subject": subject}
+
+
 # ── SES BOUNCE / ŞİKÂYET BİLDİRİMİ (AWS SNS webhook) ──────────────────────────
 # AWS kurulumu: SES → Configuration set → Event destination → SNS topic →
 #   Subscription: HTTPS → https://api.facette.com.tr/api/email-marketing/ses-webhook?key=<SECRET>
