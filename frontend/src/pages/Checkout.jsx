@@ -1139,9 +1139,10 @@ export default function Checkout() {
                 )}
               </section>
 
-              {/* 2.b) Kurumsal Fatura — sade/kompakt tik-kutu (üstteki 'aynı adres' satırıyla tutarlı) */}
-              <div data-testid="corporate-invoice-block">
-                <label className="inline-flex items-center gap-2 text-sm cursor-pointer pt-3">
+              {/* 2.b) Kurumsal Fatura — sade/kompakt tik-kutu; üstteki 'aynı adres' satırına
+                  yaklaştırıldı (-mt-4, space-y-7 boşluğunu azaltır). İşlev/tik→alan-açma aynı. */}
+              <div data-testid="corporate-invoice-block" className="-mt-4">
+                <label className="inline-flex items-center gap-2 text-sm cursor-pointer pt-1">
                   <input type="checkbox" checked={corporateInvoice}
                     onChange={(e) => setCorporateInvoice(e.target.checked)}
                     className="accent-black" data-testid="corporate-invoice-checkbox" />
@@ -1427,7 +1428,7 @@ export default function Checkout() {
                     <span>{estimateDelivery()} <span className="text-gray-400">· 2-4 iş günü</span></span>
                   </div>
                   {extraDisc > 0.001 && <div className="flex justify-between text-green-600"><span>Kupon{appliedCoupon?.code ? ` (${appliedCoupon.code})` : ""}</span><span>-{extraDisc.toFixed(2)} TL</span></div>}
-                  {bankTransferDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>Havale/EFT İndirimi (%{bankPct})</span><span>-{bankTransferDiscount.toFixed(2)} TL</span></div>}
+                  {bankTransferDiscount > 0 && <div className="flex justify-between" style={{ color: "#dc2626" }}><span>Havale/EFT İndirimi (%{bankPct})</span><span>-{bankTransferDiscount.toFixed(2)} TL</span></div>}
                   {paymentMethodDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>{_payRule?.label || "Ödeme İndirimi"}</span><span>-{paymentMethodDiscount.toFixed(2)} TL</span></div>}
                   {memberGroupDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>Üye İndirimi{memberGroupName ? ` (${memberGroupName})` : ""} (%{memberDiscPct})</span><span>-{memberGroupDiscount.toFixed(2)} TL</span></div>}
                   {pointsDeduction > 0 && <div className="flex justify-between text-black"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
