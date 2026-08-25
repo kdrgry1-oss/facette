@@ -428,22 +428,30 @@ _SEED_EMAIL_TEMPLATES = [
 
 
 async def seed_email_templates() -> int:
-    """Hazır şablonları İDEMPOTENT ekler (builtin_key ile mükerrer engellenir). İlk GET'te
-    çağrılır → ayrı startup hook gerektirmez. Mevcut builtin kaydın adı/kategorisi güncel
-    tutulur; html/subject KULLANICI kopyalarına dokunmaz (builtin ayrı dokümanlar)."""
+    """Hazır şablonları İDEMPOTENT ekler/günceller (builtin_key anahtar). İlk GET'te çağrılır
+    → ayrı startup hook gerektirmez. BUILTIN'ler KOD-SAHİPLİ: içerik (name/category/subject/html/
+    recommended) koddaki güncel seed'e EŞİTLENİR (ör. {ad}→{customer_name} güncellemesi yayılsın).
+    KULLANICI kopyaları AYRI dokümanlardır (builtin!=True) — onlara DOKUNULMAZ."""
     added = 0
     for t in _SEED_EMAIL_TEMPLATES:
         key = t["builtin_key"]
-        existing = await db.email_templates.find_one({"builtin_key": key}, {"_id": 0, "id": 1})
-        if existing:
-            continue
-        doc = {
-            "id": f"builtin:{key}", "builtin_key": key, "builtin": True,
+        _fields = {
+            "builtin": True,
             "recommended": bool(t.get("recommended")),
             "name": t["name"], "category": t.get("category", "Genel"),
             "subject": t["subject"], "html": t["html"],
-            "created_at": _now(), "updated_at": _now(),
+            "updated_at": _now(),
         }
+        existing = await db.email_templates.find_one({"builtin_key": key}, {"_id": 0, "id": 1, "html": 1, "name": 1, "subject": 1, "category": 1})
+        if existing:
+            # İçerik değiştiyse builtin'i güncel seed'e eşitle (kod otorite).
+            if any(existing.get(k) != _fields.get(k) for k in ("html", "name", "subject", "category")):
+                try:
+                    await db.email_templates.update_one({"builtin_key": key}, {"$set": _fields})
+                except Exception as e:
+                    logger.warning(f"[email-marketing] seed şablon güncellenemedi {key}: {e}")
+            continue
+        doc = {"id": f"builtin:{key}", "builtin_key": key, "created_at": _now(), **_fields}
         try:
             await db.email_templates.insert_one(doc)
             added += 1
