@@ -10,7 +10,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { Mail, Send, Save, Users, RefreshCw, CheckCircle2, AlertTriangle,
   FileText, Eye, Copy, Trash2, X, Star,
-  Bold, Italic, List, Link2, AlignLeft, AlignCenter, AlignRight, Heading, Code, SquarePlus, Image } from "lucide-react";
+  Bold, Italic, List, Link2, AlignLeft, AlignCenter, AlignRight, Heading, Code, SquarePlus, Image, ImagePlus } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const h = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -39,6 +39,11 @@ export default function EmailMarketing() {
   // Görsel (WYSIWYG) editör — hafif contentEditable + execCommand (yeni npm paketi YOK).
   const visualRef = useRef(null);
   const lastEditorHtml = useRef("");   // editörün DIŞARI yazdığı son html (dış değişimi ayırt et)
+  const htmlRef = useRef(null);        // HTML-mod textarea (imleç konumuna görsel eklemek için)
+  // ── Serbest GÖRSEL EKLE (herhangi bir dosya → R2/cdn.facette.com.tr; katalog/ürün DEĞİL) ──
+  const imgFileRef = useRef(null);     // gizli file input
+  const [imgUploading, setImgUploading] = useState(false);
+  const [lastImageUrl, setLastImageUrl] = useState("");   // son yüklenen cdn URL (kopyalanabilir gösterim)
 
   // camp.html DIŞARIDAN değişince (şablon "Kullan" / HTML modda yazma) görsel alanı senkronla.
   useEffect(() => {
@@ -78,6 +83,54 @@ export default function EmailMarketing() {
     exec("insertHTML", btn + "<p><br></p>");
   };
   const insertPlaceholder = (ph) => { if (ph) exec("insertText", ph); };
+
+  // ── Serbest görsel: dosya seç → mevcut R2 ucuna yükle (POST /api/upload/image, multipart `file`)
+  // → dönen cdn.facette.com.tr URL'iyle e-posta-güvenli <img> ekle. DB'de yalnız URL referansı
+  // tutulur (base64/DB-bloat YOK; optimizasyon backend'de WebP). Görsel modda imleç konumuna
+  // insertHTML; HTML modda textarea imleç konumuna metin olarak eklenir. Ürün seçiciyle İLGİSİZ.
+  const insertImageSnippet = (url) => {
+    const snippet = `<img src="${url}" alt="" style="display:block;width:100%;max-width:600px;height:auto;border:0;margin:0 auto;"/>`;
+    if (editMode === "visual") {
+      exec("insertHTML", snippet + "<p><br></p>");
+    } else {
+      const ta = htmlRef.current;
+      const cur = camp.html || "";
+      if (ta && typeof ta.selectionStart === "number") {
+        const s = ta.selectionStart, e = ta.selectionEnd;
+        const next = cur.slice(0, s) + snippet + cur.slice(e);
+        setCamp((p) => ({ ...p, html: next }));
+        requestAnimationFrame(() => { try { ta.focus(); ta.selectionStart = ta.selectionEnd = s + snippet.length; } catch { /* noop */ } });
+      } else {
+        setCamp((p) => ({ ...p, html: cur + snippet }));
+      }
+    }
+  };
+
+  const onPickImageFile = async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (ev.target) ev.target.value = "";   // aynı dosya tekrar seçilebilsin
+    if (!file) return;
+    if (!/^image\//.test(file.type || "")) { toast.error("Lütfen bir görsel dosyası seçin"); return; }
+    setImgUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await axios.post(`${API}/upload/image`, fd, { headers: { ...h() } });
+      const url = r.data?.url || "";
+      if (!url) { toast.error("Görsel URL alınamadı"); return; }
+      setLastImageUrl(url);
+      insertImageSnippet(url);
+      toast.success("Görsel yüklendi ve eklendi");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Görsel yüklenemedi");
+    } finally { setImgUploading(false); }
+  };
+
+  const copyImageUrl = async () => {
+    if (!lastImageUrl) return;
+    try { await navigator.clipboard.writeText(lastImageUrl); toast.success("URL kopyalandı"); }
+    catch { toast.error("Kopyalanamadı — elle seçip kopyalayın"); }
+  };
 
   // ── Canlı önizleme: 600px e-postayı panele SIĞDIR (transform: scale) — yatay kırpma yok ──
   // TİTREME FİXİ: ResizeObserver YALNIZ layout-kaynaklı SÜTUN genişliğini gözler (scale/scrollbar'dan
@@ -489,16 +542,36 @@ export default function EmailMarketing() {
                 <button onClick={() => setEditMode("html")} data-testid="mode-html"
                   className={`px-3 py-1.5 font-medium inline-flex items-center gap-1 ${editMode === "html" ? "bg-black text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}><Code size={12} /> HTML</button>
               </div>
-              <select onChange={(e) => { insertPlaceholder(e.target.value); e.target.value = ""; }} defaultValue=""
-                disabled={editMode !== "visual"} className="border rounded-lg px-2 py-1.5 text-xs disabled:opacity-40" title="İmleç konumuna placeholder ekle">
-                <option value="" disabled>+ Placeholder</option>
-                <option value="{customer_name}">{"{customer_name}"} — müşteri/abone adı (otomatik dolar)</option>
-                <option value="{kod}">{"{kod}"} — kupon kodu</option>
-                <option value="{indirim}">{"{indirim}"} — indirim oranı</option>
-                <option value="URUN_LINKI">URUN_LINKI — bağlantı</option>
-                <option value="GORSEL_URL">GORSEL_URL — görsel</option>
-              </select>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Serbest GÖRSEL EKLE — herhangi bir dosyayı R2/cdn'e yükler (ürün seçiciyle İLGİSİZ).
+                    Hem Görsel hem HTML modunda çalışır. */}
+                <input ref={imgFileRef} type="file" accept="image/*" onChange={onPickImageFile} className="hidden" data-testid="email-image-file" />
+                <button type="button" onClick={() => imgFileRef.current && imgFileRef.current.click()} disabled={imgUploading}
+                  data-testid="email-image-add"
+                  className="inline-flex items-center gap-1 border rounded-lg px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50 disabled:opacity-50">
+                  {imgUploading ? <RefreshCw size={13} className="animate-spin" /> : <ImagePlus size={14} />}
+                  {imgUploading ? "Yükleniyor…" : "Görsel Ekle"}
+                </button>
+                <select onChange={(e) => { insertPlaceholder(e.target.value); e.target.value = ""; }} defaultValue=""
+                  disabled={editMode !== "visual"} className="border rounded-lg px-2 py-1.5 text-xs disabled:opacity-40" title="İmleç konumuna placeholder ekle">
+                  <option value="" disabled>+ Placeholder</option>
+                  <option value="{customer_name}">{"{customer_name}"} — müşteri/abone adı (otomatik dolar)</option>
+                  <option value="{kod}">{"{kod}"} — kupon kodu</option>
+                  <option value="{indirim}">{"{indirim}"} — indirim oranı</option>
+                  <option value="URUN_LINKI">URUN_LINKI — bağlantı</option>
+                  <option value="GORSEL_URL">GORSEL_URL — görsel</option>
+                </select>
+              </div>
             </div>
+            {lastImageUrl && (
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5">
+                <span className="text-[11px] text-emerald-700 font-medium shrink-0">Yüklenen görsel (cdn):</span>
+                <input readOnly value={lastImageUrl} onFocus={(e) => e.target.select()} data-testid="email-image-url"
+                  className="flex-1 min-w-0 bg-white border rounded px-2 py-1 text-[11px] text-gray-700" />
+                <button type="button" onClick={copyImageUrl} title="URL'yi kopyala"
+                  className="inline-flex items-center gap-1 border rounded px-2 py-1 text-[11px] hover:bg-white shrink-0"><Copy size={12} /> Kopyala</button>
+              </div>
+            )}
 
             {editMode === "visual" ? (
               <div className="border rounded-lg overflow-hidden">
@@ -531,7 +604,7 @@ export default function EmailMarketing() {
                 </div>
               </div>
             ) : (
-              <textarea value={camp.html} onChange={(e) => setCamp((p) => ({ ...p, html: e.target.value }))}
+              <textarea ref={htmlRef} value={camp.html} onChange={(e) => setCamp((p) => ({ ...p, html: e.target.value }))}
                 placeholder="HTML içerik — <p>Merhaba {customer_name}...</p> (marka kabuğu: logo + footer + abonelikten-çık otomatik eklenir)"
                 rows={20} className="w-full border rounded-lg px-3 py-2 text-sm font-mono" style={{ minHeight: 400 }} data-testid="camp-html" />
             )}
