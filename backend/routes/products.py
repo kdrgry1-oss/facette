@@ -212,7 +212,14 @@ async def _feed_site_shop_prods():
     main = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
     site = (main.get("site_url") or "https://facette.com.tr").rstrip("/")
     shop = main.get("site_name") or "FACETTE"
-    prods = await db.products.find({"is_active": True, "is_deleted": {"$ne": True}}, {"_id": 0}).to_list(50000)
+    _q = {"is_active": True, "is_deleted": {"$ne": True}}
+    # ÜYELERE ÖZEL: feed'ler ANONİM (üye kavramı yok) → members_only ürünleri HER ZAMAN hariç.
+    _mo_ids = await _members_only_cat_ids()
+    if _mo_ids:
+        _mo_list = list(_mo_ids)
+        _q["category_id"] = {"$nin": _mo_list}
+        _q["category_ids"] = {"$nin": _mo_list}
+    prods = await db.products.find(_q, {"_id": 0}).to_list(50000)
     return site, shop, prods
 
 
@@ -478,6 +485,28 @@ async def ai_generate_description(payload: dict, current_user: dict = Depends(re
     return {"description": html_out}
 
 
+_MEMBERS_ONLY_CACHE = {"ids": set(), "ts": 0.0}
+
+
+async def _members_only_cat_ids() -> set:
+    """`members_only=True` kategori id'lerinin kümesi (str). ~60sn cache — her ürün
+    isteğinde kategori sorgusu atmamak için. Admin toggle sonrası en fazla 60sn gecikir."""
+    import time as _t
+    now = _t.monotonic()
+    if _MEMBERS_ONLY_CACHE["ts"] and (now - _MEMBERS_ONLY_CACHE["ts"] < 60):
+        return _MEMBERS_ONLY_CACHE["ids"]
+    ids: set = set()
+    try:
+        async for c in db.categories.find({"members_only": True}, {"_id": 0, "id": 1}):
+            if c.get("id") is not None:
+                ids.add(str(c["id"]))
+    except Exception:
+        pass
+    _MEMBERS_ONLY_CACHE["ids"] = ids
+    _MEMBERS_ONLY_CACHE["ts"] = now
+    return ids
+
+
 async def _build_products_query(
     request: Request,
     *,
@@ -535,11 +564,15 @@ async def _build_products_query(
     # arama/listede hiçbir ürün "kaybolmasın". Storefront token göndermez →
     # aktif default korunur, vitrin etkilenmez.
     _is_admin = False
+    _is_member = False   # ÜYE = geçerli kullanıcı JWT'si (admin olması gerekmez). Misafir = token yok/geçersiz.
     _auth = request.headers.get("authorization") or ""
     if _auth.lower().startswith("bearer "):
         try:
             from .deps import _decode_jwt_strict
-            if _decode_jwt_strict(_auth.split(" ", 1)[1]).get("is_admin"):
+            _payload = _decode_jwt_strict(_auth.split(" ", 1)[1]) or {}
+            if _payload.get("user_id"):
+                _is_member = True
+            if _payload.get("is_admin"):
                 _is_admin = True
         except Exception:
             pass
@@ -570,6 +603,16 @@ async def _build_products_query(
     if not _admin_view:
         query["is_active"] = True
         query["images.0"] = {"$exists": True}
+
+    # ── ÜYELERE ÖZEL KATEGORİLER: MİSAFİR (geçerli JWT yok) bunların ürünlerini GÖRMEZ ──
+    # Üye (geçerli kullanıcı token'ı) ve admin_view her şeyi görür. Ürünün category_id VEYA
+    # category_ids'inden (atalar dâhil) herhangi biri members_only kümesindeyse misafirden gizlenir.
+    if not _admin_view and not _is_member:
+        _mo_ids = await _members_only_cat_ids()
+        if _mo_ids:
+            _mo_list = list(_mo_ids)
+            and_clauses.append({"category_id": {"$nin": _mo_list}})
+            and_clauses.append({"category_ids": {"$nin": _mo_list}})
 
     if brand:
         query["brand"] = {"$regex": re.escape(brand.strip()), "$options": "i"}  # ReDoS/regex-injection koruması
@@ -1112,6 +1155,7 @@ async def get_products(
 
 @router.get("/slider-feed")
 async def slider_feed(
+    request: Request,
     source: str = Query("newest"),
     category_ids: Optional[str] = None,
     limit: int = Query(8, ge=1, le=24),
@@ -1119,8 +1163,25 @@ async def slider_feed(
     """Sayfa Tasarımı ürün slider'ı için kaynak beslemesi.
     source: favorites (en çok favorilenen) | discounted (indirimde: sale_price
     veya aktif otomatik kampanya kapsamı) | category (category_ids CSV) | newest.
-    Yalnız aktif+silinmemiş ürünler; kampanya rozet alanları işlenir."""
+    Yalnız aktif+silinmemiş ürünler; kampanya rozet alanları işlenir.
+    ÜYELERE ÖZEL: misafire members_only ürünleri gösterilmez."""
     base_q = {"is_active": True, "is_deleted": {"$ne": True}}
+    # Misafir (geçerli JWT yok) → members_only kategorilerin ürünlerini gizle.
+    _is_member_sf = False
+    _auth_sf = request.headers.get("authorization") or ""
+    if _auth_sf.lower().startswith("bearer "):
+        try:
+            from .deps import _decode_jwt_strict
+            if (_decode_jwt_strict(_auth_sf.split(" ", 1)[1]) or {}).get("user_id"):
+                _is_member_sf = True
+        except Exception:
+            pass
+    if not _is_member_sf:
+        _mo_ids = await _members_only_cat_ids()
+        if _mo_ids:
+            _mo_list = list(_mo_ids)
+            base_q["category_id"] = {"$nin": _mo_list}
+            base_q["category_ids"] = {"$nin": _mo_list}
     prods: list = []
 
     if source == "favorites":
@@ -1276,16 +1337,27 @@ async def get_product(product_id: str, request: Request):
     # PASİF/SİLİNMİŞ ürün direkt link ile açılamaz: yalnızca admin görebilir,
     # müşteri için "bulunamadı" döner (vitrin gizliliği detay sayfasında da geçerli).
     _is_admin = False
+    _is_member = False
     _auth = request.headers.get("authorization") or ""
     if _auth.lower().startswith("bearer "):
         try:
             from .deps import _decode_jwt_strict
-            if _decode_jwt_strict(_auth.split(" ", 1)[1]).get("is_admin"):
+            _payload = _decode_jwt_strict(_auth.split(" ", 1)[1]) or {}
+            if _payload.get("user_id"):
+                _is_member = True
+            if _payload.get("is_admin"):
                 _is_admin = True
         except Exception:
             pass
     if not _is_admin and (product.get("is_active") is not True or product.get("is_deleted")):
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    # ÜYELERE ÖZEL: misafir, members_only kategorideki ürünün detayına DİREKT URL ile de erişemez.
+    if not _is_admin and not _is_member:
+        _mo_ids = await _members_only_cat_ids()
+        if _mo_ids:
+            _pc = {str(product.get("category_id"))} | {str(x) for x in (product.get("category_ids") or [])}
+            if _pc & _mo_ids:
+                raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     # Varyantları global Beden Havuzu (variant_options) sırasına göre diz —
     # böylece storefront'ta XS, S, M, L, XL... admin'in tanımladığı sırayla görünür.
     product["variants"] = await _sort_variants_by_pool(product.get("variants") or [])
@@ -1853,10 +1925,11 @@ def _cnorm(s: str) -> str:
 
 
 @router.get("/{product_id}/similar")
-async def get_similar_products(product_id: str, limit: int = 4):
+async def get_similar_products(product_id: str, request: Request, limit: int = 4):
     """Benzer ürünler: ürünün GERÇEK tip kategorisindeki (promo/sanal kategoriler HARİÇ)
     ürünleri döndürür. Tip kategorisi yoksa ürün ADINDAN tip çıkarır. Hiçbiri tutmazsa
-    BOŞ döner (rastgele promo ürünüyle DOLDURMAZ — yanlış öneriden iyidir). PUBLIC."""
+    BOŞ döner (rastgele promo ürünüyle DOLDURMAZ — yanlış öneriden iyidir). PUBLIC.
+    ÜYELERE ÖZEL: misafire members_only ürünleri gösterilmez."""
     try:
         limit = max(1, min(int(limit or 4), 24))
     except Exception:
@@ -1932,6 +2005,22 @@ async def get_similar_products(product_id: str, limit: int = 4):
 
     results = []
     base_q = {"is_active": True, "is_deleted": {"$ne": True}, "id": {"$ne": p["id"]}}
+    # ÜYELERE ÖZEL: misafir (geçerli JWT yok) members_only ürünleri benzer listesinde görmesin.
+    _is_member_sim = False
+    _auth_sim = request.headers.get("authorization") or ""
+    if _auth_sim.lower().startswith("bearer "):
+        try:
+            from .deps import _decode_jwt_strict
+            if (_decode_jwt_strict(_auth_sim.split(" ", 1)[1]) or {}).get("user_id"):
+                _is_member_sim = True
+        except Exception:
+            pass
+    if not _is_member_sim:
+        _mo_ids = await _members_only_cat_ids()
+        if _mo_ids:
+            _mo_list = list(_mo_ids)
+            base_q["category_id"] = {"$nin": _mo_list}
+            base_q["category_ids"] = {"$nin": _mo_list}
     if basis_cat_id:
         cur = db.products.find(
             {**base_q, "$or": [{"category_ids": basis_cat_id}, {"category_id": basis_cat_id}]},

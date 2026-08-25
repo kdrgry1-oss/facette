@@ -1,7 +1,7 @@
 """
 Category routes - CRUD
 """
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from typing import Optional
 from datetime import datetime, timezone
 import re
@@ -9,6 +9,19 @@ import re
 from .deps import db, logger, require_admin, generate_id, generate_short_id
 
 router = APIRouter(prefix="/categories", tags=["Categories"])
+
+
+def _req_is_member(request) -> bool:
+    """İstek geçerli bir kullanıcı JWT'si taşıyor mu (üye)? Misafir = token yok/geçersiz."""
+    try:
+        _auth = (request.headers.get("authorization") or "") if request else ""
+        if _auth.lower().startswith("bearer "):
+            from .deps import _decode_jwt_strict
+            if (_decode_jwt_strict(_auth.split(" ", 1)[1]) or {}).get("user_id"):
+                return True
+    except Exception:
+        pass
+    return False
 
 def generate_slug(name: str) -> str:
     slug = name.lower()
@@ -21,6 +34,7 @@ def generate_slug(name: str) -> str:
 
 @router.get("")
 async def get_categories(
+    request: Request,
     parent_id: Optional[str] = None,
     is_active: Optional[bool] = None,
     visible_only: bool = False
@@ -29,6 +43,7 @@ async def get_categories(
 
     visible_only=True (storefront): pasif ve test/placeholder kategorileri gizler.
     Varsayılan False (admin): tüm kategoriler döner — mevcut davranış korunur.
+    ÜYELERE ÖZEL: visible_only=True + MİSAFİR (geçerli JWT yok) ise members_only kategoriler gizlenir.
     """
     query = {}
     if parent_id is not None:
@@ -39,6 +54,10 @@ async def get_categories(
         query["is_active"] = {"$ne": False}
 
     categories = await db.categories.find(query, {"_id": 0}).to_list(500)
+
+    # Misafir + storefront görünümü: üyelere-özel kategorileri menü/nav'dan çıkar.
+    if visible_only and not _req_is_member(request):
+        categories = [c for c in categories if not c.get("members_only")]
 
     if visible_only:
         # Sızan test/placeholder kategorileri (ör. HB_CAT_TEST_123) storefront'tan gizle.
@@ -100,6 +119,8 @@ async def create_category(
         "attribute_mapping": category_data.get("attribute_mapping", {}),
         "sort_order": category_data.get("sort_order", 0),
         "is_active": category_data.get("is_active", True),
+        # ÜYELERE ÖZEL: True ise giriş yapmayan (misafir) bu kategoriyi/ürünlerini göremez.
+        "members_only": bool(category_data.get("members_only", False)),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -119,9 +140,12 @@ async def update_category(
     
     if category_data.get("name"):
         category_data["slug"] = generate_slug(category_data["name"])
-    
+
+    if "members_only" in category_data:   # ÜYELERE ÖZEL bayrağı — bool'a normalize et
+        category_data["members_only"] = bool(category_data["members_only"])
+
     category_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
+
     await db.categories.update_one({"id": category_id}, {"$set": category_data})
     return {"message": "Kategori güncellendi"}
 

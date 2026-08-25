@@ -47,9 +47,16 @@ async def sitemap_xml():
     urls.append(_url_block(f"{_FRONTEND}/", today, "daily", "1.0"))
 
     try:
-        # Kategoriler
+        # ÜYELERE ÖZEL kategoriler ANONİM sitemap'te YER ALMAZ (misafir göremez → indekslenmez).
+        _mo_ids = set()
+        async for c in db.categories.find({"members_only": True}, {"_id": 0, "id": 1}):
+            if c.get("id") is not None:
+                _mo_ids.add(str(c["id"]))
+        _mo_list = list(_mo_ids)
+
+        # Kategoriler (üyelere-özel hariç)
         async for c in db.categories.find(
-            {"is_active": {"$ne": False}}, {"_id": 0, "slug": 1}
+            {"is_active": {"$ne": False}, "members_only": {"$ne": True}}, {"_id": 0, "slug": 1}
         ):
             slug = c.get("slug")
             if slug:
@@ -63,9 +70,13 @@ async def sitemap_xml():
             if slug:
                 urls.append(_url_block(f"{_FRONTEND}/sayfa/{slug}", today, "monthly", "0.4"))
 
-        # Ürünler (yalnızca aktif) — lastmod olarak updated_at kullan
+        # Ürünler (yalnızca aktif; üyelere-özel kategori ürünleri HARİÇ) — lastmod = updated_at
+        _prod_q = {"is_active": {"$ne": False}}
+        if _mo_list:
+            _prod_q["category_id"] = {"$nin": _mo_list}
+            _prod_q["category_ids"] = {"$nin": _mo_list}
         async for prod in db.products.find(
-            {"is_active": {"$ne": False}},
+            _prod_q,
             {"_id": 0, "slug": 1, "updated_at": 1},
         ):
             slug = prod.get("slug")

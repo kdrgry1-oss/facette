@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { X, Check } from "lucide-react";
 import axios from "axios";
+import { useAuth } from "../context/AuthContext";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
@@ -27,7 +28,26 @@ function pColor(p) {
 
 export default function Category() {
   const { slug } = useParams();
+  const navigate = useNavigate();
+  const { token } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // ÜYELERE ÖZEL kategori route guard: MİSAFİR (giriş yok) members_only kategoriye
+  // doğrudan URL ile giderse GİRİŞ sayfasına yönlendir (girişten sonra geri döner).
+  // (Backend zaten ürünleri gizler; bu, boş sayfa yerine net bir yönlendirme sağlar.)
+  useEffect(() => {
+    if (!slug || slug === "all" || token) return;   // üye/token varsa serbest
+    let cancel = false;
+    (async () => {
+      try {
+        const r = await axios.get(`${API}/categories/${encodeURIComponent(slug)}`);
+        if (!cancel && r.data?.members_only) {
+          navigate(`/giris?redirect=${encodeURIComponent("/" + slug)}`, { replace: true });
+        }
+      } catch { /* kategori yoksa normal akış (404/boş) */ }
+    })();
+    return () => { cancel = true; };
+  }, [slug, token, navigate]);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
