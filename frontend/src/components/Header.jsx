@@ -172,6 +172,7 @@ export default function Header({ hideMenu = false, announcement = null, announce
   // arası overlay AÇIK kalır; ancak gerçek sayfa kaydırması başlayınca kapanır.)
   const [heroOverlay, setHeroOverlay] = useState(false);
   const [heroPage, setHeroPage] = useState(false);   // ana sayfa + editorial hero var mı (kaydırmadan bağımsız)
+  const barsRef = useRef(null);                       // sayaç + duyuru barı sarmalayıcısı (yükseklik ölçümü)
   useEffect(() => {
     let rafId = 0;
     const compute = () => {
@@ -202,6 +203,30 @@ export default function Header({ hideMenu = false, announcement = null, announce
       if (mo) mo.disconnect();
     };
   }, [location.pathname]);
+
+  // Editorial-hero SOLID BARLARININ (sayaç + duyuru) yüksekliğini ölç → `--fct-hero-offset`
+  // CSS değişkenine yaz. Home'daki editorial hero bu kadar AŞAĞIDA başlar → barlar hero'yu
+  // ÖRTMEZ (şeffaf header hero üzerinde yüzmeye devam eder). Değer SABİT tutulur: barlar
+  // kaydırınca unmount olsa bile en son ölçülen pozitif değer korunur → layout ZIPLAMAZ
+  // (boşalan bant beyaz sayfa zemini + beyaz sticky header ile örtüşür, renksiz-dikişsiz).
+  // Yalnız hero sayfasında geçerli; diğer sayfalar/checkout etkilenmez.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (!heroPage) {
+      try { document.documentElement.style.removeProperty("--fct-hero-offset"); } catch (_) { /* noop */ }
+      return;
+    }
+    const node = barsRef.current;
+    if (!node) return;   // barlar (overlay kapalı) yok → önceki ölçülen değer korunur (zıplama yok)
+    const setVar = () => {
+      const h = Math.round(node.getBoundingClientRect().height);
+      if (h > 0) { try { document.documentElement.style.setProperty("--fct-hero-offset", h + "px"); } catch (_) { /* noop */ } }
+    };
+    setVar();
+    let ro = null;
+    try { ro = new ResizeObserver(setVar); ro.observe(node); } catch (_) { /* noop */ }
+    return () => { if (ro) ro.disconnect(); };
+  }, [heroPage, heroOverlay, isCheckout]);
 
   // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch (3 ürün).
   // Kategori boş dönerse statik banner yerine genel popüler ürünlere düşülür → sağ panel her zaman dinamik.
@@ -331,9 +356,11 @@ export default function Header({ hideMenu = false, announcement = null, announce
             geçer. Aralarında margin/boşluk YOK (bitişik). Ana-sayfa-hero'da yalnız EN ÜSTTE
             (overlay) görünür; diğer sayfalarda sayaç hep görünür. Duyuru barı yalnız Home'dan gelir. */}
         {(heroPage ? heroOverlay : true) && !isCheckout && (
-          announcementFirst
-            ? <>{announcement}<CountdownBar /></>
-            : <><CountdownBar />{announcement}</>
+          <div ref={barsRef}>
+            {announcementFirst
+              ? <>{announcement}<CountdownBar /></>
+              : <><CountdownBar />{announcement}</>}
+          </div>
         )}
 
         <header

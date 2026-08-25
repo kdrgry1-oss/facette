@@ -308,8 +308,11 @@ function HeroEditorial({ block, isFirst = false }) {
       ref={sectionRef}
       data-testid="hero-editorial"
       className="relative w-full overflow-hidden bg-stone-100"
-      // İlk hero: üstteki siyah duyuru barıyla arasında beyaz boşluk/çizgi kalmasın diye yukarı çek.
-      style={{ height: "100vh", marginTop: isFirst ? "-2px" : 0 }}
+      // İlk (editorial) hero, üstteki SOLID barların (sayaç + duyuru) TAM YÜKSEKLİĞİ kadar AŞAĞIDA
+      // başlar → barlar hero'yu ÖRTMEZ; şeffaf header hero üzerinde yüzmeye devam eder. Ofset,
+      // Header'ın ölçüp yazdığı `--fct-hero-offset` değişkeninden gelir (responsive; sabit tutulur →
+      // kaydırmada zıplama yok). -2px: bar altı ile hero arasında beyaz saç-teli çizgi kalmasın.
+      style={{ height: "100vh", marginTop: isFirst ? "calc(var(--fct-hero-offset, 0px) - 2px)" : 0 }}
     >
       {images.map((img, i) => {
         const cap = captions[i] || {};
