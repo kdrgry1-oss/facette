@@ -469,7 +469,7 @@ export default function Header({ hideMenu = false, announcement = null, announce
                     <li key={col.title}>
                       <Link
                         to={col.link}
-                        className="block py-1 text-sm text-gray-700 hover:text-black transition-colors"
+                        className={`block py-1 text-sm text-gray-700 hover:text-black transition-colors${_isDowntownCode(col.title) ? " italic" : ""}`}
                         onClick={() => setActiveMenu(null)}
                         onMouseEnter={() => setHoveredCategory(col.slug)}
                       >
