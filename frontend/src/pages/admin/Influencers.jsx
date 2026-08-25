@@ -521,25 +521,31 @@ function PRFormModal({ initial, onClose, onSaved }) {
     })();
   }, []);
 
-  // Kayıtlı influencer seçilince isim/tür/insta/tiktok otomatik dolsun (kullanıcı sonra düzenleyebilir).
+  // PR kaydı YALNIZ kayıtlı influencer seçilerek açılır (serbest-yaz YOK). Seçilince kimlik
+  // alanları registry'den dolar ve READ-ONLY olur; kullanıcı yalnız Ürün&Beden + PR alanlarını girer.
   const pickInfluencer = (id) => {
+    if (!id) {
+      setForm((f) => ({ ...f, influencer_id: "", influencer_name: "", influencer_type: "",
+        instagram: "", tiktok: "", phone: "", anlasma_sekli: "", adres: "" }));
+      return;
+    }
     const inf = infList.find((i) => i.id === id);
     const sa = inf?.shipping_address || {};
     const adr = [sa.adres, sa.ilce, sa.il].filter(Boolean).join(", ");
-    // Kadir: SADECE kimlik/iletişim otomatik dolsun (isim/insta/tiktok/telefon/adres).
-    // Tür/anlaşma/beden/teklif/cevap/durum vb. her kayıtta DEĞİŞEBİLİR → otomatik doldurulmaz.
     setForm((f) => ({
       ...f, influencer_id: id,
-      influencer_name: inf?.name || f.influencer_name,
-      instagram: inf?.instagram || f.instagram,
-      tiktok: inf?.tiktok || f.tiktok,
-      phone: inf?.phone || f.phone,
-      adres: adr || f.adres,
+      influencer_name: inf?.name || "",
+      influencer_type: inf?.platform || "",
+      instagram: inf?.instagram || "",
+      tiktok: inf?.tiktok || "",
+      phone: inf?.phone || "",
+      anlasma_sekli: inf?.anlasma_sekli || "",
+      adres: adr || "",
     }));
   };
 
   const save = async () => {
-    if (!form.influencer_name.trim() && !form.influencer_id) return toast.error("Influencer seçin veya adını yazın");
+    if (!form.influencer_id) return toast.error("Önce kayıtlı bir influencer seçin (yoksa Kayıtlı Influencerlar'dan ekleyin)");
     setSaving(true);
     try {
       const body = { ...form, products, beden: "", urun: "", date: form.date ? `${form.date}T00:00:00` : new Date().toISOString() };
@@ -555,29 +561,28 @@ function PRFormModal({ initial, onClose, onSaved }) {
   return (
     <Modal title={initial?.id ? "PR Kaydı Düzenle" : "Yeni PR Kaydı"} onClose={onClose}>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Kayıtlı influencer (opsiyonel — seçince alanlar dolar)" full>
+        <Field label="Kayıtlı influencer * (yalnız kayıtlı seçilebilir — yoksa Kayıtlı Influencerlar'dan ekleyin)" full>
           <select className="inp" value={form.influencer_id} onChange={(e) => pickInfluencer(e.target.value)} data-testid="pr-inf-select">
-            <option value="">— Bağlama / serbest yaz —</option>
+            <option value="">— Kayıtlı influencer seçin —</option>
             {infList.map((i) => (
               <option key={i.id} value={i.id}>{i.name}{i.instagram ? ` (${i.instagram})` : ""}</option>
             ))}
           </select>
+          {!form.influencer_id && (
+            <p className="text-[11px] text-amber-600 mt-1">Önce kayıtlı bir influencer seçin (yoksa Kayıtlı Influencerlar'dan ekleyin).</p>
+          )}
         </Field>
-        <Field label="Influencer adı *"><input className="inp" value={form.influencer_name} onChange={(e) => set("influencer_name", e.target.value)} placeholder="İsim" /></Field>
-        <Field label="Influencer Türü"><input className="inp" value={form.influencer_type} onChange={(e) => set("influencer_type", e.target.value)} placeholder="Örn. Moda / Mikro / Nano" /></Field>
-        <Field label="Instagram (@)"><input className="inp" value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="@kullanici" /></Field>
-        <Field label="TikTok (@)"><input className="inp" value={form.tiktok} onChange={(e) => set("tiktok", e.target.value)} placeholder="@kullanici" /></Field>
-        <Field label="Telefon"><input className="inp" value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="05..." /></Field>
-        <Field label="Anlaşma Şekli">
-          <select className="inp" value={form.anlasma_sekli} onChange={(e) => set("anlasma_sekli", e.target.value)} data-testid="pr-anlasma">
-            <option value="">— Seçin —</option>
-            {ANLASMA_SEKLI.map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
-        </Field>
+        {/* Kimlik alanları SEÇİMDEN gelir → READ-ONLY (serbest-yaz ile yeni influencer yaratılmaz). */}
+        <Field label="Influencer adı"><input className="inp bg-gray-50 text-gray-600" value={form.influencer_name} readOnly disabled placeholder="Seçimden gelir" /></Field>
+        <Field label="Influencer Türü"><input className="inp bg-gray-50 text-gray-600" value={form.influencer_type} readOnly disabled placeholder="Seçimden gelir" /></Field>
+        <Field label="Instagram (@)"><input className="inp bg-gray-50 text-gray-600" value={form.instagram} readOnly disabled placeholder="Seçimden gelir" /></Field>
+        <Field label="TikTok (@)"><input className="inp bg-gray-50 text-gray-600" value={form.tiktok} readOnly disabled placeholder="Seçimden gelir" /></Field>
+        <Field label="Telefon"><input className="inp bg-gray-50 text-gray-600" value={form.phone} readOnly disabled placeholder="Seçimden gelir" /></Field>
+        <Field label="Anlaşma Şekli"><input className="inp bg-gray-50 text-gray-600" value={form.anlasma_sekli} readOnly disabled placeholder="Seçimden gelir" data-testid="pr-anlasma" /></Field>
         <Field label="Ürün & Beden (ürünü ara → bedenini seç; birden çok eklenebilir)" full>
           <ProductPicker picked={products} setPicked={setProducts} />
         </Field>
-        <Field label="Adres" full><input className="inp" value={form.adres} onChange={(e) => set("adres", e.target.value)} placeholder="Kargo adresi" /></Field>
+        <Field label="Adres" full><input className="inp bg-gray-50 text-gray-600" value={form.adres} readOnly disabled placeholder="Seçimden gelir" /></Field>
         <Field label="Gönderim Durumu">
           <select className="inp" value={form.status} onChange={(e) => set("status", e.target.value)} data-testid="pr-status">
             {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
@@ -591,7 +596,7 @@ function PRFormModal({ initial, onClose, onSaved }) {
       </div>
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm border rounded-lg">İptal</button>
-        <button onClick={save} disabled={saving} data-testid="pr-save" className="px-4 py-2 text-sm bg-black text-white rounded-lg disabled:opacity-50">
+        <button onClick={save} disabled={saving || !form.influencer_id} data-testid="pr-save" className="px-4 py-2 text-sm bg-black text-white rounded-lg disabled:opacity-50">
           {saving ? "..." : "Kaydet"}
         </button>
       </div>

@@ -517,32 +517,27 @@ async def _resolve_or_create_registry(doc: dict):
 
 @router.post("/influencer-pr")
 async def create_pr_entry(payload: dict, current_user: dict = Depends(require_admin)):
-    """PR işlemi ekle (stok hareketi YOK). influencer_id verilirse isim/insta/tiktok
-    influencer kaydından otomatik doldurulur (girilmişse override edilmez). Ayrıca influencer
-    Kayıtlı Influencerlar'da YOKSA otomatik oluşturulup PR ona LİNKLENİR (mükerrer önlemeli)."""
+    """PR işlemi ekle (stok hareketi YOK). YALNIZ KAYITLI influencer seçilerek açılabilir:
+    geçerli `influencer_id` (db.influencers'ta VAR olan) ZORUNLU — yoksa 400. Serbest-yaz ile
+    yeni influencer OLUŞTURULMAZ. Seçilen kaydın alanları (isim/tür/insta/tiktok/telefon/adres/
+    beden/anlaşma) girilmemişse otomatik doldurulur (girilmişse override edilmez)."""
     doc = {k: (payload.get(k) if payload else None) for k in _PR_FIELDS}
-    if doc.get("influencer_id"):
-        inf = await db.influencers.find_one({"id": doc["influencer_id"]}, {"_id": 0})
-        if inf:
-            doc["influencer_name"] = doc.get("influencer_name") or inf.get("name")
-            doc["influencer_type"] = doc.get("influencer_type") or inf.get("platform")
-            doc["instagram"] = doc.get("instagram") or inf.get("instagram")
-            doc["tiktok"] = doc.get("tiktok") or inf.get("tiktok")
-            # Kadir: adres/beden/anlaşma/telefon da influencer'dan otomatik dolsun (elle override edilebilir).
-            doc["phone"] = doc.get("phone") or inf.get("phone")
-            doc["adres"] = doc.get("adres") or _pr_addr(inf)
-            doc["beden"] = doc.get("beden") or _pr_beden(inf, doc)
-            doc["anlasma_sekli"] = doc.get("anlasma_sekli") or inf.get("anlasma_sekli")
-    # OTO-REGISTER: influencer Kayıtlı Influencerlar'da yoksa oluştur + PR'ı ona LİNKLE.
-    try:
-        rid, _created = await _resolve_or_create_registry(doc)
-        if rid:
-            doc["influencer_id"] = rid
-            if not doc.get("influencer_name"):
-                _r = await db.influencers.find_one({"id": rid}, {"_id": 0, "name": 1})
-                doc["influencer_name"] = (_r or {}).get("name") or doc.get("influencer_name")
-    except Exception as _e:
-        logger.warning(f"[influencer] PR oto-register başarısız: {_e}")
+    iid = str(doc.get("influencer_id") or "").strip()
+    if not iid:
+        raise HTTPException(status_code=400, detail="Kayıtlı influencer gerekli")
+    inf = await db.influencers.find_one({"id": iid}, {"_id": 0})
+    if not inf:
+        raise HTTPException(status_code=400, detail="Kayıtlı influencer gerekli")
+    doc["influencer_id"] = iid
+    doc["influencer_name"] = doc.get("influencer_name") or inf.get("name")
+    doc["influencer_type"] = doc.get("influencer_type") or inf.get("platform")
+    doc["instagram"] = doc.get("instagram") or inf.get("instagram")
+    doc["tiktok"] = doc.get("tiktok") or inf.get("tiktok")
+    # Kadir: adres/beden/anlaşma/telefon da influencer'dan otomatik dolsun (elle override edilebilir).
+    doc["phone"] = doc.get("phone") or inf.get("phone")
+    doc["adres"] = doc.get("adres") or _pr_addr(inf)
+    doc["beden"] = doc.get("beden") or _pr_beden(inf, doc)
+    doc["anlasma_sekli"] = doc.get("anlasma_sekli") or inf.get("anlasma_sekli")
     if (doc.get("status") or "") not in PR_STATUSES:
         doc["status"] = "beklemede"
     doc["date"] = doc.get("date") or _now_iso()
@@ -829,15 +824,8 @@ async def update_pr_entry(entry_id: str, payload: dict, current_user: dict = Dep
     update["updated_at"] = _now_iso()
     await db.influencer_pr.update_one({"id": entry_id}, {"$set": update})
     doc = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
-    # OTO-REGISTER (güncellemede de): influencer_id yoksa isim/handle'dan eşle/oluştur + linkle.
-    try:
-        if doc and not str(doc.get("influencer_id") or "").strip():
-            rid, _c = await _resolve_or_create_registry(doc)
-            if rid:
-                await db.influencer_pr.update_one({"id": entry_id}, {"$set": {"influencer_id": rid}})
-                doc = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
-    except Exception as _e:
-        logger.warning(f"[influencer] update oto-register başarısız {entry_id}: {_e}")
+    # NOT: PR güncellemede registry OTO-OLUŞTURMA YOK — PR yalnız kayıtlı influencer'a bağlanır
+    # (create'te zorunlu). Mevcut kayıtların influencer_id'si korunur.
     return {"success": True, "entry": doc}
 
 
