@@ -208,29 +208,11 @@ function HeroEditorial({ block, isFirst = false }) {
   const safeActive = Math.min(active, Math.max(0, n - 1));
   useEffect(() => { activeRef.current = safeActive; }, [safeActive]);
 
-  // Header overlay: hero ekranı kapladığı sürece "1" (şeffaf/beyaz header). Slaytlar arası sayfa
-  // kaymadığından bu, tüm slider boyunca açık kalır; hero yukarı kayıp çıkınca "0" olur.
+  // Şeffaf-overlay KALDIRILDI (Option A): header home'da da SOLID → data-hero-overlay artık
+  // yazılmaz. Kalıntı bırakmamak için bir kez temizle (header rengini bozmaz).
   useEffect(() => {
-    if (!isFirst) return;
-    const compute = () => {
-      const el = sectionRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const vh = window.innerHeight || 1;
-      // Sticky header/duyuru barı hero'yu birkaç px aşağı itebilir → r.top tam 0 olmayabilir.
-      // "Hero ekranın çoğunu kaplıyor mu" diye bak (üst ofsete toleranslı).
-      const covering = r.top < vh * 0.5 && r.bottom > vh * 0.5;
-      document.documentElement.setAttribute("data-hero-overlay", covering ? "1" : "0");
-    };
-    compute();
-    window.addEventListener("scroll", compute, { passive: true });
-    window.addEventListener("resize", compute);
-    return () => {
-      window.removeEventListener("scroll", compute);
-      window.removeEventListener("resize", compute);
-      document.documentElement.removeAttribute("data-hero-overlay");
-    };
-  }, [isFirst, n]);
+    try { document.documentElement.removeAttribute("data-hero-overlay"); } catch (_) { /* noop */ }
+  }, []);
 
   // Jest yakalama: hero ekranı tam kapladığında ve sınır slaytta değilken tek kaydırma = tek slayt.
   useEffect(() => {
@@ -308,11 +290,10 @@ function HeroEditorial({ block, isFirst = false }) {
       ref={sectionRef}
       data-testid="hero-editorial"
       className="relative w-full overflow-hidden bg-stone-100"
-      // İlk (editorial) hero, üstteki SOLID barların (sayaç + duyuru) TAM YÜKSEKLİĞİ kadar AŞAĞIDA
-      // başlar → barlar hero'yu ÖRTMEZ; şeffaf header hero üzerinde yüzmeye devam eder. Ofset,
-      // Header'ın ölçüp yazdığı `--fct-hero-offset` değişkeninden gelir (responsive; sabit tutulur →
-      // kaydırmada zıplama yok). -2px: bar altı ile hero arasında beyaz saç-teli çizgi kalmasın.
-      style={{ height: "100vh", marginTop: isFirst ? "calc(var(--fct-hero-offset, 0px) - 2px)" : 0 }}
+      // Şeffaf-overlay KALDIRILDI (Option A): header artık home'da da SOLID + normal akış/sticky.
+      // Hero, üstteki solid şeridin (barlar + header) ALTINDA doğal akışta başlar → marginTop
+      // offset'e GEREK YOK (örtme/zıplama yok, üstü kesilmez). 100vh + jest + slaytlar korunur.
+      style={{ height: "100vh", marginTop: 0 }}
     >
       {images.map((img, i) => {
         const cap = captions[i] || {};
@@ -989,19 +970,12 @@ export default function Home() {
     && (Number(rotatingBlock.sort_order ?? 0) < Number(countdownBlock.sort_order ?? 0));
   const flowBlocks = blocks.filter(b => b.type !== "rotating_text");
 
-  // İLK blok TAM EKRAN editorial hero mu? Öyleyse header şeffaf-overlay (beyaz logo/ikon) olur.
-  // <html data-hero-overlay="1"> bayrağını Header okur; sayfadan ayrılınca temizlenir.
-  const firstIsEditorialHero = flowBlocks[0]?.type === "hero_slider"
-    && flowBlocks[0]?.settings?.hero_style !== "klasik"
-    && (flowBlocks[0]?.show_mobile !== false || flowBlocks[0]?.show_desktop !== false);
+  // Şeffaf-overlay KALDIRILDI (Option A): header home'da da SOLID; editorial hero olsa bile
+  // data-hero-overlay bayrağı YAZILMAZ (header akıştan çıkmaz, hero solid şeridin altında akar).
   useEffect(() => {
-    // Editorial hero VARSA bayrağı hemen "1" yap → header ANINDA fixed/şeffaf olur, akıştan çıkar,
-    // hero en üste (y=0) oturur; böylece deadlock kırılır (sticky header hero'yu aşağı itmez).
-    // Sonrasında değeri HeroEditorial kapsama alanına göre "1"/"0" günceller.
-    if (firstIsEditorialHero) document.documentElement.setAttribute("data-hero-overlay", "1");
-    else document.documentElement.removeAttribute("data-hero-overlay");
-    return () => document.documentElement.removeAttribute("data-hero-overlay");
-  }, [firstIsEditorialHero]);
+    try { document.documentElement.removeAttribute("data-hero-overlay"); } catch (_) { /* noop */ }
+    return () => { try { document.documentElement.removeAttribute("data-hero-overlay"); } catch (_) { /* noop */ } };
+  }, []);
 
   return (
     <div className="min-h-screen bg-white" data-testid="home-page">

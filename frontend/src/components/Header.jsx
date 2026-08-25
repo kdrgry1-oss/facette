@@ -175,61 +175,18 @@ export default function Header({ hideMenu = false, announcement = null, announce
   // arası overlay AÇIK kalır; ancak gerçek sayfa kaydırması başlayınca kapanır.)
   const [heroOverlay, setHeroOverlay] = useState(false);
   const [heroPage, setHeroPage] = useState(false);   // ana sayfa + editorial hero var mı (kaydırmadan bağımsız)
-  const barsRef = useRef(null);                       // sayaç + duyuru barı sarmalayıcısı (yükseklik ölçümü)
+  const barsRef = useRef(null);                       // sayaç + duyuru barı sarmalayıcısı
+  // ŞEFFAF-OVERLAY KALDIRILDI (kullanıcı kesin kararı — Option A): home dahil header HER ZAMAN
+  // SOLID + normal akış/sticky. Üstte [duyuru barı][sayaç][beyaz menü/logo header] solid şerit;
+  // hero doğal akışta bunların TAM ALTINDA başlar (fixed-overlay + marginTop offset YOK → örtme
+  // yok, üstü kesilmez, zıplama yok). heroPage/heroOverlay artık hiçbir yerde AÇILMAZ → tüm
+  // sayfalar (home + klasik) aynı sticky-solid davranışta. Kalıntı bayrak/değişkenler temizlenir.
   useEffect(() => {
-    let rafId = 0;
-    const compute = () => {
-      if (typeof document === "undefined" || location.pathname !== "/") { setHeroOverlay(false); setHeroPage(false); return false; }
-      const hero = document.querySelector('[data-testid="hero-editorial"]');
-      if (!hero) { setHeroOverlay(false); setHeroPage(false); return false; }
-      setHeroPage(true);
-      const scrolled = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
-      setHeroOverlay(scrolled < 6);   // yalnız sayfa en üstünde → floating; kaydırınca → sticky
-      return true;                    // hero bulundu
-    };
-    // Hero, sayfa blokları async yüklendiği için header'dan GEÇ mount olabilir → hero DOM'a gelene
-    // kadar (max ~2.5 sn) requestAnimationFrame ile POLL et. Bulununca değerlendirme zaten yapıldı,
-    // poll'u sonlandır (sonrasında scroll/resize dinleyicileri yeterli).
-    let tries = 0;
-    const poll = () => {
-      const found = compute();
-      if (!found && tries < 150) { tries++; rafId = requestAnimationFrame(poll); }
-    };
-    poll();
-    window.addEventListener("scroll", compute, { passive: true });
-    window.addEventListener("resize", compute);
-    let mo = null;
-    try { mo = new MutationObserver(compute); mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-hero-overlay"] }); } catch (_) { /* noop */ }
-    return () => {
-      if (rafId) cancelAnimationFrame(rafId);
-      window.removeEventListener("scroll", compute); window.removeEventListener("resize", compute);
-      if (mo) mo.disconnect();
-    };
+    setHeroOverlay(false);
+    setHeroPage(false);
+    try { document.documentElement.removeAttribute("data-hero-overlay"); } catch (_) { /* noop */ }
+    try { document.documentElement.style.removeProperty("--fct-hero-offset"); } catch (_) { /* noop */ }
   }, [location.pathname]);
-
-  // Editorial-hero SOLID BARLARININ (sayaç + duyuru) yüksekliğini ölç → `--fct-hero-offset`
-  // CSS değişkenine yaz. Home'daki editorial hero bu kadar AŞAĞIDA başlar → barlar hero'yu
-  // ÖRTMEZ (şeffaf header hero üzerinde yüzmeye devam eder). Değer SABİT tutulur: barlar
-  // kaydırınca unmount olsa bile en son ölçülen pozitif değer korunur → layout ZIPLAMAZ
-  // (boşalan bant beyaz sayfa zemini + beyaz sticky header ile örtüşür, renksiz-dikişsiz).
-  // Yalnız hero sayfasında geçerli; diğer sayfalar/checkout etkilenmez.
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    if (!heroPage) {
-      try { document.documentElement.style.removeProperty("--fct-hero-offset"); } catch (_) { /* noop */ }
-      return;
-    }
-    const node = barsRef.current;
-    if (!node) return;   // barlar (overlay kapalı) yok → önceki ölçülen değer korunur (zıplama yok)
-    const setVar = () => {
-      const h = Math.round(node.getBoundingClientRect().height);
-      if (h > 0) { try { document.documentElement.style.setProperty("--fct-hero-offset", h + "px"); } catch (_) { /* noop */ } }
-    };
-    setVar();
-    let ro = null;
-    try { ro = new ResizeObserver(setVar); ro.observe(node); } catch (_) { /* noop */ }
-    return () => { if (ro) ro.disconnect(); };
-  }, [heroPage, heroOverlay, isCheckout]);
 
   // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch (3 ürün).
   // Kategori boş dönerse statik banner yerine genel popüler ürünlere düşülür → sağ panel her zaman dinamik.
