@@ -838,22 +838,36 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
                 new_status = _amz_status_of(status_raw)
                 existing = await _db.orders.find_one({"order_number": oid, "platform": "amazon"})
                 if existing:
+                    # Adres/PII eksik geldiyse (Restricted henüz aktif değildi / geçici hata),
+                    # SINIRLI denemeyle tamamla — sipariş zaten panelde, yalnız adresi backfill.
+                    if existing.get("needs_pii_refresh") and int(existing.get("pii_attempts") or 0) < 5:
+                        _full = await _fetch_amazon_order_full(oid)
+                        if (_full or {}).get("ShippingAddress"):
+                            _items = await _fetch_amazon_order_items(oid)
+                            _fresh = map_amazon_order(_full, _items)
+                            await _db.orders.update_one({"_id": existing["_id"]}, {"$set": {
+                                "shipping_address": _fresh["shipping_address"],
+                                "billing_address": _fresh["billing_address"],
+                                "items": _fresh["items"] or existing.get("items"),
+                                "needs_pii_refresh": False,
+                            }})
+                        else:
+                            await _db.orders.update_one({"_id": existing["_id"]}, {"$inc": {"pii_attempts": 1}})
+                        await _aio.sleep(0.3)
                     await _update_existing_amazon_order(_db, existing, new_status, status_raw, o, oid)
                     summary["updated"] += 1
                     continue
-                # YENİ sipariş → PII (RDT) + kalemleri çek.
+                # YENİ sipariş → PII (RDT) + kalemleri çek. PII gelmese bile sipariş DAİMA düşer
+                # (kabuk); adres sonraki turlarda needs_pii_refresh ile tamamlanır → hiç kaybolmaz.
                 full = await _fetch_amazon_order_full(oid)
-                # Restricted açıkken adres beklenir; gelmediyse (geçici/rate-limit) BU TURDA ATLA →
-                # sonraki tur (LastUpdatedAfter penceresi hâlâ kapsar) PII ile tekrar dener.
-                if RESTRICTED_ALLOWED and not (full or {}).get("ShippingAddress"):
-                    summary["skipped"] += 1
-                    await _aio.sleep(0.3)
-                    continue
                 items = await _fetch_amazon_order_items(oid)
                 data = map_amazon_order(full or o, items)
                 data["id"] = generate_id()
                 # created_at = GERÇEK sipariş tarihi (PurchaseDate) — aylık pazaryeri sayımı doğru.
                 data["created_at"] = data.get("marketplace_order_date") or datetime.now(timezone.utc).isoformat()
+                if RESTRICTED_ALLOWED and not (full or {}).get("ShippingAddress"):
+                    data["needs_pii_refresh"] = True
+                    data["pii_attempts"] = 1
                 await _db.orders.insert_one(data)
                 summary["imported"] += 1
                 # Stok: yalnız MFN (satıcı kargolar) + iptal/iade DEĞİLSE düş. FBA stoğu Amazon'da.
