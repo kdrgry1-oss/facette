@@ -803,6 +803,7 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
         if not cfg or not cfg.get("refresh_token_enc"):
             return summary  # bağlı değil → sessiz
         from routes.deps import db as _db, generate_id
+        from routes.integrations import _hb_enrich_items, _decrement_stock_for_imported_order
 
         _, _, marketplace_id = await get_valid_access_token()
         updated_after = (_dt.now(timezone.utc) - _td(days=max(1, int(lookback_days)))
@@ -838,21 +839,33 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
                 new_status = _amz_status_of(status_raw)
                 existing = await _db.orders.find_one({"order_number": oid, "platform": "amazon"})
                 if existing:
-                    # Adres/PII eksik geldiyse (Restricted henüz aktif değildi / geçici hata),
-                    # SINIRLI denemeyle tamamla — sipariş zaten panelde, yalnız adresi backfill.
-                    if existing.get("needs_pii_refresh") and int(existing.get("pii_attempts") or 0) < 5:
-                        _full = await _fetch_amazon_order_full(oid)
-                        if (_full or {}).get("ShippingAddress"):
-                            _items = await _fetch_amazon_order_items(oid)
-                            _fresh = map_amazon_order(_full, _items)
-                            await _db.orders.update_one({"_id": existing["_id"]}, {"$set": {
-                                "shipping_address": _fresh["shipping_address"],
-                                "billing_address": _fresh["billing_address"],
-                                "items": _fresh["items"] or existing.get("items"),
-                                "needs_pii_refresh": False,
-                            }})
-                        else:
-                            await _db.orders.update_one({"_id": existing["_id"]}, {"$inc": {"pii_attempts": 1}})
+                    # (a) PII backfill: adres/isim eksik geldiyse (Restricted sonradan açıldı ya da
+                    #     geçici hata) SINIRLI denemeyle tamamla. Placeholder ("Amazon Müşterisi")
+                    #     eski siparişler de dahil — needs_pii_refresh bayrağı olmasa bile.
+                    # (b) Ürün eşleştirme: kalemlerde resim yoksa TEK SEFER Facette ürünüyle eşle.
+                    _ship_fn = (existing.get("shipping_address") or {}).get("first_name")
+                    _need_pii = (RESTRICTED_ALLOWED and int(existing.get("pii_attempts") or 0) < 5 and
+                                 (existing.get("needs_pii_refresh") or _ship_fn in ("", "Amazon", None)))
+                    _need_enrich = (not existing.get("items_enriched") and
+                                    any(not (it or {}).get("image") for it in (existing.get("items") or [])))
+                    if _need_pii or _need_enrich:
+                        _upd, _items_src = {}, existing.get("items")
+                        if _need_pii:
+                            _full = await _fetch_amazon_order_full(oid)
+                            if (_full or {}).get("ShippingAddress"):
+                                _fresh = map_amazon_order(_full, await _fetch_amazon_order_items(oid))
+                                _upd["shipping_address"] = _fresh["shipping_address"]
+                                _upd["billing_address"] = _fresh["billing_address"]
+                                _upd["needs_pii_refresh"] = False
+                                _items_src = _fresh["items"] or existing.get("items")
+                            else:
+                                await _db.orders.update_one({"_id": existing["_id"]}, {"$inc": {"pii_attempts": 1}})
+                        if _need_enrich or _need_pii:
+                            _tmp = await _hb_enrich_items({"items": _items_src or []})
+                            _upd["items"] = _tmp["items"]
+                            _upd["items_enriched"] = True
+                        if _upd:
+                            await _db.orders.update_one({"_id": existing["_id"]}, {"$set": _upd})
                         await _aio.sleep(0.3)
                     await _update_existing_amazon_order(_db, existing, new_status, status_raw, o, oid)
                     summary["updated"] += 1
@@ -862,6 +875,10 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
                 full = await _fetch_amazon_order_full(oid)
                 items = await _fetch_amazon_order_items(oid)
                 data = map_amazon_order(full or o, items)
+                # Ürün eşleştirme: Amazon SellerSKU → Facette ürünü (görsel + gerçek product_id +
+                # barkod + beden/renk). Trendyol/HB ile AYNI eşleyici; eşleşen kalemde resim gelir.
+                data = await _hb_enrich_items(data)
+                data["items_enriched"] = True
                 data["id"] = generate_id()
                 # created_at = GERÇEK sipariş tarihi (PurchaseDate) — aylık pazaryeri sayımı doğru.
                 data["created_at"] = data.get("marketplace_order_date") or datetime.now(timezone.utc).isoformat()
@@ -872,7 +889,6 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
                 summary["imported"] += 1
                 # Stok: yalnız MFN (satıcı kargolar) + iptal/iade DEĞİLSE düş. FBA stoğu Amazon'da.
                 if data.get("status") not in ("cancelled", "returned") and data.get("fulfillment_channel") != "AFN":
-                    from routes.integrations import _decrement_stock_for_imported_order
                     await _decrement_stock_for_imported_order(data, "amazon")
                 await _aio.sleep(0.4)  # per-sipariş getOrder/RDT/getOrderItems rate limiti
             except Exception as _ex:
@@ -895,6 +911,83 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
             pass
         logger.exception(f"[scheduler] amazon auto orders pull failed: {e}")
         return summary
+
+
+async def _run_amazon_auto_stock_sync():
+    """Scheduler / manuel — Amazon stok+fiyat CANLI push (Trendyol/HB ile simetrik).
+    Amazon SellerSKU = Facette variant.stock_code (yoksa barcode). YALNIZ stoğu/fiyatı DEĞİŞEN
+    varyantı yollar (amazon_sku_state ile değişiklik tespiti) → 2 dk'lık cadence rate-limit dostu.
+    AMAZON_ALLOW_WRITE=0 iken dry-run: gerçek push YAPILMAZ, yalnız kaç SKU gönderileceği loglanır
+    (state güncellenmez → flag açılınca ilk turda gerçek gönderim başlar). Yapılandırılmamışsa no-op."""
+    import asyncio as _aio
+    from routes.marketplace_hub import log_integration_event
+    try:
+        from routes.amazon_spapi import _get_config, _amazon_push_stock_price, ALLOW_WRITE
+        cfg = await _get_config()
+        if not cfg or not cfg.get("refresh_token_enc") or not cfg.get("selling_partner_id"):
+            return  # bağlı/OAuth değil → sessiz
+        from routes.deps import db as _db
+        products = await _db.products.find({"is_active": True}, {"_id": 0}).to_list(length=None)
+
+        # SKU'su olan varyant sayısı — dry-run özeti için.
+        def _sku_of(v):
+            return (str(v.get("stock_code") or "").strip() or str(v.get("barcode") or "").strip())
+
+        if not ALLOW_WRITE:
+            _cnt = sum(1 for p in products for v in (p.get("variants") or []) if _sku_of(v))
+            await log_integration_event(
+                marketplace="amazon", action="stock_sync", status="success", direction="outbound",
+                message=(f"[cron] Amazon stok/fiyat DRY-RUN: {_cnt} SKU gönderilmeye hazır. Canlı "
+                         f"göndermek için AMAZON_ALLOW_WRITE=1 yapın."))
+            return
+
+        pushed = skipped = failed = remaining = 0
+        _CAP = 40  # tur başına gerçek push tavanı (rate-limit + ilk seed'i yayma)
+        for p in products:
+            price = p.get("price") or p.get("sale_price") or p.get("discounted_price") or 0
+            for v in (p.get("variants") or []):
+                sku = _sku_of(v)
+                if not sku:
+                    continue
+                try:
+                    qty = int(v.get("stock") or 0)
+                except Exception:
+                    qty = 0
+                try:
+                    pr = round(float(price or 0), 2)
+                except Exception:
+                    pr = 0
+                st = await _db.amazon_sku_state.find_one({"sku": sku}, {"_id": 0})
+                if st and st.get("qty") == qty and st.get("price") == pr:
+                    skipped += 1
+                    continue
+                if pushed >= _CAP:
+                    remaining += 1
+                    continue
+                try:
+                    res = await _amazon_push_stock_price(sku, qty, pr)
+                except Exception as _pe:
+                    failed += 1
+                    logger.error(f"[cron] Amazon stok push {sku}: {_pe}")
+                    continue
+                if res.get("ok"):
+                    await _db.amazon_sku_state.update_one(
+                        {"sku": sku},
+                        {"$set": {"sku": sku, "qty": qty, "price": pr,
+                                  "updated_at": datetime.now(timezone.utc).isoformat()}},
+                        upsert=True)
+                    pushed += 1
+                else:
+                    failed += 1
+                await _aio.sleep(0.25)  # Listings PATCH 5 rps — güvenli aralık
+        if pushed or failed or remaining:
+            await log_integration_event(
+                marketplace="amazon", action="stock_sync",
+                status="success" if not failed else "partial", direction="outbound",
+                message=(f"[cron] Amazon stok/fiyat CANLI: {pushed} gönderildi / {skipped} değişmedi"
+                         f" / {failed} hata" + (f" / {remaining} sonraki tura" if remaining else "")))
+    except Exception as e:
+        logger.exception(f"[scheduler] amazon stock sync failed: {e}")
 
 
 async def _run_hepsiburada_auto_stock_sync():
@@ -2511,15 +2604,27 @@ def start_scheduler():
         id="daily_stockout_alert",
         max_instances=1, coalesce=True,
     )
-    # Amazon SP-API — siparişleri panele otomatik çek (her 10 dk). Yapılandırılmamışsa
+    # Amazon SP-API — siparişleri panele otomatik çek (her 2 dk). Yapılandırılmamışsa
     # fonksiyon sessizce no-op. LastUpdatedAfter penceresi hem yeni siparişi hem iptal/kargo
     # durum değişimini yakalar; yeni MFN siparişte stok düşer, FBA'da düşmez.
     _add(
         _run_amazon_auto_orders_pull,
         "interval",
-        minutes=10,
+        minutes=2,
         id="amazon_orders_sync",
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=1),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Amazon SP-API — stok/fiyat CANLI push (her 2 dk). Yalnız stoğu DEĞİŞEN varyantları
+    # Amazon listing'ine yollar (rate-limit dostu). AMAZON_ALLOW_WRITE=0 iken dry-run (Amazon'a
+    # gitmez, ne gönderileceğini loglar); =1 iken canlı. Yapılandırılmamışsa sessiz no-op.
+    _add(
+        _run_amazon_auto_stock_sync,
+        "interval",
+        minutes=2,
+        id="amazon_stock_sync",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
         max_instances=1,
         coalesce=True,
     )

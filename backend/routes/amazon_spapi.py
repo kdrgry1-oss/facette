@@ -441,6 +441,37 @@ def map_amazon_order(o: dict, items: list) -> dict:
     }
 
 
+async def _amazon_push_stock_price(sku: str, quantity: int, price=None, currency: str = "TRY") -> dict:
+    """Tek Amazon SKU'su için stok (+opsiyonel fiyat) PATCH'ler — Listings Items 2021-08-01,
+    tek çağrıda fulfillment_availability + purchasable_offer. AMAZON_ALLOW_WRITE=0 iken dry-run
+    (Amazon'a GİTMEZ, would_send döner). Stok/fiyat senkron job'ı bunu kullanır."""
+    seller = await _require_seller_id()
+    _, _, mp = await get_valid_access_token()
+    try:
+        qty = max(0, int(quantity))
+    except Exception:
+        qty = 0
+    patches = [{
+        "op": "replace",
+        "path": "/attributes/fulfillment_availability",
+        "value": [{"fulfillment_channel_code": "DEFAULT", "quantity": qty}],
+    }]
+    try:
+        _pr = round(float(price), 2) if price is not None else 0
+    except Exception:
+        _pr = 0
+    if _pr > 0:
+        patches.append({
+            "op": "replace",
+            "path": "/attributes/purchasable_offer",
+            "value": [{"marketplace_id": mp, "currency": (currency or "TRY").upper(),
+                       "our_price": [{"schedule": [{"value_with_tax": _pr}]}]}],
+        })
+    body = {"productType": "PRODUCT", "patches": patches}
+    return await _spapi_send("PATCH", f"/listings/2021-08-01/items/{seller}/{sku}",
+                             body=body, params={"marketplaceIds": mp})
+
+
 # ============================== ENDPOINTS ==============================
 
 @router.get("/status")

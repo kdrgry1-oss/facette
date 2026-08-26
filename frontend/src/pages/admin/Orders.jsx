@@ -1380,6 +1380,8 @@ export default function AdminOrders({ unpaidView = false }) {
                           trendyol: { label: 'Trendyol', bg: 'bg-[#F27A1A]' },
                           hepsiburada: { label: 'Hepsiburada', bg: 'bg-[#FF6000]' },
                           temu: { label: 'Temu', bg: 'bg-[#FB7701]' },
+                          amazon: { label: 'Amazon', bg: 'bg-[#232F3E]' },
+                          n11: { label: 'n11', bg: 'bg-[#EA0029]' },
                         };
                         const m = map[p] || { label: 'Web', bg: 'bg-gray-800' };
                         return <span className={`inline-block px-2 py-0.5 ${m.bg} text-white text-[10px] uppercase font-bold tracking-wider rounded`}>{m.label}</span>;
