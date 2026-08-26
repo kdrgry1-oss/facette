@@ -127,6 +127,26 @@ export default function AmazonSpApi() {
     }
   };
 
+  // Amazon siparişlerini GERÇEKTEN panele (db.orders) çeker — otomatik cron ile aynı iş.
+  // Otomatik senkron her 10 dk çalışır; bu buton anında tetikler + doğrulama için özet döner.
+  const [pulling, setPulling] = useState(false);
+  const pullOrders = async () => {
+    setPulling(true);
+    try {
+      const r = await axios.post(`${API}/amazon/spapi/orders/pull?days=7`, {}, auth());
+      const s = r.data || {};
+      toast.success(
+        `Panele çekildi — +${s.imported || 0} yeni / ${s.updated || 0} güncellendi` +
+        (s.skipped ? ` / ${s.skipped} ertelendi` : "") +
+        (s.errors ? ` / ${s.errors} hata` : "")
+      );
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Panele çekme hatası");
+    } finally {
+      setPulling(false);
+    }
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto" data-testid="amazon-spapi-page">
       <div className="flex items-center justify-between mb-5">
@@ -228,6 +248,11 @@ export default function AmazonSpApi() {
           <button onClick={loadOrders} disabled={loadingOrders || !status?.connected} data-testid="amazon-orders-btn"
             className="inline-flex items-center gap-2 border px-4 py-2 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">
             <Package size={16} /> {loadingOrders ? "Çekiliyor..." : "Son Siparişler (30g)"}
+          </button>
+          <button onClick={pullOrders} disabled={pulling || !status?.connected} data-testid="amazon-orders-pull-btn"
+            title="Amazon siparişlerini panele (Siparişler) indirir. Otomatik senkron her 10 dk zaten çalışır."
+            className="inline-flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50">
+            <Package size={16} /> {pulling ? "Panele çekiliyor..." : "Siparişleri Panele Çek"}
           </button>
           <button onClick={loadStatus} className="inline-flex items-center gap-2 border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">
             <RefreshCw size={14} />

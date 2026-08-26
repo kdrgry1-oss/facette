@@ -249,6 +249,198 @@ async def _spapi_get(path: str, params: dict = None) -> dict:
         return {"status": r.status_code, "ok": _ok, "data": data}
 
 
+# ============================== SİPARİŞ İÇE-AKTARIM (panele düşürme) ==============================
+# NOT: Bu yol Amazon siparişlerini Facette paneline (db.orders) YAZAR — Trendyol/Hepsiburada
+# ile AYNI pazaryeri deseni. Pazaryeri siparişi ZATEN ödemeyi almış DIŞ sipariştir; panele
+# payment_method="marketplace", payment_status="paid", status="confirmed" (Amazon işlem
+# durumuna göre) düşer. Müşteri-yönlü iyzico ödeme akışı (CLAUDE.md değişmezleri) bundan
+# TAMAMEN AYRIDIR ve burada DEĞİŞMEZ. Alıcı adı/adresi (PII) yalnız Restricted Role onaylı +
+# AMAZON_ALLOW_RESTRICTED=1 iken RDT ile çekilir; kapalıyken sipariş kabuğu (PII'siz) düşer.
+
+
+def _amz_status_of(status_raw: str) -> str:
+    """Amazon OrderStatus -> Facette operasyonel durumu.
+    Canceled/Unfulfillable=iptal, Shipped=kargoya verildi, diğerleri=onaylandı.
+    (Amazon Orders API 'Delivered' döndürmez; teslim ayrı izlenir.)"""
+    s = status_raw or ""
+    if s in ("Canceled", "Cancelled", "Unfulfillable"):
+        return "cancelled"
+    if s == "Shipped":
+        return "shipped"
+    return "confirmed"
+
+
+async def _get_restricted_data_token(order_id: str) -> Optional[str]:
+    """Sipariş PII'si (buyerInfo + shippingAddress) için Restricted Data Token (RDT) alır.
+    AMAZON_ALLOW_RESTRICTED=0 iken None döner → PII çekilmez (yalnız sipariş kabuğu).
+    Amazon Restricted Role onayı + env flag gerekir."""
+    if not RESTRICTED_ALLOWED:
+        return None
+    try:
+        access_token, endpoint, _ = await get_valid_access_token()
+        body = {"restrictedResources": [{
+            "method": "GET",
+            "path": f"/orders/v0/orders/{order_id}",
+            "dataElements": ["buyerInfo", "shippingAddress"],
+        }]}
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(
+                f"{endpoint}/tokens/2021-03-01/restrictedDataToken",
+                json=body,
+                headers={"x-amz-access-token": access_token,
+                         "content-type": "application/json", "accept": "application/json"},
+            )
+        await _log_spapi_call("POST /tokens/restrictedDataToken", r.status_code, 200 <= r.status_code < 300)
+        if r.status_code // 100 != 2:
+            return None
+        return (r.json() or {}).get("restrictedDataToken")
+    except Exception:
+        return None
+
+
+async def _fetch_amazon_order_full(order_id: str) -> dict:
+    """Tek siparişi çeker. RDT alınabildiyse (Restricted açık) yanıt alıcı adı/adresini
+    İÇERİR ve KORUNUR; RDT yoksa Amazon PII döndürmez → defense-in-depth scrub uygulanır.
+    Döner: Orders API 'payload' (tek sipariş objesi) veya {}."""
+    access_token, endpoint, _ = await get_valid_access_token()
+    rdt = await _get_restricted_data_token(order_id)
+    token = rdt or access_token
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.get(
+                f"{endpoint}/orders/v0/orders/{order_id}",
+                headers={"x-amz-access-token": token, "accept": "application/json"},
+            )
+        _ok = 200 <= r.status_code < 300
+        await _log_spapi_call(f"GET /orders/v0/orders/{order_id}", r.status_code, _ok)
+        try:
+            payload = (r.json() or {}).get("payload") or {}
+        except Exception:
+            payload = {}
+        if not rdt:
+            # RDT yoksa beklenmedik PII saklanmadan/loglanmadan SÖKÜLÜR (§1).
+            payload = _scrub_pii(payload)
+        return payload
+    except Exception:
+        return {}
+
+
+async def _fetch_amazon_order_items(order_id: str) -> list:
+    """Sipariş kalemleri (SellerSKU/ASIN/adet/fiyat). PII'siz — RDT gerekmez."""
+    items, next_token = [], None
+    for _ in range(10):
+        params = {"NextToken": next_token} if next_token else {}
+        res = await _spapi_get(f"/orders/v0/orders/{order_id}/orderItems", params)
+        if not res["ok"]:
+            break
+        payload = res["data"].get("payload") or {}
+        items.extend(payload.get("OrderItems") or [])
+        next_token = payload.get("NextToken")
+        if not next_token:
+            break
+    return items
+
+
+def _amz_addr(node: dict, fallback_name: str, email: str) -> dict:
+    """Amazon ShippingAddress -> Facette adres bloğu. Ad 'Name' tek alandır → ilk/soyad ayrılır."""
+    node = node or {}
+    full_name = (node.get("Name") or fallback_name or "").strip()
+    parts = full_name.split(" ", 1) if full_name else []
+    first = (parts[0] if parts else "") or "Amazon"
+    last = (parts[1] if len(parts) > 1 else "") or "Müşterisi"
+    addr_line = " ".join([x for x in [node.get("AddressLine1"), node.get("AddressLine2"),
+                                      node.get("AddressLine3")] if x]).strip()
+    return {
+        "first_name": first,
+        "last_name": last,
+        "phone": node.get("Phone", "") or "",
+        "email": email or "",
+        "address": addr_line,
+        "city": node.get("City", "") or "",
+        "district": node.get("County") or node.get("District") or node.get("StateOrRegion", "") or "",
+        "country": node.get("CountryCode", "") or "",
+        "postal_code": node.get("PostalCode", "") or "",
+    }
+
+
+def map_amazon_order(o: dict, items: list) -> dict:
+    """Amazon Orders API sipariş + kalemlerini Facette db.orders şemasına eşler
+    (map_trendyol_order deseniyle hizalı)."""
+    from datetime import datetime, timezone
+    order_id = o.get("AmazonOrderId")
+    total_node = o.get("OrderTotal") or {}
+    buyer = o.get("BuyerInfo") or {}
+    ship = o.get("ShippingAddress") or {}
+    buyer_email = buyer.get("BuyerEmail", "") or ""
+    buyer_name = buyer.get("BuyerName", "") or ""
+
+    mapped_items, subtotal = [], 0.0
+    for it in (items or []):
+        try:
+            qty = int(it.get("QuantityOrdered") or 1) or 1
+        except Exception:
+            qty = 1
+        try:
+            line_amt = float((it.get("ItemPrice") or {}).get("Amount") or 0)
+        except Exception:
+            line_amt = 0.0
+        unit = round(line_amt / qty, 2) if qty else line_amt
+        sku = it.get("SellerSKU") or ""
+        mapped_items.append({
+            "product_id": sku,
+            "product_name": it.get("Title", "") or "",
+            "quantity": qty,
+            "unit_price": unit,
+            "discount_amount": 0,
+            "price": unit,
+            "size": "",
+            "color": "",
+            "barcode": sku,   # Facette stok eşlemesi variants.barcode ile yapılır
+            "sku": sku,
+            "asin": it.get("ASIN", "") or "",
+            "currency": (it.get("ItemPrice") or {}).get("CurrencyCode") or "TRY",
+        })
+        subtotal += line_amt
+
+    try:
+        total_amt = float(total_node.get("Amount") or 0) or round(subtotal, 2)
+    except Exception:
+        total_amt = round(subtotal, 2)
+
+    ship_addr = _amz_addr(ship, buyer_name, buyer_email)
+    status_raw = o.get("OrderStatus") or ""
+
+    return {
+        "order_number": str(order_id),
+        "platform": "amazon",
+        "amazon_order_id": order_id,
+        "user_id": None,
+        "items": mapped_items,
+        "shipping_address": ship_addr,
+        "billing_address": {**ship_addr, "company_name": "", "tax_number": "",
+                            "tax_office": "", "is_corporate": False},
+        "billing_info": {"is_corporate": False, "company_name": "", "tax_number": "",
+                         "tax_office": "", "e_invoice_user": False},
+        "subtotal": round(subtotal, 2) if subtotal else total_amt,
+        "shipping_cost": 0,
+        "discount_amount": 0,
+        "total": total_amt,
+        "payment_method": "marketplace",
+        "payment_status": "paid",
+        "status": _amz_status_of(status_raw),
+        "marketplace_status": status_raw,
+        "fulfillment_channel": o.get("FulfillmentChannel", "") or "",  # AFN=FBA(Amazon kargolar) / MFN=satıcı
+        "is_prime": bool(o.get("IsPrime")),
+        "is_business_order": bool(o.get("IsBusinessOrder")),
+        "sales_channel": o.get("SalesChannel", "") or "",
+        "amazon_currency": total_node.get("CurrencyCode", "") or "",
+        "marketplace_order_date": o.get("PurchaseDate", "") or "",
+        "marketplace_last_modified": o.get("LastUpdateDate", "") or "",
+        "cargo_tracking_number": "",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # ============================== ENDPOINTS ==============================
 
 @router.get("/status")
@@ -357,6 +549,19 @@ async def spapi_orders(
             "fulfillment": o.get("FulfillmentChannel"),
         } for o in orders],
     }
+
+
+@router.post("/orders/pull")
+async def spapi_pull_orders_now(
+    days: int = Query(3, ge=1, le=30),
+    current_user: dict = Depends(require_admin),
+):
+    """Amazon siparişlerini ŞİMDİ panele çeker (manuel tetik). Otomatik cron ile AYNI
+    mantığı kullanır: son `days` gün LastUpdatedAfter penceresi → yeni sipariş insert +
+    iptal/kargo durum güncelle. Yeni siparişte (MFN) stok düşülür, FBA'da düşülmez."""
+    from scheduler import _run_amazon_auto_orders_pull  # yerel import — döngü önleme
+    res = await _run_amazon_auto_orders_pull(lookback_days=days)
+    return {"success": True, **(res or {})}
 
 
 # ============================== STOK / FİYAT / LISTING (yazma) ==============================

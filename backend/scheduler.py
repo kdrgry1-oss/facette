@@ -740,6 +740,149 @@ async def _run_hepsiburada_auto_orders_pull():
         logger.exception(f"[scheduler] hepsiburada auto orders pull failed: {e}")
 
 
+async def _update_existing_amazon_order(_db, existing, new_status, status_raw, o, number):
+    """Mevcut Amazon siparişini günceller — YALNIZ durum + pazaryeri meta alanları (kalem/adres
+    EZİLMEZ; onlar ilk insert'te PII ile yazıldı). İptal edilmiş sipariş geri açılmaz.
+    confirmed/shipped→cancelled geçişinde, sipariş DAHA ÖNCE stok DÜŞÜLMÜŞSE (MFN) idempotent
+    stok iadesi yapılır; FBA'da (hiç düşülmedi) iade EDİLMEZ (hayalet stok önlenir)."""
+    _prev = existing.get("status")
+    _set = {
+        "marketplace_status": status_raw,
+        "marketplace_last_modified": o.get("LastUpdateDate", "") or "",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if _prev == "cancelled":
+        # Terminal iptal önceliklidir — durumu değiştirme, yalnız meta tazele.
+        await _db.orders.update_one({"_id": existing["_id"]}, {"$set": _set})
+        return False
+    _flip_cancel = (new_status == "cancelled" and _prev != "cancelled")
+    if new_status and new_status != _prev:
+        _set["status"] = new_status
+        if new_status == "cancelled":
+            _set["cancel_source"] = "amazon"
+    await _db.orders.update_one({"_id": existing["_id"]}, {"$set": _set})
+    if _flip_cancel and existing.get("id"):
+        try:
+            from routes.orders import _stock_delta_for_order, _RESTORE_MOVE_TYPES
+            _already = await _db.stock_movements.find_one(
+                {"$or": [{"order_id": existing.get("id")}, {"order_number": number}],
+                 "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1})
+            # Yalnız stok DÜŞÜLMÜŞSE (MFN, order_imported hareketi var) geri ekle.
+            _decremented = await _db.stock_movements.find_one(
+                {"order_id": existing.get("id"), "type": "order_imported"}, {"_id": 1})
+            if not _already and _decremented:
+                _moves = await _stock_delta_for_order(existing, +1)
+                await _db.stock_movements.insert_one({
+                    "id": str(uuid.uuid4()), "type": "order_cancelled",
+                    "order_id": existing.get("id"), "order_number": number,
+                    "items": _moves, "source": "amazon_auto_pull_cancel",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception as _re:
+            logger.error(f"[cron] Amazon iptal restock {number}: {_re}")
+    return _flip_cancel
+
+
+async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
+    """Scheduler / manuel tetik — Amazon SP-API siparişlerini panele (db.orders) çeker.
+    Trendyol/Hepsiburada akışıyla AYNI: son `lookback_days` gün LastUpdatedAfter penceresini
+    tara, YENİ siparişi (PII + kalemlerle) insert et, mevcut siparişte iptal/kargo durumunu
+    yansıt. YENİ MFN siparişte stok düşülür; FBA'da (Amazon deposu) düşülmez.
+    Amazon yapılandırılmamışsa sessizce no-op. Döner: {imported, updated, skipped, errors}."""
+    import asyncio as _aio
+    from datetime import datetime as _dt, timedelta as _td
+    from routes.marketplace_hub import log_integration_event
+    summary = {"imported": 0, "updated": 0, "skipped": 0, "errors": 0}
+    try:
+        from routes.amazon_spapi import (
+            _get_config, get_valid_access_token, _spapi_get,
+            map_amazon_order, _fetch_amazon_order_items, _fetch_amazon_order_full,
+            _amz_status_of, RESTRICTED_ALLOWED,
+        )
+        cfg = await _get_config()
+        if not cfg or not cfg.get("refresh_token_enc"):
+            return summary  # bağlı değil → sessiz
+        from routes.deps import db as _db, generate_id
+
+        _, _, marketplace_id = await get_valid_access_token()
+        updated_after = (_dt.now(timezone.utc) - _td(days=max(1, int(lookback_days)))
+                         ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # LastUpdatedAfter → hem YENİ hem DURUMU DEĞİŞEN (iptal/kargo) siparişleri getirir.
+        orders_raw, next_token, _pages = [], None, 0
+        while _pages < 30:
+            if next_token:
+                params = {"MarketplaceIds": marketplace_id, "NextToken": next_token}
+            else:
+                params = {"MarketplaceIds": marketplace_id, "LastUpdatedAfter": updated_after}
+            res = await _spapi_get("/orders/v0/orders", params)
+            if not res["ok"]:
+                await log_integration_event(
+                    marketplace="amazon", action="order_pull", status="failed",
+                    direction="inbound",
+                    message=f"[cron] Amazon getOrders HTTP {res['status']}: {res.get('data')}")
+                break
+            payload = res["data"].get("payload") or {}
+            orders_raw.extend(payload.get("Orders") or [])
+            next_token = payload.get("NextToken")
+            _pages += 1
+            if not next_token:
+                break
+            await _aio.sleep(0.7)  # getOrders rate limiti (düşük) — sayfalar arası nefes
+
+        for o in orders_raw:
+            try:
+                oid = str(o.get("AmazonOrderId") or "")
+                if not oid:
+                    continue
+                status_raw = o.get("OrderStatus") or ""
+                new_status = _amz_status_of(status_raw)
+                existing = await _db.orders.find_one({"order_number": oid, "platform": "amazon"})
+                if existing:
+                    await _update_existing_amazon_order(_db, existing, new_status, status_raw, o, oid)
+                    summary["updated"] += 1
+                    continue
+                # YENİ sipariş → PII (RDT) + kalemleri çek.
+                full = await _fetch_amazon_order_full(oid)
+                # Restricted açıkken adres beklenir; gelmediyse (geçici/rate-limit) BU TURDA ATLA →
+                # sonraki tur (LastUpdatedAfter penceresi hâlâ kapsar) PII ile tekrar dener.
+                if RESTRICTED_ALLOWED and not (full or {}).get("ShippingAddress"):
+                    summary["skipped"] += 1
+                    await _aio.sleep(0.3)
+                    continue
+                items = await _fetch_amazon_order_items(oid)
+                data = map_amazon_order(full or o, items)
+                data["id"] = generate_id()
+                # created_at = GERÇEK sipariş tarihi (PurchaseDate) — aylık pazaryeri sayımı doğru.
+                data["created_at"] = data.get("marketplace_order_date") or datetime.now(timezone.utc).isoformat()
+                await _db.orders.insert_one(data)
+                summary["imported"] += 1
+                # Stok: yalnız MFN (satıcı kargolar) + iptal/iade DEĞİLSE düş. FBA stoğu Amazon'da.
+                if data.get("status") not in ("cancelled", "returned") and data.get("fulfillment_channel") != "AFN":
+                    from routes.integrations import _decrement_stock_for_imported_order
+                    await _decrement_stock_for_imported_order(data, "amazon")
+                await _aio.sleep(0.4)  # per-sipariş getOrder/RDT/getOrderItems rate limiti
+            except Exception as _ex:
+                summary["errors"] += 1
+                logger.error(f"[cron] Amazon order import {o.get('AmazonOrderId')}: {_ex}")
+
+        if summary["imported"] or summary["updated"] or summary["skipped"]:
+            await log_integration_event(
+                marketplace="amazon", action="order_pull", status="success",
+                direction="inbound",
+                message=(f"[cron] Amazon: +{summary['imported']} yeni / {summary['updated']} güncellendi"
+                         f" / {summary['skipped']} ertelendi / {summary['errors']} hata"))
+        return summary
+    except Exception as e:
+        try:
+            await log_integration_event(
+                marketplace="amazon", action="order_pull", status="failed",
+                direction="inbound", message=f"[cron] Amazon sipariş çekme hatası: {e}")
+        except Exception:
+            pass
+        logger.exception(f"[scheduler] amazon auto orders pull failed: {e}")
+        return summary
+
+
 async def _run_hepsiburada_auto_stock_sync():
     """Scheduler — Hepsiburada stok/fiyat senkronu (Trendyol akışıyla simetrik).
     Tüm aktif ürünlerin güncel stok+fiyatını HB listing'ine gönderir.
@@ -2353,6 +2496,18 @@ def start_scheduler():
         CronTrigger(hour=9, minute=0),
         id="daily_stockout_alert",
         max_instances=1, coalesce=True,
+    )
+    # Amazon SP-API — siparişleri panele otomatik çek (her 10 dk). Yapılandırılmamışsa
+    # fonksiyon sessizce no-op. LastUpdatedAfter penceresi hem yeni siparişi hem iptal/kargo
+    # durum değişimini yakalar; yeni MFN siparişte stok düşer, FBA'da düşmez.
+    _add(
+        _run_amazon_auto_orders_pull,
+        "interval",
+        minutes=10,
+        id="amazon_orders_sync",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
+        max_instances=1,
+        coalesce=True,
     )
     # Amazon DPP — PII saklama süresi dolan siparişlerde kişisel verileri anonimleştir
     # (her gün 03:00 UTC). Amazon "Restricted" rol uyumu için kritik kontrol.
