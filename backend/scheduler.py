@@ -933,39 +933,59 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
         return summary
 
 
-async def _run_amazon_auto_stock_sync():
+async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=False):
     """Scheduler / manuel — Amazon stok+fiyat CANLI push (Trendyol/HB ile simetrik).
-    Amazon SellerSKU = Facette variant.stock_code (yoksa barcode). YALNIZ stoğu/fiyatı DEĞİŞEN
-    varyantı yollar (amazon_sku_state ile değişiklik tespiti) → 2 dk'lık cadence rate-limit dostu.
-    AMAZON_ALLOW_WRITE=0 iken dry-run: gerçek push YAPILMAZ, yalnız kaç SKU gönderileceği loglanır
-    (state güncellenmez → flag açılınca ilk turda gerçek gönderim başlar). Yapılandırılmamışsa no-op."""
+    Amazon SellerSKU = Facette variant.stock_code (yoksa barcode). Otomatik turda YALNIZ stoğu/
+    fiyatı DEĞİŞEN varyantı yollar (amazon_sku_state değişiklik tespiti). Manuel tetik `barcodes`/
+    `stock_codes` filtresi verirse yalnız o varyantları, `force=True` ile değişiklik tespitini
+    ATLAYARAK yollar. AMAZON_ALLOW_WRITE=0 iken dry-run. Döner: özet dict."""
     import asyncio as _aio
     from routes.marketplace_hub import log_integration_event
+    summary = {"mode": "live", "pushed": 0, "skipped": 0, "failed": 0, "remaining": 0,
+               "candidates": 0, "dry_run": False}
     try:
         from routes.amazon_spapi import _get_config, _amazon_push_stock_price, ALLOW_WRITE
         cfg = await _get_config()
         if not cfg or not cfg.get("refresh_token_enc") or not cfg.get("selling_partner_id"):
-            return  # bağlı/OAuth değil → sessiz
+            summary["error"] = "Amazon bağlı değil (OAuth/refresh token yok)."
+            return summary
         from routes.deps import db as _db
         products = await _db.products.find({"is_active": True}, {"_id": 0}).to_list(length=None)
 
-        # SKU'su olan varyant sayısı — dry-run özeti için.
+        _bset = {str(x).strip() for x in (barcodes or []) if str(x).strip()}
+        _sset = {str(x).strip() for x in (stock_codes or []) if str(x).strip()}
+        _filtered = bool(_bset or _sset)
+
         def _sku_of(v):
             return (str(v.get("stock_code") or "").strip() or str(v.get("barcode") or "").strip())
 
+        def _in_target(v):
+            if not _filtered:
+                return True
+            return (str(v.get("barcode") or "").strip() in _bset
+                    or str(v.get("stock_code") or "").strip() in _sset)
+
+        summary["candidates"] = sum(1 for p in products for v in (p.get("variants") or [])
+                                    if _sku_of(v) and _in_target(v))
+
         if not ALLOW_WRITE:
-            _cnt = sum(1 for p in products for v in (p.get("variants") or []) if _sku_of(v))
+            summary["dry_run"] = True
+            summary["mode"] = "dry_run"
+            summary["message"] = (f"DRY-RUN: {summary['candidates']} SKU gönderilmeye hazır. "
+                                  f"Canlı göndermek için AMAZON_ALLOW_WRITE=1.")
             await log_integration_event(
                 marketplace="amazon", action="stock_sync", status="success", direction="outbound",
-                message=(f"[cron] Amazon stok/fiyat DRY-RUN: {_cnt} SKU gönderilmeye hazır. Canlı "
-                         f"göndermek için AMAZON_ALLOW_WRITE=1 yapın."))
-            return
+                message=f"[amazon] stok/fiyat DRY-RUN: {summary['candidates']} SKU hazır.")
+            return summary
 
         pushed = skipped = failed = remaining = 0
-        _CAP = 40  # tur başına gerçek push tavanı (rate-limit + ilk seed'i yayma)
+        _CAP = 500 if _filtered else 40  # otomatik tur seed'i yayar; manuel filtrede tümü
+        _force = force or _filtered
         for p in products:
             price = p.get("price") or p.get("sale_price") or p.get("discounted_price") or 0
             for v in (p.get("variants") or []):
+                if not _in_target(v):
+                    continue
                 sku = _sku_of(v)
                 if not sku:
                     continue
@@ -977,10 +997,11 @@ async def _run_amazon_auto_stock_sync():
                     pr = round(float(price or 0), 2)
                 except Exception:
                     pr = 0
-                st = await _db.amazon_sku_state.find_one({"sku": sku}, {"_id": 0})
-                if st and st.get("qty") == qty and st.get("price") == pr:
-                    skipped += 1
-                    continue
+                if not _force:
+                    st = await _db.amazon_sku_state.find_one({"sku": sku}, {"_id": 0})
+                    if st and st.get("qty") == qty and st.get("price") == pr:
+                        skipped += 1
+                        continue
                 if pushed >= _CAP:
                     remaining += 1
                     continue
@@ -988,7 +1009,7 @@ async def _run_amazon_auto_stock_sync():
                     res = await _amazon_push_stock_price(sku, qty, pr)
                 except Exception as _pe:
                     failed += 1
-                    logger.error(f"[cron] Amazon stok push {sku}: {_pe}")
+                    logger.error(f"[amazon] stok push {sku}: {_pe}")
                     continue
                 if res.get("ok"):
                     await _db.amazon_sku_state.update_one(
@@ -1000,14 +1021,19 @@ async def _run_amazon_auto_stock_sync():
                 else:
                     failed += 1
                 await _aio.sleep(0.25)  # Listings PATCH 5 rps — güvenli aralık
+        summary.update({"pushed": pushed, "skipped": skipped, "failed": failed, "remaining": remaining})
+        summary["message"] = (f"{pushed} gönderildi / {skipped} değişmedi / {failed} hata"
+                              + (f" / {remaining} sonraki tura" if remaining else ""))
         if pushed or failed or remaining:
             await log_integration_event(
                 marketplace="amazon", action="stock_sync",
                 status="success" if not failed else "partial", direction="outbound",
-                message=(f"[cron] Amazon stok/fiyat CANLI: {pushed} gönderildi / {skipped} değişmedi"
-                         f" / {failed} hata" + (f" / {remaining} sonraki tura" if remaining else "")))
+                message=f"[amazon] stok/fiyat CANLI: {summary['message']}")
+        return summary
     except Exception as e:
         logger.exception(f"[scheduler] amazon stock sync failed: {e}")
+        summary["error"] = str(e)
+        return summary
 
 
 async def _run_hepsiburada_auto_stock_sync():

@@ -19,7 +19,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  * Görünüm: sade (stone) tema — nötr gri + tek koyu vurgu (stone-900).
  * İşlev birebir korunur; yalnız stil minimalist hale getirildi.
  */
-const SUPPORTED = ["trendyol", "hepsiburada"];
+const SUPPORTED = ["trendyol", "hepsiburada", "amazon-tr"];
 
 export default function StockPriceUpdatePanel({ marketplace, auth }) {
   const [loading, setLoading] = useState(false);

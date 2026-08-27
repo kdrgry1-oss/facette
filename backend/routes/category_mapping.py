@@ -813,6 +813,21 @@ async def search_marketplace_categories(
         rows.sort(key=lambda c: (not c["leaf"], len(c["full_path"] or "")))
         return {"items": rows, "count": len(rows)}
 
+    if marketplace.startswith("amazon"):
+        # Amazon'da "kategori" = productType (Product Type Definitions API). q ile arama.
+        if (mode or "flat").lower() == "tree":
+            return {"tree": [], "hint": "Amazon için liste (arama) görünümünü kullanın."}
+        try:
+            from .amazon_spapi import _amazon_search_product_types
+            pts = await _amazon_search_product_types((q or "").strip())
+        except Exception as e:
+            return {"items": [], "hint": f"Amazon productType çekilemedi (bağlantı/rol?): {e}"}
+        rows = [{"id": pt["name"], "name": pt.get("displayName") or pt["name"],
+                 "full_path": pt.get("displayName") or pt["name"], "leaf": True}
+                for pt in pts if pt.get("name")]
+        return {"items": rows[:max(1, min(500, int(limit)))], "count": len(rows),
+                "hint": "Amazon'da kategori yerine ürün tipi (productType) seçilir."}
+
     if marketplace != "trendyol":
         return {"items": [], "tree": [], "hint": f"{marketplace} için kategori cache yok, manuel ID girin"}
 
@@ -2125,6 +2140,25 @@ async def get_advanced_attributes(
             "attribute_mappings": mapping.get("attribute_mappings", []),
             "default_mappings": mapping.get("default_mappings", {}),
             "value_mappings": mapping.get("value_mappings", {}),
+        }
+
+    if marketplace.startswith("amazon"):
+        # Amazon: mp_cat_id = productType adı. LISTING zorunlu/opsiyonel attribute şeması.
+        try:
+            from .amazon_spapi import _amazon_product_type_schema
+            sch = await _amazon_product_type_schema(str(mp_cat_id))
+        except Exception as e:
+            sch = {"required": [], "optional": [], "error": str(e)}
+        _attrs = ([{"id": a, "name": a, "required": True} for a in (sch.get("required") or [])]
+                  + [{"id": a, "name": a, "required": False} for a in (sch.get("optional") or [])])
+        return {
+            "attributes": _attrs,
+            "attribute_mappings": mapping.get("attribute_mappings", []),
+            "default_mappings": mapping.get("default_mappings", {}),
+            "value_mappings": mapping.get("value_mappings", {}),
+            "hint": ("Amazon productType zorunlu (kırmızı) + opsiyonel alanları. Listeleme için "
+                     "zorunlu alanlar Facette ürün alanlarından otomatik doldurulur; eksikleri "
+                     "Amazon aktarım sonucu (issues) gösterir."),
         }
 
     # Diğer MP'ler — yerel cache (varsa) veya boş + hint

@@ -743,6 +743,9 @@ api_router.include_router(iyzico_router, prefix="/integrations")
 api_router.include_router(dogan_router, prefix="/integrations")
 # Trendyol Q&A + Reviews — Iter37 refactor: catch-all'dan ÖNCE
 api_router.include_router(trendyol_qna_router, prefix="/integrations")
+# Amazon entegrasyon uçları (amazon-tr/products/*) — catch-all /{marketplace}'den ÖNCE
+from routes.integrations_amazon import router as integrations_amazon_router
+api_router.include_router(integrations_amazon_router, prefix="/integrations")
 api_router.include_router(integrations_router, prefix="/integrations")
 api_router.include_router(integrations_temu_router, prefix="/integrations")
 api_router.include_router(trendyol_retry_queue_router)

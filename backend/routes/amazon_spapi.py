@@ -24,7 +24,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Body
 from fastapi.responses import RedirectResponse
 
 from .deps import db, logger, require_admin
@@ -566,6 +566,218 @@ async def _amazon_push_stock_price(sku: str, quantity: int, price=None, currency
                              body=body, params={"marketplaceIds": mp})
 
 
+# ============================== ÜRÜN LİSTELEME (Amazon'a aktarma) ==============================
+# Amazon'da "kategori" yerine PRODUCT TYPE vardır (Product Type Definitions API). Facette
+# kategorisi → Amazon productType eşlemesi category_mappings (marketplace="amazon-tr") içinde
+# default_mappings.product_type olarak saklanır. Listeleme: Listings Items 2021-08-01 PUT.
+# ALLOW_WRITE=0 iken dry-run (would_send) — canlı yazma AMAZON_ALLOW_WRITE=1 ile.
+
+async def _amazon_search_product_types(keywords: str = "") -> list:
+    """Amazon productType arama (Definitions API). Kategori sayfasında 'kategori' seçimi için."""
+    _, _, mp = await get_valid_access_token()
+    params = {"marketplaceIds": mp}
+    if keywords:
+        params["keywords"] = keywords
+    res = await _spapi_get("/definitions/2020-09-01/productTypes", params)
+    out = []
+    if res["ok"]:
+        for pt in ((res["data"] or {}).get("productTypes") or []):
+            out.append({"name": pt.get("name"), "displayName": pt.get("displayName") or pt.get("name")})
+    return out
+
+
+async def _amazon_product_type_schema(product_type: str) -> dict:
+    """productType'ın LISTING zorunlu/opsiyonel attribute şemasını çeker + cache'ler
+    (amazon_pt_schema). Kategori sayfası 'gelişmiş özellikler' için."""
+    product_type = (product_type or "").strip()
+    if not product_type:
+        return {}
+    try:
+        cached = await db.amazon_pt_schema.find_one({"product_type": product_type}, {"_id": 0})
+        if cached and cached.get("required") is not None:
+            return cached
+    except Exception:
+        pass
+    _, _, mp = await get_valid_access_token()
+    res = await _spapi_get(f"/definitions/2020-09-01/productTypes/{product_type}",
+                           {"marketplaceIds": mp, "requirements": "LISTING", "locale": "tr_TR"})
+    required, optional = [], []
+    if res["ok"]:
+        schema_node = ((res["data"] or {}).get("schema") or {})
+        props = schema_node.get("properties") or {}
+        req_set = set(schema_node.get("required") or [])
+        # Amazon şema çoğunlukla harici (imzalı) link'te döner — inline değilse onu çek.
+        link = (schema_node.get("link") or {}).get("resource")
+        if not props and link:
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    r = await client.get(link)
+                if r.status_code == 200:
+                    js = r.json()
+                    props = js.get("properties") or {}
+                    req_set = set(js.get("required") or [])
+            except Exception:
+                pass
+        for k in props.keys():
+            (required if k in req_set else optional).append(k)
+        if not props:
+            required = list(req_set)
+    doc = {"product_type": product_type, "required": required, "optional": optional,
+           "updated_at": _now_iso()}
+    try:
+        await db.amazon_pt_schema.update_one({"product_type": product_type},
+                                             {"$set": doc}, upsert=True)
+    except Exception:
+        pass
+    return doc
+
+
+def _product_images(product: dict) -> list:
+    urls = []
+    for im in (product.get("images") or []):
+        if isinstance(im, str) and im.startswith("http"):
+            urls.append(im)
+        elif isinstance(im, dict):
+            u = im.get("url") or im.get("src") or im.get("image")
+            if u and str(u).startswith("http"):
+                urls.append(u)
+    for k in ("image", "main_image"):
+        u = product.get(k)
+        if u and str(u).startswith("http") and u not in urls:
+            urls.insert(0, u)
+    return list(dict.fromkeys(urls))[:6]
+
+
+def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, brand_default) -> dict:
+    """Facette ürün+varyant → Amazon Listings attribute'ları (giyim odaklı ortak set).
+    Eksik/zorunlu alanları Amazon PUT yanıtındaki issues[] söyler → çağıran gösterir."""
+    name = (product.get("name") or "").strip()
+    desc = (product.get("description") or name or "").strip()
+    imgs = _product_images(product)
+    barcode = str(variant.get("barcode") or "").strip()
+    brand = (product.get("brand") or brand_default or "").strip() or "Facette"
+    bullets = []
+    for b in (product.get("features") or product.get("bullet_points") or []):
+        if isinstance(b, str) and b.strip():
+            bullets.append(b.strip())
+    if not bullets and desc:
+        bullets = [desc[:200]]
+    attrs = {
+        "condition_type": [{"value": "new_new", "marketplace_id": mp}],
+        "item_name": [{"value": name, "language_tag": "tr_TR", "marketplace_id": mp}],
+        "brand": [{"value": brand, "marketplace_id": mp}],
+        "product_description": [{"value": desc, "language_tag": "tr_TR", "marketplace_id": mp}],
+        "fulfillment_availability": [{"fulfillment_channel_code": "DEFAULT", "quantity": max(0, int(qty))}],
+        "purchasable_offer": [{"marketplace_id": mp, "currency": "TRY",
+                               "our_price": [{"schedule": [{"value_with_tax": round(float(price or 0), 2)}]}]}],
+    }
+    if bullets:
+        attrs["bullet_point"] = [{"value": b, "language_tag": "tr_TR", "marketplace_id": mp} for b in bullets[:5]]
+    if imgs:
+        attrs["main_product_image_locator"] = [{"media_location": imgs[0], "marketplace_id": mp}]
+        for i, u in enumerate(imgs[1:5]):
+            attrs[f"other_product_image_locator_{i+1}"] = [{"media_location": u, "marketplace_id": mp}]
+    if barcode:
+        attrs["externally_assigned_product_identifier"] = [
+            {"value": barcode, "type": "ean", "marketplace_id": mp}]
+    if variant.get("size"):
+        attrs["size"] = [{"value": str(variant["size"]), "marketplace_id": mp}]
+    if variant.get("color"):
+        attrs["color"] = [{"value": str(variant["color"]), "marketplace_id": mp}]
+    return attrs
+
+
+async def _resolve_amazon_product_type(product: dict) -> str:
+    """Ürün için Amazon productType çöz: (1) product.amazon_product_type,
+    (2) category_mappings[amazon-tr] default_mappings.product_type (kategori bazında)."""
+    pt = (product.get("amazon_product_type") or "").strip()
+    if pt:
+        return pt
+    cat_id = product.get("category_id") or product.get("category")
+    if cat_id:
+        m = await db.category_mappings.find_one(
+            {"marketplace": "amazon-tr", "category_id": str(cat_id)}, {"_id": 0})
+        if m:
+            return ((m.get("default_mappings") or {}).get("product_type")
+                    or m.get("product_type") or "").strip()
+    return ""
+
+
+async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
+    """Facette ürünlerini Amazon'a LİSTELER (Listings Items PUT). payload:
+      { barcodes?, stock_codes?, product_ids?, default_product_type?, limit? }
+    Güvenlik: filtre VERİLMEDEN tüm katalog listelenmez (kaza önleme) — limit zorunlu değilse
+    yalnız filtreli çalışır. ALLOW_WRITE=0 iken dry-run (Amazon'a gitmez, would_send + attribute
+    önizleme döner). Her SKU için Amazon issues[] toplanır (zorunlu alan eksikleri görünür)."""
+    payload = payload or {}
+    seller = await _require_seller_id()
+    _, _, mp = await get_valid_access_token()
+
+    _bset = {str(x).strip() for x in (payload.get("barcodes") or []) if str(x).strip()}
+    _sset = {str(x).strip() for x in (payload.get("stock_codes") or []) if str(x).strip()}
+    _pset = {str(x).strip() for x in (payload.get("product_ids") or []) if str(x).strip()}
+    default_pt = (payload.get("default_product_type") or "").strip()
+    limit = int(payload.get("limit") or 0)
+    _filtered = bool(_bset or _sset or _pset)
+    if not _filtered and limit <= 0:
+        raise HTTPException(status_code=400,
+                            detail="Güvenlik: filtre (barcodes/stock_codes/product_ids) veya limit verin. "
+                                   "Tüm katalog tek seferde listelenmez.")
+
+    q = {"is_active": True}
+    if _pset:
+        q["id"] = {"$in": list(_pset)}
+    products = await db.products.find(q, {"_id": 0}).to_list(length=(limit or None))
+
+    results = []
+    pushed = failed = skipped = 0
+    for p in products:
+        pt = await _resolve_amazon_product_type(p) or default_pt
+        price = p.get("price") or p.get("sale_price") or p.get("discounted_price") or 0
+        for v in (p.get("variants") or []):
+            bc = str(v.get("barcode") or "").strip()
+            sc = str(v.get("stock_code") or "").strip()
+            if _filtered and not (bc in _bset or sc in _sset or str(p.get("id")) in _pset):
+                continue
+            sku = sc or bc
+            if not sku:
+                skipped += 1
+                continue
+            if not pt:
+                results.append({"sku": sku, "product": p.get("name"), "ok": False,
+                                "error": "Amazon productType yok (kategori eşleştir ya da default_product_type ver)."})
+                failed += 1
+                continue
+            attrs = _amazon_listing_attributes(p, v, pt, mp, price, int(v.get("stock") or 0),
+                                               p.get("brand"))
+            body = {"productType": pt, "requirements": "LISTING", "attributes": attrs}
+            try:
+                res = await _spapi_send("PUT", f"/listings/2021-08-01/items/{seller}/{sku}",
+                                        body=body, params={"marketplaceIds": mp})
+            except Exception as _e:
+                results.append({"sku": sku, "product": p.get("name"), "ok": False, "error": str(_e)})
+                failed += 1
+                continue
+            if res.get("dry_run"):
+                results.append({"sku": sku, "product": p.get("name"), "product_type": pt,
+                                "dry_run": True, "attributes_preview": list(attrs.keys())})
+            else:
+                data = res.get("data") or {}
+                issues = data.get("issues") or []
+                _ok = res.get("ok") and (data.get("status") in ("ACCEPTED", "VALID", None) or not issues)
+                results.append({"sku": sku, "product": p.get("name"), "product_type": pt,
+                                "ok": bool(_ok), "status": data.get("status"),
+                                "submissionId": data.get("submissionId"),
+                                "issues": [{"code": i.get("code"), "message": i.get("message"),
+                                            "severity": i.get("severity")} for i in issues]})
+                if _ok:
+                    pushed += 1
+                else:
+                    failed += 1
+    return {"success": True, "dry_run": not ALLOW_WRITE, "pushed": pushed, "failed": failed,
+            "skipped": skipped, "count": len(results), "results": results[:200]}
+
+
 # ============================== ENDPOINTS ==============================
 
 @router.get("/status")
@@ -797,6 +1009,25 @@ async def spapi_diagnose_order(order_number: str, current_user: dict = Depends(r
         out["amazon_live_error"] = str(e)
 
     return out
+
+
+@router.get("/product-types")
+async def spapi_product_types(keywords: str = Query(""), current_user: dict = Depends(require_admin)):
+    """Amazon productType arama (kategori sayfası 'kategori' seçimi için)."""
+    return {"success": True, "product_types": await _amazon_search_product_types(keywords)}
+
+
+@router.get("/product-types/{product_type}/schema")
+async def spapi_product_type_schema(product_type: str, current_user: dict = Depends(require_admin)):
+    """productType LISTING attribute şeması (zorunlu/opsiyonel)."""
+    return {"success": True, **(await _amazon_product_type_schema(product_type))}
+
+
+@router.post("/products/sync")
+async def spapi_products_sync(payload: dict = Body(default={}),
+                              current_user: dict = Depends(require_admin)):
+    """Facette ürünlerini Amazon'a listeler (dry-run/canlı — AMAZON_ALLOW_WRITE)."""
+    return await sync_products_to_amazon(payload or {}, current_user)
 
 
 # ============================== STOK / FİYAT / LISTING (yazma) ==============================
