@@ -894,16 +894,21 @@ def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, b
     attrs.setdefault("department", [{"value": "Kadın", "marketplace_id": mp}])
     attrs.setdefault("target_gender", [{"value": "female", "marketplace_id": mp}])
     attrs.setdefault("care_instructions", [{"value": "Makinede Yıkama", "language_tag": "tr_TR", "marketplace_id": mp}])
-    # Pantolon/alt-giyim özel zorunluları — yalnız ilgili productType'ta (T-shirt vb. bozulmasın).
+    # Pantolon/alt-giyim özel zorunluları — İÇ İÇE (nested) yapı, şema title'larından DOĞRULANDI:
+    # leg.style / outer.material / closure.type / rise.style+height. Yalnız ilgili productType'ta.
     _pt = (product_type or "").upper()
     if any(x in _pt for x in ("PANT", "TROUSER", "BOTTOM", "JEAN", "SHORT", "LEGGING", "SKIRT")):
-        attrs.setdefault("weave_type", [{"value": "Düz", "marketplace_id": mp}])                       # Dokuma Türü
-        attrs.setdefault("compliance_outer_surface_material", [{"value": "cotton", "marketplace_id": mp}])  # Dış Malzeme
-        attrs.setdefault("closure", [{"value": "Fermuar", "language_tag": "tr_TR", "marketplace_id": mp}])   # Kapanış
-        attrs.setdefault("front_style", [{"value": "Düz Ön", "marketplace_id": mp}])                    # Ön Kısım Stili
-        attrs.setdefault("apparel_closure_orientation", [{"value": "front", "marketplace_id": mp}])     # Kapatma Yönü
-        attrs.setdefault("pants_form_type", [{"value": "slacks", "marketplace_id": mp}])                # Bacak/biçim
-        attrs.setdefault("rise", [{"value": 28, "unit": "centimeters", "marketplace_id": mp}])          # Yükselme
+        attrs.setdefault("weave_type", [{"value": "Düz", "marketplace_id": mp}])              # Dokuma Türü
+        # Yanlış/geçersiz eski denemeleri temizle
+        for _bad in ("compliance_outer_surface_material", "closure_type", "leg_style",
+                     "outer_material_type", "front_style", "apparel_closure_orientation", "pants_form_type"):
+            attrs.pop(_bad, None)
+        attrs.setdefault("leg", [{"style": "Düz", "marketplace_id": mp}])                     # Bacak Stili
+        attrs.setdefault("outer", [{"material": "Pamuk", "marketplace_id": mp}])              # Dış Malzeme
+        attrs.setdefault("closure", [{"type": "Fermuar", "marketplace_id": mp}])              # İlikleme/Kapanma Türü
+        attrs.setdefault("rise", [{"style": "Yüksek Bel",                                     # Yükselti Stili + Mesafesi
+                                   "height": {"value": 28, "unit": "centimeters"},
+                                   "marketplace_id": mp}])
     # Ölçü tipli ama kullanıcı düz sayı girdiyse (ör. leg_hem_opening_width) → {value,unit}'e çevir.
     for _mk in list(attrs.keys()):
         if _mk in _AMZ_MEASUREMENT_ATTRS:
