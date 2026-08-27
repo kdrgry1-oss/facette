@@ -1058,8 +1058,9 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
                 issues = data.get("issues") or []
                 _ok = res.get("ok") and (data.get("status") in ("ACCEPTED", "VALID", None) or not issues)
                 results.append({"sku": sku, "product": p.get("name"), "product_type": pt,
-                                "ok": bool(_ok), "status": data.get("status"),
+                                "ok": bool(_ok), "status": data.get("status"), "http": res.get("status"),
                                 "submissionId": data.get("submissionId"),
+                                "raw_errors": (data.get("errors") if not issues else None),
                                 "issues": [{"code": i.get("code"), "message": i.get("message"),
                                             "severity": i.get("severity")} for i in issues]})
                 if _ok:
