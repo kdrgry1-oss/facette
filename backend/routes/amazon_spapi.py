@@ -1483,6 +1483,28 @@ async def spapi_product_types(keywords: str = Query(""), current_user: dict = De
     return {"success": True, "product_types": await _amazon_search_product_types(keywords)}
 
 
+@router.get("/product-types/{product_type}/raw-attr")
+async def spapi_raw_attr(product_type: str, name: str = Query(...),
+                         current_user: dict = Depends(require_admin)):
+    """TEŞHİS — bir attribute'ın HAM Amazon JSON şemasını döndürür (nested composite alt-yapıyı
+    görmek için). Örn. rise/leg/outer/closure gerçek alt-alan formatı."""
+    _, _, mp = await get_valid_access_token()
+    res = await _spapi_get(f"/definitions/2020-09-01/productTypes/{product_type}",
+                           {"marketplaceIds": mp, "requirements": "LISTING", "locale": "tr_TR"})
+    schema_node = ((res["data"] or {}).get("schema") or {})
+    props = schema_node.get("properties") or {}
+    link = (schema_node.get("link") or {}).get("resource")
+    if not props and link:
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                r = await client.get(link)
+            if r.status_code == 200:
+                props = (r.json() or {}).get("properties") or {}
+        except Exception:
+            pass
+    return {"attr": name, "schema": props.get(name)}
+
+
 @router.get("/product-types/{product_type}/schema")
 async def spapi_product_type_schema(product_type: str, current_user: dict = Depends(require_admin)):
     """productType LISTING attribute şeması (zorunlu/opsiyonel)."""
