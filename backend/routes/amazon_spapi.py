@@ -884,6 +884,18 @@ async def _resolve_amazon_product_type(product: dict) -> str:
     return pt
 
 
+def _amz_code_match(product: dict, variant: dict, bset: set, sset: set, pset: set) -> bool:
+    """Filtre eşleşmesi — varyant VE ürün seviyesindeki tüm kod adaylarını (barkod/stok_kodu/
+    sku/urun_id/id) verilen kümelerle karşılaştırır. 'Stok Kodu/Barkod' alanı ikisine de gider."""
+    for c in (variant.get("barcode"), variant.get("stock_code"), variant.get("sku"),
+              variant.get("urun_id"), product.get("stock_code"), product.get("barcode"),
+              product.get("sku"), product.get("id")):
+        c = str(c or "").strip()
+        if c and (c in bset or c in sset or c in pset):
+            return True
+    return False
+
+
 async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
     """Facette ürünlerini Amazon'a LİSTELER (Listings Items PUT). payload:
       { barcodes?, stock_codes?, product_ids?, default_product_type?, limit? }
@@ -921,7 +933,7 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
         for v in (p.get("variants") or []):
             bc = str(v.get("barcode") or "").strip()
             sc = str(v.get("stock_code") or "").strip()
-            if _filtered and not (bc in _bset or sc in _sset or str(p.get("id")) in _pset):
+            if _filtered and not _amz_code_match(p, v, _bset, _sset, _pset):
                 continue
             sku = sc or bc
             if not sku:
@@ -995,7 +1007,7 @@ async def validate_products_for_amazon(payload: dict, current_user: dict) -> dic
         for v in (p.get("variants") or []):
             bc = str(v.get("barcode") or "").strip()
             sc = str(v.get("stock_code") or "").strip()
-            if _filtered and not (bc in _bset or sc in _sset or str(p.get("id")) in _pset):
+            if _filtered and not _amz_code_match(p, v, _bset, _sset, _pset):
                 continue
             sku = sc or bc
             if not sku:
