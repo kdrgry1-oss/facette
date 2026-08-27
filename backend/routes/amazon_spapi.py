@@ -648,7 +648,17 @@ def _product_images(product: dict) -> list:
     return list(dict.fromkeys(urls))[:6]
 
 
-def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, brand_default) -> dict:
+# Türkçe/serbest metin isteyen attribute'lar language_tag alır; kalanlar düz value.
+_AMZ_LOCALIZED_ATTRS = {"fabric_type", "material", "style", "occasion_type",
+                        "care_instructions", "special_feature", "pattern_type", "neck_style"}
+# Facette ürün alanından OTOMATİK dolan attribute'lar — kullanıcı default'u bunları EZMEZ.
+_AMZ_AUTO_FILLED = {"item_name", "brand", "product_description", "bullet_point",
+                    "main_product_image_locator", "purchasable_offer", "fulfillment_availability",
+                    "condition_type", "externally_assigned_product_identifier", "size", "color"}
+
+
+def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, brand_default,
+                               default_attrs: dict = None) -> dict:
     """Facette ürün+varyant → Amazon Listings attribute'ları (giyim odaklı ortak set).
     Eksik/zorunlu alanları Amazon PUT yanıtındaki issues[] söyler → çağıran gösterir."""
     name = (product.get("name") or "").strip()
@@ -684,23 +694,43 @@ def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, b
         attrs["size"] = [{"value": str(variant["size"]), "marketplace_id": mp}]
     if variant.get("color"):
         attrs["color"] = [{"value": str(variant["color"]), "marketplace_id": mp}]
+    # Kullanıcı VARSAYILAN değerleri (fabric_type, country_of_origin, menşei vb.) —
+    # kategori default_mappings'ten gelir. product_type + otomatik-dolan alanlar ATLANIR;
+    # zaten set edilmiş bir attribute EZİLMEZ.
+    for k, v in (default_attrs or {}).items():
+        key = str(k).strip()
+        if not key or key == "product_type" or key in _AMZ_AUTO_FILLED or key in attrs:
+            continue
+        if v is None or str(v).strip() == "":
+            continue
+        val = str(v).strip()
+        if key in _AMZ_LOCALIZED_ATTRS:
+            attrs[key] = [{"value": val, "language_tag": "tr_TR", "marketplace_id": mp}]
+        else:
+            attrs[key] = [{"value": val, "marketplace_id": mp}]
     return attrs
 
 
-async def _resolve_amazon_product_type(product: dict) -> str:
-    """Ürün için Amazon productType çöz: (1) product.amazon_product_type,
-    (2) category_mappings[amazon-tr] default_mappings.product_type (kategori bazında)."""
+async def _resolve_amazon_pt_and_defaults(product: dict) -> tuple:
+    """Ürün için (Amazon productType, default_mappings dict) döndürür.
+    productType: (1) product.amazon_product_type, (2) kategori eşlemesi. default_mappings:
+    kategori belgesindeki kullanıcı varsayılanları (fabric_type, country_of_origin vb.)."""
     pt = (product.get("amazon_product_type") or "").strip()
-    if pt:
-        return pt
+    defaults = {}
     cat_id = product.get("category_id") or product.get("category")
     if cat_id:
         m = await db.category_mappings.find_one(
             {"marketplace": "amazon-tr", "category_id": str(cat_id)}, {"_id": 0})
         if m:
-            return ((m.get("default_mappings") or {}).get("product_type")
-                    or m.get("product_type") or "").strip()
-    return ""
+            defaults = dict(m.get("default_mappings") or {})
+            if not pt:
+                pt = (defaults.get("product_type") or m.get("product_type") or "").strip()
+    return pt, defaults
+
+
+async def _resolve_amazon_product_type(product: dict) -> str:
+    pt, _ = await _resolve_amazon_pt_and_defaults(product)
+    return pt
 
 
 async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
@@ -732,7 +762,8 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
     results = []
     pushed = failed = skipped = 0
     for p in products:
-        pt = await _resolve_amazon_product_type(p) or default_pt
+        pt, cat_defaults = await _resolve_amazon_pt_and_defaults(p)
+        pt = pt or default_pt
         price = p.get("price") or p.get("sale_price") or p.get("discounted_price") or 0
         for v in (p.get("variants") or []):
             bc = str(v.get("barcode") or "").strip()
@@ -749,7 +780,7 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
                 failed += 1
                 continue
             attrs = _amazon_listing_attributes(p, v, pt, mp, price, int(v.get("stock") or 0),
-                                               p.get("brand"))
+                                               p.get("brand"), default_attrs=cat_defaults)
             body = {"productType": pt, "requirements": "LISTING", "attributes": attrs}
             try:
                 res = await _spapi_send("PUT", f"/listings/2021-08-01/items/{seller}/{sku}",

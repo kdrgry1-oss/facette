@@ -76,6 +76,30 @@ function _fixedDefaultFor(name) {
   return FIXED_DEFAULT_VALUES[k] || null;
 }
 
+// ── AMAZON: İngilizce productType attribute'ları için Türkçe etiket + otomatik/varsayılan davranış ──
+const AMZ_TR = {
+  item_name: "Ürün Adı", brand: "Marka", product_description: "Ürün Açıklaması",
+  bullet_point: "Madde İşaretleri (özellikler)", fabric_type: "Kumaş Türü",
+  country_of_origin: "Menşei (üretim ülkesi)", material: "Malzeme", color: "Renk",
+  size: "Beden", style: "Stil", department: "Bölüm", target_gender: "Cinsiyet",
+  age_range_description: "Yaş Grubu", occasion_type: "Kullanım Ortamı",
+  care_instructions: "Yıkama / Bakım", pattern_type: "Desen", neck_style: "Yaka Tipi",
+  sleeve_type: "Kol Tipi", closure_type: "Kapama Tipi", main_product_image_locator: "Ana Görsel",
+  purchasable_offer: "Fiyat", fulfillment_availability: "Stok", condition_type: "Ürün Durumu",
+  externally_assigned_product_identifier: "Barkod (EAN/UPC)",
+};
+// Facette ürün alanından OTOMATİK dolan → kullanıcı elle girmez.
+const AMZ_AUTO_FILLED = new Set([
+  "item_name", "brand", "product_description", "bullet_point", "main_product_image_locator",
+  "purchasable_offer", "fulfillment_availability", "condition_type",
+  "externally_assigned_product_identifier", "size", "color",
+]);
+// Varsayılan değer için öneri (placeholder).
+const AMZ_DEFAULT_SUGGEST = {
+  country_of_origin: "Türkiye", target_gender: "Kadın", department: "Kadın",
+  age_range_description: "Yetişkin",
+};
+
 function sortLikeSize(arr, getName) {
   return [...(arr || [])].sort((a, b) => {
     const ra = _sizeRank(getName(a));
@@ -549,6 +573,9 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                   const hasVals = attr.attributeValues?.length > 0;
                   const mapped = mappings[id];
                   const isReq = !!attr.required;
+                  const isAmazon = (marketplace || "").toString().startsWith("amazon");
+                  const amzAuto = isAmazon && AMZ_AUTO_FILLED.has(name);
+                  const trLabel = isAmazon ? (AMZ_TR[name] || name) : name;
                   // Zorunlu/opsiyonel geçişinde küçük başlık satırı
                   const showReqHeader = idx === 0 && isReq;
                   const showOptHeader = !isReq && idx > 0 && rows[idx - 1]?.required;
@@ -577,12 +604,32 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                           )}
                         </td>
                         <td className="px-4 py-2.5">
-                          <p className={`font-medium ${isReq ? "text-red-900" : "text-gray-800"}`}>{name}</p>
+                          <p className={`font-medium ${isReq ? "text-red-900" : "text-gray-800"}`}>{trLabel}</p>
+                          {isAmazon && trLabel !== name && (
+                            <p className="text-[11px] text-gray-400 font-mono">{name}</p>
+                          )}
                           {attr.attributeType && (
                             <p className="text-xs text-gray-400">Tür: {attr.attributeType}</p>
                           )}
                         </td>
                         <td className="px-4 py-2.5 space-y-2">
+                          {amzAuto ? (
+                            <span className="inline-block text-[11px] bg-green-50 text-green-700 border border-green-200 rounded px-2 py-1">
+                              ✓ Otomatik — Facette ürün alanından doldurulur (eşleştirme gerekmez)
+                            </span>
+                          ) : isAmazon ? (
+                            <div className="p-1 bg-blue-50/50 rounded border border-blue-100">
+                              <div className="text-[10px] font-bold text-blue-800 mb-1 px-1">Varsayılan Değer (bu alana gönderilecek):</div>
+                              <input
+                                type="text"
+                                placeholder={AMZ_DEFAULT_SUGGEST[name] ? `ör. ${AMZ_DEFAULT_SUGGEST[name]}` : "değer girin (boş bırakılırsa gönderilmez)"}
+                                value={defaults[id] || ""}
+                                onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
+                                className="border border-blue-200 rounded px-2 py-1 text-xs w-full bg-white"
+                              />
+                            </div>
+                          ) : (
+                          <>
                           <LocalAttrAutoComplete
                             value={mapped || ""}
                             onChange={(v) => setMappings((p) => ({ ...p, [id]: v }))}
@@ -633,9 +680,11 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                               </select>
                             </div>
                         )}
+                          </>
+                          )}
                         </td>
                         <td className="px-4 py-2.5 text-center">
-                          {mapped || defaults[id] ? (
+                          {amzAuto || mapped || defaults[id] ? (
                             <Check size={16} className="text-green-500 mx-auto" />
                           ) : isReq ? (
                             <X size={16} className="text-red-400 mx-auto" />
