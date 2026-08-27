@@ -24,7 +24,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Body, UploadFile, File
 from fastapi.responses import RedirectResponse
 
 from .deps import db, logger, require_admin
@@ -1009,6 +1009,103 @@ async def spapi_diagnose_order(order_number: str, current_user: dict = Depends(r
         out["amazon_live_error"] = str(e)
 
     return out
+
+
+@router.post("/orders/import-addresses")
+async def spapi_import_addresses(file: UploadFile = File(...),
+                                 current_user: dict = Depends(require_admin)):
+    """Amazon Sipariş Raporu (CSV/TSV) yükle → adı/adres/fatura alanlarını doldur.
+    PII rolü GEREKTİRMEZ — rapor satıcının kendi Seller Central verisidir. Amazon'un düz-dosya
+    sipariş raporu başlıklarını (order-id, recipient-name, ship-address-1..3, ship-city,
+    ship-state, ship-postal-code, ship-phone-number, buyer-name...) esnek eşler; sadece
+    amazon_order_id ile PANELDE VAR OLAN siparişleri günceller."""
+    import csv as _csv
+    import io as _io
+
+    raw = await file.read()
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "cp1254", "latin-1"):
+        try:
+            text = raw.decode(enc)
+            break
+        except Exception:
+            continue
+    if text is None:
+        raise HTTPException(status_code=400, detail="Dosya okunamadı (kodlama).")
+    head = text[:5000]
+    delim = "\t" if head.count("\t") >= head.count(",") else ","
+    reader = _csv.DictReader(_io.StringIO(text), delimiter=delim)
+
+    def _norm(h):
+        return (h or "").strip().lower().replace("_", "-").replace(" ", "-")
+
+    def _pick(row, *cands):
+        for k in row:
+            nk = _norm(k)
+            if nk in cands:
+                v = (row.get(k) or "").strip()
+                if v:
+                    return v
+        return ""
+
+    rows = updated = not_found = 0
+    unmatched_ids = []
+    for row in reader:
+        rows += 1
+        oid = _pick(row, "order-id", "amazon-order-id", "order-number", "sipariş-no", "siparis-no")
+        if not oid:
+            continue
+        name = _pick(row, "recipient-name", "ship-to-name", "buyer-name", "recipient", "alıcı", "alici")
+        a1 = _pick(row, "ship-address-1", "ship-address1", "shipping-address-1", "ship-address", "adres")
+        a2 = _pick(row, "ship-address-2", "ship-address2", "shipping-address-2")
+        a3 = _pick(row, "ship-address-3", "ship-address3", "shipping-address-3")
+        city = _pick(row, "ship-city", "shipping-city", "city", "şehir", "sehir", "il")
+        state = _pick(row, "ship-state", "shipping-state", "state", "ilçe", "ilce", "district")
+        postal = _pick(row, "ship-postal-code", "shipping-postal-code", "postal-code", "zip", "posta-kodu")
+        phone = _pick(row, "ship-phone-number", "buyer-phone-number", "phone", "telefon")
+        country = _pick(row, "ship-country", "country", "ülke", "ulke")
+        email = _pick(row, "buyer-email", "email", "e-posta")
+        addr = " ".join([x for x in [a1, a2, a3] if x]).strip()
+        if not (name or addr):
+            continue
+        existing = await db.orders.find_one(
+            {"order_number": str(oid), "platform": "amazon"}, {"_id": 1})
+        if not existing:
+            not_found += 1
+            if len(unmatched_ids) < 10:
+                unmatched_ids.append(str(oid))
+            continue
+        if name:
+            _p = name.rsplit(" ", 1)
+            first = _p[0]
+            last = _p[1] if len(_p) > 1 else ""
+        else:
+            first, last = "Amazon", "Müşterisi"
+        _set = {
+            "shipping_address.first_name": first or "Amazon",
+            "shipping_address.last_name": last,
+            "shipping_address.address": addr,
+            "shipping_address.city": city,
+            "shipping_address.district": state,
+            "shipping_address.postal_code": postal,
+            "shipping_address.phone": phone,
+            "shipping_address.country": country or "TR",
+            "shipping_address.email": email,
+            "billing_address.first_name": first or "Amazon",
+            "billing_address.last_name": last,
+            "billing_address.address": addr,
+            "billing_address.city": city,
+            "billing_address.district": state,
+            "needs_pii_refresh": False,
+            "pii_source": "report_upload",
+            "updated_at": _now_iso(),
+        }
+        r = await db.orders.update_one({"_id": existing["_id"]}, {"$set": _set})
+        updated += r.modified_count
+    return {"success": True, "rows": rows, "updated": updated, "not_found": not_found,
+            "unmatched_sample": unmatched_ids,
+            "message": f"{rows} satır okundu, {updated} sipariş güncellendi"
+                       + (f", {not_found} eşleşmedi" if not_found else "")}
 
 
 @router.get("/product-types")
