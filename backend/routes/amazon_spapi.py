@@ -934,7 +934,7 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
                             detail="Güvenlik: filtre (barcodes/stock_codes/product_ids) veya limit verin. "
                                    "Tüm katalog tek seferde listelenmez.")
 
-    q = {"is_active": True}
+    q = {} if _filtered else {"is_active": True}
     if _pset:
         q["id"] = {"$in": list(_pset)}
     products = await db.products.find(q, {"_id": 0}).to_list(length=(limit or None))
@@ -1004,7 +1004,7 @@ async def validate_products_for_amazon(payload: dict, current_user: dict) -> dic
     _sset = {str(x).strip() for x in (payload.get("stock_codes") or []) if str(x).strip()}
     _pset = {str(x).strip() for x in (payload.get("product_ids") or []) if str(x).strip()}
     _filtered = bool(_bset or _sset or _pset)
-    q = {"is_active": True}
+    q = {} if _filtered else {"is_active": True}
     if _pset:
         q["id"] = {"$in": list(_pset)}
     products = await db.products.find(q, {"_id": 0}).to_list(length=None)
@@ -1428,7 +1428,7 @@ async def spapi_products_preview(q: str = Query(...), current_user: dict = Depen
     q = (q or "").strip()
     if not q:
         raise HTTPException(status_code=400, detail="Arama (q) gerekli")
-    query = {"is_active": True, "$or": [
+    query = {"$or": [
         {"name": {"$regex": _re.escape(q), "$options": "i"}},
         {"variants.barcode": q}, {"variants.stock_code": q},
         {"barcode": q}, {"stock_code": q},
