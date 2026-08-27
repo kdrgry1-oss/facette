@@ -886,12 +886,29 @@ async def _resolve_amazon_product_type(product: dict) -> str:
 
 def _amz_code_match(product: dict, variant: dict, bset: set, sset: set, pset: set) -> bool:
     """Filtre eşleşmesi — varyant VE ürün seviyesindeki tüm kod adaylarını (barkod/stok_kodu/
-    sku/urun_id/id) verilen kümelerle karşılaştırır. 'Stok Kodu/Barkod' alanı ikisine de gider."""
-    for c in (variant.get("barcode"), variant.get("stock_code"), variant.get("sku"),
-              variant.get("urun_id"), product.get("stock_code"), product.get("barcode"),
-              product.get("sku"), product.get("id")):
-        c = str(c or "").strip()
-        if c and (c in bset or c in sset or c in pset):
+    sku/urun_id/id) verilen kümelerle karşılaştırır. TAM eşleşme yoksa, kullanıcı SKU'nun bir
+    PARÇASINI (ör. model no '2909') ya da ürün ADININ bir kısmını girmiş olabilir → substring
+    ve isim eşleşmesi de denenir. 'Stok Kodu/Barkod' alanı bset+sset'e gider."""
+    codes = [str(c or "").strip() for c in (
+        variant.get("barcode"), variant.get("stock_code"), variant.get("sku"),
+        variant.get("urun_id"), product.get("stock_code"), product.get("barcode"),
+        product.get("sku"), product.get("id"))]
+    codes = [c for c in codes if c]
+    tokens = (bset | sset | pset)
+    # 1) TAM eşleşme
+    for c in codes:
+        if c in tokens:
+            return True
+    # 2) SUBSTRING (SKU parçası) veya İSİM parçası
+    name = str(product.get("name") or "").lower()
+    for t in tokens:
+        tl = str(t).strip().lower()
+        if len(tl) < 3:  # çok kısa token yanlış eşleşir
+            continue
+        for c in codes:
+            if tl in c.lower():
+                return True
+        if tl in name:
             return True
     return False
 
