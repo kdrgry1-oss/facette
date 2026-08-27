@@ -1206,6 +1206,17 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                   </div>
                 );
               })()}
+              {(marketplace || "").startsWith("amazon") && (
+                <div className="bg-emerald-50 border-b border-emerald-200 px-3 py-2 text-[11px] text-emerald-900 flex items-start gap-1.5" data-testid="adv-amazon-valinfo">
+                  <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                  <span>
+                    <b>Amazon'da nasıl çalışır:</b> Bu alanın Amazon değerini <b>üstteki "Varsayılan değer"</b>
+                    kutusundan seç — tüm ürünlere gönderilir. <b>Alt tablo</b> yalnız ürünlerinde <b>farklı
+                    değerler olan</b> alanlarda (Beden/Renk) dolar. Menşei/Kumaş/Kategori gibi tek-değerli
+                    alanlarda alt tabloyu boş bırak; üstten seçmen yeterli.
+                  </span>
+                </div>
+              )}
               {/* HB serbest-metin bilgilendirmesi: bu özellik HB'de kapalı (seçmeli) liste DEĞİL —
                   kullanıcı "acaba HB'de var mı" diye tedirgin olmasın diye serbest metin olduğunu açıkça belirt. */}
               {(currentAttr?.attributeValues || []).length === 0 && (
@@ -1261,7 +1272,10 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                     if (filtered.length === 0) {
                       return (
                         <tr><td colSpan={2} className="py-8 text-center text-xs text-gray-400">
-                          {q ? `"${valSearch}" ile eşleşen değer yok` : `Bu kategorideki ürünlerde "${attrName}" özelliği için değer yok.`}
+                          {q ? `"${valSearch}" ile eşleşen değer yok`
+                            : ((marketplace || "").startsWith("amazon")
+                                ? `Bu alan için ürünlerinde ayrı değer yok — üstteki "Varsayılan değer"den Amazon değerini seç (tüm ürünlere gider). Bu tablo yalnız Beden/Renk gibi çok-değerli alanlarda dolar.`
+                                : `Bu kategorideki ürünlerde "${attrName}" özelliği için değer yok.`)}
                         </td></tr>
                       );
                     }
