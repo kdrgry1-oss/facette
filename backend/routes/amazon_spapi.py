@@ -879,24 +879,25 @@ def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, b
     if _model:
         attrs.setdefault("model_name", [{"value": _model, "marketplace_id": mp}])
     # Paket boyutları (zorunlu) — giyim için makul varsayılan (cm). Ürün verisi varsa onu kullan.
-    attrs.setdefault("item_package_dimensions", [{
-        "length": {"value": 32, "unit": "centimeters"},
-        "width": {"value": 24, "unit": "centimeters"},
-        "height": {"value": 4, "unit": "centimeters"},
-        "marketplace_id": mp}])
+    # Paket boyutu/ağırlığı KULLANICI mapping'inden hatalı gelirse Amazon 99022 veriyor —
+    # doğru format garantisi yoksa hiç gönderme (zorunlu değil; gerekirse 90220 ile görürüz).
+    for _pk in ("item_package_dimensions", "item_package_weight", "leg_hem_opening_width"):
+        attrs.pop(_pk, None)
     # ── Kadın-giyim apparel universal güvenli varsayılanlar (kategori default'u EZEBİLİR) ──
+    # Alan adları Amazon şema title'larından DOĞRULANDI.
     attrs.setdefault("department", [{"value": "Kadın", "marketplace_id": mp}])
     attrs.setdefault("target_gender", [{"value": "female", "marketplace_id": mp}])
     attrs.setdefault("care_instructions", [{"value": "Makinede Yıkama", "language_tag": "tr_TR", "marketplace_id": mp}])
-    attrs.setdefault("outer_material_type", [{"value": "Pamuk", "marketplace_id": mp}])
-    attrs.setdefault("fabric_type", [{"value": "Pamuklu", "language_tag": "tr_TR", "marketplace_id": mp}])
-    # Pantolon/alt-giyim özel zorunluları — yalnız ilgili productType'ta gönder (T-shirt vb. bozulmasın).
+    # Pantolon/alt-giyim özel zorunluları — yalnız ilgili productType'ta (T-shirt vb. bozulmasın).
     _pt = (product_type or "").upper()
     if any(x in _pt for x in ("PANT", "TROUSER", "BOTTOM", "JEAN", "SHORT", "LEGGING", "SKIRT")):
-        attrs.setdefault("weave_type", [{"value": "Düz", "marketplace_id": mp}])
-        attrs.setdefault("closure_type", [{"value": "Fermuar", "marketplace_id": mp}])
-        attrs.setdefault("leg_style", [{"value": "Düz Paça", "marketplace_id": mp}])
-        attrs.setdefault("rise", [{"value": 28, "unit": "centimeters", "marketplace_id": mp}])
+        attrs.setdefault("weave_type", [{"value": "Düz", "marketplace_id": mp}])                       # Dokuma Türü
+        attrs.setdefault("compliance_outer_surface_material", [{"value": "cotton", "marketplace_id": mp}])  # Dış Malzeme
+        attrs.setdefault("closure", [{"value": "Fermuar", "language_tag": "tr_TR", "marketplace_id": mp}])   # Kapanış
+        attrs.setdefault("front_style", [{"value": "Düz Ön", "marketplace_id": mp}])                    # Ön Kısım Stili
+        attrs.setdefault("apparel_closure_orientation", [{"value": "front", "marketplace_id": mp}])     # Kapatma Yönü
+        attrs.setdefault("pants_form_type", [{"value": "slacks", "marketplace_id": mp}])                # Bacak/biçim
+        attrs.setdefault("rise", [{"value": 28, "unit": "centimeters", "marketplace_id": mp}])          # Yükselme
     # Ölçü tipli ama kullanıcı düz sayı girdiyse (ör. leg_hem_opening_width) → {value,unit}'e çevir.
     for _mk in list(attrs.keys()):
         if _mk in _AMZ_MEASUREMENT_ATTRS:
