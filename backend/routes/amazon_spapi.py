@@ -745,6 +745,9 @@ def _amazon_price_of(product: dict, markup: float) -> float:
 # Türkçe/serbest metin isteyen attribute'lar language_tag alır; kalanlar düz value.
 _AMZ_LOCALIZED_ATTRS = {"fabric_type", "material", "style", "occasion_type",
                         "care_instructions", "special_feature", "pattern_type", "neck_style"}
+# Ölçü (measurement) tipli attribute'lar — {value, unit} formatı ister (cm varsayılan).
+_AMZ_MEASUREMENT_ATTRS = {"leg_hem_opening_width", "waist", "inseam_length", "outseam_length",
+                          "rise_measurement", "arm_length", "chest_size", "hip_size"}
 # Facette ürün alanından OTOMATİK dolan attribute'lar — kullanıcı default'u bunları EZMEZ.
 _AMZ_AUTO_FILLED = {"item_name", "brand", "product_description", "bullet_point",
                     "main_product_image_locator", "purchasable_offer", "fulfillment_availability",
@@ -854,10 +857,38 @@ def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, b
         if v is None or str(v).strip() == "":
             continue
         val = str(v).strip()
-        if key in _AMZ_LOCALIZED_ATTRS:
+        if key in _AMZ_MEASUREMENT_ATTRS:
+            try:
+                _num = float(str(val).replace(",", ".").split()[0])
+                attrs[key] = [{"value": _num, "unit": "centimeters", "marketplace_id": mp}]
+            except Exception:
+                pass
+        elif key in _AMZ_LOCALIZED_ATTRS:
             attrs[key] = [{"value": val, "language_tag": "tr_TR", "marketplace_id": mp}]
         else:
             attrs[key] = [{"value": val, "marketplace_id": mp}]
+
+    # ── AUTO zorunlular (Amazon giyimde ister) — kullanıcı/­default ezmemişse doldur ──
+    attrs.setdefault("manufacturer", [{"value": brand, "marketplace_id": mp}])
+    _model = (name or "")[:60] or (variant.get("stock_code") or "")
+    if _model:
+        attrs.setdefault("model_name", [{"value": _model, "marketplace_id": mp}])
+    # Paket boyutları (zorunlu) — giyim için makul varsayılan (cm). Ürün verisi varsa onu kullan.
+    attrs.setdefault("item_package_dimensions", [{
+        "length": {"value": 32, "unit": "centimeters"},
+        "width": {"value": 24, "unit": "centimeters"},
+        "height": {"value": 4, "unit": "centimeters"},
+        "marketplace_id": mp}])
+    # Ölçü tipli ama kullanıcı düz sayı girdiyse (ör. leg_hem_opening_width) → {value,unit}'e çevir.
+    for _mk in list(attrs.keys()):
+        if _mk in _AMZ_MEASUREMENT_ATTRS:
+            _cur = attrs[_mk]
+            if isinstance(_cur, list) and _cur and "unit" not in _cur[0] and "value" in _cur[0]:
+                try:
+                    _n = float(str(_cur[0]["value"]).replace(",", ".").split()[0])
+                    attrs[_mk] = [{"value": _n, "unit": "centimeters", "marketplace_id": mp}]
+                except Exception:
+                    attrs.pop(_mk, None)  # geçersiz → hiç gönderme (Amazon 4000001 vermesin)
     return attrs
 
 
