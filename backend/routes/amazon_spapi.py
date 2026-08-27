@@ -24,7 +24,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Body, UploadFile, File
 from fastapi.responses import RedirectResponse
 
 from .deps import db, logger, require_admin
@@ -1009,6 +1009,102 @@ async def spapi_diagnose_order(order_number: str, current_user: dict = Depends(r
         out["amazon_live_error"] = str(e)
 
     return out
+
+
+def _parse_amazon_packing_slip(text: str) -> dict:
+    """Amazon sevk irsaliyesi (packing slip) PDF metnini ayrıştırır. PII rolü GEREKTİRMEZ —
+    irsaliye satıcının kendi belgesidir. Çıkarır: sipariş no, alıcı adı, adres, il/ilçe/posta, tel."""
+    import re as _re
+    lines = [l.strip() for l in (text or "").splitlines()]
+    joined = "\n".join(lines)
+    out = {"order_number": "", "name": "", "address": "", "city": "", "district": "",
+           "postal_code": "", "phone": ""}
+    m = (_re.search(r"Sipari[şs]\s*No\.?\s*:?\s*([0-9]{3}-[0-9]{7}-[0-9]{7})", joined)
+         or _re.search(r"orderId=([0-9]{3}-[0-9]{7}-[0-9]{7})", joined)
+         or _re.search(r"\b([0-9]{3}-[0-9]{7}-[0-9]{7})\b", joined))
+    out["order_number"] = m.group(1) if m else ""
+    mp = _re.search(r"Phone\s*:?\s*([0-9 ]{7,})", joined)
+    out["phone"] = (mp.group(1).strip().replace(" ", "") if mp else "")
+    # "Alıcı:" bloğu — en temiz isim+adres kaynağı.
+    name, addr_lines = "", []
+    for i, l in enumerate(lines):
+        if l.replace(" ", "").lower().startswith("alıcı:") or l.replace(" ", "").lower() == "alıcı:":
+            block, j = [], i + 1
+            while j < len(lines):
+                lj = lines[j]
+                if lj.startswith("Phone") or lj.startswith("Sipariş No") or lj.startswith("Amazon Pazar"):
+                    break
+                if lj:
+                    block.append(lj)
+                j += 1
+            if block:
+                name, addr_lines = block[0], block[1:]
+            break
+    out["name"] = name
+    out["address"] = " ".join(addr_lines).strip()
+    # "Mahalle Mh., İl, İlçe, 34738" → il/ilçe/posta.
+    for l in addr_lines:
+        mm = _re.search(r",\s*([^,]+?),\s*([^,]+?),\s*(\d{5})", l)
+        if mm:
+            out["city"], out["district"], out["postal_code"] = (
+                mm.group(1).strip(), mm.group(2).strip(), mm.group(3).strip())
+            break
+    if not out["postal_code"]:
+        mz = _re.search(r"\b(\d{5})\b", out["address"])
+        out["postal_code"] = mz.group(1) if mz else ""
+    return out
+
+
+@router.post("/orders/parse-packing-slip")
+async def spapi_parse_packing_slip(file: UploadFile = File(...),
+                                   current_user: dict = Depends(require_admin)):
+    """Amazon sevk irsaliyesi (PDF) yükle → alıcı adı/adres/il/ilçe/posta/tel çıkar ve
+    irsaliyedeki SİPARİŞ NO ile eşleşen paneldeki Amazon siparişini doldur. PII rolü GEREKMEZ."""
+    import io as _io
+    raw = await file.read()
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(_io.BytesIO(raw))
+        text = "\n".join((pg.extract_text() or "") for pg in reader.pages)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"PDF okunamadı: {e}")
+    parsed = _parse_amazon_packing_slip(text)
+    oid = parsed.get("order_number")
+    if not oid:
+        return {"success": False, "parsed": parsed,
+                "error": "İrsaliyede sipariş no bulunamadı (farklı formatta olabilir)."}
+    existing = await db.orders.find_one({"order_number": oid, "platform": "amazon"}, {"_id": 1})
+    if not existing:
+        return {"success": False, "parsed": parsed, "order_found": False,
+                "error": f"{oid} panelde Amazon siparişi olarak bulunamadı."}
+    nm = parsed.get("name") or ""
+    if nm:
+        _p = nm.rsplit(" ", 1)
+        first, last = _p[0], (_p[1] if len(_p) > 1 else "")
+    else:
+        first, last = "Amazon", "Müşterisi"
+    _set = {
+        "shipping_address.first_name": first or "Amazon",
+        "shipping_address.last_name": last,
+        "shipping_address.address": parsed.get("address", ""),
+        "shipping_address.city": parsed.get("city", ""),
+        "shipping_address.district": parsed.get("district", ""),
+        "shipping_address.postal_code": parsed.get("postal_code", ""),
+        "shipping_address.phone": parsed.get("phone", ""),
+        "shipping_address.country": "TR",
+        "billing_address.first_name": first or "Amazon",
+        "billing_address.last_name": last,
+        "billing_address.address": parsed.get("address", ""),
+        "billing_address.city": parsed.get("city", ""),
+        "billing_address.district": parsed.get("district", ""),
+        "needs_pii_refresh": False,
+        "pii_source": "packing_slip",
+        "updated_at": _now_iso(),
+    }
+    r = await db.orders.update_one({"_id": existing["_id"]}, {"$set": _set})
+    return {"success": True, "order_found": True, "updated": r.modified_count > 0,
+            "order_number": oid, "parsed": parsed,
+            "message": f"{oid}: {first} {last} — adres/telefon dolduruldu."}
 
 
 @router.get("/product-types")
