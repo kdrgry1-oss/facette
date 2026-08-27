@@ -26,7 +26,29 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function CategoryMapping() {
   const [marketplaces, setMarketplaces] = useState([]);
-  const [active, setActive] = useState("trendyol");
+  // Aktif pazaryeri URL'de ?mp=<slug> olarak tutulur → her pazaryeri ayrı (paylaşılabilir) link.
+  const [active, setActive] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("mp") || "trendyol"; }
+    catch { return "trendyol"; }
+  });
+  // Sekmeye tıklayınca URL'i güncelle (ayrı geçmiş kaydı → geri/ileri ve link paylaşımı çalışır).
+  const selectMarketplace = (key) => {
+    setActive(key);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("mp", key);
+      window.history.pushState({}, "", url);
+    } catch { /* no-op */ }
+  };
+  // Tarayıcı geri/ileri → aktif sekmeyi URL'den senkronla.
+  useEffect(() => {
+    const onPop = () => {
+      try { setActive(new URLSearchParams(window.location.search).get("mp") || "trendyol"); }
+      catch { /* no-op */ }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   const [data, setData] = useState({ items: [], total: 0, matched: 0, unmatched: 0 });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -248,7 +270,7 @@ export default function CategoryMapping() {
         {marketplaces.map((m) => {
           const isActive = m.key === active;
           return (
-            <button key={m.key} onClick={() => setActive(m.key)}
+            <button key={m.key} onClick={() => selectMarketplace(m.key)}
               className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
                 isActive ? "border-stone-900 text-stone-900" : "border-transparent text-stone-500 hover:text-stone-900"
               }`} data-testid={`cat-mp-tab-${m.key}`}>
