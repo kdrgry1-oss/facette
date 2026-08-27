@@ -797,13 +797,13 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
         from routes.amazon_spapi import (
             _get_config, get_valid_access_token, _spapi_get,
             map_amazon_order, _fetch_amazon_order_items, _fetch_amazon_order_full,
-            _amz_status_of, RESTRICTED_ALLOWED,
+            _amz_status_of, RESTRICTED_ALLOWED, _amazon_enrich_items,
         )
         cfg = await _get_config()
         if not cfg or not cfg.get("refresh_token_enc"):
             return summary  # bağlı değil → sessiz
         from routes.deps import db as _db, generate_id
-        from routes.integrations import _hb_enrich_items, _decrement_stock_for_imported_order
+        from routes.integrations import _decrement_stock_for_imported_order
 
         _, _, marketplace_id = await get_valid_access_token()
         updated_after = (_dt.now(timezone.utc) - _td(days=max(1, int(lookback_days)))
@@ -861,7 +861,7 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
                             else:
                                 await _db.orders.update_one({"_id": existing["_id"]}, {"$inc": {"pii_attempts": 1}})
                         if _need_enrich or _need_pii:
-                            _tmp = await _hb_enrich_items({"items": _items_src or []})
+                            _tmp = await _amazon_enrich_items({"items": _items_src or []})
                             _upd["items"] = _tmp["items"]
                             _upd["items_enriched"] = True
                         if _upd:
@@ -877,7 +877,7 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
                 data = map_amazon_order(full or o, items)
                 # Ürün eşleştirme: Amazon SellerSKU → Facette ürünü (görsel + gerçek product_id +
                 # barkod + beden/renk). Trendyol/HB ile AYNI eşleyici; eşleşen kalemde resim gelir.
-                data = await _hb_enrich_items(data)
+                data = await _amazon_enrich_items(data)
                 data["items_enriched"] = True
                 data["id"] = generate_id()
                 # created_at = GERÇEK sipariş tarihi (PurchaseDate) — aylık pazaryeri sayımı doğru.

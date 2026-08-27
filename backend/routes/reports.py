@@ -33,7 +33,7 @@ def _iso_range(start: Optional[str], end: Optional[str], days_default: int = 30)
 
 # Pazaryeri kaynakları — Site dışı her şey. (platform VEYA marketplace alanında durabilir;
 # örn. Temu siparişleri yalnız marketplace="temu" taşır, platform boş olabilir.)
-_MARKETPLACES = ["trendyol", "hepsiburada", "temu"]
+_MARKETPLACES = ["trendyol", "hepsiburada", "temu", "n11", "amazon"]
 
 # Ciro/sipariş tutarlarına DAHİL EDİLMEYECEK durumlar: iptal + iade + ÖDENMEMİŞ grubu.
 # return_rejected (iade reddedildi) HARİÇ — satış geçerli sayıldığı için ciroda kalır.
@@ -72,6 +72,10 @@ def _source_cond(source: Optional[str]) -> dict:
         return {"$or": [{"platform": "hepsiburada"}, {"marketplace": "hepsiburada"}]}
     if s == "temu":
         return {"$or": [{"platform": "temu"}, {"marketplace": "temu"}]}
+    if s in ("amazon", "amz"):
+        return {"$or": [{"platform": "amazon"}, {"marketplace": "amazon"}]}
+    if s == "n11":
+        return {"$or": [{"platform": "n11"}, {"marketplace": "n11"}]}
     return {}  # bilinmeyen kaynak → toplu
 
 

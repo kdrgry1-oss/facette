@@ -345,9 +345,14 @@ def _amz_addr(node: dict, fallback_name: str, email: str) -> dict:
     """Amazon ShippingAddress -> Facette adres bloğu. Ad 'Name' tek alandır → ilk/soyad ayrılır."""
     node = node or {}
     full_name = (node.get("Name") or fallback_name or "").strip()
-    parts = full_name.split(" ", 1) if full_name else []
-    first = (parts[0] if parts else "") or "Amazon"
-    last = (parts[1] if len(parts) > 1 else "") or "Müşterisi"
+    # SON kelime = soyad, öncekiler = ad ("Mehmet Ali Kaya" → ad="Mehmet Ali", soyad="Kaya").
+    # İsim hiç yoksa (PII kapalı/gelmedi) placeholder.
+    if full_name:
+        parts = full_name.rsplit(" ", 1)
+        first = parts[0]
+        last = parts[1] if len(parts) > 1 else ""
+    else:
+        first, last = "Amazon", "Müşterisi"
     addr_line = " ".join([x for x in [node.get("AddressLine1"), node.get("AddressLine2"),
                                       node.get("AddressLine3")] if x]).strip()
     return {
@@ -412,8 +417,8 @@ def map_amazon_order(o: dict, items: list) -> dict:
     ship_addr = _amz_addr(ship, buyer_name, buyer_email)
     bill_addr = dict(ship_addr)
     if buyer_name:
-        _bp = buyer_name.split(" ", 1)
-        bill_addr["first_name"] = _bp[0] or bill_addr.get("first_name")
+        _bp = buyer_name.rsplit(" ", 1)
+        bill_addr["first_name"] = _bp[0]
         bill_addr["last_name"] = (_bp[1] if len(_bp) > 1 else "")
     if buyer_email:
         bill_addr["email"] = buyer_email
@@ -448,6 +453,86 @@ def map_amazon_order(o: dict, items: list) -> dict:
         "cargo_tracking_number": "",
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+async def _amazon_barcodes_for_asin(asin: str) -> list:
+    """ASIN → ürünün harici barkodları (EAN/UPC/GTIN) — Catalog Items API 2022-04-01.
+    Amazon'a MANUEL listelenen ürünlerde SellerSKU keyfi olabilir; ama listelemede verilen
+    harici ürün barkodu (EAN/UPC) Facette variants.barcode ile eşleşir. Sonuç ASIN bazında
+    cache'lenir (amazon_asin_cache) — tekrar çağrı yapılmaz."""
+    asin = (asin or "").strip()
+    if not asin:
+        return []
+    try:
+        cached = await db.amazon_asin_cache.find_one({"asin": asin}, {"_id": 0, "barcodes": 1})
+        if cached and isinstance(cached.get("barcodes"), list):
+            return cached["barcodes"]
+    except Exception:
+        pass
+    barcodes = []
+    try:
+        _, _, mp = await get_valid_access_token()
+        res = await _spapi_get(f"/catalog/2022-04-01/items/{asin}",
+                               {"marketplaceIds": mp, "includedData": "identifiers"})
+        if res["ok"]:
+            for block in ((res["data"] or {}).get("identifiers") or []):
+                for idv in (block.get("identifiers") or []):
+                    t = (idv.get("identifierType") or "").upper()
+                    if t in ("EAN", "UPC", "GTIN", "GTIN13", "ISBN", "JAN", "MPN"):
+                        v = idv.get("identifier")
+                        if v:
+                            barcodes.append(str(v).strip())
+        barcodes = list(dict.fromkeys([b for b in barcodes if b]))
+        await db.amazon_asin_cache.update_one(
+            {"asin": asin},
+            {"$set": {"asin": asin, "barcodes": barcodes, "updated_at": _now_iso()}},
+            upsert=True)
+    except Exception as _e:
+        logger.error(f"[amazon] catalog barcode ({asin}): {_e}")
+    return barcodes
+
+
+async def _amazon_enrich_items(order_data: dict) -> dict:
+    """Amazon sipariş kalemlerini Facette ürünleriyle eşler. SIRA:
+    1) SellerSKU (barcode/sku/product_id alanlarında) → Facette kod eşleşmesi (stok_kodu/barkod).
+    2) Eşleşmezse ASIN → harici barkod (EAN/UPC, Catalog Items) → Facette variants.barcode.
+    Eşleşen kalemde: görsel + gerçek product_id + Facette barkodu (stok düşümü için) + beden/renk.
+    Eşleşmeyen kalem 'matched:False' kalır (stok düşmez, log'da görünür)."""
+    from .integrations_common import _facette_match_for_codes, _facette_product_image
+    for it in (order_data.get("items") or []):
+        codes = [it.get("barcode"), it.get("sku"), it.get("product_id")]
+        m = await _facette_match_for_codes([c for c in codes if c])
+        if not m and it.get("asin"):
+            bcs = await _amazon_barcodes_for_asin(it.get("asin"))
+            if bcs:
+                it["amazon_barcodes"] = bcs
+                m = await _facette_match_for_codes(bcs)
+        if not m:
+            it["matched"] = False
+            continue
+        prod, matched_code, how = m
+        vbar = ""
+        for v in (prod.get("variants") or []):
+            if matched_code in (v.get("barcode"), v.get("stock_code")):
+                vbar = v.get("barcode") or vbar
+                if v.get("size") and not it.get("size"):
+                    it["size"] = v.get("size")
+                if v.get("color") and not it.get("color"):
+                    it["color"] = v.get("color")
+                break
+        it["marketplace_sku"] = it.get("sku") or it.get("product_id")
+        it["product_id"] = prod.get("id")
+        it["facette_product_id"] = prod.get("id")
+        # KRİTİK: stok düşümü variants.barcode ile yapılır → eşleşen gerçek barkodu yaz.
+        it["barcode"] = vbar or prod.get("barcode") or matched_code or it.get("barcode")
+        img = _facette_product_image(prod)
+        if img:
+            it["image"] = img
+        if prod.get("name"):
+            it["product_name"] = prod["name"]
+        it["matched"] = True
+        it["match_method"] = how
+    return order_data
 
 
 async def _amazon_push_stock_price(sku: str, quantity: int, price=None, currency: str = "TRY") -> dict:
@@ -672,11 +757,22 @@ async def spapi_diagnose_order(order_number: str, current_user: dict = Depends(r
         match_report = []
         for it in (items or []):
             sku = it.get("SellerSKU") or ""
+            asin = it.get("ASIN") or ""
             m = await _facette_match_for_codes([sku])
+            via = "sku"
+            asin_barcodes = []
+            if not m and asin:
+                asin_barcodes = await _amazon_barcodes_for_asin(asin)
+                if asin_barcodes:
+                    m = await _facette_match_for_codes(asin_barcodes)
+                    if m:
+                        via = "asin_barcode"
             if m:
                 prod, code, how = m
                 match_report.append({
-                    "SellerSKU": sku, "matched": True, "method": how,
+                    "SellerSKU": sku, "ASIN": asin, "matched": True,
+                    "matched_via": via, "method": how, "matched_code": code,
+                    "asin_barcodes": asin_barcodes,
                     "facette_product_id": prod.get("id"),
                     "facette_name": prod.get("name"),
                     "has_image": bool(_facette_product_image(prod)),
@@ -690,8 +786,10 @@ async def spapi_diagnose_order(order_number: str, current_user: dict = Depends(r
                     for v in (p.get("variants") or [])[:2]:
                         sample.append({"barcode": v.get("barcode"), "stock_code": v.get("stock_code")})
                 match_report.append({
-                    "SellerSKU": sku, "matched": False,
-                    "hint": "Bu SellerSKU Facette variants.barcode/stock_code/sku/urun_id ile eşleşmedi.",
+                    "SellerSKU": sku, "ASIN": asin, "matched": False,
+                    "asin_barcodes": asin_barcodes,
+                    "hint": ("Ne SellerSKU ne de ASIN barkodu (EAN/UPC) Facette variants.barcode/"
+                             "stock_code ile eşleşti. asin_barcodes boşsa Amazon katalogda barkod yok."),
                     "facette_ornek_kodlar": sample[:4],
                 })
         out["match_report"] = match_report
