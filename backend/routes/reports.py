@@ -1570,14 +1570,14 @@ async def payment_report(
     pipeline = [
         {"$match": _base_match(s, e, source)},
         {"$group": {"_id": {"$cond": [
-            {"$in": [_plat, ["trendyol", "hepsiburada", "temu"]]},
+            {"$in": [_plat, ["trendyol", "hepsiburada", "temu", "n11", "amazon"]]},
             _plat,
             {"$ifNull": ["$payment_method", "—"]}]},
             "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
         {"$sort": {"revenue": -1}},
     ]
     _LABELS = {
-        "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu",
+        "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu", "n11": "n11", "amazon": "Amazon",
         "credit_card": "Kredi Kartı", "card": "Kredi Kartı", "iyzico": "Kredi Kartı",
         "bank_transfer": "Havale/EFT", "havale": "Havale/EFT", "eft": "Havale/EFT",
         "havale_eft": "Havale/EFT", "banka_havale": "Havale/EFT",
@@ -1610,12 +1610,12 @@ async def sales_by_platform(
     _m = merge_match({"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}})
     pipeline = [
         {"$match": _m},
-        {"$group": {"_id": {"$cond": [{"$in": [_plat, ["trendyol", "hepsiburada", "temu"]]}, _plat, "site"]},
+        {"$group": {"_id": {"$cond": [{"$in": [_plat, ["trendyol", "hepsiburada", "temu", "n11", "amazon"]]}, _plat, "site"]},
                     "orders": {"$sum": 1},
                     "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
         {"$sort": {"revenue": -1}},
     ]
-    _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu"}
+    _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu", "n11": "n11", "amazon": "Amazon"}
     rows = []
     async for r in db.orders.aggregate(pipeline):
         rows.append({"channel": _SRC.get(r["_id"], r["_id"]), "orders": r["orders"],
@@ -1672,7 +1672,7 @@ async def cancel_return_products(
             "_sub": {"$first": "$_sub"}, "_coupon": {"$first": "$_coupon"}, "_pdisc": {"$first": "$_pdisc"},
         }},
     ]
-    _SRC = {"site": "Site", "facette": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu"}
+    _SRC = {"site": "Site", "facette": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu", "n11": "n11", "amazon": "Amazon"}
     rows: dict = {}
     _agg = [r async for r in db.orders.aggregate(pipeline)]
     # KISMİ İADE: yalnız gerçekten iade edilen kalem İade'ye yazılır (ürün raporunun
@@ -1753,7 +1753,7 @@ async def cancel_return_by_source(
     oids = list({str(o.get("id")) for o in orders if o.get("id")})
     closed, open_ = await _split_maps(onums, oids)
 
-    _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu"}
+    _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu", "n11": "n11", "amazon": "Amazon"}
     by_ch: dict = {}
     for o in orders:
         plat = str(o.get("platform") or o.get("marketplace") or "").strip().lower()

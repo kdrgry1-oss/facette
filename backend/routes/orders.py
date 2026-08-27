@@ -979,7 +979,7 @@ async def order_customer_journey(order_id: str, current_user: dict = Depends(req
                           "via": order.get("influencer_via")}
 
     # Reklam mı? (gclid/fbc/ttclid tıklama kimliği VEYA ücretli medium)
-    _mkt = ["trendyol", "hepsiburada", "temu"]
+    _mkt = ["trendyol", "hepsiburada", "temu", "n11", "amazon"]
     is_marketplace = (order.get("platform") in _mkt) or (order.get("marketplace") in _mkt)
     medium = (attr.get("medium") or "").lower()
     is_ad = bool(clicks.get("gclid") or clicks.get("fbc") or clicks.get("ttclid") or clicks.get("fbclid")
@@ -1520,7 +1520,7 @@ async def create_order(
     # (trendyol/hepsiburada/temu) siparişi dışarıda satıldığından bu kapıya girse de engellenmez.
     _oversell_moves = None
     _plat_lc = str(order.get("platform") or "").lower()
-    _is_marketplace = _plat_lc in ("trendyol", "hepsiburada", "temu")
+    _is_marketplace = _plat_lc in ("trendyol", "hepsiburada", "temu", "n11", "amazon")
 
     # PASİF / SİLİNMİŞ ürün siparişini ENGELLE (site). Vitrin pasif ürünü gizlese de bayat
     # sepet / direkt istek ile pasif ürün sipariş edilebiliyordu → "ürünü pasif yaptım ama yine
@@ -3008,7 +3008,7 @@ async def _restock_return_items_once(rec: dict, order: dict = None) -> int:
     if not order:
         return 0
     _plat = str(order.get("platform") or order.get("marketplace") or "").lower()
-    if _plat in ("trendyol", "hepsiburada", "temu"):
+    if _plat in ("trendyol", "hepsiburada", "temu", "n11", "amazon"):
         return 0
     # Atomik guard: yalnız henüz restock edilmemişse ilerle (yarış/çift-çağrı koruması).
     _claim = await db.customer_returns.update_one(
@@ -3966,7 +3966,7 @@ async def create_invoice_for_order(
     # siparişinde) _fs_invoice_waived'ı gerekiyorsa yeniden hesaplar. Pazaryeri e-Fatura'da
     # zaten kargo kalemi/iskonto olmaz → _fs_invoice_waived=0.0 doğru.
     _is_mp = (str(order.get("platform") or order.get("marketplace") or "").lower()
-              in ("trendyol", "hepsiburada", "temu"))
+              in ("trendyol", "hepsiburada", "temu", "n11", "amazon"))
     _fs_invoice_waived = 0.0
 
     # Gerçek Doğan e-Arşiv kesimi
@@ -4090,7 +4090,7 @@ async def create_invoice_for_order(
         # Pazaryeri (Trendyol/HB/Temu) siparişi mi? Faturada kargoya dair HİÇBİR kalem olmaz
         # (ne KARGO satırı ne iskonto) — kargo modeli pazaryerinde farklı.
         _is_mp = (str(order.get("platform") or order.get("marketplace") or "").lower()
-                  in ("trendyol", "hepsiburada", "temu"))
+                  in ("trendyol", "hepsiburada", "temu", "n11", "amazon"))
         _fs_invoice_waived = 0.0
         try:
             from business_rules import get_rule as _gr_fs
