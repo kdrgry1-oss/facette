@@ -2148,9 +2148,17 @@ async def get_advanced_attributes(
             from .amazon_spapi import _amazon_product_type_schema
             sch = await _amazon_product_type_schema(str(mp_cat_id))
         except Exception as e:
-            sch = {"required": [], "optional": [], "error": str(e)}
-        _attrs = ([{"id": a, "name": a, "required": True} for a in (sch.get("required") or [])]
-                  + [{"id": a, "name": a, "required": False} for a in (sch.get("optional") or [])])
+            sch = {"required": [], "optional": [], "values": {}, "error": str(e)}
+        _vals_map = sch.get("values") or {}
+
+        def _mk_amz(a, req):
+            vv = _vals_map.get(a) or []
+            return {"id": a, "name": a, "required": req,
+                    "attributeValues": [{"id": v.get("value"), "name": v.get("label") or v.get("value")}
+                                        for v in vv],
+                    "allowCustom": len(vv) == 0}
+        _attrs = ([_mk_amz(a, True) for a in (sch.get("required") or [])]
+                  + [_mk_amz(a, False) for a in (sch.get("optional") or [])])
         return {
             "attributes": _attrs,
             "attribute_mappings": mapping.get("attribute_mappings", []),

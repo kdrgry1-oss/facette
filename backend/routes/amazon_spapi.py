@@ -586,15 +586,38 @@ async def _amazon_search_product_types(keywords: str = "") -> list:
     return out
 
 
+def _amz_enum_values(node: dict) -> list:
+    """Bir attribute şema düğümünden izin verilen değerleri (enum + enumNames) çıkarır.
+    Amazon şeması: {items:{properties:{value:{enum:[...], enumNames:[...]}}}}. Döner:
+    [{value, label}] (label yoksa value)."""
+    try:
+        items = (node or {}).get("items") or {}
+        props = items.get("properties") or {}
+        for key in ("value", "type", "name", "unit"):
+            sub = props.get(key) or {}
+            en = sub.get("enum")
+            if en:
+                names = sub.get("enumNames") or en
+                return [{"value": str(e), "label": str(n)} for e, n in zip(en, names)][:2000]
+        for _k, sub in props.items():
+            if isinstance(sub, dict) and sub.get("enum"):
+                en = sub["enum"]
+                names = sub.get("enumNames") or en
+                return [{"value": str(e), "label": str(n)} for e, n in zip(en, names)][:2000]
+    except Exception:
+        pass
+    return []
+
+
 async def _amazon_product_type_schema(product_type: str) -> dict:
-    """productType'ın LISTING zorunlu/opsiyonel attribute şemasını çeker + cache'ler
-    (amazon_pt_schema). Kategori sayfası 'gelişmiş özellikler' için."""
+    """productType'ın LISTING zorunlu/opsiyonel attribute şemasını + izin verilen değerleri
+    çeker + cache'ler (amazon_pt_schema). Kategori sayfası 'gelişmiş özellikler' için."""
     product_type = (product_type or "").strip()
     if not product_type:
         return {}
     try:
         cached = await db.amazon_pt_schema.find_one({"product_type": product_type}, {"_id": 0})
-        if cached and cached.get("required") is not None:
+        if cached and cached.get("required") is not None and cached.get("values") is not None:
             return cached
     except Exception:
         pass
@@ -602,6 +625,7 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
     res = await _spapi_get(f"/definitions/2020-09-01/productTypes/{product_type}",
                            {"marketplaceIds": mp, "requirements": "LISTING", "locale": "tr_TR"})
     required, optional = [], []
+    attributes_values = {}
     if res["ok"]:
         schema_node = ((res["data"] or {}).get("schema") or {})
         props = schema_node.get("properties") or {}
@@ -622,8 +646,13 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
             (required if k in req_set else optional).append(k)
         if not props:
             required = list(req_set)
+        # Her attribute için izin verilen değerler (enum) — açılır liste için.
+        for k, node in props.items():
+            vals = _amz_enum_values(node)
+            if vals:
+                attributes_values[k] = vals
     doc = {"product_type": product_type, "required": required, "optional": optional,
-           "updated_at": _now_iso()}
+           "values": attributes_values, "updated_at": _now_iso()}
     try:
         await db.amazon_pt_schema.update_one({"product_type": product_type},
                                              {"$set": doc}, upsert=True)

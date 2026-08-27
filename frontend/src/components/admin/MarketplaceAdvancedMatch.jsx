@@ -618,16 +618,47 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                               ✓ Otomatik — Facette ürün alanından doldurulur (eşleştirme gerekmez)
                             </span>
                           ) : isAmazon ? (
-                            <div className="p-1 bg-blue-50/50 rounded border border-blue-100">
-                              <div className="text-[10px] font-bold text-blue-800 mb-1 px-1">Varsayılan Değer (bu alana gönderilecek):</div>
-                              <input
-                                type="text"
-                                placeholder={AMZ_DEFAULT_SUGGEST[name] ? `ör. ${AMZ_DEFAULT_SUGGEST[name]}` : "değer girin (boş bırakılırsa gönderilmez)"}
-                                value={defaults[id] || ""}
-                                onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
-                                className="border border-blue-200 rounded px-2 py-1 text-xs w-full bg-white"
-                              />
-                            </div>
+                            hasVals ? (
+                              <div className="p-1 bg-orange-50/50 rounded border border-orange-100">
+                                <div className="text-[10px] font-bold text-orange-800 mb-1 px-1">Amazon değerinden seç ({attr.attributeValues.length}):</div>
+                                <div className="relative">
+                                  <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400" />
+                                  <input
+                                    type="text"
+                                    placeholder="Değer ara..."
+                                    value={searchTerms[id] || ""}
+                                    onChange={(e) => setSearchTerms((p) => ({ ...p, [id]: e.target.value }))}
+                                    className="w-full pl-6 pr-2 py-1 text-xs border-b border-transparent bg-transparent focus:bg-white focus:border-orange-300 outline-none rounded-t"
+                                  />
+                                </div>
+                                <select
+                                  value={defaults[id] || ""}
+                                  onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
+                                  className="border rounded px-2 py-1 text-xs w-full bg-white"
+                                >
+                                  <option value="">Varsayılan Seçilmedi</option>
+                                  {attr.attributeValues
+                                    .filter((v) => (v.name || "").toLowerCase().includes((searchTerms[id] || "").toLowerCase()))
+                                    .slice(0, 500)
+                                    .map((v) => (
+                                      <option key={v.id ?? `n:${v.name}`} value={v.id != null ? v.id : v.name}>
+                                        {v.name}
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                            ) : (
+                              <div className="p-1 bg-blue-50/50 rounded border border-blue-100">
+                                <div className="text-[10px] font-bold text-blue-800 mb-1 px-1">Varsayılan Değer (bu alana gönderilecek):</div>
+                                <input
+                                  type="text"
+                                  placeholder={AMZ_DEFAULT_SUGGEST[name] ? `ör. ${AMZ_DEFAULT_SUGGEST[name]}` : "değer girin (boş bırakılırsa gönderilmez)"}
+                                  value={defaults[id] || ""}
+                                  onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
+                                  className="border border-blue-200 rounded px-2 py-1 text-xs w-full bg-white"
+                                />
+                              </div>
+                            )
                           ) : (
                           <>
                           <LocalAttrAutoComplete
