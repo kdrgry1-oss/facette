@@ -147,6 +147,25 @@ export default function AmazonSpApi() {
     }
   };
 
+  // TEŞHİS: bir sipariş no ver → Amazon ham SKU/isim + Facette eşleşme denemesi + panel kaydı.
+  const [diagNo, setDiagNo] = useState("");
+  const [diag, setDiag] = useState(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const runDiagnose = async () => {
+    const on = (diagNo || "").trim();
+    if (!on) { toast.error("Sipariş no gir"); return; }
+    setDiagLoading(true);
+    setDiag(null);
+    try {
+      const r = await axios.get(`${API}/amazon/spapi/orders/${encodeURIComponent(on)}/diagnose`, auth());
+      setDiag(r.data);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Teşhis hatası");
+    } finally {
+      setDiagLoading(false);
+    }
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto" data-testid="amazon-spapi-page">
       <div className="flex items-center justify-between mb-5">
@@ -258,6 +277,29 @@ export default function AmazonSpApi() {
             <RefreshCw size={14} />
           </button>
         </div>
+      </div>
+
+      {/* Sipariş Teşhis */}
+      <div className="bg-white border rounded-lg p-4 mt-4" data-testid="amazon-diagnose">
+        <h3 className="font-semibold text-sm mb-2">🔍 Sipariş Teşhis (SKU / isim / eşleşme)</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={diagNo} onChange={(e) => setDiagNo(e.target.value)}
+            placeholder="Amazon sipariş no (ör. 405-8332084-6545141)"
+            className="border rounded-lg px-3 py-2 text-sm w-80 max-w-full" />
+          <button onClick={runDiagnose} disabled={diagLoading || !status?.connected}
+            className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50">
+            {diagLoading ? "İnceleniyor..." : "İncele"}
+          </button>
+        </div>
+        {diag && (
+          <pre className="mt-3 text-[11px] bg-gray-900 text-green-200 p-3 rounded-lg overflow-auto max-h-[420px]">
+{JSON.stringify(diag, null, 2)}
+          </pre>
+        )}
+        <p className="text-[11px] text-gray-400 mt-2">
+          match_report'ta <b>matched:false</b> ise Amazon SellerSKU'n Facette stok kodu/barkoduyla eşleşmiyor →
+          bu yüzden resim/stok gelmiyor. Sonucu bana gönder, eşlemeyi ona göre kurayım.
+        </p>
       </div>
 
       {/* Marketplaces sonucu */}

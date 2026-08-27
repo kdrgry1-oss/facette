@@ -407,7 +407,16 @@ def map_amazon_order(o: dict, items: list) -> dict:
     except Exception:
         total_amt = round(subtotal, 2)
 
+    # Teslimat adı = kargo adresindeki ALICI adı (ShippingAddress.Name). Fatura adı = SİPARİŞ
+    # VEREN (BuyerInfo.BuyerName) — ikisi farklı olabilir (hediye/başkası adına gönderim).
     ship_addr = _amz_addr(ship, buyer_name, buyer_email)
+    bill_addr = dict(ship_addr)
+    if buyer_name:
+        _bp = buyer_name.split(" ", 1)
+        bill_addr["first_name"] = _bp[0] or bill_addr.get("first_name")
+        bill_addr["last_name"] = (_bp[1] if len(_bp) > 1 else "")
+    if buyer_email:
+        bill_addr["email"] = buyer_email
     status_raw = o.get("OrderStatus") or ""
 
     return {
@@ -417,7 +426,7 @@ def map_amazon_order(o: dict, items: list) -> dict:
         "user_id": None,
         "items": mapped_items,
         "shipping_address": ship_addr,
-        "billing_address": {**ship_addr, "company_name": "", "tax_number": "",
+        "billing_address": {**bill_addr, "company_name": "", "tax_number": "",
                             "tax_office": "", "is_corporate": False},
         "billing_info": {"is_corporate": False, "company_name": "", "tax_number": "",
                          "tax_office": "", "e_invoice_user": False},
@@ -593,6 +602,103 @@ async def spapi_pull_orders_now(
     from scheduler import _run_amazon_auto_orders_pull  # yerel import — döngü önleme
     res = await _run_amazon_auto_orders_pull(lookback_days=days)
     return {"success": True, **(res or {})}
+
+
+@router.get("/orders/{order_number}/diagnose")
+async def spapi_diagnose_order(order_number: str, current_user: dict = Depends(require_admin)):
+    """TEŞHİS — tek Amazon siparişini uçtan uca açar: (1) config bayrakları, (2) panelde kayıtlı
+    sipariş (isim/kalem/eşleşme/resim), (3) Amazon'un DÖNDÜRDÜĞÜ ham isim + SellerSKU/ASIN,
+    (4) her SellerSKU için Facette ürün eşleşme denemesi (neden resim/stok gelmiyor GÖRÜLÜR).
+    'Trendyol'da nasıl oluyorsa' problemini kesin teşhis için."""
+    from .integrations_common import _facette_match_for_codes, _facette_product_image
+
+    out = {
+        "order_number": order_number,
+        "flags": {
+            "restricted_allowed": RESTRICTED_ALLOWED,
+            "allow_write": ALLOW_WRITE,
+        },
+    }
+
+    # (2) Panelde kayıtlı sipariş
+    stored = await db.orders.find_one({"order_number": order_number, "platform": "amazon"}, {"_id": 0})
+    if stored:
+        sa = stored.get("shipping_address") or {}
+        ba = stored.get("billing_address") or {}
+        out["stored"] = {
+            "found": True,
+            "status": stored.get("status"),
+            "shipping_name": f"{sa.get('first_name','')} {sa.get('last_name','')}".strip(),
+            "billing_name": f"{ba.get('first_name','')} {ba.get('last_name','')}".strip(),
+            "shipping_city": sa.get("city", ""),
+            "needs_pii_refresh": stored.get("needs_pii_refresh"),
+            "pii_attempts": stored.get("pii_attempts"),
+            "items_enriched": stored.get("items_enriched"),
+            "items": [{
+                "product_name": it.get("product_name"),
+                "sku": it.get("sku") or it.get("marketplace_sku"),
+                "barcode": it.get("barcode"),
+                "product_id": it.get("product_id"),
+                "matched": it.get("matched"),
+                "has_image": bool(it.get("image")),
+                "quantity": it.get("quantity"),
+            } for it in (stored.get("items") or [])],
+        }
+    else:
+        out["stored"] = {"found": False}
+
+    # (3)+(4) Amazon'dan canlı çek + eşleşme denemesi
+    try:
+        full = await _fetch_amazon_order_full(order_number)
+        items = await _fetch_amazon_order_items(order_number)
+        buyer = (full or {}).get("BuyerInfo") or {}
+        ship = (full or {}).get("ShippingAddress") or {}
+        out["amazon_live"] = {
+            "order_status": (full or {}).get("OrderStatus"),
+            "fulfillment_channel": (full or {}).get("FulfillmentChannel"),
+            "buyer_name_raw": buyer.get("BuyerName", ""),
+            "buyer_email_present": bool(buyer.get("BuyerEmail")),
+            "ship_name_raw": ship.get("Name", ""),
+            "ship_city": ship.get("City", ""),
+            "pii_returned": bool(ship or buyer),  # RDT gerçekten PII getirdi mi?
+            "items": [{
+                "SellerSKU": it.get("SellerSKU"),
+                "ASIN": it.get("ASIN"),
+                "Title": it.get("Title"),
+                "QuantityOrdered": it.get("QuantityOrdered"),
+            } for it in (items or [])],
+        }
+        # Her SellerSKU için Facette eşleşme denemesi (import ile AYNI aday kodlar)
+        match_report = []
+        for it in (items or []):
+            sku = it.get("SellerSKU") or ""
+            m = await _facette_match_for_codes([sku])
+            if m:
+                prod, code, how = m
+                match_report.append({
+                    "SellerSKU": sku, "matched": True, "method": how,
+                    "facette_product_id": prod.get("id"),
+                    "facette_name": prod.get("name"),
+                    "has_image": bool(_facette_product_image(prod)),
+                })
+            else:
+                # Eşleşmedi → Facette'te bu koda benzer ne var? (ilk 3 örnek barkod/stok_kodu)
+                sample = []
+                async for p in db.products.find(
+                    {"is_active": True}, {"_id": 0, "name": 1, "variants.barcode": 1, "variants.stock_code": 1}
+                ).limit(3):
+                    for v in (p.get("variants") or [])[:2]:
+                        sample.append({"barcode": v.get("barcode"), "stock_code": v.get("stock_code")})
+                match_report.append({
+                    "SellerSKU": sku, "matched": False,
+                    "hint": "Bu SellerSKU Facette variants.barcode/stock_code/sku/urun_id ile eşleşmedi.",
+                    "facette_ornek_kodlar": sample[:4],
+                })
+        out["match_report"] = match_report
+    except Exception as e:
+        out["amazon_live_error"] = str(e)
+
+    return out
 
 
 # ============================== STOK / FİYAT / LISTING (yazma) ==============================
