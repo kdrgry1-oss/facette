@@ -866,6 +866,26 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
                             _upd["items_enriched"] = True
                         if _upd:
                             await _db.orders.update_one({"_id": existing["_id"]}, {"$set": _upd})
+                        # Geçmişe dönük stok düşümü: ilk import'ta eşleşme YOKTU → stok düşmemişti.
+                        # Şimdi eşleşen kalem varsa (MFN + iptal/iade değil) TEK SEFER güvenle düş.
+                        # Çift-düşüm koruması: order_imported hareketi DOLU (moves var) ise atlanır;
+                        # BOŞ ise (hiç düşmemiş) silinip gerçek barkodlarla yeniden düşülür.
+                        _new_items = _upd.get("items")
+                        if (_new_items and existing.get("status") not in ("cancelled", "returned")
+                                and existing.get("fulfillment_channel") != "AFN"
+                                and any((it or {}).get("matched") for it in _new_items)):
+                            try:
+                                _mv = await _db.stock_movements.find_one(
+                                    {"order_id": existing.get("id"), "type": "order_imported"},
+                                    {"_id": 1, "moves": 1})
+                                if not (_mv and _mv.get("moves")):
+                                    if _mv:
+                                        await _db.stock_movements.delete_one({"_id": _mv["_id"]})
+                                    _ord_for_stock = {**existing, "items": _new_items,
+                                                      "id": existing.get("id"), "order_number": oid}
+                                    await _decrement_stock_for_imported_order(_ord_for_stock, "amazon")
+                            except Exception as _se:
+                                logger.error(f"[cron] Amazon retro stok düşüm {oid}: {_se}")
                         await _aio.sleep(0.3)
                     await _update_existing_amazon_order(_db, existing, new_status, status_raw, o, oid)
                     summary["updated"] += 1
