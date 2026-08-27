@@ -658,7 +658,7 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
         return {}
     try:
         cached = await db.amazon_pt_schema.find_one({"product_type": product_type}, {"_id": 0})
-        if cached and cached.get("required") is not None and cached.get("_schema_v") == 2:
+        if cached and cached.get("required") is not None and cached.get("_schema_v") == 3:
             return cached
     except Exception:
         pass
@@ -667,6 +667,7 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
                            {"marketplaceIds": mp, "requirements": "LISTING", "locale": "tr_TR"})
     required, optional = [], []
     attributes_values = {}
+    titles = {}
     if res["ok"]:
         schema_node = ((res["data"] or {}).get("schema") or {})
         props = schema_node.get("properties") or {}
@@ -685,6 +686,9 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
                 pass
         for k in props.keys():
             (required if k in req_set else optional).append(k)
+            _t = (props.get(k) or {}).get("title")
+            if _t:
+                titles[k] = _t
         if not props:
             required = list(req_set)
         # Her attribute için izin verilen değerler (enum) — açılır liste için.
@@ -693,7 +697,8 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
             if vals:
                 attributes_values[k] = vals
     doc = {"product_type": product_type, "required": required, "optional": optional,
-           "values": attributes_values, "_schema_v": 2, "updated_at": _now_iso()}
+           "values": attributes_values, "titles": titles if res["ok"] else {},
+           "_schema_v": 3, "updated_at": _now_iso()}
     try:
         await db.amazon_pt_schema.update_one({"product_type": product_type},
                                              {"$set": doc}, upsert=True)
