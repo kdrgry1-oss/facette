@@ -715,7 +715,31 @@ def _product_images(product: dict) -> list:
         u = product.get(k)
         if u and str(u).startswith("http") and u not in urls:
             urls.insert(0, u)
-    return list(dict.fromkeys(urls))[:6]
+    return list(dict.fromkeys(urls))[:9]  # main + 8 other
+
+
+async def _amazon_markup() -> float:
+    """Amazon kâr marjı (%) — Amazon config'ten (integration_settings.amazon_spapi.markup).
+    Set edilmemişse 0 (marjsız). Trendyol'daki markup mantığının Amazon karşılığı."""
+    cfg = await _get_config()
+    try:
+        return float((cfg or {}).get("markup") or 0)
+    except Exception:
+        return 0.0
+
+
+def _amazon_price_of(product: dict, markup: float) -> float:
+    """Amazon SATIŞ fiyatı = pazaryeri baz fiyatı × (1 + marj/100).
+    Baz fiyat Trendyol ile AYNI: integrations_common._mp_base_price (member_price_1, yoksa price)."""
+    try:
+        from .integrations_common import _mp_base_price
+        base = float(_mp_base_price(product) or 0)
+    except Exception:
+        base = float(product.get("price") or 0)
+    try:
+        return round(base * (1 + float(markup) / 100.0), 2)
+    except Exception:
+        return round(base, 2)
 
 
 # Türkçe/serbest metin isteyen attribute'lar language_tag alır; kalanlar düz value.
@@ -760,7 +784,8 @@ def _amz_collect_local_values(product: dict, variant: dict) -> dict:
 
 
 def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, brand_default,
-                               default_attrs: dict = None, attr_mappings: list = None) -> dict:
+                               default_attrs: dict = None, attr_mappings: list = None,
+                               list_price: float = None) -> dict:
     """Facette ürün+varyant → Amazon Listings attribute'ları (giyim odaklı ortak set).
     Eksik/zorunlu alanları Amazon PUT yanıtındaki issues[] söyler → çağıran gösterir."""
     name = (product.get("name") or "").strip()
@@ -783,11 +808,18 @@ def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, b
         "purchasable_offer": [{"marketplace_id": mp, "currency": "TRY",
                                "our_price": [{"schedule": [{"value_with_tax": round(float(price or 0), 2)}]}]}],
     }
+    # Üstü çizili "liste fiyatı" (RRP) — satış fiyatından yüksekse gönder (indirim görünür).
+    try:
+        _lp = round(float(list_price), 2) if list_price else 0
+    except Exception:
+        _lp = 0
+    if _lp > round(float(price or 0), 2):
+        attrs["list_price"] = [{"value": _lp, "currency": "TRY", "marketplace_id": mp}]
     if bullets:
         attrs["bullet_point"] = [{"value": b, "language_tag": "tr_TR", "marketplace_id": mp} for b in bullets[:5]]
     if imgs:
         attrs["main_product_image_locator"] = [{"media_location": imgs[0], "marketplace_id": mp}]
-        for i, u in enumerate(imgs[1:5]):
+        for i, u in enumerate(imgs[1:9]):  # other_product_image_locator_1..8
             attrs[f"other_product_image_locator_{i+1}"] = [{"media_location": u, "marketplace_id": mp}]
     if barcode:
         attrs["externally_assigned_product_identifier"] = [
@@ -880,10 +912,12 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
 
     results = []
     pushed = failed = skipped = 0
+    markup = await _amazon_markup()
     for p in products:
         pt, cat_defaults, cat_mappings = await _resolve_amazon_pt_and_defaults(p)
         pt = pt or default_pt
-        price = p.get("price") or p.get("sale_price") or p.get("discounted_price") or 0
+        price = _amazon_price_of(p, markup)             # marjlı satış fiyatı
+        list_price = round(float(p.get("price") or 0), 2)  # üstü çizili (RRP)
         for v in (p.get("variants") or []):
             bc = str(v.get("barcode") or "").strip()
             sc = str(v.get("stock_code") or "").strip()
@@ -900,7 +934,7 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
                 continue
             attrs = _amazon_listing_attributes(p, v, pt, mp, price, int(v.get("stock") or 0),
                                                p.get("brand"), default_attrs=cat_defaults,
-                                               attr_mappings=cat_mappings)
+                                               attr_mappings=cat_mappings, list_price=list_price)
             body = {"productType": pt, "requirements": "LISTING", "attributes": attrs}
             try:
                 res = await _spapi_send("PUT", f"/listings/2021-08-01/items/{seller}/{sku}",
@@ -944,6 +978,7 @@ async def spapi_status(current_user: dict = Depends(require_admin)):
         "marketplace_id": cfg.get("marketplace_id") or DEFAULT_MARKETPLACE_ID,
         "region": cfg.get("region") or DEFAULT_REGION,
         "app_id": cfg.get("app_id"),
+        "markup": cfg.get("markup") or 0,
         "last_test": cfg.get("last_test"),
         "updated_at": cfg.get("updated_at"),
     }
@@ -965,6 +1000,12 @@ async def spapi_save_config(payload: dict, current_user: dict = Depends(require_
         "updated_at": _now_iso(),
         "updated_by": current_user.get("email"),
     }
+    # Amazon kâr marjı (%) — marjlı fiyat için (listeleme + stok/fiyat push).
+    if payload.get("markup") is not None and str(payload.get("markup")).strip() != "":
+        try:
+            update["markup"] = float(payload.get("markup"))
+        except Exception:
+            pass
     if payload.get("client_secret"):
         update["client_secret_enc"] = encrypt(payload["client_secret"].strip())
     if payload.get("refresh_token"):
@@ -1275,6 +1316,57 @@ async def spapi_products_sync(payload: dict = Body(default={}),
                               current_user: dict = Depends(require_admin)):
     """Facette ürünlerini Amazon'a listeler (dry-run/canlı — AMAZON_ALLOW_WRITE)."""
     return await sync_products_to_amazon(payload or {}, current_user)
+
+
+@router.get("/products/preview")
+async def spapi_products_preview(q: str = Query(...), current_user: dict = Depends(require_admin)):
+    """TEK ÜRÜN DRY-RUN ÖNİZLEME — ürünü ada/barkoda/stok koduna göre bul, Amazon'a GİDECEK
+    tam payload'u (marjlı fiyat, list_price, görseller, tüm attribute'lar) + eksik zorunlu
+    alanları döndür. Canlıya YAZMAZ. Aktarımdan önce 'ne gidecek' görmek için."""
+    import re as _re
+    q = (q or "").strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Arama (q) gerekli")
+    query = {"is_active": True, "$or": [
+        {"name": {"$regex": _re.escape(q), "$options": "i"}},
+        {"variants.barcode": q}, {"variants.stock_code": q},
+        {"barcode": q}, {"stock_code": q},
+    ]}
+    prod = await db.products.find_one(query, {"_id": 0})
+    if not prod:
+        return {"found": False, "error": f"'{q}' ile aktif ürün bulunamadı"}
+    _, _, mp = await get_valid_access_token()
+    pt, defaults, mappings = await _resolve_amazon_pt_and_defaults(prod)
+    markup = await _amazon_markup()
+    price = _amazon_price_of(prod, markup)
+    list_price = round(float(prod.get("price") or 0), 2)
+    variants = prod.get("variants") or [{}]
+    v0 = variants[0]
+    attrs = _amazon_listing_attributes(prod, v0, pt or "PRODUCT", mp, price,
+                                       int(v0.get("stock") or 0), prod.get("brand"),
+                                       default_attrs=defaults, attr_mappings=mappings,
+                                       list_price=list_price)
+    missing = []
+    if pt:
+        sch = await _amazon_product_type_schema(pt)
+        for r in (sch.get("required") or []):
+            if r not in attrs:
+                missing.append(r)
+    imgs = _product_images(prod)
+    return {
+        "found": True, "product": prod.get("name"), "product_id": prod.get("id"),
+        "product_type": pt or None,
+        "product_type_warning": None if pt else "Kategori→productType eşlemesi YOK — kategori eşleştir.",
+        "markup_pct": markup, "our_price": price, "list_price": list_price,
+        "variant_count": len(variants),
+        "variant_sku": (v0.get("stock_code") or v0.get("barcode") or ""),
+        "image_count": len(imgs), "images": imgs,
+        "missing_required": missing,
+        "attribute_keys": sorted(attrs.keys()),
+        "attributes": attrs,
+        "note": ("DRY-RUN — Amazon'a YAZILMADI. Eksik zorunlu alan varsa kategori Özellik/Değer "
+                 "ekranından doldurup tekrar önizle; sağlamsa Ürün Aktar."),
+    }
 
 
 # ============================== STOK / FİYAT / LISTING (yazma) ==============================

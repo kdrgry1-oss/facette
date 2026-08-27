@@ -17,7 +17,7 @@ export default function AmazonSpApi() {
   const [status, setStatus] = useState(null);
   const [form, setForm] = useState({
     client_id: "", client_secret: "", refresh_token: "", app_id: "",
-    marketplace_id: "A33AVAJ2PDY3EV", region: "eu",
+    marketplace_id: "A33AVAJ2PDY3EV", region: "eu", markup: 0,
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -35,6 +35,7 @@ export default function AmazonSpApi() {
         app_id: r.data.app_id || f.app_id,
         marketplace_id: r.data.marketplace_id || f.marketplace_id,
         region: r.data.region || f.region,
+        markup: r.data.markup != null ? r.data.markup : f.markup,
       }));
     } catch {
       toast.error("Durum yüklenemedi");
@@ -166,6 +167,26 @@ export default function AmazonSpApi() {
     }
   };
 
+  // ÜRÜN AKTARIM ÖNİZLEME (dry-run): ada göre ürünü bul → Amazon'a gidecek tam payload.
+  const [prevQ, setPrevQ] = useState("");
+  const [prev, setPrev] = useState(null);
+  const [prevLoading, setPrevLoading] = useState(false);
+  const runPreview = async () => {
+    const q = (prevQ || "").trim();
+    if (!q) { toast.error("Ürün adı/barkod gir"); return; }
+    setPrevLoading(true);
+    setPrev(null);
+    try {
+      const r = await axios.get(`${API}/amazon/spapi/products/preview?q=${encodeURIComponent(q)}`, auth());
+      setPrev(r.data);
+      if (r.data?.found === false) toast.error(r.data.error || "Ürün bulunamadı");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Önizleme hatası");
+    } finally {
+      setPrevLoading(false);
+    }
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto" data-testid="amazon-spapi-page">
       <div className="flex items-center justify-between mb-5">
@@ -244,6 +265,10 @@ export default function AmazonSpApi() {
               <option value="fe">FE</option>
             </select>
           </Field>
+          <Field label="Kâr Marjı (%) — fiyat = baz × (1+marj/100)">
+            <input type="number" step="0.1" className="inp" value={form.markup}
+              onChange={(e) => set("markup", e.target.value)} placeholder="ör. 20" />
+          </Field>
         </div>
         <Field label="App ID / Solution ID (opsiyonel — OAuth consent linki için)">
           <input className="inp font-mono" value={form.app_id} onChange={(e) => set("app_id", e.target.value)}
@@ -300,6 +325,49 @@ export default function AmazonSpApi() {
           match_report'ta <b>matched:false</b> ise Amazon SellerSKU'n Facette stok kodu/barkoduyla eşleşmiyor →
           bu yüzden resim/stok gelmiyor. Sonucu bana gönder, eşlemeyi ona göre kurayım.
         </p>
+      </div>
+
+      {/* Ürün Aktarım Önizleme (dry-run) */}
+      <div className="bg-white border rounded-lg p-4 mt-4" data-testid="amazon-product-preview">
+        <h3 className="font-semibold text-sm mb-1">🧪 Ürün Aktarım Önizleme (Amazon'a ne gidecek?)</h3>
+        <p className="text-[11px] text-gray-500 mb-2">
+          Ürün adı/barkod gir → Amazon'a gidecek <b>tam payload</b> (marjlı fiyat, list_price, görseller,
+          tüm attribute'lar + eksik zorunlu alanlar) canlıya <b>yazılmadan</b> gösterilir.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={prevQ} onChange={(e) => setPrevQ(e.target.value)}
+            placeholder="ör. yüksek bel kapri pantolon acı kahve"
+            className="border rounded-lg px-3 py-2 text-sm w-96 max-w-full" />
+          <button onClick={runPreview} disabled={prevLoading || !status?.connected}
+            className="inline-flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50">
+            {prevLoading ? "Hazırlanıyor..." : "Önizle"}
+          </button>
+        </div>
+        {prev && prev.found !== false && (
+          <div className="mt-3 text-xs">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
+              <span><b>Ürün:</b> {prev.product}</span>
+              <span><b>productType:</b> {prev.product_type || <span className="text-red-600">YOK</span>}</span>
+              <span><b>Marj:</b> %{prev.markup_pct}</span>
+              <span><b>Satış:</b> {prev.our_price} TL</span>
+              {prev.list_price > prev.our_price && <span><b>Liste:</b> {prev.list_price} TL</span>}
+              <span><b>Görsel:</b> {prev.image_count}</span>
+              <span><b>Varyant:</b> {prev.variant_count}</span>
+            </div>
+            {prev.product_type_warning && <div className="text-red-600 mb-1">⚠️ {prev.product_type_warning}</div>}
+            {prev.missing_required?.length > 0 && (
+              <div className="text-amber-700 mb-1">
+                ⚠️ Eksik zorunlu alan: {prev.missing_required.join(", ")} — kategori Özellik/Değer ekranından doldur.
+              </div>
+            )}
+            {prev.missing_required?.length === 0 && prev.product_type && (
+              <div className="text-green-700 mb-1">✓ Zorunlu alanlar tamam — aktarıma hazır.</div>
+            )}
+            <pre className="text-[11px] bg-gray-900 text-green-200 p-3 rounded-lg overflow-auto max-h-[360px]">
+{JSON.stringify(prev.attributes, null, 2)}
+            </pre>
+          </div>
+        )}
       </div>
 
       {/* Marketplaces sonucu */}

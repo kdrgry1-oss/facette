@@ -944,13 +944,15 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
     summary = {"mode": "live", "pushed": 0, "skipped": 0, "failed": 0, "remaining": 0,
                "candidates": 0, "dry_run": False}
     try:
-        from routes.amazon_spapi import _get_config, _amazon_push_stock_price, ALLOW_WRITE
+        from routes.amazon_spapi import (_get_config, _amazon_push_stock_price, ALLOW_WRITE,
+                                         _amazon_markup, _amazon_price_of)
         cfg = await _get_config()
         if not cfg or not cfg.get("refresh_token_enc") or not cfg.get("selling_partner_id"):
             summary["error"] = "Amazon bağlı değil (OAuth/refresh token yok)."
             return summary
         from routes.deps import db as _db
         products = await _db.products.find({"is_active": True}, {"_id": 0}).to_list(length=None)
+        markup = await _amazon_markup()  # marjlı fiyat (listeleme ile AYNI)
 
         _bset = {str(x).strip() for x in (barcodes or []) if str(x).strip()}
         _sset = {str(x).strip() for x in (stock_codes or []) if str(x).strip()}
@@ -982,7 +984,7 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
         _CAP = 500 if _filtered else 40  # otomatik tur seed'i yayar; manuel filtrede tümü
         _force = force or _filtered
         for p in products:
-            price = p.get("price") or p.get("sale_price") or p.get("discounted_price") or 0
+            pr = _amazon_price_of(p, markup)  # marjlı satış fiyatı
             for v in (p.get("variants") or []):
                 if not _in_target(v):
                     continue
@@ -993,10 +995,6 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
                     qty = int(v.get("stock") or 0)
                 except Exception:
                     qty = 0
-                try:
-                    pr = round(float(price or 0), 2)
-                except Exception:
-                    pr = 0
                 if not _force:
                     st = await _db.amazon_sku_state.find_one({"sku": sku}, {"_id": 0})
                     if st and st.get("qty") == qty and st.get("price") == pr:
