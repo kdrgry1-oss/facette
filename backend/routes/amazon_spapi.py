@@ -586,27 +586,68 @@ async def _amazon_search_product_types(keywords: str = "") -> list:
     return out
 
 
+_AMZ_ENUM_EXCLUDE = {"language_tag", "marketplace_id", "currency", "audience",
+                     "unit_of_measure", "region", "country_code"}
+
+
 def _amz_enum_values(node: dict) -> list:
     """Bir attribute şema düğümünden izin verilen değerleri (enum + enumNames) çıkarır.
-    Amazon şeması: {items:{properties:{value:{enum:[...], enumNames:[...]}}}}. Döner:
-    [{value, label}] (label yoksa value)."""
-    try:
-        items = (node or {}).get("items") or {}
-        props = items.get("properties") or {}
-        for key in ("value", "type", "name", "unit"):
-            sub = props.get(key) or {}
-            en = sub.get("enum")
-            if en:
-                names = sub.get("enumNames") or en
-                return [{"value": str(e), "label": str(n)} for e, n in zip(en, names)][:2000]
-        for _k, sub in props.items():
+    Amazon şeması enum'u farklı derinliklerde tutabilir: items.properties.value.enum,
+    doğrudan node.enum, node.properties.*.enum veya daha derinde. Döner [{value,label}].
+    language_tag/marketplace_id gibi gerçek-değer OLMAYAN enum'lar atlanır."""
+    def _pairs(sub):
+        en = sub.get("enum") or []
+        names = sub.get("enumNames") or en
+        return [{"value": str(e), "label": str(n)} for e, n in zip(en, names)][:3000]
+
+    def _from_props(props):
+        if not isinstance(props, dict):
+            return []
+        for key in ("value", "unit", "type", "name"):  # 'value' asıl değer taşıyıcı
+            sub = props.get(key)
             if isinstance(sub, dict) and sub.get("enum"):
-                en = sub["enum"]
-                names = sub.get("enumNames") or en
-                return [{"value": str(e), "label": str(n)} for e, n in zip(en, names)][:2000]
+                return _pairs(sub)
+        for k, sub in props.items():
+            if k in _AMZ_ENUM_EXCLUDE:
+                continue
+            if isinstance(sub, dict) and sub.get("enum"):
+                return _pairs(sub)
+        return []
+
+    try:
+        if not isinstance(node, dict):
+            return []
+        if node.get("enum"):
+            return _pairs(node)
+        items = node.get("items") or {}
+        r = _from_props(items.get("properties") or {})
+        if r:
+            return r
+        r = _from_props(node.get("properties") or {})
+        if r:
+            return r
+        # Sınırlı derinlikte tarama — value taşıyan enum'u bul (exclude anahtarları atla).
+        found = []
+
+        def _scan(n, depth=0):
+            if depth > 6 or found:
+                return
+            if isinstance(n, dict):
+                if n.get("enum"):
+                    found.extend(_pairs(n))
+                    return
+                for k, v in n.items():
+                    if k in _AMZ_ENUM_EXCLUDE:
+                        continue
+                    _scan(v, depth + 1)
+            elif isinstance(n, list):
+                for x in n:
+                    _scan(x, depth + 1)
+
+        _scan(items or node)
+        return found
     except Exception:
-        pass
-    return []
+        return []
 
 
 async def _amazon_product_type_schema(product_type: str) -> dict:
@@ -617,7 +658,7 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
         return {}
     try:
         cached = await db.amazon_pt_schema.find_one({"product_type": product_type}, {"_id": 0})
-        if cached and cached.get("required") is not None and cached.get("values") is not None:
+        if cached and cached.get("required") is not None and cached.get("_schema_v") == 2:
             return cached
     except Exception:
         pass
@@ -652,7 +693,7 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
             if vals:
                 attributes_values[k] = vals
     doc = {"product_type": product_type, "required": required, "optional": optional,
-           "values": attributes_values, "updated_at": _now_iso()}
+           "values": attributes_values, "_schema_v": 2, "updated_at": _now_iso()}
     try:
         await db.amazon_pt_schema.update_one({"product_type": product_type},
                                              {"$set": doc}, upsert=True)
