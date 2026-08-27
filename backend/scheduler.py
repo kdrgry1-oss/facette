@@ -945,7 +945,7 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
                "candidates": 0, "dry_run": False}
     try:
         from routes.amazon_spapi import (_get_config, _amazon_push_stock_price, ALLOW_WRITE,
-                                         _amazon_markup, _amazon_price_of)
+                                         _amazon_markup, _amazon_price_of, _amazon_seller_sku)
         cfg = await _get_config()
         if not cfg or not cfg.get("refresh_token_enc") or not cfg.get("selling_partner_id"):
             summary["error"] = "Amazon bağlı değil (OAuth/refresh token yok)."
@@ -959,7 +959,7 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
         _filtered = bool(_bset or _sset)
 
         def _sku_of(v):
-            return (str(v.get("stock_code") or "").strip() or str(v.get("barcode") or "").strip())
+            return _amazon_seller_sku(v)  # listeleme ile AYNI SellerSKU (stok_kodu-beden)
 
         def _in_target(v):
             if not _filtered:

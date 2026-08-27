@@ -888,6 +888,18 @@ async def _resolve_amazon_product_type(product: dict) -> str:
     return pt
 
 
+def _amazon_seller_sku(variant: dict) -> str:
+    """Varyant için Amazon SellerSKU — BENZERSİZ olmalı (her beden ayrı SKU).
+    Kural: stok_kodu + '-' + beden (mevcut Amazon SKU deseni 'FCSS...-XS' ile birebir);
+    beden yoksa barkod; o da yoksa stok_kodu."""
+    sc = str(variant.get("stock_code") or "").strip()
+    sz = str(variant.get("size") or "").strip()
+    bc = str(variant.get("barcode") or "").strip()
+    if sc and sz:
+        return f"{sc}-{sz}"
+    return sc or bc
+
+
 def _amz_code_match(product: dict, variant: dict, bset: set, sset: set, pset: set) -> bool:
     """Filtre eşleşmesi — varyant VE ürün seviyesindeki tüm kod adaylarını (barkod/stok_kodu/
     sku/urun_id/id) verilen kümelerle karşılaştırır. TAM eşleşme yoksa, kullanıcı SKU'nun bir
@@ -956,7 +968,7 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
             sc = str(v.get("stock_code") or "").strip()
             if _filtered and not _amz_code_match(p, v, _bset, _sset, _pset):
                 continue
-            sku = sc or bc
+            sku = _amazon_seller_sku(v)
             if not sku:
                 skipped += 1
                 continue
@@ -1030,7 +1042,7 @@ async def validate_products_for_amazon(payload: dict, current_user: dict) -> dic
             sc = str(v.get("stock_code") or "").strip()
             if _filtered and not _amz_code_match(p, v, _bset, _sset, _pset):
                 continue
-            sku = sc or bc
+            sku = _amazon_seller_sku(v)
             if not sku:
                 continue
             attrs = _amazon_listing_attributes(p, v, pt or "PRODUCT", mp, price,
