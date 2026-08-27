@@ -658,7 +658,7 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
         return {}
     try:
         cached = await db.amazon_pt_schema.find_one({"product_type": product_type}, {"_id": 0})
-        if cached and cached.get("required") is not None and cached.get("_schema_v") == 3:
+        if cached and cached.get("required") is not None and cached.get("_schema_v") == 4:
             return cached
     except Exception:
         pass
@@ -686,9 +686,15 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
                 pass
         for k in props.keys():
             (required if k in req_set else optional).append(k)
-            _t = (props.get(k) or {}).get("title")
+            _node = props.get(k) or {}
+            _t = _node.get("title")
             if _t:
                 titles[k] = _t
+            _subp = ((_node.get("items") or {}).get("properties")) or _node.get("properties") or {}
+            for _s, _sv in _subp.items():
+                _st = (_sv or {}).get("title")
+                if _st:
+                    titles[f"{k}.{_s}"] = _st
         if not props:
             required = list(req_set)
         # Her attribute için izin verilen değerler (enum) — açılır liste için.
@@ -698,7 +704,7 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
                 attributes_values[k] = vals
     doc = {"product_type": product_type, "required": required, "optional": optional,
            "values": attributes_values, "titles": titles if res["ok"] else {},
-           "_schema_v": 3, "updated_at": _now_iso()}
+           "_schema_v": 4, "updated_at": _now_iso()}
     try:
         await db.amazon_pt_schema.update_one({"product_type": product_type},
                                              {"$set": doc}, upsert=True)
