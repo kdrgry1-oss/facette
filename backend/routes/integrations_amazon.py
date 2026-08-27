@@ -35,3 +35,12 @@ async def amazon_tr_products_sync(payload: dict = Body(default={}),
     ürünlerini Amazon'a LİSTELER (Listings Items PUT). Asıl mantık amazon_spapi.sync_products."""
     from .amazon_spapi import sync_products_to_amazon  # yerel import
     return await sync_products_to_amazon(payload or {}, current_user)
+
+
+@router.post("/amazon-tr/products/validate")
+async def amazon_tr_products_validate(payload: dict = Body(default={}),
+                                      current_user: dict = Depends(require_admin)):
+    """Aktarım ÖNCESİ doğrulama (CategoryMapping 'Doğrula') — eksik zorunlu alanları raporlar,
+    canlıya yazmaz."""
+    from .amazon_spapi import validate_products_for_amazon  # yerel import
+    return await validate_products_for_amazon(payload or {}, current_user)

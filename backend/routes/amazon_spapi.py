@@ -959,8 +959,74 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
                     pushed += 1
                 else:
                     failed += 1
-    return {"success": True, "dry_run": not ALLOW_WRITE, "pushed": pushed, "failed": failed,
-            "skipped": skipped, "count": len(results), "results": results[:200]}
+    return {"success": True, "dry_run": not ALLOW_WRITE, "pushed": pushed, "successful": pushed,
+            "failed": failed, "skipped": skipped, "count": len(results), "results": results[:200],
+            "message": (f"{'DRY-RUN — ' if not ALLOW_WRITE else ''}{pushed} gönderildi / {failed} hata"
+                        + (f" / {skipped} atlandı" if skipped else ""))}
+
+
+async def validate_products_for_amazon(payload: dict, current_user: dict) -> dict:
+    """Aktarım ÖNCESİ doğrulama: filtreye uyan her ürün/varyant için Amazon'a gidecek attrs'ı
+    kur, productType + zorunlu şema alanları + temel alanları (barkod/fiyat) kontrol et, eksikleri
+    raporla. Canlıya YAZMAZ. FilteredPushPanel bunu 'Doğrula'da çağırır."""
+    payload = payload or {}
+    _, _, mp = await get_valid_access_token()
+    _bset = {str(x).strip() for x in (payload.get("barcodes") or []) if str(x).strip()}
+    _sset = {str(x).strip() for x in (payload.get("stock_codes") or []) if str(x).strip()}
+    _pset = {str(x).strip() for x in (payload.get("product_ids") or []) if str(x).strip()}
+    _filtered = bool(_bset or _sset or _pset)
+    q = {"is_active": True}
+    if _pset:
+        q["id"] = {"$in": list(_pset)}
+    products = await db.products.find(q, {"_id": 0}).to_list(length=None)
+    markup = await _amazon_markup()
+    results, valid, invalid, top_missing = [], 0, 0, {}
+    for p in products:
+        pt, defaults, mappings = await _resolve_amazon_pt_and_defaults(p)
+        req = []
+        if pt:
+            try:
+                sch = await _amazon_product_type_schema(pt)
+                req = sch.get("required") or []
+            except Exception:
+                req = []
+        price = _amazon_price_of(p, markup)
+        list_price = round(float(p.get("price") or 0), 2)
+        for v in (p.get("variants") or []):
+            bc = str(v.get("barcode") or "").strip()
+            sc = str(v.get("stock_code") or "").strip()
+            if _filtered and not (bc in _bset or sc in _sset or str(p.get("id")) in _pset):
+                continue
+            sku = sc or bc
+            if not sku:
+                continue
+            attrs = _amazon_listing_attributes(p, v, pt or "PRODUCT", mp, price,
+                                               int(v.get("stock") or 0), p.get("brand"),
+                                               default_attrs=defaults, attr_mappings=mappings,
+                                               list_price=list_price)
+            missing = []
+            if not pt:
+                missing.append("productType (kategori eşleştir)")
+            for r in req:
+                if r not in attrs:
+                    missing.append(r)
+            if not bc:
+                missing.append("barkod (EAN)")
+            if price <= 0:
+                missing.append("fiyat")
+            ok = len(missing) == 0
+            results.append({"product": p.get("name"), "sku": sku, "valid": ok,
+                            "missing_required_attrs": missing})
+            if ok:
+                valid += 1
+            else:
+                invalid += 1
+                for m0 in missing:
+                    top_missing[m0] = top_missing.get(m0, 0) + 1
+    top = sorted(top_missing.items(), key=lambda kv: -kv[1])[:12]
+    return {"success": True, "valid_count": valid, "invalid_count": invalid,
+            "results": results[:300],
+            "top_missing_attrs": [{"attr": a, "count": c} for a, c in top]}
 
 
 # ============================== ENDPOINTS ==============================
