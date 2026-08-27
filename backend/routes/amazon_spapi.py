@@ -875,7 +875,11 @@ async def _resolve_amazon_pt_and_defaults(product: dict) -> tuple:
             defaults = dict(m.get("default_mappings") or {})
             attr_mappings = list(m.get("attribute_mappings") or [])
             if not pt:
-                pt = (defaults.get("product_type") or m.get("product_type") or "").strip()
+                # productType kategori eşlemesinde marketplace_category_id alanında saklanır
+                # (ör. "PANTS"). default_mappings.product_type / product_type yedek.
+                pt = (str(m.get("marketplace_category_id") or "").strip()
+                      or str(defaults.get("product_type") or "").strip()
+                      or str(m.get("product_type") or "").strip())
     return pt, defaults, attr_mappings
 
 
