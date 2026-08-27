@@ -903,11 +903,16 @@ def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, b
         for _bad in ("compliance_outer_surface_material", "closure_type", "leg_style",
                      "outer_material_type", "front_style", "apparel_closure_orientation", "pants_form_type"):
             attrs.pop(_bad, None)
-        # İÇ İÇE composite zorunlular (leg.style/outer.material/closure.type/rise.style+height):
-        # Amazon'un tam alt-format şeması netleşene kadar bu alanlar GÖNDERİLMEZ — malformed
-        # payload tüm ürünü 400 ile reddediyordu. Kullanıcı bunları kategori Özellik/Değer'den
-        # (doğru alt-yapıyla) girer; şema alt-tipleri çözülünce burada otomatik doldurulacak.
-        pass
+        # İÇ İÇE composite zorunlular — HAM ŞEMADAN doğrulanmış çift-nested format:
+        # parent:[{marketplace_id, child:[{language_tag,value}]}]  (ölçüde {unit,value}).
+        def _txt(v):
+            return [{"language_tag": "tr_TR", "value": v}]
+        attrs["leg"] = [{"marketplace_id": mp, "style": _txt("Düz Paça")}]              # Bacak Stili
+        attrs["outer"] = [{"marketplace_id": mp, "material": _txt("Pamuk")}]            # Dış Malzeme
+        attrs["closure"] = [{"marketplace_id": mp, "type": _txt("Fermuar")}]            # İlikleme/Kapanma
+        attrs["rise"] = [{"marketplace_id": mp,                                         # Yükselti Stili + Mesafesi
+                          "style": _txt("Yüksek Bel"),
+                          "height": [{"unit": "centimeters", "value": 28}]}]
     # Ölçü tipli ama kullanıcı düz sayı girdiyse (ör. leg_hem_opening_width) → {value,unit}'e çevir.
     for _mk in list(attrs.keys()):
         if _mk in _AMZ_MEASUREMENT_ATTRS:
