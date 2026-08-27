@@ -166,28 +166,6 @@ export default function AmazonSpApi() {
     }
   };
 
-  // Adres raporu (CSV/TSV) yükle → PII olmadan isim/adres/fatura doldur.
-  const [addrFile, setAddrFile] = useState(null);
-  const [addrUploading, setAddrUploading] = useState(false);
-  const [addrResult, setAddrResult] = useState(null);
-  const uploadAddresses = async () => {
-    if (!addrFile) { toast.error("Önce Amazon sipariş raporu (CSV/TSV) seç"); return; }
-    setAddrUploading(true);
-    setAddrResult(null);
-    try {
-      const a = auth();
-      const fd = new FormData();
-      fd.append("file", addrFile);
-      const r = await axios.post(`${API}/amazon/spapi/orders/import-addresses`, fd, { headers: a.headers });
-      setAddrResult(r.data);
-      toast.success(r.data?.message || "Adresler yüklendi");
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Adres yükleme hatası");
-    } finally {
-      setAddrUploading(false);
-    }
-  };
-
   return (
     <div className="p-6 max-w-4xl mx-auto" data-testid="amazon-spapi-page">
       <div className="flex items-center justify-between mb-5">
@@ -322,34 +300,6 @@ export default function AmazonSpApi() {
           match_report'ta <b>matched:false</b> ise Amazon SellerSKU'n Facette stok kodu/barkoduyla eşleşmiyor →
           bu yüzden resim/stok gelmiyor. Sonucu bana gönder, eşlemeyi ona göre kurayım.
         </p>
-      </div>
-
-      {/* Adres Raporu Yükle (PII rolü olmadan isim/adres) */}
-      <div className="bg-white border rounded-lg p-4 mt-4" data-testid="amazon-addr-import">
-        <h3 className="font-semibold text-sm mb-1">📄 Sipariş Adres Raporu Yükle (isim/adres/fatura)</h3>
-        <p className="text-[11px] text-gray-500 mb-2">
-          Amazon PII rolü onayı yoksa: <b>Seller Central → Raporlar → Sipariş Raporları →
-          "Tüm Siparişler" / "Kargolanmamış Siparişler"</b> düz-dosya (.txt/.csv) indir, buraya
-          yükle. Sadece <b>panelde var olan</b> Amazon siparişlerinin adı/adres/fatura alanları
-          otomatik dolar (sipariş no ile eşleşir).
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <input type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
-            onChange={(e) => setAddrFile(e.target.files?.[0] || null)}
-            className="text-xs" />
-          <button onClick={uploadAddresses} disabled={addrUploading || !addrFile}
-            className="inline-flex items-center gap-2 bg-teal-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-teal-700 disabled:opacity-50">
-            {addrUploading ? "Yükleniyor..." : "Yükle & Doldur"}
-          </button>
-        </div>
-        {addrResult && (
-          <div className="mt-2 text-xs text-gray-700">
-            ✅ {addrResult.message}
-            {addrResult.not_found > 0 && addrResult.unmatched_sample?.length > 0 && (
-              <div className="text-gray-400 mt-1">Eşleşmeyen örnek sipariş no: {addrResult.unmatched_sample.join(", ")}</div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Marketplaces sonucu */}
