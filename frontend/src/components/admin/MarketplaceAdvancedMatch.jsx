@@ -99,6 +99,40 @@ const AMZ_DEFAULT_SUGGEST = {
   country_of_origin: "Türkiye", target_gender: "Kadın", department: "Kadın",
   age_range_description: "Yetişkin",
 };
+// Amazon alanlarının Türkçe AÇIKLAMASI — kullanıcı ne olduğunu görüp mantıklı seçsin.
+const AMZ_DESC = {
+  item_name: "Ürün başlığı — Facette ürün adından otomatik gelir.",
+  brand: "Marka adı — Facette markadan otomatik.",
+  product_description: "Ürün açıklaması — Facette açıklamasından otomatik.",
+  bullet_point: "Madde madde öne çıkan özellikler (5 adede kadar).",
+  fabric_type: "Kumaş içeriği (ör. %100 Pamuk, Polyester).",
+  country_of_origin: "Menşei — üretildiği/ithal edildiği ülke (ör. Türkiye).",
+  material: "Ana malzeme.",
+  color: "Renk — Facette varyant renginden otomatik.",
+  size: "Beden — Facette varyant bedeninden otomatik.",
+  department: "Bölüm/hedef grup (womens=Kadın, mens=Erkek, girls=Kız çocuk).",
+  target_gender: "Hedef cinsiyet (female=Kadın, male=Erkek, unisex).",
+  age_range_description: "Yaş grubu (adult=Yetişkin, child=Çocuk).",
+  style: "Stil/tarz (ör. Casual, Klasik).",
+  occasion_type: "Kullanım ortamı (Günlük, Spor, Ofis).",
+  care_instructions: "Yıkama/bakım talimatı (ör. 30°C, kuru temizleme).",
+  pattern_type: "Desen (Düz, Çizgili, Çiçekli).",
+  neck_style: "Yaka tipi.",
+  sleeve_type: "Kol tipi (Kısa, Uzun, Kolsuz).",
+  closure_type: "Kapama tipi (Fermuar, Düğme, Bağcık).",
+  outer_material_type: "Dış malzeme.",
+  fit_type: "Kalıp (Slim, Regular, Oversize).",
+  model_number: "Model/stil kodun (kendi kodun) — opsiyonel, boş bırakılabilir.",
+  model_name: "Model/stil adı — opsiyonel, boş bırakılabilir.",
+  recommended_browse_nodes: "Amazon kategori düğümü (browse node) ID'si — ürünün Amazon'da göründüğü kategori. Boş bırakılırsa Amazon productType'a göre atar.",
+  parentage_level: "Varyant yapısı: parent=ana ürün, child=alt (beden/renk) varyant.",
+  variation_theme: "Varyant teması (SIZE=beden, COLOR=renk, SIZE_COLOR).",
+  item_type_name: "Ürün tipi adı.",
+  number_of_items: "Paketteki adet (tek ürün = 1).",
+  batteries_required: "Pil gerekli mi (giyimde Hayır).",
+  supplier_declared_dg_hz_regulation: "Tehlikeli madde beyanı (giyimde 'not_applicable').",
+  is_expiration_dated_product: "Son kullanma tarihli ürün mü (giyimde Hayır).",
+};
 
 function sortLikeSize(arr, getName) {
   return [...(arr || [])].sort((a, b) => {
@@ -608,6 +642,9 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                           {isAmazon && trLabel !== name && (
                             <p className="text-[11px] text-gray-400 font-mono">{name}</p>
                           )}
+                          {isAmazon && AMZ_DESC[name] && (
+                            <p className="text-[11px] text-gray-500 mt-0.5 leading-snug max-w-xs">{AMZ_DESC[name]}</p>
+                          )}
                           {attr.attributeType && (
                             <p className="text-xs text-gray-400">Tür: {attr.attributeType}</p>
                           )}
@@ -617,48 +654,6 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                             <span className="inline-block text-[11px] bg-green-50 text-green-700 border border-green-200 rounded px-2 py-1">
                               ✓ Otomatik — Facette ürün alanından doldurulur (eşleştirme gerekmez)
                             </span>
-                          ) : isAmazon ? (
-                            hasVals ? (
-                              <div className="p-1 bg-orange-50/50 rounded border border-orange-100">
-                                <div className="text-[10px] font-bold text-orange-800 mb-1 px-1">Amazon değerinden seç ({attr.attributeValues.length}):</div>
-                                <div className="relative">
-                                  <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400" />
-                                  <input
-                                    type="text"
-                                    placeholder="Değer ara..."
-                                    value={searchTerms[id] || ""}
-                                    onChange={(e) => setSearchTerms((p) => ({ ...p, [id]: e.target.value }))}
-                                    className="w-full pl-6 pr-2 py-1 text-xs border-b border-transparent bg-transparent focus:bg-white focus:border-orange-300 outline-none rounded-t"
-                                  />
-                                </div>
-                                <select
-                                  value={defaults[id] || ""}
-                                  onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
-                                  className="border rounded px-2 py-1 text-xs w-full bg-white"
-                                >
-                                  <option value="">Varsayılan Seçilmedi</option>
-                                  {attr.attributeValues
-                                    .filter((v) => (v.name || "").toLowerCase().includes((searchTerms[id] || "").toLowerCase()))
-                                    .slice(0, 500)
-                                    .map((v) => (
-                                      <option key={v.id ?? `n:${v.name}`} value={v.id != null ? v.id : v.name}>
-                                        {v.name}
-                                      </option>
-                                    ))}
-                                </select>
-                              </div>
-                            ) : (
-                              <div className="p-1 bg-blue-50/50 rounded border border-blue-100">
-                                <div className="text-[10px] font-bold text-blue-800 mb-1 px-1">Varsayılan Değer (bu alana gönderilecek):</div>
-                                <input
-                                  type="text"
-                                  placeholder={AMZ_DEFAULT_SUGGEST[name] ? `ör. ${AMZ_DEFAULT_SUGGEST[name]}` : "değer girin (boş bırakılırsa gönderilmez)"}
-                                  value={defaults[id] || ""}
-                                  onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
-                                  className="border border-blue-200 rounded px-2 py-1 text-xs w-full bg-white"
-                                />
-                              </div>
-                            )
                           ) : (
                           <>
                           <LocalAttrAutoComplete
