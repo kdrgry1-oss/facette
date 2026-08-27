@@ -131,6 +131,7 @@ export default function AdminOrders({ unpaidView = false }) {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState(null);
+  const [slipUploading, setSlipUploading] = useState(false);
   const [bulkAction, setBulkAction] = useState("");
   const [selectedCargo, setSelectedCargo] = useState("MNG");
   const [shipModalOpen, setShipModalOpen] = useState(false);
@@ -454,6 +455,37 @@ export default function AdminOrders({ unpaidView = false }) {
     }
   };
 
+
+  // Amazon sevk irsaliyesi (PDF) yükle → adres/isim/telefon otomatik doldur (PII rolü gerekmez).
+  const uploadPackingSlip = async (file) => {
+    if (!file) return;
+    setSlipUploading(true);
+    const t = toast.loading("İrsaliye çözümleniyor...");
+    try {
+      const token = localStorage.getItem('token');
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await axios.post(`${API}/amazon/spapi/orders/parse-packing-slip`, fd, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.data?.success) {
+        toast.success(res.data.message || "Adres dolduruldu", { id: t });
+        await fetchOrders();
+        // Açık detayda anında görünsün diye seçili siparişi güncelle
+        const p = res.data.parsed || {};
+        setSelectedOrder((o) => o ? { ...o, shipping_address: { ...(o.shipping_address || {}),
+          first_name: (p.name || "").split(" ").slice(0, -1).join(" ") || o.shipping_address?.first_name,
+          last_name: (p.name || "").split(" ").slice(-1).join(" ") || o.shipping_address?.last_name,
+          address: p.address, city: p.city, district: p.district, phone: p.phone } } : o);
+      } else {
+        toast.error(res.data?.error || "Çözümlenemedi", { id: t });
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "İrsaliye yüklenemedi", { id: t });
+    } finally {
+      setSlipUploading(false);
+    }
+  };
 
   const handleSendConfirmationSMS = async (orderId) => {
     try {
@@ -1858,6 +1890,18 @@ export default function AdminOrders({ unpaidView = false }) {
                       </div>
                     );
                   })()}
+                  {/* Amazon: PII rolü olmadan adres için sevk irsaliyesi (PDF) çözümle */}
+                  {!editMode && (selectedOrder.platform === "amazon") && (
+                    <div className="mt-3 pt-3 border-t">
+                      <label className="block text-[11px] text-gray-500 mb-1">
+                        📄 Sevk irsaliyesi (PDF) çözümle — adres/isim/telefon otomatik dolar
+                      </label>
+                      <input type="file" accept=".pdf,application/pdf" disabled={slipUploading}
+                        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; uploadPackingSlip(f); }}
+                        className="text-xs" />
+                      {slipUploading && <span className="text-[11px] text-gray-400 ml-2">çözümleniyor…</span>}
+                    </div>
+                  )}
                 </div>
                 <div className="p-4 border rounded">
                   <h3 className="font-medium mb-3">{editMode ? "Teslimat Adresi" : "Fatura Adresi"}</h3>
