@@ -17,7 +17,7 @@ export default function AmazonSpApi() {
   const [status, setStatus] = useState(null);
   const [form, setForm] = useState({
     client_id: "", client_secret: "", refresh_token: "", app_id: "",
-    marketplace_id: "A33AVAJ2PDY3EV", region: "eu", markup: 0,
+    marketplace_id: "A33AVAJ2PDY3EV", region: "eu", markup: 0, selling_partner_id: "",
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -36,6 +36,7 @@ export default function AmazonSpApi() {
         marketplace_id: r.data.marketplace_id || f.marketplace_id,
         region: r.data.region || f.region,
         markup: r.data.markup != null ? r.data.markup : f.markup,
+        selling_partner_id: r.data.selling_partner_id || f.selling_partner_id,
       }));
     } catch {
       toast.error("Durum yüklenemedi");
@@ -270,6 +271,11 @@ export default function AmazonSpApi() {
               onChange={(e) => set("markup", e.target.value)} placeholder="ör. 20" />
           </Field>
         </div>
+        <Field label="Merchant Token / Selling Partner ID (ürün listeleme için ŞART)">
+          <input className="inp font-mono" value={form.selling_partner_id}
+            onChange={(e) => set("selling_partner_id", e.target.value)}
+            placeholder="ör. A2XXXXXXXXXXXX — Seller Central → Ayarlar → Hesap Bilgileri → Merchant Token" />
+        </Field>
         <Field label="App ID / Solution ID (opsiyonel — OAuth consent linki için)">
           <input className="inp font-mono" value={form.app_id} onChange={(e) => set("app_id", e.target.value)}
             placeholder="amzn1.sp.solution.xxxx" />

@@ -1045,6 +1045,7 @@ async def spapi_status(current_user: dict = Depends(require_admin)):
         "region": cfg.get("region") or DEFAULT_REGION,
         "app_id": cfg.get("app_id"),
         "markup": cfg.get("markup") or 0,
+        "selling_partner_id": cfg.get("selling_partner_id") or "",
         "last_test": cfg.get("last_test"),
         "updated_at": cfg.get("updated_at"),
     }
@@ -1072,6 +1073,11 @@ async def spapi_save_config(payload: dict, current_user: dict = Depends(require_
             update["markup"] = float(payload.get("markup"))
         except Exception:
             pass
+    # Merchant Token / Selling Partner ID — listeleme + stok/fiyat push için gerekli.
+    # Normalde OAuth consent akışında gelir; elle de girilebilir (Seller Central → Ayarlar →
+    # Hesap Bilgileri → Merchant Token, ör. A2XXXXXXXX).
+    if payload.get("selling_partner_id"):
+        update["selling_partner_id"] = str(payload.get("selling_partner_id")).strip()
     if payload.get("client_secret"):
         update["client_secret_enc"] = encrypt(payload["client_secret"].strip())
     if payload.get("refresh_token"):
