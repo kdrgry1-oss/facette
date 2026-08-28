@@ -20,11 +20,15 @@ function useDateRange() {
 // Hazır tarih ön-ayarları — tüm rapor sayfalarında ortak (bu DateBar her rapor tarafından kullanılır).
 const DATE_PRESETS = [
   { key: "today", label: "Bugün", days: 1 },
+  { key: "yesterday", label: "Dün" },
   { key: "7", label: "Son 7 Gün", days: 7 },
   { key: "30", label: "Son 30 Gün", days: 30 },
+  { key: "thismonth", label: "Bu Ay" },
   { key: "90", label: "Son 90 Gün", days: 90 },
   { key: "365", label: "Son 1 Yıl", days: 365 },
 ];
+// Yerel tarih → YYYY-MM-DD (toISOString UTC kayması olmadan; TR'de ayın 1'i bir gün geri kaymasın).
+const _ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 function DateBar({ from, setFrom, to, setTo, onRefresh }) {
   // Ön-ayar tıklanınca tarihleri güncelle ve tarih STATE'i işlendikten SONRA (ref ile en güncel
@@ -50,9 +54,17 @@ function DateBar({ from, setFrom, to, setTo, onRefresh }) {
 
   const applyPreset = (p) => {
     const t = new Date();
-    const toStr = t.toISOString().slice(0, 10);
-    const fromStr = p.days <= 1 ? toStr
-      : new Date(t.getTime() - (p.days - 1) * 864e5).toISOString().slice(0, 10);
+    let fromStr, toStr;
+    if (p.key === "yesterday") {
+      const y = new Date(t.getTime() - 864e5);
+      fromStr = toStr = _ymd(y);
+    } else if (p.key === "thismonth") {
+      fromStr = _ymd(new Date(t.getFullYear(), t.getMonth(), 1));
+      toStr = _ymd(t);
+    } else {
+      toStr = _ymd(t);
+      fromStr = p.days <= 1 ? toStr : _ymd(new Date(t.getTime() - (p.days - 1) * 864e5));
+    }
     pendingLabelRef.current = p.label;
     setFrom(fromStr); setTo(toStr); setActivePreset(p.key); setTick((x) => x + 1);
   };
