@@ -1090,7 +1090,12 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
             _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, parent_sku, pattrs)
             _r["product"] = f"{p0.get('name')} (ana ürün)"
             _tally(_r, _ok, _dry)
+            _done_skus = set()
             for pp, v in specs:
+                _csku = _amazon_seller_sku(v, pp)
+                if _csku in _done_skus:   # mükerrer (Kopya) ürün → aynı SKU'yu tekrar yazma
+                    continue
+                _done_skus.add(_csku)
                 cattrs = _amazon_listing_attributes(pp, v, pt, mp, _amazon_price_of(pp, markup),
                                                     int(v.get("stock") or 0), pp.get("brand"),
                                                     default_attrs=cat_defaults, attr_mappings=cat_mappings,
@@ -1099,7 +1104,7 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
                 cattrs["variation_theme"] = [{"name": theme}]
                 cattrs["child_parent_sku_relationship"] = [
                     {"marketplace_id": mp, "child_relationship_type": "variation", "parent_sku": parent_sku}]
-                _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, _amazon_seller_sku(v, pp), cattrs)
+                _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, _csku, cattrs)
                 _r["product"] = pp.get("name")
                 _tally(_r, _ok, _dry)
         else:
