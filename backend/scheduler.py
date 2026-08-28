@@ -933,7 +933,7 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
         return summary
 
 
-async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=False):
+async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=False, manual=False):
     """Scheduler / manuel — Amazon stok+fiyat CANLI push (Trendyol/HB ile simetrik).
     Amazon SellerSKU = Facette variant.stock_code (yoksa barcode). Otomatik turda YALNIZ stoğu/
     fiyatı DEĞİŞEN varyantı yollar (amazon_sku_state değişiklik tespiti). Manuel tetik `barcodes`/
@@ -981,7 +981,8 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
             return summary
 
         pushed = skipped = failed = remaining = 0
-        _CAP = 500 if _filtered else 40  # otomatik tur seed'i yayar; manuel filtrede tümü
+        # Otomatik cron: 40/tur (seed'i yay). Manuel tetik: TAVAN YOK (tümünü gönder).
+        _CAP = 1000000 if (manual or _filtered) else 40
         _force = force or _filtered
         for p in products:
             pr = _amazon_price_of(p, markup)  # marjlı satış fiyatı

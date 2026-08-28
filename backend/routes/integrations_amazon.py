@@ -23,7 +23,10 @@ async def amazon_tr_inventory_sync(payload: dict = Body(default={}),
     payload = payload or {}
     barcodes = payload.get("barcodes") or []
     stock_codes = payload.get("stock_codes") or []
-    res = await _run_amazon_auto_stock_sync(barcodes=barcodes, stock_codes=stock_codes, force=True)
+    # manual=True → tavan yok. force yalnız filtreli durumda (filtresiz 'tümü' değişiklik-tespitiyle
+    # ilerler, tekrar çalıştırınca kaldığı yerden devam eder — çift push yok).
+    res = await _run_amazon_auto_stock_sync(barcodes=barcodes, stock_codes=stock_codes,
+                                            force=bool(barcodes or stock_codes), manual=True)
     prefix = "DRY-RUN — " if res.get("dry_run") else ""
     return {"success": not res.get("error"), "message": f"Amazon: {prefix}{res.get('message', '')}", **res}
 
