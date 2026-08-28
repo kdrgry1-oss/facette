@@ -77,6 +77,9 @@ async def create_coupon(payload: dict, current_user: dict = Depends(require_admi
         "first_order_only": bool(payload.get("first_order_only", False)),
         "free_shipping": bool(payload.get("free_shipping", False)),
         "auto_apply": bool(payload.get("auto_apply", False)),
+        # İndirimli fiyatı (sale_price) olan ürünlere bu kampanya uygulansın mı? Varsayılan True
+        # = uygulanmaz (indirimli fiyat geçerli). False → indirimli ürünlere de kampanya uygulanır.
+        "skip_discounted": bool(payload.get("skip_discounted", True)),
         # --- nth_discount ("X al Y öde") alanları (önceden create'te kaydedilmiyordu) ---
         "min_quantity": int(payload.get("min_quantity", 0) or 0) or None,
         "buy_quantity": int(payload.get("buy_quantity", 0) or 0) or None,
@@ -104,6 +107,7 @@ async def update_coupon(cid: str, payload: dict, current_user: dict = Depends(re
         "start_at", "end_at", "is_active", "first_order_only", "free_shipping", "auto_apply",
         "min_quantity", "buy_quantity", "free_quantity", "get_discount", "bundle_price",
         "priority", "combinable", "stack_group", "combinable_with", "payment_methods",
+        "skip_discounted",
     )
     update = {k: v for k, v in payload.items() if k in allowed}
     update["updated_at"] = _utcnow()
@@ -350,20 +354,25 @@ def _compute_discount(c: dict, cart_total: float, items: list) -> float:
     allowed_pids = {str(x) for x in (c.get("products") or []) if x is not None}
     # HARİÇ TUTMA (kullanıcı isteği): kategori kapsamında olsa dahi bu ürünler kampanyaya girmez.
     excluded_pids = {str(x) for x in (c.get("excluded_products") or []) if x is not None}
-    # KURAL: ürün kartında indirimli fiyat (sale_price) girili kalemler kampanya tabanına
-    # GİRMEZ → o kalemlere kampanya uygulanmaz (indirimli fiyat geçerli). _has_manual_sale
-    # bayrağı _enrich_items_category_ids'ten gelir.
+    # KAMPANYA-BAŞINA ANAHTAR: skip_discounted (varsayılan True) → ürün kartında indirimli fiyat
+    # (sale_price) girili kalemler kampanya tabanına GİRMEZ (indirimli fiyat geçerli). Admin
+    # kampanya formundan kapatırsa (False) indirimli kalemler de kampanya tabanına dahil olur.
+    # _has_manual_sale bayrağı _enrich_items_category_ids'ten gelir. (Rozet ⊆ motor: aynı
+    # anahtar products._campaign_pct_for_product'ta da uygulanır.)
+    skip_disc = c.get("skip_discounted", True)
+    def _excl_sale(it):  # bu kalem indirimli-fiyatlı olduğu için dışlanmalı mı?
+        return skip_disc and bool(it.get("_has_manual_sale"))
     if allowed_cats or allowed_pids:
         base = 0.0
         for it in items:
-            if _item_in_scope(it, allowed_cats, allowed_pids, excluded_pids) and not it.get("_has_manual_sale"):
+            if _item_in_scope(it, allowed_cats, allowed_pids, excluded_pids) and not _excl_sale(it):
                 base += float(it.get("price", 0)) * int(it.get("qty", 0) or 0)
     else:
         base = cart_total
         # Kapsamsız (tüm sepet) kampanyada da indirimli-fiyatlı VE hariç-tutulan kalemleri tabandan düş.
         for it in items:
             _ex = excluded_pids and str(it.get("product_id")) in excluded_pids
-            if it.get("_has_manual_sale") or _ex:
+            if _excl_sale(it) or _ex:
                 base -= float(it.get("price", 0)) * int(it.get("qty", 0) or 0)
         base = max(0.0, base)
     ctype = c.get("type")
@@ -377,7 +386,7 @@ def _compute_discount(c: dict, cart_total: float, items: list) -> float:
             _ex = excluded_pids and str(it.get("product_id")) in excluded_pids
             inscope = (not _ex) and ((not allowed_cats and not allowed_pids)
                                      or _item_in_scope(it, allowed_cats, allowed_pids, excluded_pids))
-            if inscope and not it.get("_has_manual_sale"):  # indirimli-fiyatlı kalem kampanyaya girmez
+            if inscope and not _excl_sale(it):  # indirimli-fiyatlı kalem (anahtar açıksa) kampanyaya girmez
                 for _ in range(int(it.get("qty", 0) or 0)):
                     units.append(float(it.get("price", 0) or 0))
         units.sort()  # en ucuz basta
@@ -612,6 +621,7 @@ def _coupon_to_campaign(c: dict) -> dict:
         "excluded_products_raw": c.get("excluded_products_raw") or "",
         "combinable_with": c.get("combinable_with") or [],
         "payment_methods": c.get("payment_methods") or [],
+        "skip_discounted": bool(c.get("skip_discounted", True)),
     }
 
 
@@ -654,6 +664,8 @@ def _campaign_to_coupon_fields(payload: dict) -> dict:
         "stack_group": (payload.get("stack_group") or "").strip() or None,
         "combinable_with": payload.get("combinable_with") or [],
         "payment_methods": payload.get("payment_methods") or [],
+        # İndirimli fiyatı (sale_price) olan ürünlere kampanya uygulansın mı? Varsayılan True = uygulama.
+        "skip_discounted": bool(payload.get("skip_discounted", True)),
     }
 
 

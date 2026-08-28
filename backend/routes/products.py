@@ -1619,8 +1619,17 @@ def _campaign_pct_for_product(p: dict, camps: list):
     cats = {str(c) for c in (p.get("category_ids") or []) if c}
     if p.get("category_id"):
         cats.add(str(p["category_id"]))
+    # Ürün kartında İNDİRİMLİ FİYAT (sale_price) girili mi?
+    _lp = float(p.get("price") or 0)
+    _sp = float(p.get("sale_price") or 0)
+    has_manual_sale = bool(_sp > 0 and _sp < _lp)
     best, label = 0.0, ""
     for c in camps:
+        # KAMPANYA-BAŞINA ANAHTAR: skip_discounted (varsayılan True) → indirimli-fiyatlı ürüne
+        # bu kampanya UYGULANMAZ. Admin kampanya formundan kapatırsa (False) kampanya indirimli
+        # ürünlere de uygulanır. Rozet ⊆ motor: aynı kural coupons._compute_discount'ta da var.
+        if has_manual_sale and c.get("skip_discounted", True):
+            continue
         ac = {str(x) for x in (c.get("categories") or []) if x}
         ap = {str(x) for x in (c.get("products") or []) if x}
         ex = {str(x) for x in (c.get("excluded_products") or []) if x}
@@ -1649,16 +1658,10 @@ def _apply_campaign_badge(p: dict, camps: list) -> dict:
     "%10 indirim" gösteriyor ama sepet/sipariş motoru kapsam dışı olduğu için indirimi
     UYGULAMIYOR (müşteri %10 görüp indirimli fiyatı DEĞİL 'ilk satış fiyatını' ödüyordu).
     Artık kampanya eşleşmezse alan 0'a çekilir → gösterim ile tahsil BİREBİR tutarlı olur."""
-    # KURAL (kullanıcı): ürün kartında İNDİRİMLİ FİYAT (sale_price) girili ise KAMPANYA UYGULANMAZ
-    # (indirimli fiyat geçerli). Sepet motoru (coupons._compute_discount) bu ürünü kampanya
-    # tabanından dışladığı için rozet de 0 olmalı (rozet ⊆ motor). Aksi halde vitrin "%X kampanya"
-    # gösterip sepet uygulamazdı.
-    _lp = float(p.get("price") or 0)
-    _sp = float(p.get("sale_price") or 0)
-    if _sp > 0 and _sp < _lp:
-        p["campaign_discount_percent"] = 0
-        p["campaign_label"] = ""
-        return p
+    # KURAL (kullanıcı): ürün kartında İNDİRİMLİ FİYAT (sale_price) girili ise, kampanya-başına
+    # `skip_discounted` (varsayılan True) o kampanyayı bu ürüne uygulatmaz. Karar artık
+    # _campaign_pct_for_product içinde kampanya-başına verilir (rozet ⊆ motor). Böylece admin
+    # bir kampanyada anahtarı kapatırsa indirimli ürüne de rozet/indirim gider.
     try:
         pct, label = _campaign_pct_for_product(p, camps or [])
     except Exception:
@@ -3577,6 +3580,141 @@ async def bulk_add_to_category_after(
             f"{updated} ürün '{cat_name}' kategorisine eklendi (Kart ID > {after_card_id})."
         ),
     }
+
+
+# product.id referansı tutan koleksiyon/alanlar (ajan haritası). kind: scalar | arr_scalar | arr_obj
+_PID_REFS = [
+    ("orders", "arr_obj", "items.product_id"),
+    ("orders", "arr_obj", "items.facette_product_id"),
+    ("orders", "arr_obj", "products.product_id"),
+    ("orders_deleted", "arr_obj", "items.product_id"),
+    ("cart_sessions", "arr_obj", "items.product_id"),
+    ("shared_carts", "arr_obj", "items.product_id"),
+    ("stock_movements", "scalar", "product_id"),
+    ("stock_movements", "arr_obj", "items.product_id"),
+    ("stock_movements", "arr_obj", "moves.product_id"),
+    ("favorites", "scalar", "product_id"),
+    ("reviews", "scalar", "product_id"),
+    ("product_reviews", "scalar", "product_id"),
+    ("trendyol_review_sync_products", "scalar", "product_id"),
+    ("stock_notifications", "scalar", "product_id"),
+    ("stock_alerts", "scalar", "product_id"),
+    ("product_costs", "scalar", "product_id"),
+    ("product_stock_flags", "scalar", "product_id"),
+    ("product_image_backups", "scalar", "product_id"),
+    ("size_tables", "scalar", "product_id"),
+    ("whatsapp_active_product", "scalar", "product_id"),
+    ("bin_stock", "scalar", "product_id"),
+    ("manufacturing", "scalar", "product_id"),
+    ("manufacturing", "arr_scalar", "created_product_ids"),
+    ("coupons", "arr_scalar", "products"),
+    ("coupons", "arr_scalar", "excluded_products"),
+    ("referrals", "arr_scalar", "products"),
+    ("instagram_posts", "arr_obj", "products.id"),
+    ("products", "arr_scalar", "combo_product_ids"),
+    ("products", "arr_scalar", "similar_product_ids"),
+]
+
+
+def _is_short_numeric_id(v) -> bool:
+    s = str(v or "").strip()
+    return len(s) == 4 and s.isdigit()
+
+
+@router.post("/migrate-uuid-ids")
+async def migrate_uuid_product_ids(
+    dry_run: bool = Query(True, description="True → önizleme (YAZMAZ). False → uygular."),
+    limit: int = Query(0, description="0=tümü; test için küçük bir sayı verilebilir."),
+    current_user: dict = Depends(require_admin),
+):
+    """UUID/uzun product.id'leri BENZERSİZ 4-haneliye çevirir + TÜM referansları günceller
+    (_PID_REFS). Eski→yeni map product_id_migration_map'e kalıcı yazılır (geri-alınabilir).
+    product_visual_index (_id=product.id, immutable) delete+reinsert ile taşınır. dry_run'da
+    yalnız etkilenecek doküman sayıları raporlanır (YAZMAZ). Idempotent."""
+    # 1) Aday ürünler: id'si 4-haneli-sayısal OLMAYANLAR
+    cands = []
+    async for p in db.products.find({}, {"_id": 0, "id": 1, "name": 1}):
+        if not _is_short_numeric_id(p.get("id")):
+            cands.append({"id": p.get("id"), "name": (p.get("name") or "")[:40]})
+    if limit and limit > 0:
+        cands = cands[:limit]
+
+    # 2) Yeni id'ler (benzersiz)
+    id_map = {}
+    for c in cands:
+        old = c["id"]
+        prev = await db.product_id_migration_map.find_one({"old": old}, {"_id": 0, "new": 1})
+        if prev and prev.get("new"):
+            id_map[old] = prev["new"]
+            continue
+        nid = await generate_short_id("products")
+        # çakışma güvenliği: bu batch'te veya map'te kullanılmışsa yeniden üret
+        while nid in id_map.values() or await db.product_id_migration_map.find_one({"new": nid}, {"_id": 1}):
+            nid = await generate_short_id("products")
+        id_map[old] = nid
+
+    olds = list(id_map.keys())
+
+    # 3) DRY-RUN: etkilenecek doküman sayıları
+    if dry_run:
+        impact = {}
+        for coll, kind, path in _PID_REFS:
+            try:
+                n = await db[coll].count_documents({path: {"$in": olds}})
+            except Exception:
+                n = -1
+            if n:
+                impact[f"{coll}.{path}"] = n
+        try:
+            pvi = await db.product_visual_index.count_documents({"_id": {"$in": olds}})
+        except Exception:
+            pvi = 0
+        return {
+            "dry_run": True, "uuid_products": len(cands), "sample_map": dict(list(id_map.items())[:8]),
+            "product_visual_index_move": pvi, "impact_by_field": impact,
+            "message": (f"{len(cands)} UUID ürün 4-haneliye çevrilecek; yukarıdaki alanlardaki "
+                        f"referanslar güncellenecek (YAZILMADI). Uygulamak için dry_run=false."),
+        }
+
+    # 4) UYGULA
+    _now = datetime.now(timezone.utc).isoformat()
+    ref_updates = 0
+    for old, new in id_map.items():
+        # 4a) products.id
+        await db.products.update_one({"id": old}, {"$set": {"id": new, "updated_at": _now}})
+        # 4b) referanslar
+        for coll, kind, path in _PID_REFS:
+            try:
+                if kind == "scalar":
+                    r = await db[coll].update_many({path: old}, {"$set": {path: new}})
+                elif kind == "arr_scalar":
+                    r = await db[coll].update_many(
+                        {path: old}, {"$set": {f"{path}.$[e]": new}}, array_filters=[{"e": old}])
+                else:  # arr_obj: "arr.sub"
+                    arr, sub = path.split(".", 1)
+                    r = await db[coll].update_many(
+                        {path: old}, {"$set": {f"{arr}.$[e].{sub}": new}},
+                        array_filters=[{f"e.{sub}": old}])
+                ref_updates += r.modified_count
+            except Exception as _e:
+                logger.error(f"[id-migrate] {coll}.{path} {old}->{new}: {_e}")
+        # 4c) product_visual_index (_id immutable → delete+reinsert)
+        try:
+            vi = await db.product_visual_index.find_one({"_id": old})
+            if vi and not await db.product_visual_index.find_one({"_id": new}, {"_id": 1}):
+                vi["_id"] = new
+                vi["product_id"] = new
+                await db.product_visual_index.insert_one(vi)
+                await db.product_visual_index.delete_one({"_id": old})
+        except Exception as _e:
+            logger.error(f"[id-migrate] visual_index {old}: {_e}")
+        # 4d) map kaydı (geri-alma)
+        await db.product_id_migration_map.update_one(
+            {"old": old}, {"$set": {"old": old, "new": new, "migrated_at": _now}}, upsert=True)
+
+    return {"dry_run": False, "migrated": len(id_map), "ref_updates": ref_updates,
+            "message": f"{len(id_map)} ürün 4-haneli id'ye taşındı; {ref_updates} referans güncellendi. "
+                       f"Eski→yeni map: product_id_migration_map (geri-alınabilir)."}
 
 
 @router.post("/bulk/set-variant-stock")

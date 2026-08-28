@@ -75,6 +75,7 @@ const blankForm = () => ({
   priority: 0, combinable: false, stack_group: "", combinable_with: [],
   categories: [], products: [], payment_methods: [],
   excluded_products_raw: "",
+  skip_discounted: true,
 });
 
 export default function AdminCampaigns() {
@@ -214,6 +215,7 @@ export default function AdminCampaigns() {
       products: c.products || [],
       payment_methods: c.payment_methods || [],
       excluded_products_raw: c.excluded_products_raw || "",
+      skip_discounted: c.skip_discounted !== false,
     });
     setModalOpen(true);
   };
@@ -543,6 +545,21 @@ export default function AdminCampaigns() {
             {/* Madde 4 — Kapsam (kategori/ürün). Boş = tüm sepete uygulanır. */}
             <div className="border rounded-lg p-3 space-y-3 bg-gray-50/50">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">Kapsam (opsiyonel — boşsa tüm sepete uygulanır)</div>
+              {/* İNDİRİMLİ FİYATLI ÜRÜNLERİ HARİÇ TUT: seçili kategoride ürün kartında "İndirimli Fiyat"
+                  girili ise o ürünlere bu kampanya UYGULANMAZ. Kapatılırsa kampanya indirimli ürünlere de uygulanır. */}
+              <label className="flex items-start gap-2 text-xs cursor-pointer bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+                <input
+                  type="checkbox"
+                  className="accent-black mt-0.5"
+                  checked={formData.skip_discounted !== false}
+                  onChange={(e) => setFormData({ ...formData, skip_discounted: e.target.checked })}
+                />
+                <span>
+                  <b>İndirimli fiyatı olan ürünlere bu kampanyayı uygulama.</b> İşaretliyken, kapsamdaki
+                  bir üründe <b>İndirimli Fiyat</b> girili ise o ürüne kampanya (rozet + sepet indirimi) uygulanmaz —
+                  ürünün kendi indirimli fiyatı geçerli olur. Kapatırsan kampanya indirimli ürünlere de uygulanır.
+                </span>
+              </label>
               <div>
                 <label className={lblCls}>Kategoriler</label>
                 <div className="max-h-32 overflow-y-auto border rounded bg-white p-2 space-y-1">
