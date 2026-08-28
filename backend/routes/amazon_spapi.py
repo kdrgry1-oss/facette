@@ -839,9 +839,11 @@ def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, b
         attrs["externally_assigned_product_identifier"] = [
             {"value": barcode, "type": "ean", "marketplace_id": mp}]
     if variant.get("size"):
-        attrs["size"] = [{"value": str(variant["size"]), "marketplace_id": mp}]
-    if variant.get("color"):
-        attrs["color"] = [{"value": str(variant["color"]), "marketplace_id": mp}]
+        attrs["size"] = [{"value": str(variant["size"]), "language_tag": "tr_TR", "marketplace_id": mp}]
+    if variant.get("color") or product.get("color"):
+        _clr = str(variant.get("color") or product.get("color") or "").strip()
+        if _clr:
+            attrs["color"] = [{"value": _clr, "language_tag": "tr_TR", "marketplace_id": mp}]
     # Site-alanı eşleştirmeleri (attribute_mappings): kullanıcı bir Amazon alanını Facette
     # özelliğine eşlediyse, ürünün o özellik DEĞERİNİ gönder (varsayılandan ÖNCE gelir).
     if attr_mappings:
