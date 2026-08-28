@@ -294,6 +294,7 @@ export default function Returns() {
     const now = new Date();
     let from = new Date(now), to = new Date(now);
     if (key === "today") { /* from=to=bugün */ }
+    else if (key === "yesterday") { from.setDate(now.getDate() - 1); to.setDate(now.getDate() - 1); }
     else if (key === "7") { from.setDate(now.getDate() - 6); }
     else if (key === "30") { from.setDate(now.getDate() - 29); }
     else if (key === "month") { from = new Date(now.getFullYear(), now.getMonth(), 1); }
@@ -697,7 +698,7 @@ export default function Returns() {
               </button>
               {/* Hazır aralık: elle tarih yazmadan tek tık. "Son 30 gün" İADE ONAY tarihine göre. */}
               <div className="flex items-center gap-1 flex-wrap">
-                {[["today", "Bugün"], ["7", "Son 7 gün"], ["30", "Son 30 gün"], ["month", "Bu ay"], ["prevmonth", "Geçen ay"]].map(([k, lbl]) => (
+                {[["today", "Bugün"], ["yesterday", "Dün"], ["7", "Son 7 gün"], ["30", "Son 30 gün"], ["month", "Bu ay"], ["prevmonth", "Geçen ay"]].map(([k, lbl]) => (
                   <button key={k} type="button" onClick={() => applyGpPreset(k)}
                     className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-gray-100 hover:text-black transition-colors">
                     {lbl}

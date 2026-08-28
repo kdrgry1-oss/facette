@@ -20,17 +20,29 @@ export default function ProfitabilityAnalysis() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  const load = async (f = from, t = to) => {
     setLoading(true);
     try {
       const { data: d } = await axios.get(`${API}/admin/reports/profitability`, {
-        headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source },
+        headers: authHeaders(), params: { start_date: f, end_date: t + "T23:59:59", source },
       });
       setData(d);
       setCfg(d.config);
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [source]);
+
+  const setDatePreset = (kind) => {
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const tn = new Date();
+    let f, tt;
+    if (kind === "today") { f = tt = ymd(tn); }
+    else if (kind === "yesterday") { const y = new Date(tn.getTime() - 864e5); f = tt = ymd(y); }
+    else if (kind === "7") { f = ymd(new Date(tn.getTime() - 6 * 864e5)); tt = ymd(tn); }
+    else if (kind === "30") { f = ymd(new Date(tn.getTime() - 29 * 864e5)); tt = ymd(tn); }
+    else if (kind === "month") { f = ymd(new Date(tn.getFullYear(), tn.getMonth(), 1)); tt = ymd(tn); }
+    setFrom(f); setTo(tt); load(f, tt);
+  };
 
   const saveCfg = async () => {
     setSaving(true);
@@ -72,9 +84,14 @@ export default function ProfitabilityAnalysis() {
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="text-sm px-2 py-1.5 border rounded" />
           <span className="text-gray-400">→</span>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="text-sm px-2 py-1.5 border rounded" />
-          <button onClick={load} className="px-3 py-1.5 bg-black text-white text-xs rounded inline-flex items-center gap-1"><RefreshCw size={12} /> Uygula</button>
+          <button onClick={() => load()} className="px-3 py-1.5 bg-black text-white text-xs rounded inline-flex items-center gap-1"><RefreshCw size={12} /> Uygula</button>
           <button onClick={() => setShowCfg(v => !v)} className="px-3 py-1.5 border rounded text-xs inline-flex items-center gap-1"><Settings size={12} /> Gider Ayarları</button>
         </div>
+      </div>
+      <div className="flex flex-wrap gap-1 items-center">
+        {[["today","Bugün"],["yesterday","Dün"],["7","Son 7"],["30","Son 30"],["month","Bu Ay"]].map(([k,l]) => (
+          <button key={k} type="button" onClick={() => setDatePreset(k)} className="px-2 py-1 border rounded text-xs bg-white hover:bg-gray-100 transition-colors">{l}</button>
+        ))}
       </div>
 
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">

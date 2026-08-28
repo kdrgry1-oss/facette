@@ -211,7 +211,14 @@ function PRTrackTab() {
     catch { toast.error("Kaydedilemedi"); }
   };
 
-  const quick = (kind) => { setStart(periodStart(kind)); setEnd(""); };
+  const quick = (kind) => {
+    if (kind === "yesterday") {
+      const y = new Date(Date.now() - 864e5);
+      const s = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, "0")}-${String(y.getDate()).padStart(2, "0")}`;
+      setStart(s); setEnd(s); return;
+    }
+    setStart(periodStart(kind)); setEnd("");
+  };
 
   // Excel'e aktar — ekrandaki AYNI filtreyle (durum/tarih/arama). Auth header gerektiği
   // için blob olarak çekip indiriyoruz (window.open header taşımaz).
@@ -274,7 +281,7 @@ function PRTrackTab() {
           <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="border rounded-lg px-2 py-1.5" data-testid="pr-end" />
         </div>
         <div className="flex gap-1 text-xs">
-          {[["today", "Bugün"], ["week", "Hafta"], ["month", "Ay"], ["year", "Yıl"]].map(([k, l]) => (
+          {[["today", "Bugün"], ["yesterday", "Dün"], ["week", "Hafta"], ["month", "Ay"], ["year", "Yıl"]].map(([k, l]) => (
             <button key={k} onClick={() => quick(k)} className="px-2 py-1.5 border rounded-lg hover:bg-gray-50">{l}</button>
           ))}
           {(start || end) && <button onClick={() => { setStart(""); setEnd(""); }} className="px-2 py-1.5 border rounded-lg text-gray-500 hover:bg-gray-50">Temizle</button>}

@@ -108,6 +108,21 @@ export default function IntegrationLogs() {
 
   const applyFilters = () => { setPage(1); loadLogs(); loadSummary(); };
 
+  const [presetTick, setPresetTick] = useState(0);
+  useEffect(() => { if (presetTick) { loadLogs(); loadSummary(); } /* eslint-disable-next-line */ }, [presetTick]);
+  const setDatePreset = (kind) => {
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const today = new Date();
+    let date_from, date_to;
+    if (kind === "today") { date_from = date_to = ymd(today); }
+    else if (kind === "yesterday") { const y = new Date(today.getTime() - 864e5); date_from = date_to = ymd(y); }
+    else if (kind === "7") { date_from = ymd(new Date(today.getTime() - 6 * 864e5)); date_to = ymd(today); }
+    else if (kind === "30") { date_from = ymd(new Date(today.getTime() - 29 * 864e5)); date_to = ymd(today); }
+    else if (kind === "month") { date_from = ymd(new Date(today.getFullYear(), today.getMonth(), 1)); date_to = ymd(today); }
+    setFilters((f) => ({ ...f, date_from, date_to }));
+    setPage(1); setPresetTick((t) => t + 1);
+  };
+
   const exportCsv = () => {
     const header = ["Tarih", "Pazaryeri", "İşlem", "Durum", "Yön", "Ref", "Mesaj"];
     const rows = logs.map((l) => [
@@ -223,6 +238,11 @@ export default function IntegrationLogs() {
             <input type="date" value={filters.date_to}
               onChange={(e) => setFilters({ ...filters, date_to: e.target.value })}
               className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white" />
+          </div>
+          <div className="col-span-2 md:col-span-6 flex flex-wrap gap-1 items-center">
+            {[["today","Bugün"],["yesterday","Dün"],["7","Son 7"],["30","Son 30"],["month","Bu Ay"]].map(([k,l]) => (
+              <button key={k} type="button" onClick={() => setDatePreset(k)} className="px-2 py-1 border border-gray-300 rounded-lg text-xs bg-white hover:border-gray-500 transition-colors">{l}</button>
+            ))}
           </div>
           <div>
             <label className="block text-xs text-gray-600 mb-1">Ürün/Sipariş ID</label>

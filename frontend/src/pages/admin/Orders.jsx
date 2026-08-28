@@ -114,6 +114,18 @@ export default function AdminOrders({ unpaidView = false }) {
   const [searchTick, setSearchTick] = useState(0);
   const applyFilters = () => { setPage(1); setSearchTick((t) => t + 1); };
   const onFilterKey = (e) => { if (e.key === "Enter") { e.preventDefault(); applyFilters(); } };
+  const setDatePreset = (kind) => {
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const today = new Date();
+    let start_date, end_date;
+    if (kind === "today") { start_date = end_date = ymd(today); }
+    else if (kind === "yesterday") { const y = new Date(today.getTime() - 864e5); start_date = end_date = ymd(y); }
+    else if (kind === "7") { start_date = ymd(new Date(today.getTime() - 6 * 864e5)); end_date = ymd(today); }
+    else if (kind === "30") { start_date = ymd(new Date(today.getTime() - 29 * 864e5)); end_date = ymd(today); }
+    else if (kind === "month") { start_date = ymd(new Date(today.getFullYear(), today.getMonth(), 1)); end_date = ymd(today); }
+    setFilters((f) => ({ ...f, start_date, end_date }));
+    setPage(1); setSearchTick((t) => t + 1);
+  };
   // Genel arama "debounce": kullanıcı yazmayı ~350ms bırakınca arama OTOMATİK
   // uygulanır — "Ara" butonuna basmaya gerek kalmaz. İlk render'da tetiklenmez
   // (mount'ta fetchOrders zaten çalışıyor; çift istek atılmasın).
@@ -1076,6 +1088,11 @@ export default function AdminOrders({ unpaidView = false }) {
               <input type="date" title="Başlangıç Tarihi" className="border px-2 py-1.5 rounded flex-1" value={filters.start_date} onChange={e => setFilters({...filters, start_date: e.target.value})} />
               <span>-</span>
               <input type="date" title="Bitiş Tarihi" className="border px-2 py-1.5 rounded flex-1" value={filters.end_date} onChange={e => setFilters({...filters, end_date: e.target.value})} />
+            </div>
+            <div className="flex flex-wrap gap-1 items-center xl:col-span-2">
+              {[["today","Bugün"],["yesterday","Dün"],["7","Son 7"],["30","Son 30"],["month","Bu Ay"]].map(([k,l]) => (
+                <button key={k} type="button" onClick={() => setDatePreset(k)} className="px-2 py-1 border rounded text-xs bg-gray-50 hover:bg-white hover:border-gray-400 transition-colors">{l}</button>
+              ))}
             </div>
             <div className="flex gap-2 xl:col-span-2">
               <button onClick={applyFilters} type="button" className="w-1/2 bg-black text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 flex justify-center items-center gap-1">

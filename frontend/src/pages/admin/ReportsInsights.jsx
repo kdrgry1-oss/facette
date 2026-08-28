@@ -59,6 +59,18 @@ export default function ReportsInsights() {
 
   useEffect(() => { load(); }, [load]);
 
+  const setDatePreset = (kind) => {
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const tn = new Date();
+    let s, e;
+    if (kind === "today") { s = e = ymd(tn); }
+    else if (kind === "yesterday") { const y = new Date(tn.getTime() - 864e5); s = e = ymd(y); }
+    else if (kind === "7") { s = ymd(new Date(tn.getTime() - 6 * 864e5)); e = ymd(tn); }
+    else if (kind === "30") { s = ymd(new Date(tn.getTime() - 29 * 864e5)); e = ymd(tn); }
+    else if (kind === "month") { s = ymd(new Date(tn.getFullYear(), tn.getMonth(), 1)); e = ymd(tn); }
+    setStart(s); setEnd(e);
+  };
+
   const maxRev = tab === "location"
     ? Math.max(1, ...((loc?.rows || []).map((x) => x.revenue)))
     : Math.max(1, ...((src?.rows || []).map((x) => x.revenue)));
@@ -103,6 +115,11 @@ export default function ReportsInsights() {
             <div>
               <label className="block text-xs text-gray-500 mb-1">Bitiş</label>
               <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
+            </div>
+            <div className="flex flex-wrap gap-1 items-center">
+              {[["today","Bugün"],["yesterday","Dün"],["7","Son 7"],["30","Son 30"],["month","Bu Ay"]].map(([k,l]) => (
+                <button key={k} type="button" onClick={() => setDatePreset(k)} className="px-2 py-1 border rounded text-xs bg-white hover:bg-gray-100 transition-colors">{l}</button>
+              ))}
             </div>
           </>
         )}
