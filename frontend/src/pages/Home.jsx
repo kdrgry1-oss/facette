@@ -306,8 +306,17 @@ function HeroEditorial({ block, isFirst = false }) {
     >
       {images.map((img, i) => {
         const cap = captions[i] || {};
-        const offset = (i - safeActive) * 100;                 // dikey kayma: aktif 0, diğerleri ekran dışı
         const isActive = i === safeActive;
+        // GEÇİŞ EFEKTİ: varsayılan "stack/creative" (Swiper 'creative' benzeri, Swiper'sız/saf CSS).
+        // Admin settings.hero_transition = "kaydir" derse eski klasik dikey kayma kullanılır.
+        //  - STACK: geçmiş+aktif slaytlar YERİNDE durur (translateY 0), üzerine gelen slayt ALTTAN
+        //    biner (100%→0); zIndex=i → sonraki slayt öncekinin ÜSTÜNE örtülür; giden slayt SABİT
+        //    kalıp GÖLGELENİR (covered → koyu overlay). Geri kaydırınca üstteki slayt aşağı iner.
+        //  - KAYDIR: aktif 0, diğerleri (i-active)*100 → ikisi birlikte hareket eder (klasik).
+        const _stack = (block?.settings?.hero_transition || "stack") !== "kaydir";
+        const offset = _stack ? (i <= safeActive ? 0 : 100) : (i - safeActive) * 100;
+        const passed = _stack && i < safeActive;   // üstü örtülen (arkada, gölgeli) slayt
+        const zi = _stack ? i + 1 : (isActive ? 2 : 1);
         return (
           <div
             key={i}
@@ -315,7 +324,7 @@ function HeroEditorial({ block, isFirst = false }) {
             style={{
               transform: `translateY(${offset}%)`,
               transition: "transform .62s cubic-bezier(0.22,1,0.36,1)",
-              zIndex: isActive ? 2 : 1,
+              zIndex: zi,
             }}
             aria-hidden={!isActive}
           >
@@ -328,6 +337,12 @@ function HeroEditorial({ block, isFirst = false }) {
               <HeroSlide img={img} cap={cap} title={block?.title} vidRef={(el) => { vids.current[i] = el; }} eager={i === 0}
                 onDims={(w, h) => setLoadedDims((prev) => (prev[i] ? prev : { ...prev, [i]: [w, h] }))} />
             </Link>
+            {/* Giden slaytın 'gölge' hissi (Swiper creativeEffect.prev.shadow karşılığı) — yalnız stack modunda */}
+            <div
+              className="pointer-events-none absolute inset-0 bg-black"
+              style={{ opacity: passed ? 0.4 : 0, transition: "opacity .62s cubic-bezier(0.22,1,0.36,1)" }}
+              aria-hidden="true"
+            />
           </div>
         );
       })}
