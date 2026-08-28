@@ -151,7 +151,7 @@ function HeroSlider({ block }) {
 // sonra sayfa (ürünler) doğal olarak devam eder. Video slaytlar yalnızca EKRANDAYKEN oynar
 // (IntersectionObserver, performans). İlk slaytta ince "aşağı kaydır" ipucu.
 // Tek slaytın medyası + yazısı (hem tekli hem sticky slider için ortak).
-function HeroSlide({ img, cap, title, vidRef, eager }) {
+function HeroSlide({ img, cap, title, vidRef, eager, onDims }) {
   return (
     <>
       {isVideoUrl(img) ? (
@@ -161,6 +161,7 @@ function HeroSlide({ img, cap, title, vidRef, eager }) {
           className="absolute inset-0 w-full h-full object-cover"
           muted loop playsInline
           preload={eager ? "auto" : "none"}
+          onLoadedMetadata={(e) => { const w = e.target.videoWidth, h = e.target.videoHeight; if (w && h) onDims?.(w, h); }}
         />
       ) : (
         <img
@@ -170,6 +171,7 @@ function HeroSlide({ img, cap, title, vidRef, eager }) {
           loading={eager ? "eager" : "lazy"}
           fetchPriority={eager ? "high" : "auto"}
           decoding="async"
+          onLoad={(e) => { const w = e.target.naturalWidth, h = e.target.naturalHeight; if (w && h) onDims?.(w, h); }}
         />
       )}
       {/* Yazılar YALNIZCA admin girmişse çıkar (görselde zaten yazı varsa çift olmaz). */}
@@ -207,6 +209,13 @@ function HeroEditorial({ block, isFirst = false }) {
   const touchStart = useRef(null);
   const safeActive = Math.min(active, Math.max(0, n - 1));
   useEffect(() => { activeRef.current = safeActive; }, [safeActive]);
+
+  // Görsel KENDİ oranında görünsün — container'ı doldurmak için 100vh'ye ZORLAMA (kırpma yok).
+  // Aktif slaytın gerçek en-boy oranı: yüklenen doğal piksel (öncelik) → kayıtlı img_dims → yedek.
+  const [loadedDims, setLoadedDims] = useState({});
+  const savedDims = block?.settings?.img_dims;
+  const dimsFor = (i) => loadedDims[i] || (savedDims && savedDims[i]) || null;
+  const heroAspect = aspectFromDims(dimsFor(safeActive), "4 / 5");
 
   // Şeffaf-overlay KALDIRILDI (Option A): header home'da da SOLID → data-hero-overlay artık
   // yazılmaz. Kalıntı bırakmamak için bir kez temizle (header rengini bozmaz).
@@ -293,7 +302,7 @@ function HeroEditorial({ block, isFirst = false }) {
       // Şeffaf-overlay KALDIRILDI (Option A): header artık home'da da SOLID + normal akış/sticky.
       // Hero, üstteki solid şeridin (barlar + header) ALTINDA doğal akışta başlar → marginTop
       // offset'e GEREK YOK (örtme/zıplama yok, üstü kesilmez). 100vh + jest + slaytlar korunur.
-      style={{ height: "100vh", marginTop: 0 }}
+      style={{ aspectRatio: heroAspect, marginTop: 0 }}
     >
       {images.map((img, i) => {
         const cap = captions[i] || {};
@@ -316,7 +325,8 @@ function HeroEditorial({ block, isFirst = false }) {
               className="block w-full h-full"
               tabIndex={isActive ? 0 : -1}
             >
-              <HeroSlide img={img} cap={cap} title={block?.title} vidRef={(el) => { vids.current[i] = el; }} eager={i === 0} />
+              <HeroSlide img={img} cap={cap} title={block?.title} vidRef={(el) => { vids.current[i] = el; }} eager={i === 0}
+                onDims={(w, h) => setLoadedDims((prev) => (prev[i] ? prev : { ...prev, [i]: [w, h] }))} />
             </Link>
           </div>
         );
