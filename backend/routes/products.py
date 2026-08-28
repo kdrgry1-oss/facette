@@ -3579,6 +3579,125 @@ async def bulk_add_to_category_after(
     }
 
 
+async def _find_category_by_slug(slug: str):
+    """slug (veya isimden türetilmiş slug) ile kategoriyi bul → (id, name) | (None, None)."""
+    s = (slug or "").strip().lower()
+    async for c in db.categories.find({}, {"_id": 0, "id": 1, "name": 1, "slug": 1}):
+        if (c.get("slug") or "").strip().lower() == s or generate_slug(c.get("name") or "") == s:
+            return c.get("id"), c.get("name")
+    return None, None
+
+
+@router.post("/bulk/move-category")
+async def bulk_move_category(
+    from_slug: str = Query(..., description="Kaynak kategori slug'ı"),
+    to_slug: str = Query(..., description="Hedef kategori slug'ı"),
+    only_active: bool = Query(True, description="Yalnız aktif (is_active) ürünler"),
+    dry_run: bool = Query(True, description="True → önizleme (YAZMAZ). False → uygular."),
+    current_user: dict = Depends(require_admin),
+):
+    """from_slug kategorisindeki ürünleri to_slug'a TAŞI: hedef eklenir (+ataları), kaynak
+    category_ids+categories'ten ÇIKARILIR. only_active=True → yalnız aktif ürünler. İdempotent."""
+    from_id, from_name = await _find_category_by_slug(from_slug)
+    to_id, to_name = await _find_category_by_slug(to_slug)
+    if not from_id:
+        raise HTTPException(status_code=404, detail=f"'{from_slug}' kategorisi bulunamadı.")
+    if not to_id:
+        raise HTTPException(status_code=404, detail=f"'{to_slug}' kategorisi bulunamadı.")
+    to_ids_all = await _expand_category_ids([to_id])
+    q = {"$or": [{"category_ids": from_id}, {"categories": from_id}]}
+    if only_active:
+        q["is_active"] = True
+    matched = updated = 0
+    sample = []
+    _now = datetime.now(timezone.utc).isoformat()
+    async for p in db.products.find(q, {"_id": 0, "id": 1, "name": 1, "is_active": 1}):
+        matched += 1
+        if len(sample) < 20:
+            sample.append({"id": p.get("id"), "name": (p.get("name") or "")[:45]})
+        if not dry_run:
+            # $addToSet ve $pull AYNI alanda tek update'te çakışır → iki ayrı update.
+            await db.products.update_one(
+                {"id": p["id"]},
+                {"$addToSet": {"category_ids": {"$each": to_ids_all}, "categories": to_id},
+                 "$set": {"updated_at": _now}})
+            await db.products.update_one(
+                {"id": p["id"]},
+                {"$pull": {"category_ids": from_id, "categories": from_id}})
+            updated += 1
+    return {
+        "from": {"id": from_id, "name": from_name}, "to": {"id": to_id, "name": to_name, "expanded": to_ids_all},
+        "only_active": only_active, "matched": matched, "updated": (0 if dry_run else updated),
+        "dry_run": dry_run, "sample": sample,
+        "message": (f"DRY-RUN: {matched} ürün '{from_name}' → '{to_name}' taşınacak (YAZILMADI). "
+                    f"dry_run=false ile uygulayın." if dry_run
+                    else f"{updated} ürün '{from_name}' kategorisinden çıkarılıp '{to_name}' kategorisine taşındı."),
+    }
+
+
+@router.post("/bulk/add-category-by-ids")
+async def bulk_add_category_by_ids(
+    payload: dict,
+    dry_run: bool = Query(True, description="True → önizleme (YAZMAZ). False → uygular."),
+    current_user: dict = Depends(require_admin),
+):
+    """payload: { ids:[...], category_slugs:[...], activate:bool }. Verilen ürün ID'lerini
+    (id / urun_karti_id / urun_id ile eşler) kategorilere ekler (+ataları) ve activate ise
+    is_active=True yapar. İdempotent."""
+    ids = [str(x).strip() for x in (payload.get("ids") or []) if str(x).strip()]
+    slugs = payload.get("category_slugs") or []
+    activate = bool(payload.get("activate"))
+    if not ids or not slugs:
+        raise HTTPException(status_code=400, detail="ids ve category_slugs zorunlu.")
+    cat_ids, cat_names, bad_slugs = [], [], []
+    for sl in slugs:
+        cid, cn = await _find_category_by_slug(sl)
+        if cid:
+            cat_ids.append(cid); cat_names.append(cn)
+        else:
+            bad_slugs.append(sl)
+    if not cat_ids:
+        raise HTTPException(status_code=404, detail=f"Kategori bulunamadı: {bad_slugs}")
+    all_cat_ids = await _expand_category_ids(cat_ids)
+    matched = updated = 0
+    missing, sample = [], []
+    _now = datetime.now(timezone.utc).isoformat()
+    for pid in ids:
+        _cands = [pid]
+        if pid.isdigit():
+            try:
+                _cands.append(int(pid))
+            except Exception:
+                pass
+        p = await db.products.find_one(
+            {"$or": [{"id": {"$in": _cands}}, {"urun_karti_id": {"$in": _cands}}, {"urun_id": {"$in": _cands}}]},
+            {"_id": 0, "id": 1, "name": 1, "is_active": 1})
+        if not p:
+            missing.append(pid)
+            continue
+        matched += 1
+        if len(sample) < 40:
+            sample.append({"id": pid, "name": (p.get("name") or "")[:45], "was_active": p.get("is_active")})
+        if not dry_run:
+            ops = {"$addToSet": {"category_ids": {"$each": all_cat_ids}, "categories": {"$each": cat_ids}},
+                   "$set": {"updated_at": _now}}
+            if activate:
+                ops["$set"]["is_active"] = True
+            await db.products.update_one({"id": p["id"]}, ops)
+            updated += 1
+    return {
+        "categories": [{"slug": s, "id": i, "name": n} for s, i, n in zip(slugs, cat_ids + [None] * 9, cat_names + [None] * 9)][:len(cat_ids)],
+        "bad_slugs": bad_slugs, "activate": activate, "requested": len(ids),
+        "matched": matched, "missing": missing, "updated": (0 if dry_run else updated),
+        "dry_run": dry_run, "sample": sample,
+        "message": (f"DRY-RUN: {matched}/{len(ids)} ürün bulundu, kategorilere eklenecek"
+                    f"{' + aktifleştirilecek' if activate else ''} (YAZILMADI). dry_run=false ile uygulayın."
+                    if dry_run else
+                    f"{updated} ürün kategorilere eklendi{' + aktifleştirildi' if activate else ''}."
+                    + (f" {len(missing)} ID bulunamadı." if missing else "")),
+    }
+
+
 # openpyxl, hücrede kontrol karakteri (0x00–0x1F, tab/satır-sonu hariç) görünce
 # IllegalCharacterError fırlatıp TÜM dışa aktarımı patlatır. Ürün açıklamaları
 # (HTML) ve içe aktarılan kayıtlar bu karakterleri içerebildiği için her metin
