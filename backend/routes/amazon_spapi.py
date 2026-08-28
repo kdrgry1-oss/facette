@@ -994,6 +994,27 @@ def _amz_code_match(product: dict, variant: dict, bset: set, sset: set, pset: se
     return False
 
 
+async def _amazon_put_listing(seller: str, mp: str, pt: str, sku: str, attrs: dict) -> tuple:
+    """Tek SKU listeleme PUT + sonuç. Döner (result_dict, ok_bool, dry_bool)."""
+    body = {"productType": pt, "requirements": "LISTING", "attributes": attrs}
+    try:
+        res = await _spapi_send("PUT", f"/listings/2021-08-01/items/{seller}/{sku}",
+                                body=body, params={"marketplaceIds": mp})
+    except Exception as _e:
+        return {"sku": sku, "ok": False, "error": str(_e)}, False, False
+    if res.get("dry_run"):
+        return {"sku": sku, "product_type": pt, "dry_run": True,
+                "attributes_preview": sorted(attrs.keys())}, True, True
+    data = res.get("data") or {}
+    issues = data.get("issues") or []
+    _ok = res.get("ok") and (data.get("status") in ("ACCEPTED", "VALID", None) or not issues)
+    return ({"sku": sku, "product_type": pt, "ok": bool(_ok), "status": data.get("status"),
+             "http": res.get("status"), "submissionId": data.get("submissionId"),
+             "raw_errors": (data.get("errors") if not issues else None),
+             "issues": [{"code": i.get("code"), "message": i.get("message"),
+                         "severity": i.get("severity")} for i in issues]}, bool(_ok), False)
+
+
 async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
     """Facette ürünlerini Amazon'a LİSTELER (Listings Items PUT). payload:
       { barcodes?, stock_codes?, product_ids?, default_product_type?, limit? }
@@ -1023,53 +1044,67 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
     results = []
     pushed = failed = skipped = 0
     markup = await _amazon_markup()
+    def _tally(r, ok, dry):
+        nonlocal pushed, failed
+        results.append(r)
+        if not dry:
+            if ok:
+                pushed += 1
+            else:
+                failed += 1
+
     for p in products:
         pt, cat_defaults, cat_mappings = await _resolve_amazon_pt_and_defaults(p)
         pt = pt or default_pt
-        price = _amazon_price_of(p, markup)             # marjlı satış fiyatı
-        list_price = round(float(p.get("price") or 0), 2)  # üstü çizili (RRP)
-        for v in (p.get("variants") or []):
-            bc = str(v.get("barcode") or "").strip()
-            sc = str(v.get("stock_code") or "").strip()
-            if _filtered and not _amz_code_match(p, v, _bset, _sset, _pset):
-                continue
-            sku = _amazon_seller_sku(v)
-            if not sku:
-                skipped += 1
-                continue
-            if not pt:
-                results.append({"sku": sku, "product": p.get("name"), "ok": False,
-                                "error": "Amazon productType yok (kategori eşleştir ya da default_product_type ver)."})
-                failed += 1
-                continue
-            attrs = _amazon_listing_attributes(p, v, pt, mp, price, int(v.get("stock") or 0),
-                                               p.get("brand"), default_attrs=cat_defaults,
-                                               attr_mappings=cat_mappings, list_price=list_price)
-            body = {"productType": pt, "requirements": "LISTING", "attributes": attrs}
-            try:
-                res = await _spapi_send("PUT", f"/listings/2021-08-01/items/{seller}/{sku}",
-                                        body=body, params={"marketplaceIds": mp})
-            except Exception as _e:
-                results.append({"sku": sku, "product": p.get("name"), "ok": False, "error": str(_e)})
-                failed += 1
-                continue
-            if res.get("dry_run"):
-                results.append({"sku": sku, "product": p.get("name"), "product_type": pt,
-                                "dry_run": True, "attributes_preview": list(attrs.keys())})
-            else:
-                data = res.get("data") or {}
-                issues = data.get("issues") or []
-                _ok = res.get("ok") and (data.get("status") in ("ACCEPTED", "VALID", None) or not issues)
-                results.append({"sku": sku, "product": p.get("name"), "product_type": pt,
-                                "ok": bool(_ok), "status": data.get("status"), "http": res.get("status"),
-                                "submissionId": data.get("submissionId"),
-                                "raw_errors": (data.get("errors") if not issues else None),
-                                "issues": [{"code": i.get("code"), "message": i.get("message"),
-                                            "severity": i.get("severity")} for i in issues]})
-                if _ok:
-                    pushed += 1
-                else:
-                    failed += 1
+        price = _amazon_price_of(p, markup)                 # marjlı satış fiyatı
+        list_price = round(float(p.get("price") or 0), 2)   # üstü çizili (RRP)
+        pname = p.get("name")
+        # Hedef varyantlar (filtreye uyan + SKU'su olan)
+        _tvs = [v for v in (p.get("variants") or [])
+                if (not _filtered or _amz_code_match(p, v, _bset, _sset, _pset)) and _amazon_seller_sku(v)]
+        if not _tvs:
+            continue
+        if not pt:
+            for v in _tvs:
+                _tally({"sku": _amazon_seller_sku(v), "product": pname, "ok": False,
+                        "error": "Amazon productType yok (kategori eşleştir)."}, False, False)
+            continue
+        # Tüm varyantların bedeni varsa → TEK LİSTE (parent + child, beden varyasyonu). Aksi → tekil.
+        _use_var = len(_tvs) > 1 and all(str(v.get("size") or "").strip() for v in _tvs)
+        if _use_var:
+            parent_sku = (str(_tvs[0].get("stock_code") or "").strip() or f"{p.get('id')}-P")
+            # Ana (parent): ortak alanlar; teklif/stok/beden/EAN YOK.
+            pattrs = _amazon_listing_attributes(p, {}, pt, mp, price, 0, p.get("brand"),
+                                                default_attrs=cat_defaults, attr_mappings=cat_mappings,
+                                                list_price=list_price)
+            for _k in ("purchasable_offer", "fulfillment_availability", "size",
+                       "externally_assigned_product_identifier", "list_price"):
+                pattrs.pop(_k, None)
+            pattrs["parentage_level"] = [{"marketplace_id": mp, "value": "parent"}]
+            pattrs["variation_theme"] = [{"name": "SIZE_NAME"}]
+            _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, parent_sku, pattrs)
+            _r["product"] = f"{pname} (ana ürün)"
+            _tally(_r, _ok, _dry)
+            # Alt ürünler (child): beden + teklif + parent ilişkisi.
+            for v in _tvs:
+                cattrs = _amazon_listing_attributes(p, v, pt, mp, price, int(v.get("stock") or 0),
+                                                    p.get("brand"), default_attrs=cat_defaults,
+                                                    attr_mappings=cat_mappings, list_price=list_price)
+                cattrs["parentage_level"] = [{"marketplace_id": mp, "value": "child"}]
+                cattrs["variation_theme"] = [{"name": "SIZE_NAME"}]
+                cattrs["child_parent_sku_relationship"] = [
+                    {"marketplace_id": mp, "child_relationship_type": "variation", "parent_sku": parent_sku}]
+                _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, _amazon_seller_sku(v), cattrs)
+                _r["product"] = pname
+                _tally(_r, _ok, _dry)
+        else:
+            for v in _tvs:
+                attrs = _amazon_listing_attributes(p, v, pt, mp, price, int(v.get("stock") or 0),
+                                                   p.get("brand"), default_attrs=cat_defaults,
+                                                   attr_mappings=cat_mappings, list_price=list_price)
+                _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, _amazon_seller_sku(v), attrs)
+                _r["product"] = pname
+                _tally(_r, _ok, _dry)
     return {"success": True, "dry_run": not ALLOW_WRITE, "pushed": pushed, "successful": pushed,
             "failed": failed, "skipped": skipped, "count": len(results), "results": results[:200],
             "message": (f"{'DRY-RUN — ' if not ALLOW_WRITE else ''}{pushed} gönderildi / {failed} hata"
