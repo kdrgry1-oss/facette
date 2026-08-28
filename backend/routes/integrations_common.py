@@ -1605,7 +1605,7 @@ async def upload_rooftr_products_excel(
                 if await db.products.find_one({"slug": slug}):
                     slug = f"{base_slug}-{kart_id}" if kart_id else f"{base_slug}-{str(uuid4())[:6]}"
                 new_doc = {
-                    "id": str(uuid4()),
+                    "id": await generate_short_id("products"),  # 4-haneli (UUID değil)
                     "slug": slug,
                     "is_active": True,
                     "is_published": True,
@@ -1858,7 +1858,7 @@ async def import_xml_products(
                 )
                 updated += 1
             else:
-                doc["id"]         = generate_id()
+                doc["id"]         = await generate_short_id("products")  # 4-haneli (UUID değil)
                 doc["created_at"] = datetime.now(timezone.utc).isoformat()
                 doc["variants"]   = []
                 await db.products.insert_one(doc)
