@@ -958,8 +958,8 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
         _sset = {str(x).strip() for x in (stock_codes or []) if str(x).strip()}
         _filtered = bool(_bset or _sset)
 
-        def _sku_of(v):
-            return _amazon_seller_sku(v)  # listeleme ile AYNI SellerSKU (stok_kodu-beden)
+        def _sku_of(v, p):
+            return _amazon_seller_sku(v, p)  # listeleme ile AYNI SellerSKU (stok_kodu-renk-beden)
 
         def _in_target(v):
             if not _filtered:
@@ -968,7 +968,7 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
                     or str(v.get("stock_code") or "").strip() in _sset)
 
         summary["candidates"] = sum(1 for p in products for v in (p.get("variants") or [])
-                                    if _sku_of(v) and _in_target(v))
+                                    if _sku_of(v, p) and _in_target(v))
 
         if not ALLOW_WRITE:
             summary["dry_run"] = True
@@ -988,7 +988,7 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
             for v in (p.get("variants") or []):
                 if not _in_target(v):
                     continue
-                sku = _sku_of(v)
+                sku = _sku_of(v, p)
                 if not sku:
                     continue
                 try:

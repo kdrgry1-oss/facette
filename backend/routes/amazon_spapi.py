@@ -955,16 +955,18 @@ async def _resolve_amazon_product_type(product: dict) -> str:
     return pt
 
 
-def _amazon_seller_sku(variant: dict) -> str:
-    """Varyant için Amazon SellerSKU — BENZERSİZ olmalı (her beden ayrı SKU).
-    Kural: stok_kodu + '-' + beden (mevcut Amazon SKU deseni 'FCSS...-XS' ile birebir);
-    beden yoksa barkod; o da yoksa stok_kodu."""
-    sc = str(variant.get("stock_code") or "").strip()
+def _amazon_seller_sku(variant: dict, product: dict = None) -> str:
+    """Varyant için BENZERSİZ Amazon SellerSKU. Renkler AYNI stok kodunu paylaşabildiğinden
+    (Siyah/Acı Kahve → FCSS1800001) SKU'ya RENK de girer: stok_kodu[-renk][-beden].
+    Renk/beden yoksa o parça atlanır; hiçbiri yoksa barkod."""
+    import re as _re
+    product = product or {}
+    sc = str(variant.get("stock_code") or product.get("stock_code") or "").strip()
+    color = str(variant.get("color") or product.get("color") or "").strip()
     sz = str(variant.get("size") or "").strip()
-    bc = str(variant.get("barcode") or "").strip()
-    if sc and sz:
-        return f"{sc}-{sz}"
-    return sc or bc
+    color_slug = _re.sub(r"[^A-Za-z0-9ğüşöçıİĞÜŞÖÇ]+", "", color)[:20]
+    parts = [x for x in (sc, color_slug, sz) if x]
+    return "-".join(parts) or str(variant.get("barcode") or "").strip()
 
 
 def _amz_code_match(product: dict, variant: dict, bset: set, sset: set, pset: set) -> bool:
@@ -1055,58 +1057,86 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
             else:
                 failed += 1
 
-    for p in products:
-        pt, cat_defaults, cat_mappings = await _resolve_amazon_pt_and_defaults(p)
+    async def _list_family(colors_products, group_key):
+        """colors_products: AYNI stok kodunu paylaşan renk ürünleri (her biri bir renk).
+        Beden×Renk children → TEK Amazon listesi (variation)."""
+        p0 = colors_products[0]
+        pt, cat_defaults, cat_mappings = await _resolve_amazon_pt_and_defaults(p0)
         pt = pt or default_pt
-        price = _amazon_price_of(p, markup)                 # marjlı satış fiyatı
-        list_price = round(float(p.get("price") or 0), 2)   # üstü çizili (RRP)
-        pname = p.get("name")
-        # Hedef varyantlar (filtreye uyan + SKU'su olan)
-        _tvs = [v for v in (p.get("variants") or [])
-                if (not _filtered or _amz_code_match(p, v, _bset, _sset, _pset)) and _amazon_seller_sku(v)]
-        if not _tvs:
-            continue
+        specs = [(pp, v) for pp in colors_products for v in (pp.get("variants") or [])
+                 if _amazon_seller_sku(v, pp)]
+        if not specs:
+            return
         if not pt:
-            for v in _tvs:
-                _tally({"sku": _amazon_seller_sku(v), "product": pname, "ok": False,
-                        "error": "Amazon productType yok (kategori eşleştir)."}, False, False)
-            continue
-        # Tüm varyantların bedeni varsa → TEK LİSTE (parent + child, beden varyasyonu). Aksi → tekil.
-        _use_var = len(_tvs) > 1 and all(str(v.get("size") or "").strip() for v in _tvs)
-        if _use_var:
-            parent_sku = (str(_tvs[0].get("stock_code") or "").strip() or f"{p.get('id')}-P")
-            # Ana (parent): ortak alanlar; teklif/stok/beden/EAN YOK.
-            pattrs = _amazon_listing_attributes(p, {}, pt, mp, price, 0, p.get("brand"),
-                                                default_attrs=cat_defaults, attr_mappings=cat_mappings,
-                                                list_price=list_price)
-            for _k in ("purchasable_offer", "fulfillment_availability", "size",
+            for pp, v in specs:
+                _tally({"sku": _amazon_seller_sku(v, pp), "product": pp.get("name"),
+                        "ok": False, "error": "Amazon productType yok (kategori eşleştir)."}, False, False)
+            return
+        n_color = len({str(pp.get("color") or "").strip() for pp, _ in specs if str(pp.get("color") or "").strip()})
+        _has_size = any(str(v.get("size") or "").strip() for _, v in specs)
+        theme = ("SIZE_NAME/COLOR_NAME" if n_color > 1 and _has_size
+                 else "COLOR_NAME" if n_color > 1 else "SIZE_NAME")
+        if len(specs) > 1:
+            parent_sku = (group_key or f"{p0.get('id')}-P")
+            pattrs = _amazon_listing_attributes(p0, {}, pt, mp, _amazon_price_of(p0, markup), 0,
+                                                p0.get("brand"), default_attrs=cat_defaults,
+                                                attr_mappings=cat_mappings,
+                                                list_price=round(float(p0.get("price") or 0), 2))
+            for _k in ("purchasable_offer", "fulfillment_availability", "size", "color",
                        "externally_assigned_product_identifier", "list_price"):
                 pattrs.pop(_k, None)
             pattrs["parentage_level"] = [{"marketplace_id": mp, "value": "parent"}]
-            pattrs["variation_theme"] = [{"name": "SIZE_NAME"}]
+            pattrs["variation_theme"] = [{"name": theme}]
             _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, parent_sku, pattrs)
-            _r["product"] = f"{pname} (ana ürün)"
+            _r["product"] = f"{p0.get('name')} (ana ürün)"
             _tally(_r, _ok, _dry)
-            # Alt ürünler (child): beden + teklif + parent ilişkisi.
-            for v in _tvs:
-                cattrs = _amazon_listing_attributes(p, v, pt, mp, price, int(v.get("stock") or 0),
-                                                    p.get("brand"), default_attrs=cat_defaults,
-                                                    attr_mappings=cat_mappings, list_price=list_price)
+            for pp, v in specs:
+                cattrs = _amazon_listing_attributes(pp, v, pt, mp, _amazon_price_of(pp, markup),
+                                                    int(v.get("stock") or 0), pp.get("brand"),
+                                                    default_attrs=cat_defaults, attr_mappings=cat_mappings,
+                                                    list_price=round(float(pp.get("price") or 0), 2))
                 cattrs["parentage_level"] = [{"marketplace_id": mp, "value": "child"}]
-                cattrs["variation_theme"] = [{"name": "SIZE_NAME"}]
+                cattrs["variation_theme"] = [{"name": theme}]
                 cattrs["child_parent_sku_relationship"] = [
                     {"marketplace_id": mp, "child_relationship_type": "variation", "parent_sku": parent_sku}]
-                _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, _amazon_seller_sku(v), cattrs)
-                _r["product"] = pname
+                _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, _amazon_seller_sku(v, pp), cattrs)
+                _r["product"] = pp.get("name")
                 _tally(_r, _ok, _dry)
         else:
-            for v in _tvs:
-                attrs = _amazon_listing_attributes(p, v, pt, mp, price, int(v.get("stock") or 0),
-                                                   p.get("brand"), default_attrs=cat_defaults,
-                                                   attr_mappings=cat_mappings, list_price=list_price)
-                _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, _amazon_seller_sku(v), attrs)
-                _r["product"] = pname
-                _tally(_r, _ok, _dry)
+            pp, v = specs[0]
+            attrs = _amazon_listing_attributes(pp, v, pt, mp, _amazon_price_of(pp, markup),
+                                               int(v.get("stock") or 0), pp.get("brand"),
+                                               default_attrs=cat_defaults, attr_mappings=cat_mappings,
+                                               list_price=round(float(pp.get("price") or 0), 2))
+            _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, _amazon_seller_sku(v, pp), attrs)
+            _r["product"] = pp.get("name")
+            _tally(_r, _ok, _dry)
+
+    # Ürünleri STOK KODUNA göre grupla (renk grubu) — aynı stok kodundaki TÜM renkler tek listede.
+    from collections import defaultdict as _dd
+    _scodes = {str(p.get("stock_code") or "").strip() for p in products if str(p.get("stock_code") or "").strip()}
+    _sibs = _dd(dict)
+    if _scodes:
+        _sq = {"stock_code": {"$in": list(_scodes)}}
+        if not _filtered:
+            _sq["is_active"] = True
+        async for sp in db.products.find(_sq, {"_id": 0}):
+            _sibs[str(sp.get("stock_code") or "").strip()][str(sp.get("id"))] = sp
+    _groups, _singles, _seen = _dd(list), [], set()
+    for p in products:
+        sc = str(p.get("stock_code") or "").strip()
+        if sc:
+            for pid, sp in (_sibs.get(sc) or {str(p.get("id")): p}).items():
+                if pid not in _seen:
+                    _seen.add(pid)
+                    _groups[sc].append(sp)
+        elif str(p.get("id")) not in _seen:
+            _seen.add(str(p.get("id")))
+            _singles.append(p)
+    for gk, gps in _groups.items():
+        await _list_family(gps, gk)
+    for sp in _singles:
+        await _list_family([sp], "")
     return {"success": True, "dry_run": not ALLOW_WRITE, "pushed": pushed, "successful": pushed,
             "failed": failed, "skipped": skipped, "count": len(results), "results": results[:200],
             "message": (f"{'DRY-RUN — ' if not ALLOW_WRITE else ''}{pushed} gönderildi / {failed} hata"
