@@ -3579,6 +3579,71 @@ async def bulk_add_to_category_after(
     }
 
 
+@router.post("/bulk/set-variant-stock")
+async def bulk_set_variant_stock(
+    payload: dict,
+    dry_run: bool = Query(True, description="True → önizleme (YAZMAZ). False → uygular."),
+    current_user: dict = Depends(require_admin),
+):
+    """BEDEN BAZINDA stok güncelle. payload: { items: [{ key, sizes: {BEDEN: adet} }] }.
+    key = id / urun_karti_id / urun_id. Her ürünün variants[].size'ı (normalize: boşluksuz+büyük)
+    BEDEN ile eşleşen varyantına stok YAZAR (0 dahil). Excel'de olmayan (gönderilmeyen) beden
+    DOKUNULMAZ. Parent stock = varyant stok toplamı olarak yeniden hesaplanır. Idempotent, dry_run."""
+    items = payload.get("items") or []
+
+    def _norm(s):
+        return str(s or "").strip().upper().replace(" ", "")
+
+    results, total_updated, not_found = [], 0, []
+    _now = datetime.now(timezone.utc).isoformat()
+    for it in items:
+        key = str(it.get("key") or "").strip()
+        sizes = {_norm(k): v for k, v in (it.get("sizes") or {}).items() if v is not None}
+        cands = [key]
+        if key.isdigit():
+            try:
+                cands.append(int(key))
+            except Exception:
+                pass
+        p = await db.products.find_one(
+            {"$or": [{"id": {"$in": cands}}, {"urun_karti_id": {"$in": cands}}, {"urun_id": {"$in": cands}}]},
+            {"_id": 0, "id": 1, "name": 1, "variants": 1})
+        if not p:
+            not_found.append(key)
+            continue
+        variants = p.get("variants") or []
+        applied, unmatched = {}, []
+        new_vs = []
+        for v in variants:
+            vsz = _norm(v.get("size"))
+            if vsz in sizes:
+                qty = int(sizes[vsz] or 0)
+                applied[v.get("size")] = qty
+                v2 = dict(v); v2["stock"] = qty
+                new_vs.append(v2)
+            else:
+                new_vs.append(v)
+        for sz in sizes:
+            if not any(_norm(v.get("size")) == sz for v in variants):
+                unmatched.append(sz)
+        new_total = sum(int(x.get("stock") or 0) for x in new_vs)
+        results.append({"key": key, "id": p.get("id"), "name": (p.get("name") or "")[:45],
+                        "applied": applied, "unmatched_sizes": unmatched, "new_total": new_total})
+        if not dry_run and applied:
+            await db.products.update_one(
+                {"id": p["id"]},
+                {"$set": {"variants": new_vs, "stock": new_total, "updated_at": _now}})
+            total_updated += 1
+    return {
+        "requested": len(items), "matched": len(results), "not_found": not_found,
+        "updated": (0 if dry_run else total_updated), "dry_run": dry_run, "results": results[:60],
+        "message": (f"DRY-RUN: {len(results)} ürün bulundu; beden stokları yazılacak (YAZILMADI). "
+                    f"dry_run=false ile uygulayın." if dry_run
+                    else f"{total_updated} ürünün beden stokları güncellendi.")
+        + (f" {len(not_found)} ID bulunamadı." if not_found else ""),
+    }
+
+
 async def _find_category_by_slug(slug: str):
     """slug (veya isimden türetilmiş slug) ile kategoriyi bul → (id, name) | (None, None)."""
     s = (slug or "").strip().lower()
