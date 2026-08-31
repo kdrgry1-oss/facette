@@ -416,7 +416,31 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       toast.success(`İade onaylandı · ${fmtTL(res.data?.refund_amount)}`);
       setWf((m) => ({ ...m, status: "approved", loading: false }));
       load();
-    } catch (e) { toast.error(e.response?.data?.detail || "Onaylanamadı"); setWf((m) => ({ ...m, loading: false })); }
+    } catch (e) {
+      const det = e.response?.data?.detail || "";
+      // ZATEN KAPANMIŞ/ONAYLI iade: /approve bloke eder. Operatör yine de TUTARI düzenlemek
+      // istiyor → /update-approval'a düş (statü/stok değişmez, gider pusulası YENİ tutara göre
+      // yeniden kesilir). Böylece "kapanmış; onaylanamaz" hatası yerine düzenleme uygulanır.
+      if (/kapanm/i.test(det)) {
+        try {
+          const ub = { include_cargo: wf.fault === "customer" };
+          if (wf.edited) ub.refund_amount = Number(wf.finalAmount);
+          if (wf.returnedNet != null) ub.returned_net = wf.returnedNet;
+          if (wf.selIdx?.length) { ub.item_indexes = wf.selIdx; ub.selected_items = wf.selIdents || []; }
+          const res2 = await axios.post(`${API}/orders/returns/${wf.returnId}/update-approval`, ub, auth());
+          toast.success(`İade tutarı güncellendi · ${fmtTL(res2.data?.refund_amount)}${res2.data?.gp_regenerated ? " · gider pusulası yenilendi" : ""}`);
+          setWf((m) => ({ ...m, status: "approved", loading: false }));
+          load();
+          return;
+        } catch (e2) {
+          toast.error(e2.response?.data?.detail || "Güncellenemedi");
+          setWf((m) => ({ ...m, loading: false }));
+          return;
+        }
+      }
+      toast.error(det || "Onaylanamadı");
+      setWf((m) => ({ ...m, loading: false }));
+    }
   };
   const wfReject = async () => {
     if (!wf) return;

@@ -8029,6 +8029,7 @@ async def update_return_approval(return_id: str, payload: dict,
             await site_return_gider_pusulasi(return_id, payload={
                 "include_cargo": include_cargo,
                 "tracking_no": _gp.get("display_number") or "",
+                "refund_amount": final_amount,  # elle/edited tutarı pusulaya YANSIT (yeni tutara göre kes)
             }, current_user=current_user)
             gp_regenerated = True
         except HTTPException:
@@ -8452,6 +8453,23 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         if deduct_cargo:
             cargo_mode = "deducted"
 
+    # MANUEL/EDİTLENMİŞ TOPLAM (opt-in): caller net iade tutarını AÇIKÇA geçtiyse (update-approval
+    # / elle düzenleme), pusula TOPLAMI otomatik hesap yerine BU tutara sabitlenir. Böylece operatör
+    # 'İade tutarı'nı elle değiştirince gider pusulası da yeni tutara göre kesilir (kullanıcı talebi:
+    # "gider pusulasını güncellediğimiz yeni tutara göre düzenlemiyor"). Ürün satırları aşağıdaki
+    # mutabakatla bu hedefe çekilir; kargo/vade satırları korunur. Yalnız açıkça geçilince aktif →
+    # diğer çağrılar (preview, toplu, satır-içi) davranışı DEĞİŞMEZ.
+    _manual_total = (payload or {}).get("refund_amount")
+    try:
+        _manual_total = None if _manual_total in (None, "") else _round2(float(_manual_total))
+    except Exception:
+        _manual_total = None
+    if _manual_total is not None and _manual_total >= 0 and abs(_manual_total - net_total) >= 0.01:
+        net_total = _manual_total
+        if total_gross < net_total:
+            total_gross = net_total          # gider pusulası: brüt < net olamaz
+        total_discount = _round2(max(0.0, total_gross - net_total))
+
     vat_rate = settings.get("default_vat_rate", 10) if settings else 10
     vat_amount = round(net_total * vat_rate / (100 + vat_rate), 2)
     net_without_vat = round(net_total - vat_amount, 2)
@@ -8499,7 +8517,7 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         if abs(_diff) >= 0.01:
             _last = gp_items[-1]
             _q = int(_last.get("quantity", 1) or 1)
-            _last["net_price"] = _round2(_last["net_price"] + _diff / _q)
+            _last["net_price"] = _round2(max(0.0, _last["net_price"] + _diff / _q))  # negatif net olamaz
             _last["discount"] = _round2(max(0.0, _last["unit_price"] - _last["net_price"]))
 
     if cargo_line:
