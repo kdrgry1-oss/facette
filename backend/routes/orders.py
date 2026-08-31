@@ -7946,6 +7946,37 @@ async def update_return_approval(return_id: str, payload: dict,
     if not rec:
         raise HTTPException(status_code=404, detail="İade bulunamadı")
     order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
+    # OPERATÖR SİPARİŞTEN DAHA FAZLA ÜRÜN SEÇTİYSE (kök sebep — W11381): customer_returns kaydı
+    # siparişin ALT KÜMESİ olabilir (müşteri talebi 1 ürün) ama operatör panelde siparişin 2
+    # kalemini seçip onaylıyor. Panel seçimi SİPARİŞ kalemlerine göre indekslidir; kayıt yalnız 1
+    # kalemse seçim SIĞMAZ → 2. ürün yok sayılır, onay/pusula tek üründe kalır ("2 seçtim
+    # güncellenmiyor"). Bu durumda kaydın kalemlerini SİPARİŞ kalemleriyle GENİŞLETİRİZ ki
+    # operatörün seçtiği tüm ürünler onaya ve gider pusulasına girsin. Yalnız seçim mevcut kalem
+    # sayısını AŞTIĞINDA tetiklenir → normal (kayıt = sipariş) durumlar etkilenmez.
+    _rec_items = rec.get("items") or []
+    _ord_items = order.get("items") or []
+    def _idx_ok(v):
+        try:
+            return int(v)
+        except Exception:
+            return None
+    _sent_idx = payload.get("item_indexes") if isinstance(payload.get("item_indexes"), list) else []
+    _sent_sel = payload.get("selected_items") if isinstance(payload.get("selected_items"), list) else []
+    _needs_expand = bool(_ord_items) and (
+        any((_idx_ok(i) is not None and _idx_ok(i) >= len(_rec_items)) for i in _sent_idx)
+        or (len(_sent_sel) > len(_rec_items))
+    )
+    if _needs_expand:
+        _expanded = [{
+            "name": it.get("product_name") or it.get("name") or "Ürün",
+            "size": it.get("size", "") or "", "color": it.get("color", "") or "",
+            "quantity": int(it.get("quantity", 1) or 1),
+            "price": float(it.get("price") or it.get("unit_price") or 0),
+            "unit_price": float(it.get("unit_price") or it.get("price") or 0),
+            "product_id": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+        } for it in _ord_items]
+        await db.customer_returns.update_one({"id": return_id}, {"$set": {"items": _expanded}})
+        rec["items"] = _expanded
     _all_items = rec.get("items") or []
     try:
         _ap_sel = _resolve_return_selection(_all_items, payload.get("selected_items"), payload.get("item_indexes"))
