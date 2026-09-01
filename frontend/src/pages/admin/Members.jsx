@@ -128,7 +128,7 @@ export default function Members() {
     setDetail(null);
     setM360(null);
     setD360({ start: "", end: "" });
-    setFull360(true);  // satıra tıklayınca doğrudan tam-genişlik (sayfa gibi) açılsın
+    setFull360(false);  // yarım sayfa (drawer) — kullanıcı tercihi; "Tam ekran" butonuyla genişletilebilir
     try {
       const { data } = await axios.get(`${API}/admin/members/${id}`, { headers: authHeaders() });
       setDetail(data);
@@ -258,16 +258,19 @@ export default function Members() {
               <th className="text-left p-3">İletişim</th>
               <th className="text-center p-3">Sipariş</th>
               <th className="text-right p-3">Toplam Harcama</th>
+              <th className="text-right p-3">Ort. Sepet</th>
               <th className="text-center p-3">Segment</th>
+              <th className="text-left p-3">Son Sipariş</th>
+              <th className="text-left p-3">Katılım</th>
               <th className="text-left p-3">Kaynak</th>
               <th className="text-right p-3">İşlem</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="p-8 text-center text-gray-400">Yükleniyor…</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-gray-400">Yükleniyor…</td></tr>
             ) : items.length === 0 ? (
-              <tr><td colSpan={7} className="p-8 text-center text-gray-400">Henüz üye yok.</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-gray-400">Henüz üye yok.</td></tr>
             ) : items.map((m) => (
               <tr key={m.id} onClick={() => openDetail(m.id)} className="border-t hover:bg-gray-50 cursor-pointer" data-testid={`member-row-${m.id}`}>
                 <td className="p-3">
@@ -280,7 +283,10 @@ export default function Members() {
                 </td>
                 <td className="p-3 text-center font-medium">{m.orders_count}</td>
                 <td className="p-3 text-right font-semibold tabular-nums">₺{(m.total_spent || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td>
+                <td className="p-3 text-right text-xs text-gray-600 tabular-nums">{m.orders_count > 0 ? "₺" + (Number(m.total_spent || 0) / m.orders_count).toLocaleString("tr-TR", { maximumFractionDigits: 0 }) : "—"}</td>
                 <td className="p-3 text-center"><SegmentBadge seg={m.segment} /></td>
+                <td className="p-3 text-xs text-gray-500 whitespace-nowrap">{m.last_order_at ? new Date(m.last_order_at).toLocaleDateString("tr-TR") : "—"}</td>
+                <td className="p-3 text-xs text-gray-500 whitespace-nowrap">{m.created_at ? new Date(m.created_at).toLocaleDateString("tr-TR") : "—"}</td>
                 <td className="p-3 text-xs text-gray-500">{m.acquisition_source || "—"}</td>
                 <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => openDetail(m.id)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Detay"><Eye size={15} /></button>
