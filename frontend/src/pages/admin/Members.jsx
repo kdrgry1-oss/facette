@@ -45,6 +45,20 @@ export default function Members() {
   const [m360, setM360] = useState(null);
   const [d360, setD360] = useState({ start: "", end: "" });
   const [full360, setFull360] = useState(false);
+  const [sortBy, setSortBy] = useState("created");
+  const [sortDir, setSortDir] = useState("desc");
+
+  const toggleSort = (k) => {
+    if (sortBy === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortBy(k); setSortDir("desc"); }
+    setPage(1);
+  };
+  // Tıklanabilir sıralama başlığı (artan/azalan ok). cls ile hizalama.
+  const Th = ({ label, k, cls = "text-left" }) => (
+    <th className={`p-3 cursor-pointer select-none hover:text-gray-900 ${cls}`} onClick={() => toggleSort(k)} title="Sırala">
+      <span className="inline-flex items-center gap-1">{label}{sortBy === k && <span className="text-[10px]">{sortDir === "asc" ? "▲" : "▼"}</span>}</span>
+    </th>
+  );
 
   const open360Print = () => {
     const t = localStorage.getItem("token");
@@ -88,7 +102,7 @@ export default function Members() {
   const load = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page, limit: "25" });
+      const params = new URLSearchParams({ page, limit: "25", sort: sortBy, dir: sortDir });
       if (search) params.set("search", search);
       if (segment) params.set("segment", segment);
       if (source) params.set("source", source);
@@ -107,7 +121,7 @@ export default function Members() {
     } catch (_) {}
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [page, segment, source]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [page, segment, source, sortBy, sortDir]);
   useEffect(() => { loadStats(); }, []);
   useEffect(() => {
     axios.get(`${API}/admin/member-groups`, { headers: authHeaders() })
@@ -254,15 +268,15 @@ export default function Members() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
             <tr>
-              <th className="text-left p-3">Üye</th>
+              <Th label="Üye" k="name" />
               <th className="text-left p-3">İletişim</th>
-              <th className="text-center p-3">Sipariş</th>
-              <th className="text-right p-3">Toplam Harcama</th>
-              <th className="text-right p-3">Ort. Sepet</th>
-              <th className="text-center p-3">Segment</th>
-              <th className="text-left p-3">Son Sipariş</th>
-              <th className="text-left p-3">Katılım</th>
-              <th className="text-left p-3">Kaynak</th>
+              <Th label="Sipariş" k="orders" cls="text-center" />
+              <Th label="Toplam Harcama" k="spent" cls="text-right" />
+              <Th label="Ort. Sepet" k="aov" cls="text-right" />
+              <Th label="Segment" k="segment" cls="text-center" />
+              <Th label="Son Sipariş" k="last_order" />
+              <Th label="Katılım" k="created" />
+              <Th label="Kaynak" k="source" />
               <th className="text-right p-3">İşlem</th>
             </tr>
           </thead>

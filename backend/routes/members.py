@@ -77,6 +77,8 @@ async def list_members(
     search: Optional[str] = None,
     segment: Optional[str] = None,
     source: Optional[str] = None,
+    sort: Optional[str] = "created",
+    dir: Optional[str] = "desc",
     current_user: dict = Depends(require_admin),
 ):
     query: dict = {"is_admin": {"$ne": True}}
@@ -99,11 +101,15 @@ async def list_members(
     # _refresh_member_stats ile periyodik/isteğe-bağlı tek geçişte yazılır. Liste/segment BU
     # alanları okur → korelasyonlu $lookup (O(üye×sipariş)) KALDIRILDI. Önbellek YOKSA 0/prospect.
     # (Üye 360 detayı tam eşleşmeyi ayrıca canlı yapar; liste görünümü için önbellek yeterli+hızlı.)
+    # addFields SIRALAMADAN ÖNCE — türetilmiş alanlara (aov) göre de sıralanabilsin. cached_* zaten
+    # kullanıcı belgesinde; aov = harcama/sipariş (0'a bölme korumalı).
     _cached_fields = [{"$addFields": {
         "orders_count": {"$ifNull": ["$cached_orders", 0]},
         "total_spent": {"$ifNull": ["$cached_spent", 0]},
         "last_order_at": "$cached_last_order",
         "segment": {"$ifNull": ["$cached_segment", "prospect"]},
+        "aov": {"$cond": [{"$gt": [{"$ifNull": ["$cached_orders", 0]}, 0]},
+                          {"$divide": [{"$ifNull": ["$cached_spent", 0]}, "$cached_orders"]}, 0]},
     }}]
     _project = {"$project": {"_id": 0, "password": 0}}
 
@@ -112,16 +118,25 @@ async def list_members(
                      if segment == "prospect" else {"cached_segment": segment})
         query = {"$and": [query, seg_match]}
 
+    # SIRALAMA — tüm sütunlar artan/azalan (sunucu-taraflı → tüm sayfalarda geçerli).
+    _sort_map = {
+        "name": "first_name", "orders": "cached_orders", "spent": "cached_spent",
+        "aov": "aov", "last_order": "cached_last_order", "created": "created_at",
+        "segment": "cached_segment", "source": "acquisition_source",
+    }
+    _sf = _sort_map.get((sort or "created"), "created_at")
+    _dir = -1 if (dir or "desc").lower() != "asc" else 1
+
     total = await db.users.count_documents(query)
     pipeline = [
         {"$match": query},
-        {"$sort": {"created_at": -1}},
+        *_cached_fields,
+        {"$sort": {_sf: _dir, "_id": 1}},  # _id ikincil → sayfalama kararlı
         {"$skip": skip},
         {"$limit": limit},
-        *_cached_fields,
         _project,
     ]
-    items = [r async for r in db.users.aggregate(pipeline)]
+    items = [r async for r in db.users.aggregate(pipeline, allowDiskUse=True)]
     return {"items": items, "total": total, "page": page, "pages": (total + limit - 1) // limit}
 
 
