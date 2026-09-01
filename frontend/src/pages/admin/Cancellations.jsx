@@ -67,11 +67,6 @@ function invoiceName(o) {
 function itemsOf(o) {
   return o.items || o.lines || [];
 }
-function itemTitle(it) {
-  const base = it.name || it.product_name || it.title || "Ürün";
-  const sc = [it.size, it.color].filter(Boolean).join(" / ");
-  return sc ? `${base} — ${sc}` : base;
-}
 function itemQty(it) {
   return Number(it.quantity || it.qty || 1);
 }
@@ -184,98 +179,136 @@ export default function Cancellations() {
         sağdaki menüden durumu değiştirebilirsiniz. (İade talepleri ayrı "İadeler" menüsündedir.)
       </p>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="relative flex-1 min-w-[220px] max-w-md">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") applySearch(); }}
-            placeholder="Sipariş no / müşteri ara…"
-            className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm"
-          />
+      <div className="bg-white border rounded-lg p-4 mb-6 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[220px] max-w-md">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") applySearch(); }}
+              placeholder="Sipariş no / müşteri ara…"
+              className="w-full pl-9 pr-3 py-1.5 border rounded text-sm"
+            />
+          </div>
+          <button onClick={applySearch} className="px-4 py-1.5 bg-gray-900 text-white rounded text-sm">Ara</button>
+          <select value={payFilter} onChange={(e) => { setPage(1); setPayFilter(e.target.value); }}
+            className="border px-3 py-1.5 rounded text-sm bg-white" title="Ödeme tipine göre filtrele">
+            <option value="">Tüm Ödeme Tipleri</option>
+            <option value="credit_card">Kredi Kartı</option>
+            <option value="bank_transfer">Havale/EFT</option>
+            <option value="cash_on_delivery">Kapıda Ödeme</option>
+          </select>
+          <button onClick={fetchCancelled} className="px-3 py-1.5 border rounded text-sm flex items-center gap-1">
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Yenile
+          </button>
+          <span className="text-sm text-gray-500 ml-auto">Toplam {total} iptal</span>
         </div>
-        <button onClick={applySearch} className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm">Ara</button>
-        <select value={payFilter} onChange={(e) => { setPage(1); setPayFilter(e.target.value); }}
-          className="px-3 py-2 border rounded-lg text-sm bg-white" title="Ödeme tipine göre filtrele">
-          <option value="">Tüm Ödeme Tipleri</option>
-          <option value="credit_card">Kredi Kartı</option>
-          <option value="bank_transfer">Havale/EFT</option>
-          <option value="cash_on_delivery">Kapıda Ödeme</option>
-        </select>
-        <button onClick={fetchCancelled} className="px-3 py-2 border rounded-lg text-sm flex items-center gap-1">
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Yenile
-        </button>
-        <span className="text-sm text-gray-500 ml-auto">Toplam {total} iptal</span>
       </div>
 
-      <div className="overflow-x-auto border rounded-lg bg-white">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
+      <div className="bg-white rounded-lg shadow-sm overflow-x-auto">
+        <table className="admin-table admin-table-compact">
+          <thead>
             <tr>
-              <th className="text-left font-medium px-3 py-2">Sipariş No</th>
-              <th className="text-left font-medium px-3 py-2">Platform</th>
-              <th className="text-left font-medium px-3 py-2">Müşteri / Ürün</th>
-              <th className="text-left font-medium px-3 py-2">Tutar</th>
-              <th className="text-left font-medium px-3 py-2">Ödeme</th>
-              <th className="text-left font-medium px-3 py-2">Sipariş Tarihi</th>
-              <th className="text-left font-medium px-3 py-2">Sebep</th>
-              <th className="text-left font-medium px-3 py-2">Durum</th>
-              <th className="text-left font-medium px-3 py-2">İşlem</th>
+              <th>Sipariş No</th>
+              <th>Müşteri</th>
+              <th>Ürünler</th>
+              <th>Tutar</th>
+              <th>Ödeme Tipi</th>
+              <th>Platform</th>
+              <th>Durum</th>
+              <th>Tarih</th>
+              <th>Sebep</th>
+              <th>İşlem</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400">Yükleniyor…</td></tr>
+              <tr><td colSpan={10} className="text-center py-8">Yükleniyor...</td></tr>
             ) : orders.length === 0 ? (
-              <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400">İptal edilen sipariş bulunamadı.</td></tr>
+              <tr><td colSpan={10} className="text-center py-8 text-gray-500">İptal edilen sipariş bulunamadı</td></tr>
             ) : orders.map((o) => {
               const name = custName(o);
               const invName = invoiceName(o);
               const diffInv = invName && invName !== name;
               const its = itemsOf(o);
               const dt = o.created_at ? new Date(o.created_at).toLocaleString("tr-TR") : "—";
+              const phone = (o.shipping_address || {}).phone || o.phone || "";
+              const pm = (o.payment_method || "").toLowerCase();
+              const pmLabel = { credit_card:"Kredi Kartı", card:"Kredi Kartı", iyzico:"Kredi Kartı", cc:"Kredi Kartı",
+                bank_transfer:"Havale/EFT", transfer:"Havale/EFT", havale:"Havale/EFT", eft:"Havale/EFT",
+                cash_on_delivery:"Kapıda", cod:"Kapıda", kapida:"Kapıda", marketplace:"Marketplace" }[pm]
+                || (["trendyol","hepsiburada","temu","n11","amazon"].includes((o.platform||"").toLowerCase()) ? "Marketplace" : (o.payment_method || "—"));
+              const pMap = {
+                trendyol: { label: "Trendyol", bg: "bg-[#F27A1A]" },
+                hepsiburada: { label: "Hepsiburada", bg: "bg-[#FF6000]" },
+                temu: { label: "Temu", bg: "bg-[#FB7701]" },
+                amazon: { label: "Amazon", bg: "bg-[#232F3E]" },
+                amazon_tr: { label: "Amazon", bg: "bg-[#232F3E]" },
+                n11: { label: "n11", bg: "bg-[#EA0029]" },
+              };
+              const pb = pMap[(o.platform || "").toLowerCase()] || { label: "Web", bg: "bg-gray-800" };
               return (
                 <tr
                   key={o.id || o.order_number}
-                  className="border-t hover:bg-gray-50 cursor-pointer"
+                  className="cursor-pointer"
                   onClick={() => setDetail(o)}
                 >
-                  <td className="px-3 py-2 font-medium">{o.order_number || o.id}</td>
-                  <td className="px-3 py-2">{platformLabel(o.platform)}</td>
-                  <td className="px-3 py-2">
-                    <div>{diffInv ? invName : name}</div>
-                    {diffInv && (
-                      <div className="text-xs text-gray-500 mt-0.5">Teslimat: {name}</div>
-                    )}
-                    {its.length > 0 && (
-                      <div className="text-xs text-gray-500 mt-0.5">
-                        {itemTitle(its[0])}{its.length > 1 ? ` +${its.length - 1} ürün` : ""}
-                      </div>
-                    )}
+                  <td className="font-medium">{o.order_number || o.id}</td>
+                  <td>
+                    <p className="font-medium">{diffInv ? invName : name}</p>
+                    {diffInv && <p className="text-xs text-gray-500">Teslimat: {name}</p>}
+                    {phone && <p className="text-xs text-gray-500">{phone}</p>}
                   </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-col gap-0.5 text-sm text-gray-900">
-                      {(o.subtotal != null && ((o.discount_amount || o.discount || 0) > 0)) && (
-                        <>
-                          <span>Liste: {money(o.subtotal)}</span>
-                          <span>İskonto: -{money(o.discount_amount || o.discount || 0)}</span>
-                        </>
-                      )}
-                      <span>Fiyat: {money(o.total ?? o.total_amount ?? o.grand_total)}</span>
+                  <td>
+                    <div className="flex flex-col gap-0.5">
+                      {its.slice(0, 2).map((item, i) => {
+                        const qty = itemQty(item);
+                        const img = item.image || item.product_image || item.imageUrl;
+                        return (
+                          <div key={i} className="flex items-center gap-1 text-xs">
+                            <div className="relative w-6 h-6 shrink-0">
+                              {img ? (
+                                <img src={optimizeImg(img, 48, 48)} alt="" className="w-6 h-6 object-cover bg-gray-100 rounded" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                              ) : (
+                                <div className="w-6 h-6 bg-gray-100 rounded flex items-center justify-center text-[8px] text-gray-400">—</div>
+                              )}
+                              {qty > 1 && (
+                                <span className="absolute -top-2 -left-2 min-w-[20px] h-[20px] px-1 bg-red-600 text-white text-[11px] leading-[20px] text-center rounded-full font-extrabold ring-2 ring-white shadow-md">{qty}</span>
+                              )}
+                            </div>
+                            <span className="truncate max-w-[120px]">{item.name || item.product_name || item.title || "Ürün"}</span>
+                          </div>
+                        );
+                      })}
+                      {its.length > 2 && <span className="text-xs text-gray-500">+{its.length - 2} daha</span>}
+                      {its.length === 0 && <span className="text-xs text-gray-400">—</span>}
                     </div>
                   </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {{credit_card:"Kredi Kartı", bank_transfer:"Havale/EFT", havale:"Havale/EFT", eft:"Havale/EFT", cash_on_delivery:"Kapıda Ödeme", kapida:"Kapıda Ödeme", marketplace:"Pazaryeri"}[(o.payment_method||"").toLowerCase()] || (o.payment_method || "—")}
+                  <td>
+                    <div className="flex flex-col gap-0.5 tabular-nums">
+                      {(o.subtotal != null && ((o.discount_amount || o.discount || 0) > 0)) && (
+                        <>
+                          <span className="text-xs text-gray-400 line-through">{Number(o.subtotal).toFixed(2)} TL</span>
+                          <span className="text-xs font-medium text-[#8b1e3f]">İskonto -{Number(o.discount_amount || o.discount || 0).toFixed(2)} TL</span>
+                        </>
+                      )}
+                      {Number(o.shipping_cost) > 0 && (
+                        <span className="text-xs text-gray-500">Kargo +{Number(o.shipping_cost).toFixed(2)} TL</span>
+                      )}
+                      <span className="font-medium">{money(o.total ?? o.total_amount ?? o.grand_total)}</span>
+                    </div>
                   </td>
-                  <td className="px-3 py-2 whitespace-nowrap">{dt}</td>
-                  <td className="px-3 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={o.cancel_reason || ""}>{o.cancel_reason || "—"}</td>
-                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                  <td className="whitespace-nowrap text-sm text-gray-900">{pmLabel}</td>
+                  <td>
+                    <span className={`inline-block px-2 py-0.5 ${pb.bg} text-white text-[10px] uppercase font-bold tracking-wider rounded`}>{pb.label}</span>
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <select
                       value={o.status || "cancelled"}
                       disabled={savingId === o.id}
                       onChange={(e) => changeStatus(o.id, e.target.value)}
-                      className="border rounded-lg text-xs px-2 py-1 bg-white max-w-[160px] disabled:opacity-50"
+                      className="border rounded text-xs px-2 py-1 bg-white max-w-[150px] disabled:opacity-50"
                       title="Sipariş durumunu değiştir"
                     >
                       {optsFor(o.status || "cancelled").map((s) => (
@@ -284,7 +317,9 @@ export default function Cancellations() {
                     </select>
                     {savingId === o.id && <span className="ml-1 text-xs text-gray-400">…</span>}
                   </td>
-                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                  <td className="whitespace-nowrap text-sm text-gray-700">{dt}</td>
+                  <td className="text-xs text-gray-600 max-w-[160px] truncate" title={o.cancel_reason || ""}>{o.cancel_reason || "—"}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => handleDelete(o.id, o.order_number)}
                       disabled={deletingId === o.id}
