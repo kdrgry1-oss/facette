@@ -498,7 +498,6 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
                 <div key={i} className="flex items-center gap-1.5 h-7">
                   <PRThumb src={p.image} name={p.name || p.barcode} />
                   <span className="text-gray-900 whitespace-nowrap" title={p.name || p.barcode}>{p.name || p.barcode}</span>
-                  {(p.barkod || barcoded) && <span title={`Barkod: ${p.barkod || e.cargo_barcode}`} className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-0.5 text-[9px] shrink-0"><Barcode size={10} className="mr-0.5" />Barkod</span>}
                 </div>
               ))}
             </div>

@@ -1167,16 +1167,27 @@ async def refresh_pr_tracking(entry_id: str, current_user: dict = Depends(requir
     if not s.get("is_active") or not s.get("username"):
         raise HTTPException(status_code=400, detail="MNG/DHL kargo entegrasyonu aktif değil.")
     import asyncio as _aio
-    try:
-        info = await _aio.to_thread(
-            get_mng_shipment_status, username=s["username"], password=s["password"], siparis_no=siparis_no)
-    except Exception as ex:
-        raise HTTPException(status_code=502, detail=f"Kargo sorgusu başarısız: {ex}")
-    if not info or not info.get("ok"):
+    # Referans adayları: MNG sipariş no (INF…) ÖNCE, sonra barkod — bazı gönderilerde gerçek
+    # takip no barkod referansından döner. İlk gonderi_no bulunan kazanır.
+    refs = [r for r in [siparis_no, (e.get("cargo_barcode") or "").strip()] if r]
+    refs = list(dict.fromkeys(refs))  # tekilleştir, sıra korunur
+    gonderi, statu_ac, last_info = "", "", None
+    for ref in refs:
+        try:
+            info = await _aio.to_thread(
+                get_mng_shipment_status, username=s["username"], password=s["password"], siparis_no=ref)
+        except Exception as ex:
+            raise HTTPException(status_code=502, detail=f"Kargo sorgusu başarısız: {ex}")
+        if info and info.get("ok"):
+            last_info = info
+            statu_ac = (info.get("kargo_statu_aciklama") or "").strip() or statu_ac
+            g = (info.get("gonderi_no") or "").strip()
+            if g:
+                gonderi = g
+                break
+    if not last_info:
         return {"success": False, "pending": True,
                 "message": "Kargo firması henüz takip no üretmedi (kargoya verilmesini bekleyin)."}
-    gonderi = (info.get("gonderi_no") or "").strip()
-    statu_ac = (info.get("kargo_statu_aciklama") or "").strip()
     track_no = gonderi or siparis_no
     track_url = (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={track_no}"
                  if track_no else (info.get("kargo_takip_url") or "").strip())

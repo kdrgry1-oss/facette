@@ -1759,23 +1759,35 @@ async def _dhl_cargo_poll_tick():
                     {"$or": [{"shipped_at": {"$gt": _pr_cut}}, {"shipped_at": {"$exists": False}}]},
                 ],
             }
-            async for pr in db.influencer_pr.find(pr_q, {"_id": 0, "id": 1, "cargo_tracking_no": 1}).limit(80):
-                sip = str(pr.get("cargo_tracking_no") or "").strip()
-                if not sip:
+            async for pr in db.influencer_pr.find(
+                    pr_q, {"_id": 0, "id": 1, "cargo_tracking_no": 1, "cargo_barcode": 1}).limit(80):
+                # Referans adayları: MNG sipariş no (INF…) önce, sonra barkod (bazı gönderilerde
+                # gerçek takip no barkod referansından döner).
+                _refs = [r for r in [str(pr.get("cargo_tracking_no") or "").strip(),
+                                     str(pr.get("cargo_barcode") or "").strip()] if r]
+                _refs = list(dict.fromkeys(_refs))
+                if not _refs:
                     continue
-                try:
-                    pinfo = await asyncio.to_thread(
-                        get_mng_shipment_status, username=user, password=pw, siparis_no=sip)
-                except Exception as _pe:
-                    logger.warning(f"[scheduler][dhl][pr] status err {sip}: {_pe}")
-                    n_errors += 1
+                pg, pac, got_ok = "", "", False
+                for _ref in _refs:
+                    try:
+                        pinfo = await asyncio.to_thread(
+                            get_mng_shipment_status, username=user, password=pw, siparis_no=_ref)
+                    except Exception as _pe:
+                        logger.warning(f"[scheduler][dhl][pr] status err {_ref}: {_pe}")
+                        n_errors += 1
+                        await asyncio.sleep(0.2)
+                        continue
+                    if pinfo and pinfo.get("ok"):
+                        got_ok = True
+                        pac = (pinfo.get("kargo_statu_aciklama") or "").strip() or pac
+                        _g = (pinfo.get("gonderi_no") or "").strip()
+                        if _g:
+                            pg = _g
+                            break
                     await asyncio.sleep(0.2)
+                if not got_ok:
                     continue
-                if not pinfo or not pinfo.get("ok"):
-                    await asyncio.sleep(0.2)
-                    continue
-                pg = (pinfo.get("gonderi_no") or "").strip()
-                pac = (pinfo.get("kargo_statu_aciklama") or "").strip()
                 pupd = {"cargo_last_status_text": pac,
                         "cargo_status_checked_at": datetime.now(timezone.utc).isoformat()}
                 if pg:
@@ -1784,7 +1796,7 @@ async def _dhl_cargo_poll_tick():
                 await db.influencer_pr.update_one({"id": pr["id"]}, {"$set": pupd})
                 if pg:
                     processed += 1
-                await asyncio.sleep(0.25)
+                await asyncio.sleep(0.2)
         except Exception as _pe:
             logger.warning(f"[scheduler][dhl][pr] pr poll err: {_pe}")
 
