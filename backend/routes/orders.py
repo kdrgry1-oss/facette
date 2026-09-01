@@ -1513,6 +1513,18 @@ async def create_order(
     order["discount_breakdown"] = _breakdown
     order["discount_total"] = round(_server_discount + _pm_disc, 2)
 
+    # 🎯 PER-ÜRÜN İNDİRİMİ DONDUR (W11214 kök çözümü): kampanya kapsamı O AN doğru olduğundan
+    # hangi üründen ne kadar indirim düşüldüğünü kalem üstüne (item.discount_amount) yaz. İptal/iade/
+    # gider-pusulası bu DONMUŞ değeri okur → ürün kategorisi sonradan değişse de sabit kalır, kapsam-
+    # dışı ürüne hayali (düz-oransal) indirim yazılmaz. Kapsamdaki her ürün kendi payını, kapsam-dışı 0.
+    try:
+        _pdisc = await _order_item_discounts(order)
+        for _i, _it in enumerate(order.get("items") or []):
+            if isinstance(_it, dict) and _i < len(_pdisc):
+                _it["discount_amount"] = _pdisc[_i]
+    except Exception as _e:
+        logger.warning(f"[create_order] per-ürün indirim dondurma atlandı: {_e}")
+
     # A2.5b — OVERSELL ENGELLE (kullanıcı kararı). Sipariş insert'inden ÖNCE stok koşullu
     # atomik düşülür: bir kalem bile yetmezse düşürülenler geri alınır ve 409 ile reddedilir
     # (karşılanamayacak sipariş HİÇ oluşmaz). Ayar block_oversell=false ise (backorder/ön-sipariş
@@ -7579,6 +7591,10 @@ async def _order_item_discounts(order: dict) -> list:
     items = order.get("items") or []
     n = len(items)
     gross = [_round2((it.get("price") or 0)) * int(it.get("quantity") or 1) for it in items]
+    # DONMUŞ per-ürün indirim (checkout'ta item.discount_amount yazıldıysa) → TEK doğru kaynak
+    # odur (kategori sonradan değişse de sabit kalır). Yeni siparişler bu daldan geçer.
+    if items and all(isinstance(it, dict) and ("discount_amount" in it) for it in items):
+        return [_round2((it.get("discount_amount") or 0)) for it in items]
     order_disc = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
     promos = order.get("applied_promotions") or []
     _sub = _round2(order.get("subtotal") or sum(gross))
@@ -7637,7 +7653,70 @@ async def _order_item_discounts(order: dict) -> list:
             continue
         for i in idxs:
             disc[i] += amt * (gross[i] / base)
+    # Ödeme (havale/EFT) indirimi sepet-geneli teşvik → tüm kalemlere brüt payıyla oransal.
+    pm = _round2(order.get("payment_discount") or 0)
+    if pm > 0.005:
+        _tot = sum(gross) or 1.0
+        for i in range(n):
+            disc[i] += pm * (gross[i] / _tot)
     return [_round2(x) for x in disc]
+
+
+@router.post("/{order_id}/set-item-discounts")
+async def set_item_discounts(order_id: str, payload: dict,
+                             current_user: dict = Depends(require_permission("returns.expense_note"))):
+    """ESKİ sipariş düzeltme: kalem-başı indirimi (item.discount_amount) ELLE dondur. Kampanya kapsamı
+    sonradan değişen siparişlerde (W11214: Etek kapsam-dışıydı, 0 indirim almıştı ama iade motoru düz-
+    oransal 168,42 yazıyordu) doğru per-ürün indirim yazılır. payload: {discounts:[...]} order.items ile
+    hizalı (her kalem için indirim tutarı). customer_returns.items barkod/index ile senkronlanır; varsa
+    gider pusulası yeni tutarla yeniden hesaplanır. Toplam, siparişin discount+payment_discount'una eşit
+    olmalıdır (uyarı verilir, engellenmez)."""
+    order = (await db.orders.find_one({"id": order_id}, {"_id": 0})
+             or await db.orders.find_one({"order_number": order_id}, {"_id": 0}))
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    ds = payload.get("discounts") or []
+    items = order.get("items") or []
+    if len(ds) != len(items):
+        raise HTTPException(status_code=400, detail=f"discounts uzunluğu ({len(ds)}) kalem sayısıyla ({len(items)}) eşleşmeli.")
+    for i, it in enumerate(items):
+        if isinstance(it, dict):
+            it["discount_amount"] = _round2(ds[i] or 0)
+    await db.orders.update_one({"id": order["id"]}, {"$set": {"items": items}})
+    _sum = _round2(sum(_round2(x or 0) for x in ds))
+    _exp = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
+    _warn = "" if abs(_sum - _exp) < 0.02 else f"UYARI: indirim toplamı {_sum} ≠ sipariş indirimi {_exp}"
+
+    # customer_returns senkron: barkod eşleşmesi (yoksa index) ile discount_amount kopyala.
+    _by_bc = {}
+    for it in items:
+        bc = str((it or {}).get("product_id") or "")
+        if bc:
+            _by_bc[bc] = _round2((it or {}).get("discount_amount") or 0)
+    _synced = 0
+    async for cr in db.customer_returns.find({"order_id": order["id"]}, {"_id": 0, "id": 1, "items": 1}):
+        _cri = cr.get("items") or []
+        for j, cit in enumerate(_cri):
+            if not isinstance(cit, dict):
+                continue
+            bc = str(cit.get("product_id") or cit.get("barcode") or "")
+            if bc and bc in _by_bc:
+                cit["discount_amount"] = _by_bc[bc]
+            elif j < len(items) and isinstance(items[j], dict):
+                cit["discount_amount"] = _round2(items[j].get("discount_amount") or 0)
+        await db.customer_returns.update_one({"id": cr["id"]}, {"$set": {"items": _cri}})
+        _synced += 1
+        # Gider pusulası varsa yeni per-ürün indirimle yeniden hesapla (idempotent).
+        try:
+            _gp = await db.gider_pusulasi.find_one({"return_id": cr["id"]}, {"_id": 0, "display_number": 1})
+            if _gp:
+                await site_return_gider_pusulasi(cr["id"], payload={"tracking_no": _gp.get("display_number") or ""},
+                                                 current_user=current_user)
+        except Exception:
+            pass
+    return {"success": True, "order": order.get("order_number"),
+            "discounts": [it.get("discount_amount") for it in items],
+            "returns_synced": _synced, "warning": _warn}
 
 
 async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
@@ -8073,8 +8152,12 @@ async def update_return_approval(return_id: str, payload: dict,
                 if _c is not None and 1.06 <= _c <= 1.24:
                     _pf = _c
                     break
+        # DONMUŞ per-ürün indirim (checkout) varsa kapsam-farkındalıklı; yoksa düz-oransal (_dr).
+        _froz_sel = bool(_ap_sel) and all(_all_items[i].get("discount_amount") is not None for i in _ap_sel)
         returned_net_in = _round2(sum(
-            _round2(_all_items[i].get("price", 0)) * _pf * int(_all_items[i].get("quantity", 1) or 1) * (1 - _dr)
+            _pf * ((_round2(_all_items[i].get("price", 0)) * int(_all_items[i].get("quantity", 1) or 1))
+                   - (_round2(_all_items[i].get("discount_amount") or 0) if _froz_sel
+                      else _round2(_all_items[i].get("price", 0)) * int(_all_items[i].get("quantity", 1) or 1) * _dr))
             for i in _ap_sel))
 
     bd = await _compute_refund_breakdown(rec, order, fault, return_cargo_fee_override=cargo_override,
@@ -8473,9 +8556,20 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     if _disc_ratio > 1:
         _disc_ratio = 1.0
 
+    # DONMUŞ per-ürün indirim (checkout'ta kampanya kapsamına göre yazıldı) varsa onu kullan
+    # (kapsam-dışı ürün 0); yoksa sipariş toplam indirimini düz-oransal uygula. W11214 kök çözümü.
+    _frozen_disc = bool(all_items) and all(
+        isinstance(_i, dict) and (_i.get("discount_amount") is not None) for _i in all_items)
+
     def _eff_net_unit(it):
-        """Kalemin GERÇEK ödenen birim neti = item.price × KDV-dahil faktörü × (1 − indirim oranı)."""
-        return _round2(_round2(it.get("price", 0)) * _paid_factor * (1 - _disc_ratio))
+        """Kalemin GERÇEK ödenen birim neti. Donmuş per-ürün indirim varsa (kapsam-farkındalıklı) onu,
+        yoksa düz-oransal indirimi uygular; ikisi de KDV-dahil faktörüyle ölçeklenir."""
+        _lp = _round2(it.get("price", 0))
+        if _frozen_disc:
+            _q = int(it.get("quantity", 1) or 1) or 1
+            _du = _round2(it.get("discount_amount") or 0) / _q
+            return _round2((_lp - _du) * _paid_factor)
+        return _round2(_lp * _paid_factor * (1 - _disc_ratio))
 
     cargo_line = None
     cargo_mode = "none"
@@ -8508,7 +8602,12 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
             vade_line = {"name": f"Vade Farkı (Taksit x{_inst_r})", "net_price": _vf_r, "qty": 1}
     else:
         # KISMİ İADE → seçili ürünler; sipariş-seviyesi (kupon) indirimi seçili kalemlere oransal dağıtılır.
-        alloc_disc = _round2(order_disc * (prod_net / _disc_base)) if (order_disc > 0 and _disc_base > 0) else 0.0
+        # Donmuş per-ürün indirim varsa: seçili kalemlerin GERÇEK indirim toplamı (kapsam-farkındalıklı,
+        # faktörle ölçekli). Yoksa düz-oransal. (W11214: kapsam-dışı Etek → 0 indirim.)
+        if _frozen_disc:
+            alloc_disc = _round2(sum(_round2(it.get("discount_amount") or 0) for it in items) * _paid_factor)
+        else:
+            alloc_disc = _round2(order_disc * (prod_net / _disc_base)) if (order_disc > 0 and _disc_base > 0) else 0.0
         base_net = _round2(max(0.0, prod_net - alloc_disc))
         # VADE FARKI (taksit) — kısmi iadede de faturayla örtüşsün diye ORANSAL eklenir: iade edilen
         # ürünlerin faiz-siz ödenen tabana (order.total) oranı kadar vade farkı iade edilir. Tam

@@ -256,6 +256,9 @@ async def list_rooftr_return_orders(
                 for n in (o.get("admin_notes") or []) if (n or {}).get("text")
             ],
             "item_count": sum(int(i.get("quantity") or 1) for i in items),
+            # Kalemlerde DONMUŞ per-ürün indirim (checkout) var mı? Varsa panel/gider-pusulası düz-
+            # oransal dağıtım yerine bu değeri kullanır (W11214: kapsam-dışı ürüne hayali indirim yok).
+            "frozen_item_discounts": bool(items) and all(isinstance(i, dict) and ("discount_amount" in i) for i in items),
             "items": [
                 {
                     "name": i.get("product_name") or i.get("name") or "",
@@ -497,6 +500,7 @@ async def bulk_approve_site_returns(
                 "price": float(it.get("price") or it.get("unit_price") or 0),
                 "unit_price": float(it.get("unit_price") or it.get("price") or 0),
                 "product_id": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+                "discount_amount": it.get("discount_amount"),  # donmuş per-ürün indirim (W11214)
             } for it in _src]
             rid = generate_id()
             rec = {"id": rid, "order_id": oid, "order_number": order.get("order_number", ""),
@@ -623,6 +627,7 @@ async def flatten_order_financials(
         "quantity": int(it.get("quantity", 1) or 1),
         "price": float(it.get("price") or 0), "unit_price": float(it.get("unit_price") or 0),
         "product_id": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+        "discount_amount": it.get("discount_amount"),  # donmuş per-ürün indirim (W11214)
     } for it in new_items]
     await db.customer_returns.update_many(
         {"order_id": order_id}, {"$set": {"items": _cr_items}})
@@ -967,6 +972,7 @@ async def open_rooftr_return(order_id: str, current_user: dict = Depends(require
                 "price": float(it.get("price") or it.get("unit_price") or 0),
                 "unit_price": float(it.get("unit_price") or it.get("price") or 0),
                 "product_id": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+                "discount_amount": it.get("discount_amount"),  # donmuş per-ürün indirim (W11214)
             } for it in _src]
             if _fix:
                 await db.customer_returns.update_one(
@@ -984,6 +990,7 @@ async def open_rooftr_return(order_id: str, current_user: dict = Depends(require
         "price": float(it.get("price") or it.get("unit_price") or 0),
         "unit_price": float(it.get("unit_price") or it.get("price") or 0),
         "product_id": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+        "discount_amount": it.get("discount_amount"),  # donmuş per-ürün indirim (W11214)
     } for it in src]
 
     # Sipariş durumu → customer_returns durumu

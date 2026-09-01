@@ -14,6 +14,15 @@ const BACKEND = process.env.REACT_APP_BACKEND_URL;
 // davranış birebir aynı kalır.
 const _effDisc = (r) => (Number(r?.discount) || 0) + (Number(r?.payment_discount) || 0);
 
+// Per-ürün indirim: sipariş kalemlerinde DONMUŞ indirim varsa (row.frozen_item_discounts — checkout'ta
+// kampanya kapsamına göre yazıldı, kapsam-dışı ürün 0) o kalemin it.discount değerini kullan; yoksa
+// (eski sipariş) sipariş toplam indirimini düz-oransal (g × drFallback) dağıt. W11214 kök çözümü.
+const _itemDisc = (row, it, drFallback) => {
+  if (row && row.frozen_item_discounts) return Number(it?.discount) || 0;
+  const g = (Number(it?.qty ?? it?.quantity) || 1) * (Number(it?.price) || 0);
+  return g * (Number(drFallback) || 0);
+};
+
 // TÜM sipariş durumları — order_statuses.py kataloğuyla birebir (iade sayfasında da hepsi seçilebilir)
 const STATUS_OPTS = [
   { value: "pending", label: "Onay Bekliyor" },
@@ -354,7 +363,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       const _base = Number(row.subtotal) || 0;
       const _dr = (_base > 0 && _effDisc(row) > 0) ? Math.min(1, _effDisc(row) / _base) : 0;
       const selAmount = isPartialSelection ? Math.round(selIdx.reduce(
-        (a, i) => a + (Number(row.items[i].qty) || 1) * (Number(row.items[i].price) || 0) * (1 - _dr), 0
+        (a, i) => a + ((Number(row.items[i].qty) || 1) * (Number(row.items[i].price) || 0) - _itemDisc(row, row.items[i], _dr)), 0
       ) * 100) / 100 : 0;
       const returnedNet = selAmount > 0 ? selAmount : null;
       // Kısmi onayda seçilen kalemler backend'e KİMLİKLERİYLE gönderilir (approve kaydına
@@ -482,7 +491,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       // oranında orantılı vade farkını TEK KAYNAKTAN ekler (çift sayım önlenir). Buradan yalnız
       // ürün neti gönderilir; initial-approve akışıyla (satır ~349) birebir aynı formül.
       const selAmount = isPartialSelection ? Math.round(selIdx.reduce(
-        (a, i) => a + (Number(r.items[i].qty) || 1) * (Number(r.items[i].price) || 0) * (1 - _dr), 0
+        (a, i) => a + ((Number(r.items[i].qty) || 1) * (Number(r.items[i].price) || 0) - _itemDisc(r, r.items[i], _dr)), 0
       ) * 100) / 100 : null;
       const selIdents = selIdx.map((i) => r.items[i]).filter(Boolean)
         .map((it) => ({ barcode: it.barcode || "", name: it.name || "", size: it.size || "", color: it.color || "" }));
@@ -881,7 +890,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                     const g = (Number(it.qty) || 1) * (Number(it.price) || 0);
                                     const dr = (Number(r.subtotal) > 0 && _effDisc(r) > 0)
                                       ? Math.min(1, _effDisc(r) / Number(r.subtotal)) : 0;
-                                    const dShare = g * dr;
+                                    const dShare = _itemDisc(r, it, dr);
+                                    const drShow = g > 0 ? dShare / g : dr;
                                     const netAfterDisc = g - dShare;
                                     // TABAN, backend ile BİREBİR AYNI olmalı (orders._compute_refund_breakdown
                                     // ve gider pusulası): ürünlerin NET toplamı = subtotal − indirim.
@@ -898,9 +908,9 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                     if (!hasDisc && !hasVade) return <span className="font-semibold whitespace-nowrap">{fmtTL(g)}</span>;
                                     return (
                                       <span className="whitespace-nowrap inline-flex items-center gap-2"
-                                        title={`Brüt ${fmtTL(g)}${hasDisc ? ` · indirim (kampanya + ödeme indirimi) −${fmtTL(dShare)} = siparişin toplam indiriminin bu ürüne düşen payı (%${(dr * 100).toFixed(1).replace(".", ",")})` : ""}${hasVade ? ` · vade farkı +${fmtTL(vadeShare)}` : ""} · net ${fmtTL(net)}`}>
+                                        title={`Brüt ${fmtTL(g)}${hasDisc ? ` · indirim (kampanya + ödeme indirimi) −${fmtTL(dShare)} = bu ürüne uygulanan indirim (%${(drShow * 100).toFixed(1).replace(".", ",")})` : ""}${hasVade ? ` · vade farkı +${fmtTL(vadeShare)}` : ""} · net ${fmtTL(net)}`}>
                                         {hasDisc && <span className="text-gray-400 line-through">{fmtTL(g)}</span>}
-                                        {hasDisc && <span className="text-orange-600">−{fmtTL(dShare)} <span className="text-[10px]">(%{(dr * 100).toFixed(1).replace(".", ",")})</span></span>}
+                                        {hasDisc && <span className="text-orange-600">−{fmtTL(dShare)} <span className="text-[10px]">(%{(drShow * 100).toFixed(1).replace(".", ",")})</span></span>}
                                         {hasVade && <span className="text-amber-600">+{fmtTL(vadeShare)} <span className="text-[10px]">vade</span></span>}
                                         {/* Taksitli siparişte kalem tutarı vade farkını İÇERİR — operatör
                                             "bu rakama vade farkı dahil mi?" diye tereddüt etmesin. */}
@@ -944,7 +954,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           (r.items || []).forEach((it, i) => {
                             if (!selItems[`${r.id}::${i}`]) return;
                             selN += 1;
-                            selNet += ((Number(it.qty) || 1) * (Number(it.price) || 0)) * (1 - dr) * (1 + vadeRatio);
+                            selNet += (((Number(it.qty) || 1) * (Number(it.price) || 0)) - _itemDisc(r, it, dr)) * (1 + vadeRatio);
                           });
                           const totalItems = (r.items || []).length;
                           const isFullSel = totalItems > 0 && selN >= totalItems;
@@ -1011,7 +1021,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                             ? Number(r.vade_farki) / _vadeBase : 0;
                           let retNet = 0, anySel = false;
                           (r.items || []).forEach((it, i) => {
-                            if (selItems[`${r.id}::${i}`]) { anySel = true; retNet += ((Number(it.qty) || 1) * (Number(it.price) || 0)) * (1 - dr) * (1 + vadeRatio); }
+                            if (selItems[`${r.id}::${i}`]) { anySel = true; retNet += (((Number(it.qty) || 1) * (Number(it.price) || 0)) - _itemDisc(r, it, dr)) * (1 + vadeRatio); }
                           });
                           const orderNet = Number(r.total) || 0;
                           const keptNet = Math.max(0, orderNet - retNet);
