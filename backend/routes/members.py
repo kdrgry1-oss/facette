@@ -95,84 +95,69 @@ async def list_members(
 
     skip = (page - 1) * limit
 
-    # Sipariş istatistiği $lookup'ı (e-posta lowercase eşleşmesi → indekslenemez) PAHALI.
-    # Eskiden TÜM üyeler (10k+) için, $facet'ten ÖNCE çalışıyordu → O(üye×sipariş) → 60sn
-    # timeout, sayfa açılmıyordu. FIX: sipariş istatistiğini YALNIZ görüntülenen sayfanın
-    # üyeleri için hesapla. Bunun için $lookup'ı sort/skip/limit'ten SONRA koyarız.
-    _stats_lookup = {"$lookup": {
-        "from": "orders",
-        "let": {"uid": "$id", "em": {"$toLower": {"$ifNull": ["$email", ""]}}},
-        "pipeline": [
-            {"$match": {"$expr": {"$and": [
-                {"$ne": ["$status", "cancelled"]},
-                {"$or": [
-                    {"$eq": ["$user_id", "$$uid"]},
-                    {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$email", ""]}}, "$$em"]}]},
-                    {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$shipping_address.email", ""]}}, "$$em"]}]},
-                    {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$billing_address.email", ""]}}, "$$em"]}]},
-                ]},
-            ]}}},
-            {"$group": {"_id": None, "orders": {"$sum": 1},
-                        "total_spent": {"$sum": {"$ifNull": ["$total", 0]}},
-                        "last_order_at": {"$max": "$created_at"}}},
-        ],
-        "as": "_ostats",
-    }}
-    _stats_addfields = [
-        {"$addFields": {
-            "orders_count": {"$ifNull": [{"$arrayElemAt": ["$_ostats.orders", 0]}, 0]},
-            "total_spent": {"$round": [{"$ifNull": [{"$arrayElemAt": ["$_ostats.total_spent", 0]}, 0]}, 2]},
-            "last_order_at": {"$arrayElemAt": ["$_ostats.last_order_at", 0]},
-        }},
-        {"$addFields": {
-            "segment": {"$switch": {"branches": [
-                {"case": {"$gte": ["$total_spent", 5000]}, "then": "vip"},
-                {"case": {"$gte": ["$orders_count", 2]}, "then": "returning"},
-                {"case": {"$eq": ["$orders_count", 1]}, "then": "new"},
-            ], "default": "prospect"}},
-        }},
-    ]
-    _project = {"$project": {"_id": 0, "password": 0, "_ostats": 0}}
+    # HIZLANDIRMA: sipariş istatistikleri artık kullanıcı belgesinde ÖNBELLEKTE (cached_*),
+    # _refresh_member_stats ile periyodik/isteğe-bağlı tek geçişte yazılır. Liste/segment BU
+    # alanları okur → korelasyonlu $lookup (O(üye×sipariş)) KALDIRILDI. Önbellek YOKSA 0/prospect.
+    # (Üye 360 detayı tam eşleşmeyi ayrıca canlı yapar; liste görünümü için önbellek yeterli+hızlı.)
+    _cached_fields = [{"$addFields": {
+        "orders_count": {"$ifNull": ["$cached_orders", 0]},
+        "total_spent": {"$ifNull": ["$cached_spent", 0]},
+        "last_order_at": "$cached_last_order",
+        "segment": {"$ifNull": ["$cached_segment", "prospect"]},
+    }}]
+    _project = {"$project": {"_id": 0, "password": 0}}
 
-    if not segment:
-        # HIZLI YOL (varsayılan): önce sayfayı seç, istatistiği YALNIZ o ~25 üye için hesapla.
-        total = await db.users.count_documents(query)
-        pipeline = [
-            {"$match": query},
-            {"$sort": {"created_at": -1}},
-            {"$skip": skip},
-            {"$limit": limit},
-            _stats_lookup,
-            *_stats_addfields,
-            _project,
-        ]
-        items = [r async for r in db.users.aggregate(pipeline)]
-        return {"items": items, "total": total, "page": page, "pages": (total + limit - 1) // limit}
+    if segment:
+        seg_match = ({"$or": [{"cached_segment": "prospect"}, {"cached_segment": {"$exists": False}}]}
+                     if segment == "prospect" else {"cached_segment": segment})
+        query = {"$and": [query, seg_match]}
 
-    # SEGMENT FİLTRESİ: segment istatistikten türediği için filtreden ÖNCE tüm eşleşen üyeler
-    # için hesaplanmalı (bilinçli filtre aksiyonu). Sayfalama $facet içinde; total filtre sonrası.
-    base_pipeline: list = [
+    total = await db.users.count_documents(query)
+    pipeline = [
         {"$match": query},
-        _stats_lookup,
-        *_stats_addfields,
-        {"$match": {"segment": segment}},
-        {"$facet": {
-            "meta": [{"$count": "total"}],
-            "items": [
-                {"$sort": {"created_at": -1}},
-                {"$skip": skip},
-                {"$limit": limit},
-                _project,
-            ],
-        }},
+        {"$sort": {"created_at": -1}},
+        {"$skip": skip},
+        {"$limit": limit},
+        *_cached_fields,
+        _project,
     ]
-    agg_out = None
-    async for row in db.users.aggregate(base_pipeline, allowDiskUse=True):
-        agg_out = row
-    items = (agg_out or {}).get("items", [])
-    meta = (agg_out or {}).get("meta", [])
-    total = int(meta[0]["total"]) if meta else 0
+    items = [r async for r in db.users.aggregate(pipeline)]
     return {"items": items, "total": total, "page": page, "pages": (total + limit - 1) // limit}
+
+
+async def _refresh_member_stats() -> dict:
+    """orders → users.cached_* (orders/spent/last_order/segment) TEK GEÇİŞTE yazar (bulk).
+    user_id ile eşleşen (kayıtlı üye) sipariş­leri baz alır — liste/segment görünümü için hızlı ve
+    yeterli. Misafir-email-only siparişler hariç (üye 360 detayı tam eşleşmeyi ayrıca yapar)."""
+    from pymongo import UpdateOne
+    pipeline = [
+        {"$match": {"user_id": {"$ne": None}, "status": {"$ne": "cancelled"}}},
+        {"$group": {"_id": "$user_id", "o": {"$sum": 1},
+                    "t": {"$sum": {"$ifNull": ["$total", 0]}}, "last": {"$max": "$created_at"}}},
+    ]
+    ops, n = [], 0
+    _now = datetime.now(timezone.utc).isoformat()
+    async for row in db.orders.aggregate(pipeline, allowDiskUse=True):
+        o = int(row.get("o") or 0)
+        t = round(float(row.get("t") or 0), 2)
+        seg = "vip" if t >= 5000 else ("returning" if o >= 2 else ("new" if o == 1 else "prospect"))
+        ops.append(UpdateOne({"id": row["_id"]}, {"$set": {
+            "cached_orders": o, "cached_spent": t, "cached_last_order": row.get("last"),
+            "cached_segment": seg, "stats_refreshed_at": _now}}))
+        if len(ops) >= 500:
+            await db.users.bulk_write(ops, ordered=False)
+            n += len(ops)
+            ops = []
+    if ops:
+        await db.users.bulk_write(ops, ordered=False)
+        n += len(ops)
+    return {"updated": n, "at": _now}
+
+
+@router.post("/refresh-stats")
+async def refresh_stats(current_user: dict = Depends(require_admin)):
+    """Üye sipariş istatistiklerini (cached_*) yeniden hesapla — liste/segment/stats bundan okur."""
+    return await _refresh_member_stats()
 
 
 @router.get("/stats")
@@ -193,26 +178,17 @@ async def stats(current_user: dict = Depends(require_admin)):
     async for row in db.orders.aggregate(pipeline):
         by_channel.append({"channel": row["_id"] or "direct", "members": row["members"]})
 
-    # Segments – compute lightweight
+    # Segments — ÖNBELLEKTEN (cached_segment). Eskiden her üye için ayrı aggregation vardı
+    # (O(üye) sorgu → 10k+ üyede dakikalarca). Artık tek grup sorgusu; önbellek _refresh_member_stats
+    # ile güncellenir. cached_segment yoksa 'prospect' sayılır.
     seg = {"vip": 0, "returning": 0, "new": 0, "prospect": 0}
-    async for u in db.users.find({"is_admin": {"$ne": True}}, {"_id": 0, "id": 1}):
-        pipeline_user = [
-            {"$match": {"user_id": u["id"], "status": {"$ne": "cancelled"}}},
-            {"$group": {"_id": None, "o": {"$sum": 1}, "t": {"$sum": {"$ifNull": ["$total", 0]}}}},
-        ]
-        a = None
-        async for row in db.orders.aggregate(pipeline_user):
-            a = row
-        o = int(a["o"]) if a else 0
-        t = float(a["t"]) if a else 0.0
-        if t >= 5000:
-            seg["vip"] += 1
-        elif o >= 2:
-            seg["returning"] += 1
-        elif o == 1:
-            seg["new"] += 1
-        else:
-            seg["prospect"] += 1
+    seg_pipe = [
+        {"$match": {"is_admin": {"$ne": True}}},
+        {"$group": {"_id": {"$ifNull": ["$cached_segment", "prospect"]}, "n": {"$sum": 1}}},
+    ]
+    async for row in db.users.aggregate(seg_pipe):
+        key = row["_id"] if row["_id"] in seg else "prospect"
+        seg[key] += int(row["n"])
 
     return {"total": total, "new_last_30_days": new_30, "segments": seg, "acquisition_by_channel": by_channel}
 

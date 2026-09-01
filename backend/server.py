@@ -264,6 +264,11 @@ async def lifespan(app: FastAPI):
         await db.order_events.create_index([("created_at", -1)])
         await db.orders_deleted.create_index([("deleted_at", -1)])
         await db.users.create_index("email", unique=True)
+        # Üye listesi/segment hızı: is_admin+created_at (sıralama), cached_segment (segment filtresi),
+        # cached_spent (VIP/harcama sıralaması). Sipariş istatistiği artık users.cached_* önbelleğinden.
+        await db.users.create_index([("is_admin", 1), ("created_at", -1)])
+        await db.users.create_index([("cached_segment", 1)])
+        await db.users.create_index([("cached_spent", -1)])
         # Security audit indexes — fast forensic queries as the collection grows
         await db.auth_audit_logs.create_index([("created_at", -1)])
         await db.auth_audit_logs.create_index([("event", 1), ("email", 1), ("created_at", -1)])

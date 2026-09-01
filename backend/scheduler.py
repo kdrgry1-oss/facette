@@ -2344,6 +2344,17 @@ async def _backfill_trendyol_order_dates():
         logger.error(f"[backfill] Trendyol orderDate backfill hata: {_e}")
 
 
+async def _run_member_stats_refresh():
+    """Üye sipariş istatistiklerini (users.cached_*) yeniden hesapla — üye listesi/segment/stats
+    sayfaları bu önbellekten okur (per-üye aggregation kaldırıldı → sayfalar anında açılır)."""
+    try:
+        from routes.members import _refresh_member_stats
+        res = await _refresh_member_stats()
+        logger.info(f"[cron] Üye istatistik önbelleği güncellendi: {res}")
+    except Exception as e:
+        logger.warning(f"[cron] Üye istatistik refresh hata: {e}")
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -2353,6 +2364,17 @@ def start_scheduler():
     def _add(fn, *a, **k):
         # A2.8: her iş lider-sarmalıyla eklenir (çok-instance'ta çift çalışmayı önler).
         return _scheduler.add_job(_lead(fn), *a, **k)
+    # Üye sipariş istatistiği önbelleği (users.cached_*): boot+60s'de ilk dolum, sonra 15 dk'da bir.
+    # Üye listesi/segment/stats sayfalarının hızı için — canlı per-üye aggregation kaldırıldı.
+    _add(
+        _run_member_stats_refresh,
+        "interval",
+        minutes=15,
+        id="member_stats_refresh",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+        max_instances=1,
+        coalesce=True,
+    )
     # SINIRSIZ Instagram feed: token'ı günde bir kontrol et, 45 günü geçince otomatik yenile.
     _add(
         _refresh_instagram_token,
