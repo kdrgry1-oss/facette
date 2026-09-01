@@ -462,6 +462,12 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
   const items = Array.isArray(e.products) && e.products.length ? e.products : null;
   const canShip = (items && e.influencer_id);
   const barcoded = !!e.cargo_barcode;
+  // Gerçek kargo takip no: gonderi_no → yoksa NZ barkodu (cargo_barcode GERÇEKSE). 'INF…' yedeği
+  // ve cargo_tracking_no'ya eşit barkod = sipariş no yedeği → takip no SAYILMAZ.
+  const _bcRaw = (e.cargo_barcode || "").trim();
+  const _bcFallback = /^INF/i.test(_bcRaw) || _bcRaw === (e.cargo_tracking_no || "").trim();
+  const trackNo = (e.cargo_gonderi_no || "").trim() || (_bcRaw && !_bcFallback ? _bcRaw : "");
+  const trackUrl = e.cargo_tracking_url || (trackNo ? `https://kargotakip.dhlecommerce.com.tr/?takipNo=${trackNo}` : "");
   const platform = e.platform || (e.instagram ? "İnstagram" : e.tiktok ? "Tiktok" : "—");
   const uname = e.handle || e.instagram || e.tiktok || "—";
 
@@ -549,13 +555,13 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
                     <span className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-1" title={`Barkod çıkarıldı · ${e.cargo_barcode}`}><Barcode size={14} /></span>
                     {/* Kargo takip — Siparişler mantığı: gerçek gönderi_no varsa yeşil kamyon + no (link),
                         yoksa MNG/DHL'den ÇEK butonu (kamyon). */}
-                    {e.cargo_gonderi_no ? (
-                      <a href={e.cargo_tracking_url || `https://kargotakip.dhlecommerce.com.tr/?takipNo=${e.cargo_gonderi_no}`}
+                    {trackNo ? (
+                      <a href={trackUrl}
                          target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()}
-                         title={`Kargo takip: ${e.cargo_gonderi_no}${e.cargo_last_status_text ? " · " + e.cargo_last_status_text : ""}`}
+                         title={`Kargo takip: ${trackNo}${e.cargo_last_status_text ? " · " + e.cargo_last_status_text : ""}`}
                          className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-700 border border-emerald-200 bg-emerald-50 rounded px-1.5 py-1"
                          data-testid={`pr-track-link-${e.id}`}>
-                        <Truck size={14} /><span className="font-mono text-[10px] font-bold text-gray-700 max-w-[86px] truncate">{e.cargo_gonderi_no}</span>
+                        <Truck size={14} /><span className="font-mono text-[10px] font-bold text-gray-700 max-w-[92px] truncate">{trackNo}</span>
                       </a>
                     ) : (
                       <button onClick={onTrack} title="Kargo takip no çek (MNG/DHL e-Commerce)"
