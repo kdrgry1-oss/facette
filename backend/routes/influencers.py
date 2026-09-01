@@ -666,19 +666,49 @@ def _exp_shared(e) -> str:
     return "Evet" if e.get("shared") else "Hayır"
 
 
-def _xlsx_response(ws_title, headers, rows, widths, filename):
+def _xlsx_response(ws_title, headers, rows, widths, filename, status_col=None, status_colors=None):
+    """Stilize XLSX: koyu başlık bandı (beyaz kalın), donmuş başlık, otomatik filtre, ince çerçeve,
+    zebra (bir satır bir) gölge, üstten hizalı + metin sarma. status_col verilirse o sütun değere göre
+    renklendirilir (status_colors: {etiket:{'bg':hex,'fg':hex}})."""
     import openpyxl
     from io import BytesIO
     from fastapi.responses import Response
     from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = ws_title
+    ws.title = (ws_title or "Sayfa")[:31]
+    hfill = PatternFill("solid", fgColor="1F2937")
+    hfont = Font(bold=True, color="FFFFFF", size=11)
+    thin = Side(style="thin", color="E5E7EB")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
     ws.append(headers)
-    for r in rows:
+    for c in ws[1]:
+        c.fill = hfill
+        c.font = hfont
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = border
+    ws.row_dimensions[1].height = 28
+    smap = status_colors or {}
+    for ri, r in enumerate(rows, start=2):
         ws.append(r)
+        band = "FFFFFF" if ri % 2 == 0 else "F5F6F8"
+        for c in ws[ri]:
+            c.border = border
+            c.alignment = Alignment(vertical="top", wrap_text=True)
+            c.fill = PatternFill("solid", fgColor=band)
+        if status_col:
+            sc = ws.cell(row=ri, column=status_col)
+            col = smap.get(str(sc.value or ""))
+            if col:
+                sc.fill = PatternFill("solid", fgColor=col["bg"])
+                sc.font = Font(bold=True, color=col["fg"])
+                sc.alignment = Alignment(horizontal="center", vertical="center")
     for idx, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(idx)].width = w
+    ws.freeze_panes = "A2"
+    if rows:
+        ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
     buf = BytesIO()
     wb.save(buf)
     return Response(
@@ -721,24 +751,46 @@ async def export_pr_entries(
     entries = await db.influencer_pr.find(query, {"_id": 0}).sort("date", 1).to_list(5000)
     await _pr_enrich(entries)  # influencer master + görsel/handle/platform join
 
+    def _exp_barcodes(e) -> str:
+        prods = e.get("products")
+        if isinstance(prods, list) and prods:
+            return " • ".join(str(p.get("barcode")) for p in prods
+                              if isinstance(p, dict) and p.get("barcode"))
+        return ""
+
     rows = []
     for e in entries:
         rows.append([
             e.get("influencer_name") or "",
-            _exp_uname(e, None),
-            e.get("platform") or "",
+            e.get("instagram") or _exp_uname(e, None) or "",
+            e.get("tiktok") or "",
+            e.get("phone") or "",
+            e.get("anlasma_sekli") or "",
+            e.get("influencer_turu") or "",
+            e.get("adres") or "",
             _exp_products(e),
             _exp_bedens(e),
+            _exp_barcodes(e),
             _PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or ""),
             _exp_shared(e),
+            e.get("cargo_barcode") or "",
+            e.get("cargo_tracking_no") or "",
             e.get("note") or "",
+            e.get("offer") or "",
             _exp_effdate(e),
         ])
-    return _xlsx_response(
-        "Gönderi Takibi",
-        ["Influencer", "Kullanıcı Adı", "Platform", "Ürün(ler)", "Beden(ler)",
-         "Gönderim Durumu", "Paylaştı mı", "Not", "Gönderim Tarihi"],
-        rows, [22, 20, 12, 40, 18, 16, 12, 34, 14], "gonderi-takibi.xlsx")
+    _status_colors = {
+        "Gönderildi": {"bg": "D1FAE5", "fg": "065F46"}, "Yayınlandı": {"bg": "DBEAFE", "fg": "1E40AF"},
+        "Olumlu": {"bg": "D1FAE5", "fg": "065F46"}, "İletildi": {"bg": "E0E7FF", "fg": "3730A3"},
+        "Cevap Bekleniyor": {"bg": "FEF3C7", "fg": "92400E"}, "Beklemede": {"bg": "F3F4F6", "fg": "374151"},
+        "Olumsuz": {"bg": "FEE2E2", "fg": "991B1B"}, "İptal": {"bg": "FEE2E2", "fg": "991B1B"},
+    }
+    headers = ["Influencer", "Instagram", "TikTok", "Telefon", "İş Birliği Türü", "Influencer Türü",
+               "Adres", "Ürün(ler)", "Beden(ler)", "Barkod(lar)", "Gönderim Durumu", "Paylaştı mı",
+               "Kargo Barkodu", "Kargo Takip", "Not", "Teklif", "Gönderim Tarihi"]
+    widths = [22, 18, 16, 14, 16, 15, 34, 42, 16, 28, 16, 12, 18, 18, 30, 26, 14]
+    return _xlsx_response("Gönderi Takibi", headers, rows, widths, "gonderi-takibi.xlsx",
+                          status_col=11, status_colors=_status_colors)
 
 
 @router.get("/influencer-pr/calendar-export")
