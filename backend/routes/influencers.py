@@ -751,16 +751,26 @@ async def export_pr_entries(
     entries = await db.influencer_pr.find(query, {"_id": 0}).sort("date", 1).to_list(5000)
     await _pr_enrich(entries)  # influencer master + görsel/handle/platform join
 
-    def _exp_barcodes(e) -> str:
-        prods = e.get("products")
-        if isinstance(prods, list) and prods:
-            return " • ".join(str(p.get("barcode")) for p in prods
-                              if isinstance(p, dict) and p.get("barcode"))
-        return ""
+    # ── HER ÜRÜN AYRI SATIR: influencer bilgisi her satırda tekrar (filtre/pivot dostu),
+    #    'Görsel' sütununa ürünün küçük resmi gömülür, üstte 'Özet' sayfası. ──
+    _status_colors = {
+        "Gönderildi": {"bg": "D1FAE5", "fg": "065F46"}, "Yayınlandı": {"bg": "DBEAFE", "fg": "1E40AF"},
+        "Olumlu": {"bg": "D1FAE5", "fg": "065F46"}, "İletildi": {"bg": "E0E7FF", "fg": "3730A3"},
+        "Cevap Bekleniyor": {"bg": "FEF3C7", "fg": "92400E"}, "Beklemede": {"bg": "F3F4F6", "fg": "374151"},
+        "Olumsuz": {"bg": "FEE2E2", "fg": "991B1B"}, "İptal": {"bg": "FEE2E2", "fg": "991B1B"},
+    }
 
-    rows = []
+    def _plabel(p):
+        return (p.get("name") or p.get("barcode") or "") if isinstance(p, dict) else str(p or "")
+
+    def _pdate(e, p):
+        g = p.get("gonderim_tarihi") if isinstance(p, dict) else None
+        return str(g)[:10] if g else _exp_effdate(e)
+
+    # düz satır listesi: (hücre_değerleri, görsel_url)
+    flat = []
     for e in entries:
-        rows.append([
+        base = [
             e.get("influencer_name") or "",
             e.get("instagram") or _exp_uname(e, None) or "",
             e.get("tiktok") or "",
@@ -768,29 +778,190 @@ async def export_pr_entries(
             e.get("anlasma_sekli") or "",
             e.get("influencer_turu") or "",
             e.get("adres") or "",
-            _exp_products(e),
-            _exp_bedens(e),
-            _exp_barcodes(e),
-            _PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or ""),
-            _exp_shared(e),
-            e.get("cargo_barcode") or "",
-            e.get("cargo_tracking_no") or "",
-            e.get("note") or "",
-            e.get("offer") or "",
-            _exp_effdate(e),
-        ])
-    _status_colors = {
-        "Gönderildi": {"bg": "D1FAE5", "fg": "065F46"}, "Yayınlandı": {"bg": "DBEAFE", "fg": "1E40AF"},
-        "Olumlu": {"bg": "D1FAE5", "fg": "065F46"}, "İletildi": {"bg": "E0E7FF", "fg": "3730A3"},
-        "Cevap Bekleniyor": {"bg": "FEF3C7", "fg": "92400E"}, "Beklemede": {"bg": "F3F4F6", "fg": "374151"},
-        "Olumsuz": {"bg": "FEE2E2", "fg": "991B1B"}, "İptal": {"bg": "FEE2E2", "fg": "991B1B"},
-    }
+        ]
+        status_lbl = _PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or "")
+        prods = [p for p in (e.get("products") or []) if isinstance(p, dict)]
+        if not prods:
+            flat.append(([
+                *base, "", _exp_products(e), _exp_bedens(e), "",
+                status_lbl, _exp_shared(e), e.get("cargo_barcode") or "",
+                e.get("cargo_tracking_no") or "", e.get("note") or "", e.get("offer") or "",
+                _exp_effdate(e),
+            ], None))
+            continue
+        for p in prods:
+            flat.append(([
+                *base, "", _plabel(p), str(p.get("size") or ""), str(p.get("barcode") or ""),
+                status_lbl, ("Evet" if p.get("shared") else "Hayır"),
+                e.get("cargo_barcode") or "", e.get("cargo_tracking_no") or "",
+                e.get("note") or "", e.get("offer") or "", _pdate(e, p),
+            ], (p.get("image") or None)))
+
+    # benzersiz görselleri eşzamanlı indir + küçült (best-effort; hata → görselsiz devam)
+    IMG_CAP = 400
+    img_cache: dict = {}
+    urls, seen = [], set()
+    for _, u in flat:
+        if u and u not in seen and len(urls) < IMG_CAP:
+            seen.add(u)
+            urls.append(u)
+    if urls:
+        try:
+            import asyncio
+            import httpx
+            from io import BytesIO as _BIO
+            from PIL import Image as _PILImage
+            _sem = asyncio.Semaphore(8)
+
+            async def _grab(u):
+                async with _sem:
+                    try:
+                        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as cli:
+                            r = await cli.get(u)
+                        if r.status_code == 200 and r.content:
+                            im = _PILImage.open(_BIO(r.content)).convert("RGB")
+                            im.thumbnail((72, 72))
+                            b = _BIO()
+                            im.save(b, format="PNG")
+                            img_cache[u] = b.getvalue()
+                    except Exception:
+                        pass
+            await asyncio.gather(*[_grab(u) for u in urls])
+        except Exception as ex:
+            logger.warning(f"[influencer] excel görsel indirme atlandı: {ex}")
+
+    import openpyxl
+    from io import BytesIO
+    from fastapi.responses import Response
+    from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.drawing.image import Image as XLImage
+
+    wb = openpyxl.Workbook()
+    thin = Side(style="thin", color="E5E7EB")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    # ── 1) ÖZET sayfası ──
+    from collections import Counter
+    total_entries = len(entries)
+    total_products = sum(len([p for p in (e.get("products") or []) if isinstance(p, dict)]) or 1
+                         for e in entries)
+    inf_count = len({(e.get("influencer_id") or e.get("influencer_name") or id(e)) for e in entries})
+    shared_yes = sum(1 for e in entries for p in (e.get("products") or [])
+                     if isinstance(p, dict) and p.get("shared"))
+    scount = Counter(_PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or "")
+                     for e in entries)
+
+    wso = wb.active
+    wso.title = "Özet"
+    wso.sheet_view.showGridLines = False
+    wso.merge_cells("A1:C1")
+    t = wso["A1"]
+    t.value = "GÖNDERİ TAKİBİ — ÖZET"
+    t.font = Font(bold=True, color="FFFFFF", size=15)
+    t.fill = PatternFill("solid", fgColor="1F2937")
+    t.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    wso.row_dimensions[1].height = 34
+    for col, w in (("A", 30), ("B", 16), ("C", 22)):
+        wso.column_dimensions[col].width = w
+
+    metrics = [
+        ("Toplam Kayıt", total_entries, "5B3DF5"),
+        ("Toplam Ürün Gönderimi", total_products, "0EA5E9"),
+        ("Influencer Sayısı", inf_count, "059669"),
+        ("Paylaşan Ürün", shared_yes, "D97706"),
+    ]
+    r = 3
+    for label, val, hexc in metrics:
+        ca = wso.cell(row=r, column=1, value=label)
+        cb = wso.cell(row=r, column=2, value=val)
+        ca.font = Font(bold=True, color="374151", size=11)
+        ca.fill = PatternFill("solid", fgColor="F5F6F8")
+        ca.alignment = Alignment(vertical="center", indent=1)
+        ca.border = border
+        cb.font = Font(bold=True, color=hexc, size=14)
+        cb.alignment = Alignment(horizontal="center", vertical="center")
+        cb.fill = PatternFill("solid", fgColor="FFFFFF")
+        cb.border = border
+        wso.row_dimensions[r].height = 24
+        r += 1
+
+    r += 1
+    hc = wso.cell(row=r, column=1, value="DURUM KIRILIMI")
+    hc.font = Font(bold=True, color="FFFFFF", size=11)
+    hc.fill = PatternFill("solid", fgColor="1F2937")
+    hc.alignment = Alignment(vertical="center", indent=1)
+    wso.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+    wso.cell(row=r, column=2).fill = PatternFill("solid", fgColor="1F2937")
+    wso.row_dimensions[r].height = 26
+    r += 1
+    _order = ["Gönderildi", "Yayınlandı", "Olumlu", "İletildi", "Cevap Bekleniyor",
+              "Beklemede", "Olumsuz", "İptal"]
+    for lbl in _order + [k for k in scount if k not in _order]:
+        n = scount.get(lbl, 0)
+        if not n:
+            continue
+        col = _status_colors.get(lbl, {"bg": "F3F4F6", "fg": "374151"})
+        ca = wso.cell(row=r, column=1, value=lbl)
+        cb = wso.cell(row=r, column=2, value=n)
+        ca.fill = PatternFill("solid", fgColor=col["bg"])
+        ca.font = Font(bold=True, color=col["fg"], size=11)
+        ca.alignment = Alignment(vertical="center", indent=1)
+        ca.border = border
+        cb.font = Font(bold=True, color="111827", size=11)
+        cb.alignment = Alignment(horizontal="center", vertical="center")
+        cb.border = border
+        wso.row_dimensions[r].height = 22
+        r += 1
+
+    # ── 2) GÖNDERİ TAKİBİ (veri) sayfası ──
+    ws = wb.create_sheet("Gönderi Takibi")
     headers = ["Influencer", "Instagram", "TikTok", "Telefon", "İş Birliği Türü", "Influencer Türü",
-               "Adres", "Ürün(ler)", "Beden(ler)", "Barkod(lar)", "Gönderim Durumu", "Paylaştı mı",
+               "Adres", "Görsel", "Ürün", "Beden", "Barkod", "Gönderim Durumu", "Paylaştı",
                "Kargo Barkodu", "Kargo Takip", "Not", "Teklif", "Gönderim Tarihi"]
-    widths = [22, 18, 16, 14, 16, 15, 34, 42, 16, 28, 16, 12, 18, 18, 30, 26, 14]
-    return _xlsx_response("Gönderi Takibi", headers, rows, widths, "gonderi-takibi.xlsx",
-                          status_col=11, status_colors=_status_colors)
+    widths = [22, 18, 15, 13, 16, 15, 30, 12, 30, 9, 20, 16, 9, 16, 16, 26, 22, 14]
+    STATUS_COL = 12
+    IMG_COL = 8
+    ws.append(headers)
+    for c in ws[1]:
+        c.fill = PatternFill("solid", fgColor="1F2937")
+        c.font = Font(bold=True, color="FFFFFF", size=11)
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = border
+    ws.row_dimensions[1].height = 30
+
+    for ri, (row, img_url) in enumerate(flat, start=2):
+        ws.append(row)
+        band = "FFFFFF" if ri % 2 == 0 else "F5F6F8"
+        for c in ws[ri]:
+            c.border = border
+            c.alignment = Alignment(vertical="top", wrap_text=True)
+            c.fill = PatternFill("solid", fgColor=band)
+        sc = ws.cell(row=ri, column=STATUS_COL)
+        col = _status_colors.get(str(sc.value or ""))
+        if col:
+            sc.fill = PatternFill("solid", fgColor=col["bg"])
+            sc.font = Font(bold=True, color=col["fg"])
+            sc.alignment = Alignment(horizontal="center", vertical="center")
+        data = img_cache.get(img_url) if img_url else None
+        if data:
+            try:
+                ws.add_image(XLImage(BytesIO(data)), f"{get_column_letter(IMG_COL)}{ri}")
+                ws.row_dimensions[ri].height = 58
+            except Exception:
+                pass
+    for idx, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(idx)].width = w
+    ws.freeze_panes = "A2"
+    if flat:
+        ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(flat) + 1}"
+
+    buf = BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=gonderi-takibi.xlsx"})
 
 
 @router.get("/influencer-pr/calendar-export")
