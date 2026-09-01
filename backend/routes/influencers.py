@@ -1017,14 +1017,11 @@ async def export_influencers(q: Optional[str] = Query(None), current_user: dict 
 
     rows = []
     for d in docs:
-        fc = int(d.get("follower_count") or 0)
         rows.append([
             d.get("name") or "",
             d.get("anlasma_sekli") or "",
             d.get("handle") or d.get("instagram") or d.get("tiktok") or "",
             d.get("influencer_turu") or _influencer_turu(d.get("follower_count")),
-            (f"{fc:,}".replace(",", ".") if fc > 0 else ""),
-            d.get("coupon_code") or "",
             d.get("phone") or "",
             d.get("email") or "",
             _addr(d),
@@ -1039,9 +1036,9 @@ async def export_influencers(q: Optional[str] = Query(None), current_user: dict 
     }
     return _xlsx_response(
         "Kayıtlı Influencerlar",
-        ["İsim Soyisim", "İş Birliği Türü", "Kullanıcı Adı", "Influencer Türü", "Takipçi",
-         "Kupon Kodu", "Telefon", "E-posta", "Adres", "Beden Üst", "Beden Alt", "Not"],
-        rows, [24, 18, 20, 15, 12, 16, 15, 26, 40, 11, 11, 34], "kayitli-influencerlar.xlsx",
+        ["İsim Soyisim", "İş Birliği Türü", "Kullanıcı Adı", "Influencer Türü",
+         "Telefon", "E-posta", "Adres", "Beden Üst", "Beden Alt", "Not"],
+        rows, [24, 18, 20, 15, 15, 26, 40, 11, 11, 34], "kayitli-influencerlar.xlsx",
         status_col=2, status_colors=_anlasma_colors)
 
 

@@ -173,6 +173,10 @@ function PRTrackTab() {
   const [showForm, setShowForm] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [historyFor, setHistoryFor] = useState(null); // {id, name}
+  const [colF, setColF] = useState({});               // sütun filtreleri (istemci taraflı)
+  const setF = (k, v) => setColF((p) => ({ ...p, [k]: v }));
+  const clearF = () => setColF({});
+  const anyColF = Object.values(colF).some(Boolean);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -256,6 +260,32 @@ function PRTrackTab() {
     }
   };
 
+  // İstemci-taraflı sütun filtreleri (yüklü kayıtlar üzerinde) — İş Birliği/Platform/Ürün/Beden/
+  // Durum/Paylaştı/Not. Üst arama+tarih+durum sunucudan; bunlar ekrandaki tabloyu daraltır.
+  const _plat = (e) => e.platform || (e.instagram ? "İnstagram" : e.tiktok ? "Tiktok" : "");
+  const _sharedAny = (e) => (Array.isArray(e.products) && e.products.length)
+    ? e.products.some((p) => p.shared) : !!e.shared;
+  const anlasmaOpts = useMemo(() =>
+    Array.from(new Set(entries.map((e) => e.anlasma_sekli).filter(Boolean)))
+      .sort((a, b) => String(a).localeCompare(String(b), "tr")), [entries]);
+  const fEntries = useMemo(() => {
+    const f = colF;
+    const inc = (v, qq) => String(v || "").toLocaleLowerCase("tr").includes(String(qq).toLocaleLowerCase("tr"));
+    const prodMatch = (e, qq) => (e.products || []).some((p) => inc(p.name, qq) || inc(p.barcode, qq)) || inc(e.urun, qq);
+    const bedenMatch = (e, qq) => (e.products || []).some((p) => inc(p.size, qq)) || inc(e.beden, qq);
+    return entries.filter((e) =>
+      (!f.name || inc(e.influencer_name, f.name)) &&
+      (!f.anlasma || (e.anlasma_sekli || "") === f.anlasma) &&
+      (!f.platform || _plat(e) === f.platform) &&
+      (!f.urun || prodMatch(e, f.urun)) &&
+      (!f.beden || bedenMatch(e, f.beden)) &&
+      (!f.durum || (e.status || "") === f.durum) &&
+      (!f.paylasti || (f.paylasti === "evet" ? _sharedAny(e) : !_sharedAny(e))) &&
+      (!f.not || inc(e.note, f.not))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, colF]);
+
   return (
     <div data-testid="pr-track-tab">
       {/* Dönem sayaçları */}
@@ -317,9 +347,42 @@ function PRTrackTab() {
                   <th key={i} className="px-2 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
+              {/* SÜTUN FİLTRELERİ (istemci) — İş Birliği/Platform/Ürün/Beden/Durum/Paylaştı/Not */}
+              <tr className="bg-white border-t text-[11px] normal-case tracking-normal">
+                <th className="px-1.5 py-1.5"><FTxt v={colF.name} onCh={(v) => setF("name", v)} ph="Influencer…" /></th>
+                <th className="px-1.5 py-1.5"><FSel v={colF.anlasma} onCh={(v) => setF("anlasma", v)} options={anlasmaOpts} /></th>
+                <th className="px-1.5 py-1.5"><FSel v={colF.platform} onCh={(v) => setF("platform", v)} options={["İnstagram", "Tiktok"]} /></th>
+                <th className="px-1.5 py-1.5"><FTxt v={colF.urun} onCh={(v) => setF("urun", v)} ph="Ürün/barkod…" /></th>
+                <th className="px-1.5 py-1.5"><FTxt v={colF.beden} onCh={(v) => setF("beden", v)} ph="Beden…" /></th>
+                <th className="px-1.5 py-1.5"></th>
+                <th className="px-1.5 py-1.5">
+                  <select value={colF.durum || ""} onChange={(e) => setF("durum", e.target.value)}
+                    className="w-full border rounded px-1.5 py-1 text-[11px] font-normal bg-white focus:outline-none focus:border-black">
+                    <option value="">Tümü</option>
+                    {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+                  </select>
+                </th>
+                <th className="px-1.5 py-1.5">
+                  <select value={colF.paylasti || ""} onChange={(e) => setF("paylasti", e.target.value)}
+                    className="w-full border rounded px-1.5 py-1 text-[11px] font-normal bg-white focus:outline-none focus:border-black">
+                    <option value="">Tümü</option>
+                    <option value="evet">Paylaşan</option>
+                    <option value="hayir">Paylaşmayan</option>
+                  </select>
+                </th>
+                <th className="px-1.5 py-1.5"><FTxt v={colF.not} onCh={(v) => setF("not", v)} ph="Not…" /></th>
+                <th className="px-1.5 py-1.5 text-right">
+                  {anyColF && <button onClick={clearF} className="text-[11px] text-gray-500 hover:text-black underline whitespace-nowrap">Temizle</button>}
+                </th>
+              </tr>
             </thead>
             <tbody>
-              {entries.map((e) => (
+              {fEntries.length === 0 && (
+                <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400 text-sm">
+                  Filtrelerle eşleşen kayıt yok. {anyColF && <button onClick={clearF} className="underline hover:text-black">Temizle</button>}
+                </td></tr>
+              )}
+              {fEntries.map((e) => (
                 <PRRow key={e.id} e={e}
                        onEdit={() => { setEditTarget(e); setShowForm(true); }}
                        onDelete={() => del(e.id)}
@@ -893,13 +956,10 @@ function InfluencerListTab() {
                 <SortTh k="anlasma" label="İş Birliği Türü" sortK={sortK} sortD={sortD} onSort={onSort} />
                 <SortTh k="uname" label="Kullanıcı Adı" sortK={sortK} sortD={sortD} onSort={onSort} />
                 <SortTh k="turu" label="Influencer Türü" sortK={sortK} sortD={sortD} onSort={onSort} />
-                <SortTh k="followers" label="Takipçi" sortK={sortK} sortD={sortD} onSort={onSort} cls="text-right" />
-                <SortTh k="coupon" label="Kupon Kodu" sortK={sortK} sortD={sortD} onSort={onSort} />
                 <SortTh k="phone" label="Telefon" sortK={sortK} sortD={sortD} onSort={onSort} />
                 <SortTh k="adres" label="Adres" sortK={sortK} sortD={sortD} onSort={onSort} />
                 <SortTh k="ust" label="Beden Üst" sortK={sortK} sortD={sortD} onSort={onSort} />
                 <SortTh k="alt" label="Beden Alt" sortK={sortK} sortD={sortD} onSort={onSort} />
-                <SortTh k="notes" label="Not" sortK={sortK} sortD={sortD} onSort={onSort} />
                 <th className="px-3 py-2.5 font-semibold whitespace-nowrap text-right">İşlemler</th>
               </tr>
               {/* FİLTRE SATIRI — kategorik→açılır (İş Birliği: Barter/PR/Ücretli), serbest→arama, Takipçi→min */}
@@ -908,13 +968,10 @@ function InfluencerListTab() {
                 <th className="px-2 py-1.5"><FSel v={colF.anlasma} onCh={(v) => setF("anlasma", v)} options={opts.anlasma} /></th>
                 <th className="px-2 py-1.5"><FTxt v={colF.uname} onCh={(v) => setF("uname", v)} ph="@kullanıcı…" /></th>
                 <th className="px-2 py-1.5"><FSel v={colF.turu} onCh={(v) => setF("turu", v)} options={opts.turu} /></th>
-                <th className="px-2 py-1.5"><FNum v={colF.followers} onCh={(v) => setF("followers", v)} ph="≥ takipçi" /></th>
-                <th className="px-2 py-1.5"><FTxt v={colF.coupon} onCh={(v) => setF("coupon", v)} ph="Kupon…" /></th>
                 <th className="px-2 py-1.5"><FTxt v={colF.phone} onCh={(v) => setF("phone", v)} ph="Telefon…" /></th>
                 <th className="px-2 py-1.5"><FTxt v={colF.adres} onCh={(v) => setF("adres", v)} ph="Adres…" /></th>
                 <th className="px-2 py-1.5"><FSel v={colF.ust} onCh={(v) => setF("ust", v)} options={opts.ust} /></th>
                 <th className="px-2 py-1.5"><FSel v={colF.alt} onCh={(v) => setF("alt", v)} options={opts.alt} /></th>
-                <th className="px-2 py-1.5"><FTxt v={colF.notes} onCh={(v) => setF("notes", v)} ph="Not…" /></th>
                 <th className="px-2 py-1.5 text-right">
                   {anyF && <button onClick={clearF} className="text-[11px] text-gray-500 hover:text-black underline whitespace-nowrap">Temizle</button>}
                 </th>
@@ -922,14 +979,13 @@ function InfluencerListTab() {
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr><td colSpan={12} className="px-3 py-10 text-center text-gray-400 text-sm">
+                <tr><td colSpan={9} className="px-3 py-10 text-center text-gray-400 text-sm">
                   Filtrelerle eşleşen influencer yok. <button onClick={clearF} className="underline hover:text-black">Filtreleri temizle</button>
                 </td></tr>
               )}
               {rows.map((inf) => {
                 const uname = inf.handle || inf.instagram || inf.tiktok || "—";
                 const adres = inf.adres || (inf.shipping_address && inf.shipping_address.adres) || "—";
-                const fc = Number(inf.follower_count || 0);
                 return (
                   <tr key={inf.id} data-testid={`influencer-row-${inf.id}`} className="border-t hover:bg-gray-50/60">
                     <td className="px-3 py-2.5 whitespace-nowrap">
@@ -945,13 +1001,10 @@ function InfluencerListTab() {
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{uname}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.influencer_turu || influencerTuru(inf.follower_count)}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-right tabular-nums text-gray-900">{fc > 0 ? fc.toLocaleString("tr-TR") : "—"}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.coupon_code || "—"}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.phone || "—"}</td>
                     <td className="px-3 py-2.5 max-w-[220px] truncate text-gray-900" title={adres}>{adres}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.beden_ust || "—"}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.beden_alt || "—"}</td>
-                    <td className="px-3 py-2.5 max-w-[240px] truncate text-gray-900" title={inf.notes || ""}>{inf.notes || "—"}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-right">
                       <div className="inline-flex items-center gap-1.5">
                         <button
@@ -1115,7 +1168,7 @@ function ShipmentCalendar({ entries }) {
               const list = byDay[key] || [];
               return (
                 <button key={i} onClick={() => list.length && openDay(key)} data-testid={`cal-day-${key}`}
-                  className={`relative min-h-[74px] border-t border-l p-1.5 pt-7 text-left ${inMonth ? "bg-white" : "bg-gray-50/60"} ${list.length ? "hover:bg-amber-50 cursor-pointer" : "cursor-default"}`}>
+                  className={`relative min-h-[74px] border-t border-l p-1.5 pt-7 text-left flex flex-col items-start justify-start ${inMonth ? "bg-white" : "bg-gray-50/60"} ${list.length ? "hover:bg-amber-50 cursor-pointer" : "cursor-default"}`}>
                   {/* Gün no — HER hücrede SABİT sol-üst (absolute); içerik/rozet konumunu ETKİLEMEZ.
                       Bugün kırmızı daire aynı 20px kutuda → diğer numaralarla BİREBİR aynı konum. */}
                   <span className={`absolute top-1 left-1 text-[11px] w-5 h-5 inline-flex items-center justify-center rounded-full ${key === todayKey ? "bg-red-600 text-white font-semibold" : inMonth ? "text-gray-900" : "text-gray-400"}`}>{d.getDate()}</span>
@@ -1127,7 +1180,7 @@ function ShipmentCalendar({ entries }) {
                   {/* TÜM isimler gösterilir (kırpma/"+N daha" YOK); satır en yoğun güne göre
                       otomatik aşağı uzar (grid satırı auto-height). */}
                   {list.length > 0 && (
-                    <div className="space-y-0.5">
+                    <div className="space-y-0.5 w-full">
                       {list.map((e) => <div key={e.id} className="text-[10px] leading-4 text-gray-900 truncate" title={e.influencer_name || ""}>{e.influencer_name || "—"}</div>)}
                     </div>
                   )}

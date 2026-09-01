@@ -704,7 +704,7 @@ export default function Header({ hideMenu = false, announcement = null, announce
               suggestedProducts.length > 0 && (
                 <div>
                   <h3 className="text-[10px] tracking-widest uppercase text-gray-400 mb-5">İlginizi çekebilecek diğer ürünler</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-8">
                     {suggestedProducts.map((p) => (
                       <button key={p.id} onClick={() => { navigate(`/${p.slug}`); closeSearch(); }} className="text-left group">
                         <div className="relative aspect-[2/3] bg-gray-50 mb-2.5 overflow-hidden">
@@ -721,7 +721,7 @@ export default function Header({ hideMenu = false, announcement = null, announce
             ) : searchResults.length > 0 ? (
               <div>
                 <h3 className="text-[10px] tracking-widest uppercase text-gray-400 mb-5">Ürünler</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-8">
                   {searchResults.map((p) => (
                     <button key={p.id} onClick={() => { navigate(`/${p.slug}`); closeSearch(); }} className="text-left group">
                       <div className="relative aspect-[2/3] bg-gray-50 mb-2.5 overflow-hidden">

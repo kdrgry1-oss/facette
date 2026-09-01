@@ -216,15 +216,16 @@ export default function AdminLayout() {
           FACETTE
         </Link>
 
-        {/* Desktop Nav — overflow yok; sekmeler kompakt */}
-        <nav className="hidden lg:flex items-center gap-0.5 flex-1 min-w-0">
+        {/* Desktop Nav — tam yatay menü ancak ~1280px'e sığar; altında (iPad yatay/dikey dahil)
+            hamburger kullanılır (dropdown'lar satır-içi açılır, kırpılmaz). */}
+        <nav className="hidden xl:flex items-center gap-0.5 flex-1 min-w-0">
           {navigation.map((item) => (
             <NavItem key={item.key} item={item} />
           ))}
         </nav>
 
         {/* User area */}
-        <div className="hidden lg:flex items-center gap-2 ml-auto shrink-0 border-l border-gray-800 pl-3">
+        <div className="hidden xl:flex items-center gap-2 ml-auto shrink-0 border-l border-gray-800 pl-3">
           <div className="text-right">
             <p className="text-xs text-white font-medium leading-tight">{user.email}</p>
             <p className="text-xs text-gray-300">Admin</p>
@@ -239,9 +240,9 @@ export default function AdminLayout() {
           </button>
         </div>
 
-        {/* Mobile menu toggle */}
+        {/* Mobile/Tablet menu toggle (iPad dahil <1280) */}
         <button
-          className="lg:hidden ml-auto text-white hover:text-gray-300"
+          className="xl:hidden ml-auto text-white hover:text-gray-300"
           onClick={() => setMobileOpen(!mobileOpen)}
           data-testid="admin-mobile-toggle"
         >
@@ -249,9 +250,9 @@ export default function AdminLayout() {
         </button>
       </header>
 
-      {/* Mobile Menu */}
+      {/* Mobile/Tablet Menu (iPad dahil <1280) */}
       {mobileOpen && (
-        <div className="lg:hidden fixed top-14 left-0 right-0 z-40 bg-gray-900 border-b border-gray-800 px-4 py-4 space-y-1 max-h-[80vh] overflow-y-auto shadow-2xl">
+        <div className="xl:hidden fixed top-14 left-0 right-0 z-40 bg-gray-900 border-b border-gray-800 px-4 py-4 space-y-1 max-h-[80vh] overflow-y-auto shadow-2xl">
           {navigation.map((item) => (
             <NavItem key={item.key} item={item} closeMobile={() => setMobileOpen(false)} />
           ))}

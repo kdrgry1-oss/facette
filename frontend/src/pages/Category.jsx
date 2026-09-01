@@ -260,10 +260,12 @@ export default function Category() {
     { label: "İsim: A-Z", value: "name:asc" },
   ];
 
+  // Kullanıcının seçtiği sütun sayısı ÜST SINIR gibi davranır: dar ekranda (iPad dikey/telefon)
+  // kartlar okunaklı kalsın diye kademeli düşer. 4 → telefon/dikey 2, iPad yatay 3, masaüstü 4.
   const gridClass = {
     1: "grid-cols-1",
     2: "grid-cols-2",
-    4: "grid-cols-4",
+    4: "grid-cols-2 md:grid-cols-3 lg:grid-cols-4",
   };
 
   // Aktif (uygulanmış) filtre sayısı — toolbar rozetinde gösterilir.

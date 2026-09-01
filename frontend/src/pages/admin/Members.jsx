@@ -290,9 +290,9 @@ export default function Members() {
         <button onClick={() => { setPage(1); load(); }} className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-700">Ara</button>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border overflow-hidden">
-        <table className="w-full text-sm">
+      {/* Table — tablet/iPad'de kırpma yerine yatay kaydırma */}
+      <div className="bg-white rounded-xl border overflow-x-auto">
+        <table className="w-full text-sm min-w-[900px]">
           <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
             <tr>
               <Th label="Üye" k="name" />

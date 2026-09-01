@@ -289,7 +289,7 @@ export default function Footer() {
         </div>
 
         {/* Columns */}
-        <div className="grid md:grid-cols-4 gap-x-10 md:border-t md:border-white/10 md:pt-12">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-x-10 md:border-t md:border-white/10 md:pt-12">
           {columns.map((col, i) => (
             <FooterColumn key={col.title || i} col={col} defaultOpen={i === 0} />
           ))}

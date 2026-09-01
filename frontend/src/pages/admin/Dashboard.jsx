@@ -349,7 +349,7 @@ export default function Dashboard() {
           <h3 className="font-semibold mb-4 flex items-center gap-2">
             <ShoppingCart size={18} className="text-amber-600" /> Terk Edilen Sepet İstatistikleri
           </h3>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="text-center p-3 bg-amber-50 rounded-lg border border-amber-100">
               <p className="text-2xl font-bold text-amber-800">{stats.abandoned_carts?.count || 0}</p>
               <p className="text-xs text-amber-700 mt-1">Sepet Adet</p>
