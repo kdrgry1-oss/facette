@@ -1745,6 +1745,49 @@ async def _dhl_cargo_poll_tick():
 
             processed += 1
             await asyncio.sleep(0.25)
+
+        # ── Influencer PR gönderileri de OTOMATİK takip no çeker (Siparişler ile aynı MNG oturumu).
+        #    PR kargosunun MNG sipariş no'su = cargo_tracking_no (INF…). gonderi_no doldukça yazılır;
+        #    böylece "takip çek" butonuna basmaya gerek kalmaz. ──
+        try:
+            _pr_cut = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+            pr_q = {
+                "cargo_tracking_no": {"$nin": [None, ""]},
+                "$and": [
+                    {"$or": [{"cargo_gonderi_no": {"$in": [None, ""]}},
+                             {"cargo_gonderi_no": {"$exists": False}}]},
+                    {"$or": [{"shipped_at": {"$gt": _pr_cut}}, {"shipped_at": {"$exists": False}}]},
+                ],
+            }
+            async for pr in db.influencer_pr.find(pr_q, {"_id": 0, "id": 1, "cargo_tracking_no": 1}).limit(80):
+                sip = str(pr.get("cargo_tracking_no") or "").strip()
+                if not sip:
+                    continue
+                try:
+                    pinfo = await asyncio.to_thread(
+                        get_mng_shipment_status, username=user, password=pw, siparis_no=sip)
+                except Exception as _pe:
+                    logger.warning(f"[scheduler][dhl][pr] status err {sip}: {_pe}")
+                    n_errors += 1
+                    await asyncio.sleep(0.2)
+                    continue
+                if not pinfo or not pinfo.get("ok"):
+                    await asyncio.sleep(0.2)
+                    continue
+                pg = (pinfo.get("gonderi_no") or "").strip()
+                pac = (pinfo.get("kargo_statu_aciklama") or "").strip()
+                pupd = {"cargo_last_status_text": pac,
+                        "cargo_status_checked_at": datetime.now(timezone.utc).isoformat()}
+                if pg:
+                    pupd["cargo_gonderi_no"] = pg
+                    pupd["cargo_tracking_url"] = f"https://kargotakip.dhlecommerce.com.tr/?takipNo={pg}"
+                await db.influencer_pr.update_one({"id": pr["id"]}, {"$set": pupd})
+                if pg:
+                    processed += 1
+                await asyncio.sleep(0.25)
+        except Exception as _pe:
+            logger.warning(f"[scheduler][dhl][pr] pr poll err: {_pe}")
+
         _final_status = "ok"
     except Exception as e:
         logger.exception(f"[scheduler][dhl] poll tick failed: {e}")
