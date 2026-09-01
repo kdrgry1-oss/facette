@@ -917,6 +917,42 @@ async def ship_pr_entry(entry_id: str, current_user: dict = Depends(require_admi
             "tracking_no": upd["cargo_tracking_no"], "shipped_at": upd["shipped_at"]}
 
 
+@router.get("/influencer-pr/{entry_id}/cargo-label")
+async def influencer_pr_cargo_label(entry_id: str, token: str = None):
+    """Influencer PR gönderisinin YAZDIRILABİLİR kargo etiketi — sipariş etiketiyle AYNI şablon
+    (orders._render_cargo_label_html). Alıcı = influencer kargo adresi, barkod = cargo_barcode.
+    token query ile kimlik doğrulanır (yeni sekmede yazdırma; sipariş cargo-label ile aynı desen)."""
+    from fastapi.responses import HTMLResponse
+    from .orders import _render_cargo_label_html, _get_sender_info, _get_mng_settings, verify_admin_token
+    await verify_admin_token(token)
+    e = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
+    if not e:
+        raise HTTPException(status_code=404, detail="PR kaydı bulunamadı")
+    bc = (e.get("cargo_barcode") or "").strip()
+    if not bc:
+        raise HTTPException(status_code=400, detail="Bu gönderi için kargo barkodu yok — önce 'Barkod Çıkart' ile kargoya verin.")
+    inf = await db.influencers.find_one({"id": e.get("influencer_id")}, {"_id": 0}) or {}
+    addr = inf.get("shipping_address") or {}
+    rname = (addr.get("full_name") or inf.get("name") or e.get("influencer_name") or "Alıcı").strip()
+    rphone = (addr.get("phone") or inf.get("phone") or "").strip()
+    radres = (addr.get("adres") or addr.get("address") or "").strip()
+    rcity = " / ".join([x for x in [(addr.get("ilce") or addr.get("district") or "").strip(),
+                                     (addr.get("il") or addr.get("city") or "").strip()] if x])
+    rfull = ", ".join([x for x in [radres, rcity] if x])
+    sender = await _get_sender_info()
+    mng = await _get_mng_settings()
+    sender_company = mng.get("customer_code") or sender.get("name") or "FACETTE"
+    sender_addr_line = f"{sender.get('address','')}, {sender.get('district','')}/{sender.get('city','')}".strip(" ,/")
+    html = _render_cargo_label_html(
+        siparis_no=bc, main_barcode=bc,
+        sender_company=sender_company, sender_phone=sender.get("phone", "") or "",
+        sender_addr_line=sender_addr_line,
+        receiver_name=rname, receiver_phone=rphone, receiver_full_addr=rfull,
+        cargo_company_display="DHL E-Commerce", odeme_turu="Peşin Ödemeli", kargo_tipi="Peşin Ödemeli Kargo",
+    )
+    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
+
+
 @router.get("/influencers/{influencer_id}/history")
 async def influencer_history(influencer_id: str, current_user: dict = Depends(require_admin)):
     """Yan sayfa: bir influencerla GEÇMİŞ — daha önce ne gönderdik (seeding kampanyaları)

@@ -12,7 +12,7 @@ import {
   Plus, TrendingUp, CheckCircle, Trash2, X,
   Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Package,
   ClipboardList, ExternalLink, History, Filter, Download,
-  ChevronRight, ChevronDown, Barcode,
+  ChevronRight, ChevronDown, Barcode, Printer,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -461,7 +461,16 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
           <div className="flex items-center gap-1">
             {canShip && (
               barcoded
-                ? <span className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-1" title={`Barkod çıkarıldı · ${e.cargo_barcode}`}><Barcode size={14} /></span>
+                ? (
+                  <>
+                    <span className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-1" title={`Barkod çıkarıldı · ${e.cargo_barcode}`}><Barcode size={14} /></span>
+                    <button
+                      onClick={() => { const t = localStorage.getItem("token"); window.open(`${API}/influencer-pr/${e.id}/cargo-label?token=${encodeURIComponent(t || "")}&print=1`, "_blank", "width=420,height=640"); }}
+                      title="Kargo etiketini yazdır"
+                      className="inline-flex items-center text-gray-600 hover:text-black border border-gray-200 rounded px-1.5 py-1"
+                      data-testid={`pr-print-${e.id}`}><Printer size={14} /></button>
+                  </>
+                )
                 : <button onClick={onShip} title="Barkod Çıkart — stok düşer + MNG kargo barkodu oluşur"
                           className="inline-flex items-center text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded px-1.5 py-1"
                           data-testid={`pr-ship-${e.id}`}><Barcode size={15} /></button>
@@ -487,7 +496,11 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
               <div><span className="text-gray-400">Cevap: </span><span className="text-gray-900">{e.response || "—"}</span></div>
               <div><span className="text-gray-400">Follow-up: </span><span className="text-gray-900">{e.follow_up || "—"}</span></div>
               {e.adres && <div className="w-full"><span className="text-gray-400">Adres: </span><span className="text-gray-900">{e.adres}</span></div>}
-              {e.cargo_barcode && <div className="w-full"><span className="text-gray-400">Kargo barkodu: </span><span className="font-mono text-gray-800">{e.cargo_barcode}</span>{e.cargo_tracking_no ? <span className="text-gray-400"> · Takip: {e.cargo_tracking_no}</span> : null}</div>}
+              {e.cargo_barcode && <div className="w-full flex items-center gap-2"><span><span className="text-gray-400">Kargo barkodu: </span><span className="font-mono text-gray-800">{e.cargo_barcode}</span>{e.cargo_tracking_no ? <span className="text-gray-400"> · Takip: {e.cargo_tracking_no}</span> : null}</span>
+                <button onClick={() => { const t = localStorage.getItem("token"); window.open(`${API}/influencer-pr/${e.id}/cargo-label?token=${encodeURIComponent(t || "")}&print=1`, "_blank", "width=420,height=640"); }}
+                  className="inline-flex items-center gap-1 text-[11px] text-gray-600 hover:text-black border border-gray-300 rounded px-2 py-0.5" title="Kargo etiketini yazdır">
+                  <Printer size={12} /> Etiketi Yazdır
+                </button></div>}
             </div>
           </td>
         </tr>
