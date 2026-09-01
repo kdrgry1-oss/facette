@@ -121,6 +121,8 @@ async def list_members(
         "total_spent": {"$ifNull": ["$cached_spent", 0]},
         "last_order_at": "$cached_last_order",
         "segment": {"$ifNull": ["$cached_segment", "prospect"]},
+        "returns_count": {"$ifNull": ["$cached_returns", 0]},
+        "returns_amount": {"$ifNull": ["$cached_returns_amount", 0]},
         "aov": {"$cond": [{"$gt": [{"$ifNull": ["$cached_orders", 0]}, 0]},
                           {"$divide": [{"$ifNull": ["$cached_spent", 0]}, "$cached_orders"]}, 0]},
     }}]
@@ -136,6 +138,7 @@ async def list_members(
         "name": "first_name", "orders": "cached_orders", "spent": "cached_spent",
         "aov": "aov", "last_order": "cached_last_order", "created": "created_at",
         "segment": "cached_segment", "source": "acquisition_source",
+        "returns": "cached_returns",
     }
     _sf = _sort_map.get((sort or "created"), "created_at")
     _dir = -1 if (dir or "desc").lower() != "asc" else 1
@@ -163,15 +166,34 @@ async def _refresh_member_stats() -> dict:
         {"$group": {"_id": "$user_id", "o": {"$sum": 1},
                     "t": {"$sum": {"$ifNull": ["$total", 0]}}, "last": {"$max": "$created_at"}}},
     ]
+    # İADE önbelleği: customer_returns → orders.user_id join ile üye başına iade SAYISI + TUTARI.
+    # (İade kaydı yalnız siparişi olan üyede olur → orders döngüsünde eşleşir; 0'a düşen üye de
+    #  orders döngüsünde güncellenir çünkü siparişi vardır.)
+    ret_map: dict = {}
+    try:
+        async for row in db.customer_returns.aggregate([
+            {"$lookup": {"from": "orders", "localField": "order_id",
+                         "foreignField": "id", "as": "o"}},
+            {"$unwind": "$o"},
+            {"$match": {"o.user_id": {"$ne": None}}},
+            {"$group": {"_id": "$o.user_id", "rn": {"$sum": 1},
+                        "ra": {"$sum": {"$ifNull": ["$refund_amount", 0]}}}},
+        ], allowDiskUse=True):
+            ret_map[row["_id"]] = (int(row.get("rn") or 0), round(float(row.get("ra") or 0), 2))
+    except Exception as e:
+        logger.warning(f"[members] iade önbelleği hesaplanamadı: {e}")
+
     ops, n = [], 0
     _now = datetime.now(timezone.utc).isoformat()
     async for row in db.orders.aggregate(pipeline, allowDiskUse=True):
         o = int(row.get("o") or 0)
         t = round(float(row.get("t") or 0), 2)
         seg = "vip" if t >= 5000 else ("returning" if o >= 2 else ("new" if o == 1 else "prospect"))
+        rn, ra = ret_map.get(row["_id"], (0, 0.0))
         ops.append(UpdateOne({"id": row["_id"]}, {"$set": {
             "cached_orders": o, "cached_spent": t, "cached_last_order": row.get("last"),
-            "cached_segment": seg, "stats_refreshed_at": _now}}))
+            "cached_segment": seg, "cached_returns": rn, "cached_returns_amount": ra,
+            "stats_refreshed_at": _now}}))
         if len(ops) >= 500:
             await db.users.bulk_write(ops, ordered=False)
             n += len(ops)

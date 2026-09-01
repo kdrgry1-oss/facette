@@ -312,7 +312,7 @@ function PRTrackTab() {
           <table className="w-full text-sm min-w-[920px]">
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500 text-left">
               <tr>
-                {["Influencer", "İletişim", "Ürün", "Beden", "Gönderim Tarihi",
+                {["Influencer", "İş Birliği", "İletişim", "Ürün", "Beden", "Gönderim Tarihi",
                   "Gönderim Durumu", "Paylaştı", "Not", "İşlemler"].map((h, i) => (
                   <th key={i} className="px-2 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
@@ -399,6 +399,12 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
             {open ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
             {e.influencer_name || "—"}
           </button>
+        </td>
+        {/* İş Birliği Türü (Barter / PR / Ücretli İş Birliği) */}
+        <td className={`${td} whitespace-nowrap`}>
+          {e.anlasma_sekli
+            ? <span className="inline-block text-[11px] font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">{e.anlasma_sekli}</span>
+            : <span className="text-gray-300">—</span>}
         </td>
         {/* İletişim (platform) */}
         <td className={`${td} whitespace-nowrap`}>
@@ -492,7 +498,7 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
       </tr>
       {open && (
         <tr className="bg-gray-50/70 border-t" data-testid={`pr-detail-${e.id}`}>
-          <td colSpan={9} className="px-4 py-3">
+          <td colSpan={10} className="px-4 py-3">
             <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
               <div><span className="text-gray-400">Kullanıcı Adı: </span><span className="font-medium text-gray-900">{uname}</span></div>
               <div><span className="text-gray-400">Influencer Türü: </span><span className="font-medium text-gray-900">{e.influencer_turu || "—"}</span></div>
@@ -704,6 +710,36 @@ function TabBtn({ active, onClick, icon, children, testid }) {
   );
 }
 
+/* Sütun filtre/sıralama yardımcıları (Kayıtlı Influencerlar tablosu) */
+function SortTh({ k, label, sortK, sortD, onSort, cls = "" }) {
+  const active = sortK === k;
+  return (
+    <th onClick={() => onSort(k)}
+      className={`px-3 py-2.5 font-semibold whitespace-nowrap select-none cursor-pointer hover:text-black ${cls}`}>
+      <span className="inline-flex items-center gap-1">{label}
+        <span className={`text-[9px] ${active ? "text-black" : "text-gray-300"}`}>{active ? (sortD === "asc" ? "▲" : "▼") : "↕"}</span>
+      </span>
+    </th>
+  );
+}
+function FTxt({ v, onCh, ph }) {
+  return <input value={v || ""} onChange={(e) => onCh(e.target.value)} placeholder={ph}
+    className="w-full border rounded px-2 py-1 text-[11px] font-normal focus:outline-none focus:border-black" />;
+}
+function FNum({ v, onCh, ph }) {
+  return <input value={v || ""} onChange={(e) => onCh(e.target.value.replace(/[^\d]/g, ""))} placeholder={ph}
+    inputMode="numeric" className="w-full border rounded px-2 py-1 text-[11px] font-normal focus:outline-none focus:border-black" />;
+}
+function FSel({ v, onCh, options }) {
+  return (
+    <select value={v || ""} onChange={(e) => onCh(e.target.value)}
+      className="w-full border rounded px-1.5 py-1 text-[11px] font-normal bg-white focus:outline-none focus:border-black">
+      <option value="">Tümü</option>
+      {options.map((o) => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+}
+
 /* ======================= SEKME 1: KAYITLI INFLUENCERLAR ======================= */
 function InfluencerListTab() {
   const [list, setList] = useState([]);
@@ -712,6 +748,69 @@ function InfluencerListTab() {
   const [showForm, setShowForm] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [colF, setColF] = useState({});        // sütun filtreleri
+  const [sortK, setSortK] = useState("");       // sıralama sütunu
+  const [sortD, setSortD] = useState("asc");    // asc | desc
+
+  // Satır türev alanları (kolon değerleri) — filtre/sıralama ile AYNI kaynak.
+  const _uname = (i) => i.handle || i.instagram || i.tiktok || "";
+  const _turu = (i) => i.influencer_turu || influencerTuru(i.follower_count) || "";
+  const _adres = (i) => i.adres || (i.shipping_address && i.shipping_address.adres) || "";
+
+  // Kategorik sütunların seçenekleri (veriden tekilleştirilmiş) — Türü/Platform/İş Birliği/Beden.
+  const opts = useMemo(() => {
+    const uniq = (fn) => Array.from(new Set(list.map(fn).filter(Boolean)))
+      .sort((a, b) => String(a).localeCompare(String(b), "tr"));
+    return {
+      turu: uniq(_turu),
+      anlasma: uniq((i) => i.anlasma_sekli),
+      ust: uniq((i) => i.beden_ust),
+      alt: uniq((i) => i.beden_alt),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list]);
+
+  const setF = (k, v) => setColF((p) => ({ ...p, [k]: v }));
+  const clearF = () => { setColF({}); setSortK(""); };
+  const anyF = Object.values(colF).some(Boolean) || !!sortK;
+
+  const rows = useMemo(() => {
+    const f = colF;
+    const inc = (v, q) => String(v || "").toLocaleLowerCase("tr").includes(String(q).toLocaleLowerCase("tr"));
+    const fmin = parseInt(f.followers || "", 10);
+    let out = list.filter((i) =>
+      (!f.name || inc(i.name, f.name)) &&
+      (!f.uname || inc(_uname(i), f.uname)) &&
+      (!f.turu || _turu(i) === f.turu) &&
+      (!(fmin > 0) || Number(i.follower_count || 0) >= fmin) &&
+      (!f.coupon || inc(i.coupon_code, f.coupon)) &&
+      (!f.phone || inc(i.phone, f.phone)) &&
+      (!f.adres || inc(_adres(i), f.adres)) &&
+      (!f.anlasma || (i.anlasma_sekli || "") === f.anlasma) &&
+      (!f.ust || (i.beden_ust || "") === f.ust) &&
+      (!f.alt || (i.beden_alt || "") === f.alt) &&
+      (!f.notes || inc(i.notes, f.notes))
+    );
+    if (sortK) {
+      const num = sortK === "followers";
+      const val = (i) => (num ? Number(i.follower_count || 0) : ({
+        name: i.name, uname: _uname(i), turu: _turu(i), coupon: i.coupon_code,
+        phone: i.phone, adres: _adres(i), anlasma: i.anlasma_sekli,
+        ust: i.beden_ust, alt: i.beden_alt, notes: i.notes,
+      }[sortK] || ""));
+      out = [...out].sort((a, b) => num
+        ? val(a) - val(b)
+        : String(val(a)).localeCompare(String(val(b)), "tr", { numeric: true, sensitivity: "base" }));
+      if (sortD === "desc") out.reverse();
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, colF, sortK, sortD]);
+
+  const onSort = (k) => {
+    if (sortK === k) setSortD((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortK(k); setSortD("asc"); }
+  };
 
   const load = useCallback(async (search) => {
     setLoading(true);
@@ -790,23 +889,47 @@ function InfluencerListTab() {
           <table className="w-full text-sm min-w-[1100px]">
             <thead>
               <tr className="bg-gray-50 text-gray-600 text-left text-xs uppercase tracking-wide">
-                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">İsim Soyisim</th>
-                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Kullanıcı Adı</th>
-                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Platform</th>
-                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Influencer Türü</th>
-                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Telefon</th>
-                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Adres</th>
-                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">İş Birliği Türü</th>
-                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Beden Üst</th>
-                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Beden Alt</th>
-                <th className="px-3 py-2.5 font-semibold whitespace-nowrap">Not</th>
+                <SortTh k="name" label="İsim Soyisim" sortK={sortK} sortD={sortD} onSort={onSort} />
+                <SortTh k="anlasma" label="İş Birliği Türü" sortK={sortK} sortD={sortD} onSort={onSort} />
+                <SortTh k="uname" label="Kullanıcı Adı" sortK={sortK} sortD={sortD} onSort={onSort} />
+                <SortTh k="turu" label="Influencer Türü" sortK={sortK} sortD={sortD} onSort={onSort} />
+                <SortTh k="followers" label="Takipçi" sortK={sortK} sortD={sortD} onSort={onSort} cls="text-right" />
+                <SortTh k="coupon" label="Kupon Kodu" sortK={sortK} sortD={sortD} onSort={onSort} />
+                <SortTh k="phone" label="Telefon" sortK={sortK} sortD={sortD} onSort={onSort} />
+                <SortTh k="adres" label="Adres" sortK={sortK} sortD={sortD} onSort={onSort} />
+                <SortTh k="ust" label="Beden Üst" sortK={sortK} sortD={sortD} onSort={onSort} />
+                <SortTh k="alt" label="Beden Alt" sortK={sortK} sortD={sortD} onSort={onSort} />
+                <SortTh k="notes" label="Not" sortK={sortK} sortD={sortD} onSort={onSort} />
                 <th className="px-3 py-2.5 font-semibold whitespace-nowrap text-right">İşlemler</th>
+              </tr>
+              {/* FİLTRE SATIRI — kategorik→açılır (İş Birliği: Barter/PR/Ücretli), serbest→arama, Takipçi→min */}
+              <tr className="bg-white border-t text-[11px] normal-case tracking-normal">
+                <th className="px-2 py-1.5"><FTxt v={colF.name} onCh={(v) => setF("name", v)} ph="İsim…" /></th>
+                <th className="px-2 py-1.5"><FSel v={colF.anlasma} onCh={(v) => setF("anlasma", v)} options={opts.anlasma} /></th>
+                <th className="px-2 py-1.5"><FTxt v={colF.uname} onCh={(v) => setF("uname", v)} ph="@kullanıcı…" /></th>
+                <th className="px-2 py-1.5"><FSel v={colF.turu} onCh={(v) => setF("turu", v)} options={opts.turu} /></th>
+                <th className="px-2 py-1.5"><FNum v={colF.followers} onCh={(v) => setF("followers", v)} ph="≥ takipçi" /></th>
+                <th className="px-2 py-1.5"><FTxt v={colF.coupon} onCh={(v) => setF("coupon", v)} ph="Kupon…" /></th>
+                <th className="px-2 py-1.5"><FTxt v={colF.phone} onCh={(v) => setF("phone", v)} ph="Telefon…" /></th>
+                <th className="px-2 py-1.5"><FTxt v={colF.adres} onCh={(v) => setF("adres", v)} ph="Adres…" /></th>
+                <th className="px-2 py-1.5"><FSel v={colF.ust} onCh={(v) => setF("ust", v)} options={opts.ust} /></th>
+                <th className="px-2 py-1.5"><FSel v={colF.alt} onCh={(v) => setF("alt", v)} options={opts.alt} /></th>
+                <th className="px-2 py-1.5"><FTxt v={colF.notes} onCh={(v) => setF("notes", v)} ph="Not…" /></th>
+                <th className="px-2 py-1.5 text-right">
+                  {anyF && <button onClick={clearF} className="text-[11px] text-gray-500 hover:text-black underline whitespace-nowrap">Temizle</button>}
+                </th>
               </tr>
             </thead>
             <tbody>
-              {list.map((inf) => {
+              {rows.length === 0 && (
+                <tr><td colSpan={12} className="px-3 py-10 text-center text-gray-400 text-sm">
+                  Filtrelerle eşleşen influencer yok. <button onClick={clearF} className="underline hover:text-black">Filtreleri temizle</button>
+                </td></tr>
+              )}
+              {rows.map((inf) => {
                 const uname = inf.handle || inf.instagram || inf.tiktok || "—";
                 const adres = inf.adres || (inf.shipping_address && inf.shipping_address.adres) || "—";
+                const fc = Number(inf.follower_count || 0);
                 return (
                   <tr key={inf.id} data-testid={`influencer-row-${inf.id}`} className="border-t hover:bg-gray-50/60">
                     <td className="px-3 py-2.5 whitespace-nowrap">
@@ -815,12 +938,17 @@ function InfluencerListTab() {
                       </button>
                       {inf.is_active === false && <span className="ml-2 text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">pasif</span>}
                     </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      {inf.anlasma_sekli
+                        ? <span className="inline-block text-[11px] font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">{inf.anlasma_sekli}</span>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{uname}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.platform || "—"}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.influencer_turu || influencerTuru(inf.follower_count)}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-right tabular-nums text-gray-900">{fc > 0 ? fc.toLocaleString("tr-TR") : "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.coupon_code || "—"}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.phone || "—"}</td>
                     <td className="px-3 py-2.5 max-w-[220px] truncate text-gray-900" title={adres}>{adres}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.anlasma_sekli || "—"}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.beden_ust || "—"}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-gray-900">{inf.beden_alt || "—"}</td>
                     <td className="px-3 py-2.5 max-w-[240px] truncate text-gray-900" title={inf.notes || ""}>{inf.notes || "—"}</td>
@@ -996,10 +1124,11 @@ function ShipmentCalendar({ entries }) {
                     <span className="absolute top-1 right-1 text-[9px] leading-none bg-black text-white rounded-full min-w-[18px] h-[18px] inline-flex items-center justify-center px-1">{list.length}</span>
                   )}
                   {/* İçerik — numaranın ALTINDA (pt-7 sabit boşluk), numarayı İTMEZ */}
+                  {/* TÜM isimler gösterilir (kırpma/"+N daha" YOK); satır en yoğun güne göre
+                      otomatik aşağı uzar (grid satırı auto-height). */}
                   {list.length > 0 && (
                     <div className="space-y-0.5">
-                      {list.slice(0, 2).map((e) => <div key={e.id} className="text-[10px] leading-4 text-gray-900 truncate">{e.influencer_name || "—"}</div>)}
-                      {list.length > 2 && <div className="text-[9px] leading-4 text-gray-500">+{list.length - 2} daha</div>}
+                      {list.map((e) => <div key={e.id} className="text-[10px] leading-4 text-gray-900 truncate" title={e.influencer_name || ""}>{e.influencer_name || "—"}</div>)}
                     </div>
                   )}
                 </button>

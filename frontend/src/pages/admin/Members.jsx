@@ -20,11 +20,25 @@ const SEGMENT_META = {
   prospect: { label: "Aday", color: "bg-gray-100 text-gray-700 border-gray-200", icon: UserX },
 };
 
-function SegmentBadge({ seg }) {
+// Segment atama kriteri (backend _refresh_member_stats ile AYNI eşikler) → rozet tooltip'i.
+function segReason(seg, member) {
+  const o = member?.orders_count, s = member?.total_spent;
+  const info = (o != null && s != null) ? `  •  bu üye: ${o} sipariş, ${tl(s)}` : "";
+  const base = {
+    vip: "VIP — toplam harcaması ₺5.000 ve üzeri",
+    returning: "Sadık — 2 veya daha fazla sipariş vermiş (harcaması ₺5.000 altı)",
+    new: "Yeni — ilk (tek) siparişini vermiş",
+    prospect: "Aday — üye olmuş ama henüz hiç siparişi yok",
+  }[seg] || "Aday — henüz siparişi yok";
+  return base + info;
+}
+
+function SegmentBadge({ seg, member }) {
   const m = SEGMENT_META[seg] || SEGMENT_META.prospect;
   const Icon = m.icon;
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-medium ${m.color}`}>
+    <span title={segReason(seg, member)}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-medium cursor-help ${m.color}`}>
       <Icon size={12} /> {m.label}
     </span>
   );
@@ -289,7 +303,7 @@ export default function Members() {
               <Th label="Segment" k="segment" cls="text-center" />
               <Th label="Son Sipariş" k="last_order" />
               <Th label="Katılım" k="created" />
-              <Th label="Kaynak" k="source" />
+              <Th label="İade" k="returns" cls="text-center" />
               <th className="text-right p-3">İşlem</th>
             </tr>
           </thead>
@@ -311,10 +325,19 @@ export default function Members() {
                 <td className="p-3 text-center font-medium">{m.orders_count}</td>
                 <td className="p-3 text-right font-semibold tabular-nums">₺{(m.total_spent || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td>
                 <td className="p-3 text-right text-xs text-gray-600 tabular-nums">{m.orders_count > 0 ? "₺" + (Number(m.total_spent || 0) / m.orders_count).toLocaleString("tr-TR", { maximumFractionDigits: 0 }) : "—"}</td>
-                <td className="p-3 text-center"><SegmentBadge seg={m.segment} /></td>
+                <td className="p-3 text-center"><SegmentBadge seg={m.segment} member={m} /></td>
                 <td className="p-3 text-xs text-gray-500 whitespace-nowrap">{m.last_order_at ? new Date(m.last_order_at).toLocaleDateString("tr-TR") : "—"}</td>
                 <td className="p-3 text-xs text-gray-500 whitespace-nowrap">{m.created_at ? new Date(m.created_at).toLocaleDateString("tr-TR") : "—"}</td>
-                <td className="p-3 text-xs text-gray-500">{m.acquisition_source || "—"}</td>
+                <td className="p-3 text-center">
+                  {m.returns_count > 0 ? (
+                    <span title={`${m.returns_count} iade · ${tl(m.returns_amount)} tutarında`}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded-full px-2 py-0.5">
+                      <RotateCcw size={11} /> {m.returns_count}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-gray-300">—</span>
+                  )}
+                </td>
                 <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => openDetail(m.id)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Detay"><Eye size={15} /></button>
                   <button onClick={() => handleDelete(m.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Sil"><Trash2 size={15} /></button>
@@ -356,7 +379,7 @@ export default function Members() {
                     <div className="text-xl font-bold">{detail.member.first_name} {detail.member.last_name}</div>
                     <div className="text-sm text-gray-500">{detail.member.email} {detail.member.phone && ` · ${detail.member.phone}`}</div>
                     <div className="mt-2 flex gap-2 items-center">
-                      <SegmentBadge seg={detail.member.segment} />
+                      <SegmentBadge seg={detail.member.segment} member={detail.member} />
                       <span className="text-xs text-gray-500">Katılım: {new Date(detail.member.created_at).toLocaleDateString("tr-TR")}</span>
                     </div>
                     {/* DENETİM FIX (#41): üye grubu atama — grubun indirimi checkout'ta uygulanır */}

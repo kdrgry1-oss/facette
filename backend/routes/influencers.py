@@ -1017,23 +1017,32 @@ async def export_influencers(q: Optional[str] = Query(None), current_user: dict 
 
     rows = []
     for d in docs:
+        fc = int(d.get("follower_count") or 0)
         rows.append([
             d.get("name") or "",
-            d.get("handle") or d.get("instagram") or d.get("tiktok") or "",
-            d.get("platform") or "",
-            d.get("influencer_turu") or _influencer_turu(d.get("follower_count")),
-            d.get("phone") or "",
-            _addr(d),
             d.get("anlasma_sekli") or "",
+            d.get("handle") or d.get("instagram") or d.get("tiktok") or "",
+            d.get("influencer_turu") or _influencer_turu(d.get("follower_count")),
+            (f"{fc:,}".replace(",", ".") if fc > 0 else ""),
+            d.get("coupon_code") or "",
+            d.get("phone") or "",
+            d.get("email") or "",
+            _addr(d),
             d.get("beden_ust") or "",
             d.get("beden_alt") or "",
             d.get("notes") or "",
         ])
+    # İş Birliği Türü değere göre renkli (Barter/PR/Ücretli İş Birliği ayırt edilsin).
+    _anlasma_colors = {
+        "Barter": {"bg": "DBEAFE", "fg": "1E40AF"}, "PR": {"bg": "D1FAE5", "fg": "065F46"},
+        "Ücretli İş Birliği": {"bg": "FEF3C7", "fg": "92400E"},
+    }
     return _xlsx_response(
         "Kayıtlı Influencerlar",
-        ["İsim Soyisim", "Kullanıcı Adı", "Platform", "Influencer Türü", "Telefon",
-         "Adres", "İş Birliği Türü", "Beden Üst", "Beden Alt", "Not"],
-        rows, [22, 20, 12, 16, 16, 40, 18, 12, 12, 34], "kayitli-influencerlar.xlsx")
+        ["İsim Soyisim", "İş Birliği Türü", "Kullanıcı Adı", "Influencer Türü", "Takipçi",
+         "Kupon Kodu", "Telefon", "E-posta", "Adres", "Beden Üst", "Beden Alt", "Not"],
+        rows, [24, 18, 20, 15, 12, 16, 15, 26, 40, 11, 11, 34], "kayitli-influencerlar.xlsx",
+        status_col=2, status_colors=_anlasma_colors)
 
 
 @router.put("/influencer-pr/{entry_id}")
