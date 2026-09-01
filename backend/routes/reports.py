@@ -1062,7 +1062,11 @@ async def top_products(
         _sz = _norm_size(r["_id"].get("sz"))
         m["_sizes"][_sz] = m["_sizes"].get(_sz, 0) + _q
         _pl = (r["_id"].get("plat") or "site").strip().lower() or "site"
-        m["_plats"][_pl] = m["_plats"].get(_pl, 0) + _q
+        # Platform kırılımı: adet + NET ciro (platform filtresinde satırı o platforma daraltmak için).
+        _pv = m["_plats"].get(_pl) or {"qty": 0, "revenue": 0.0}
+        _pv["qty"] += _q
+        _pv["revenue"] += float(r["revenue"])
+        m["_plats"][_pl] = _pv
     # Kullanıcı isteği: kataloğdan SİLİNMİŞ ya da hiçbir ürün kartına eşleşmeyen
     # kalemlerin satırları ürün raporunda GÖSTERİLMEZ (yalnız mevcut kartlar listelenir).
     merged = {k: m for k, m in merged.items() if m.pop("_matched", False)}
@@ -1202,8 +1206,11 @@ async def top_products(
             k["revenue"] += keep_r
             _ksz = _norm_size(i.get("sz"))
             k["sizes"][_ksz] = k["sizes"].get(_ksz, 0) + keep_q
-            _kpl = i.get("plat") or "site"
-            k["plats"][_kpl] = k["plats"].get(_kpl, 0) + keep_q
+            _kpl = (i.get("plat") or "site")
+            _kpv = k["plats"].get(_kpl) or {"qty": 0, "revenue": 0.0}
+            _kpv["qty"] += keep_q
+            _kpv["revenue"] += keep_r
+            k["plats"][_kpl] = _kpv
         if qty <= 0:
             continue
         d = cr_map.setdefault(gk, {"cancel": 0, "return": 0, "by_plat": {}, "by_size": {}})
@@ -1216,7 +1223,8 @@ async def top_products(
     out = []
     for gkey, m in merged.items():
         _sizes = sorted(m.pop("_sizes").items(), key=lambda x: -x[1])
-        _plats = sorted(m.pop("_plats").items(), key=lambda x: -x[1])
+        # _plats: {platform: {qty, revenue}} → adet'e göre sırala.
+        _plats = sorted(m.pop("_plats").items(), key=lambda x: -x[1]["qty"])
         # DENETİM O10: distinct sipariş no seti → "orders" adedi (JSON'a set serileşmesin).
         if "_onums" in m:
             m["orders"] = len(m.pop("_onums"))
@@ -1233,15 +1241,17 @@ async def top_products(
             _sizes = sorted(_sd.items(), key=lambda x: -x[1])
             _pd = dict(_plats)
             for _pk, _pv in _kp["plats"].items():
-                _pd[_pk] = _pd.get(_pk, 0) + _pv
-            _plats = sorted(_pd.items(), key=lambda x: -x[1])
+                _cur = _pd.get(_pk) or {"qty": 0, "revenue": 0.0}
+                _pd[_pk] = {"qty": _cur["qty"] + _pv["qty"], "revenue": _cur["revenue"] + _pv["revenue"]}
+            _plats = sorted(_pd.items(), key=lambda x: -x[1]["qty"])
         out.append({
             **m,
             "revenue": round(m["revenue"], 2),
             "best_size": _sizes[0][0] if _sizes else "—",
             "size_breakdown": [{"size": k, "qty": v} for k, v in _sizes],
             "top_platform": _plats[0][0] if _plats else "site",
-            "platform_breakdown": [{"platform": k, "qty": v} for k, v in _plats],
+            "platform_breakdown": [{"platform": k, "qty": v["qty"], "revenue": round(v["revenue"], 2)}
+                                   for k, v in _plats],
             "velocity": _velocity(int(m["qty"])),
             "cancel_qty": int(_cr.get("cancel", 0)),
             "return_qty": int(_cr.get("return", 0)),

@@ -488,7 +488,29 @@ export function ProductsReport() {
       };
     });
     if (f) r = r.filter(p => (p.name || "").toLocaleLowerCase("tr").includes(f));
-    if (platFilter) r = r.filter(p => (p.platform_breakdown || []).some(x => x.platform === platFilter));
+    // Platform filtresi: satırı YALNIZ o platforma DARALT (adet/ciro/iptal/iade + Platform sütunu
+    // o platforma göre). Stok/kapsama/hız TOPLAM kalır (stok platformlar arası ortaktır).
+    if (platFilter) {
+      r = r.filter(p => (p.platform_breakdown || []).some(x => x.platform === platFilter))
+           .map(p => {
+             const pb = (p.platform_breakdown || []).find(x => x.platform === platFilter) || { qty: 0, revenue: 0 };
+             const cr = (p.cancel_return_by_platform || []).find(x => x.platform === platFilter) || { cancel: 0, return: 0 };
+             const nq = pb.qty || 0, rq = cr.return || 0, cq = cr.cancel || 0;
+             const totQ = nq + rq;
+             return {
+               ...p,
+               qty: nq,
+               revenue: pb.revenue || 0,
+               cancel_qty: cq,
+               return_qty: rq,
+               _gross: nq + cq + rq,
+               _retpct: totQ > 0 ? (100 * rq) / totQ : 0,
+               platform_breakdown: [{ platform: platFilter, qty: nq, revenue: pb.revenue || 0 }],
+               top_platform: platFilter,
+               _platScoped: true,
+             };
+           });
+    }
     if (sizeFilter) r = r.filter(p => (p.size_breakdown || []).some(x => x.size === sizeFilter));
     if (collFilter) r = r.filter(p => (p.season || "") === collFilter);
     if (velFilter) r = r.filter(p => (p.velocity || {}).code === velFilter);
