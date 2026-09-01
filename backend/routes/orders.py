@@ -7568,6 +7568,78 @@ async def _storefront_free_shipping():
     return threshold, fee
 
 
+async def _order_item_discounts(order: dict) -> list:
+    """Sipariş kalemlerine indirimi KAMPANYA KAPSAMINA GÖRE dağıtır (düz-oransal DEĞİL).
+    Her applied_promotion'ın indirimi yalnız KAPSAMINDAKİ (kategori/ürün; indirimli-hariç, hariç-liste)
+    kalemlere, o kalemlerin brüt payına göre bölüştürülür → kapsam-DIŞI kalem 0 indirim alır.
+    W11214 hatası: 'Lansman %20' yalnız kategori 2867'ye uygulanmışken, iade motoru toplam indirimi
+    TÜM kalemlere düz-oransal dağıtıp kapsam-dışı ürüne (Kahverengi Etek) hayali indirim yazıyordu.
+    Dönüş: order['items'] ile hizalı kalem-başı indirim listesi. applied_promotions yoksa düz-oransal
+    (geriye uyum). Kapsam çözülemezse (kupon silinmiş) o promo düz-oransal dağıtılır (güvenli yedek)."""
+    items = order.get("items") or []
+    n = len(items)
+    gross = [_round2((it.get("price") or 0)) * int(it.get("quantity") or 1) for it in items]
+    order_disc = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
+    promos = order.get("applied_promotions") or []
+    _sub = _round2(order.get("subtotal") or sum(gross))
+
+    def _flat():
+        dr = min(1.0, order_disc / _sub) if _sub > 0.005 else 0.0
+        return [_round2(g * dr) for g in gross]
+
+    if order_disc <= 0.005 or n == 0:
+        return [0.0] * n
+    if not promos:
+        return _flat()
+
+    # Kalem kategori üyeliklerini (category_ids, atalar dahil) + indirimli-fiyat bayrağını çöz.
+    from .coupons import _item_in_scope
+    pids = [str(it.get("product_id") or "") for it in items if it.get("product_id")]
+    cat_map = {}
+    if pids:
+        async for p in db.products.find({"id": {"$in": pids}},
+                                        {"_id": 0, "id": 1, "category_ids": 1, "category_id": 1,
+                                         "price": 1, "sale_price": 1}):
+            cids = set(str(c) for c in (p.get("category_ids") or []) if c)
+            if p.get("category_id"):
+                cids.add(str(p["category_id"]))
+            _lp = float(p.get("price") or 0)
+            _sp = float(p.get("sale_price") or 0)
+            cat_map[p["id"]] = {"cids": cids, "manual_sale": bool(_sp > 0 and _sp < _lp)}
+    enr = []
+    for it in items:
+        info = cat_map.get(str(it.get("product_id") or ""), {})
+        enr.append({**it, "category_ids": list(info.get("cids", set())),
+                    "_has_manual_sale": info.get("manual_sale", False)})
+
+    disc = [0.0] * n
+    for pr in promos:
+        amt = _round2(pr.get("discount") or 0)
+        if amt <= 0.005:
+            continue
+        cid = pr.get("coupon_id")
+        cpn = await db.coupons.find_one({"id": cid}, {"_id": 0}) if cid else None
+        allowed_cats = set(str(x) for x in ((cpn or {}).get("categories") or []) if x)
+        allowed_pids = set(str(x) for x in ((cpn or {}).get("products") or []) if x)
+        excluded = set(str(x) for x in ((cpn or {}).get("excluded_products") or []) if x)
+        skip_disc = (cpn or {}).get("skip_discounted", True)
+        idxs = []
+        for i, it in enumerate(enr):
+            in_scope = ((not allowed_cats and not allowed_pids)
+                        or _item_in_scope(it, allowed_cats, allowed_pids, excluded))
+            if in_scope and not (skip_disc and it.get("_has_manual_sale")):
+                idxs.append(i)
+        base = sum(gross[i] for i in idxs)
+        if base <= 0.005:  # kapsam çözülemedi → bu promo'yu düz-oransal (güvenli yedek)
+            _tot = sum(gross) or 1.0
+            for i in range(n):
+                disc[i] += amt * (gross[i] / _tot)
+            continue
+        for i in idxs:
+            disc[i] += amt * (gross[i] / base)
+    return [_round2(x) for x in disc]
+
+
 async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
                                     return_cargo_fee_override=None, returned_net_override=None):
     """İade tutarını otomatik hesaplar, şeffaf bir döküm döndürür (Karar #2 + #3).
