@@ -128,6 +128,7 @@ export default function Members() {
     setDetail(null);
     setM360(null);
     setD360({ start: "", end: "" });
+    setFull360(true);  // satıra tıklayınca doğrudan tam-genişlik (sayfa gibi) açılsın
     try {
       const { data } = await axios.get(`${API}/admin/members/${id}`, { headers: authHeaders() });
       setDetail(data);
@@ -268,7 +269,7 @@ export default function Members() {
             ) : items.length === 0 ? (
               <tr><td colSpan={7} className="p-8 text-center text-gray-400">Henüz üye yok.</td></tr>
             ) : items.map((m) => (
-              <tr key={m.id} className="border-t hover:bg-gray-50" data-testid={`member-row-${m.id}`}>
+              <tr key={m.id} onClick={() => openDetail(m.id)} className="border-t hover:bg-gray-50 cursor-pointer" data-testid={`member-row-${m.id}`}>
                 <td className="p-3">
                   <div className="font-medium">{m.first_name || m.last_name ? `${m.first_name || ""} ${m.last_name || ""}`.trim() : "—"}</div>
                   <div className="text-xs text-gray-500 mt-0.5">#{m.id.slice(0, 8)}</div>
@@ -281,7 +282,7 @@ export default function Members() {
                 <td className="p-3 text-right font-semibold tabular-nums">₺{(m.total_spent || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td>
                 <td className="p-3 text-center"><SegmentBadge seg={m.segment} /></td>
                 <td className="p-3 text-xs text-gray-500">{m.acquisition_source || "—"}</td>
-                <td className="p-3 text-right">
+                <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => openDetail(m.id)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Detay"><Eye size={15} /></button>
                   <button onClick={() => handleDelete(m.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Sil"><Trash2 size={15} /></button>
                 </td>
@@ -397,8 +398,9 @@ export default function Members() {
 
                       {m360.advanced && (
                         <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                            RFM: {m360.advanced.rfm.segment} <span className="opacity-70">(R{m360.advanced.rfm.r}/F{m360.advanced.rfm.f}/M{m360.advanced.rfm.m})</span>
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200"
+                            title="RFM = Recency (Yakınlık: son siparişten bu yana geçen süre) · Frequency (Sıklık: toplam sipariş sayısı) · Monetary (Parasal: toplam harcama). Her biri 1–5 arası puanlanır.">
+                            RFM · {m360.advanced.rfm.segment} <span className="opacity-70">(Yakınlık R{m360.advanced.rfm.r} · Sıklık F{m360.advanced.rfm.f} · Parasal M{m360.advanced.rfm.m})</span>
                           </span>
                           {m360.advanced.churn && (
                             <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold border ${m360.advanced.churn.level === "high" ? "bg-red-50 text-red-700 border-red-200" : m360.advanced.churn.level === "medium" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`} title={m360.advanced.churn.reason}>

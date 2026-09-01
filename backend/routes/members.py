@@ -481,6 +481,7 @@ table{{width:100%;border-collapse:collapse;font-size:10.5px;margin-top:4px}} th{
 <div class="h"><div class="brand">FACETTE</div><div style="text-align:right"><div class="t">MÜŞTERİ 360 RAPORU</div><div class="sub">Dönem: {rng}</div></div></div>
 <div class="who"><div class="n">{esc(name)}</div><div class="m">{esc(m.get('email'))}{(' · '+esc(m.get('phone'))) if m.get('phone') else ''} · Segment: {esc(a['rfm']['segment'])}</div></div>
 <div class="grid">{kpi_html}</div>
+<div style="font-size:9px;color:#888;margin-top:4px">RFM: R = Recency (Yakınlık — son siparişten bu yana) · F = Frequency (Sıklık — sipariş sayısı) · M = Monetary (Parasal — toplam harcama); her biri 1–5 puan.</div>
 <h2>Kırılımlar &amp; Tercihler</h2>
 <div class="chips"><b>Ödeme:</b> {chips(d['payment_breakdown'])}<br><b>Kanal:</b> {chips(d['channel_breakdown'])}<br>
 <b>En çok ürün:</b> {chips(d['top_products'])}<br><b>Kategori:</b> {chips(d['top_categories'])}<br>
