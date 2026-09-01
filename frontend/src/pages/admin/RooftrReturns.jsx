@@ -898,9 +898,9 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                     if (!hasDisc && !hasVade) return <span className="font-semibold whitespace-nowrap">{fmtTL(g)}</span>;
                                     return (
                                       <span className="whitespace-nowrap inline-flex items-center gap-2"
-                                        title={`Brüt ${fmtTL(g)}${hasDisc ? ` · indirim −${fmtTL(dShare)}` : ""}${hasVade ? ` · vade farkı +${fmtTL(vadeShare)}` : ""} · net ${fmtTL(net)}`}>
+                                        title={`Brüt ${fmtTL(g)}${hasDisc ? ` · indirim (kampanya + ödeme indirimi) −${fmtTL(dShare)} = siparişin toplam indiriminin bu ürüne düşen payı (%${(dr * 100).toFixed(1).replace(".", ",")})` : ""}${hasVade ? ` · vade farkı +${fmtTL(vadeShare)}` : ""} · net ${fmtTL(net)}`}>
                                         {hasDisc && <span className="text-gray-400 line-through">{fmtTL(g)}</span>}
-                                        {hasDisc && <span className="text-orange-600">−{fmtTL(dShare)} <span className="text-[10px]">(%{(dr * 100).toFixed(0)})</span></span>}
+                                        {hasDisc && <span className="text-orange-600">−{fmtTL(dShare)} <span className="text-[10px]">(%{(dr * 100).toFixed(1).replace(".", ",")})</span></span>}
                                         {hasVade && <span className="text-amber-600">+{fmtTL(vadeShare)} <span className="text-[10px]">vade</span></span>}
                                         {/* Taksitli siparişte kalem tutarı vade farkını İÇERİR — operatör
                                             "bu rakama vade farkı dahil mi?" diye tereddüt etmesin. */}
