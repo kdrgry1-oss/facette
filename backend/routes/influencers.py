@@ -1146,6 +1146,47 @@ async def ship_pr_entry(entry_id: str, current_user: dict = Depends(require_admi
             "tracking_no": upd["cargo_tracking_no"], "shipped_at": upd["shipped_at"]}
 
 
+@router.post("/influencer-pr/{entry_id}/refresh-tracking")
+async def refresh_pr_tracking(entry_id: str, current_user: dict = Depends(require_admin)):
+    """Siparişler'deki mantıkla PR kargosunun GERÇEK takip no'sunu MNG/DHL e-Commerce'den çeker.
+    PR kargosunun MNG sipariş no'su `cargo_tracking_no` (INF… biçimi). Firma gönderi_no üretmişse
+    kaydeder: cargo_gonderi_no (gerçek takip no), cargo_tracking_url (DHL takip linki),
+    cargo_last_status_text, cargo_status_checked_at. Henüz üretmediyse pending döner."""
+    e = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
+    if not e:
+        raise HTTPException(status_code=404, detail="PR kaydı bulunamadı")
+    siparis_no = (e.get("cargo_tracking_no") or "").strip()
+    if not siparis_no:
+        raise HTTPException(status_code=400, detail="Bu kayıtta kargo yok — önce Kargoya Ver (barkod çıkart).")
+    try:
+        from .orders import _get_mng_settings
+        from mng_kargo_client import get_mng_shipment_status
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=f"Kargo modülü yüklenemedi: {ex}")
+    s = await _get_mng_settings()
+    if not s.get("is_active") or not s.get("username"):
+        raise HTTPException(status_code=400, detail="MNG/DHL kargo entegrasyonu aktif değil.")
+    import asyncio as _aio
+    try:
+        info = await _aio.to_thread(
+            get_mng_shipment_status, username=s["username"], password=s["password"], siparis_no=siparis_no)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"Kargo sorgusu başarısız: {ex}")
+    if not info or not info.get("ok"):
+        return {"success": False, "pending": True,
+                "message": "Kargo firması henüz takip no üretmedi (kargoya verilmesini bekleyin)."}
+    gonderi = (info.get("gonderi_no") or "").strip()
+    statu_ac = (info.get("kargo_statu_aciklama") or "").strip()
+    track_no = gonderi or siparis_no
+    track_url = (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={track_no}"
+                 if track_no else (info.get("kargo_takip_url") or "").strip())
+    upd = {"cargo_gonderi_no": gonderi, "cargo_tracking_url": track_url,
+           "cargo_last_status_text": statu_ac, "cargo_status_checked_at": _now_iso()}
+    await db.influencer_pr.update_one({"id": entry_id}, {"$set": upd})
+    return {"success": True, "pending": not gonderi, "gonderi_no": gonderi,
+            "tracking_url": track_url, "status_text": statu_ac}
+
+
 @router.get("/influencer-pr/{entry_id}/cargo-label")
 async def influencer_pr_cargo_label(entry_id: str, token: str = None):
     """Influencer PR gönderisinin YAZDIRILABİLİR kargo etiketi — sipariş etiketiyle AYNI şablon

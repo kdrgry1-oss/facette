@@ -260,6 +260,20 @@ function PRTrackTab() {
     }
   };
 
+  // Kargo takip no ÇEK — Siparişler'deki mantık: MNG/DHL e-Commerce'den gerçek gönderi_no'yu getirir.
+  const trackPR = async (e) => {
+    if (!e.cargo_tracking_no) return toast.error("Önce kargoya verin (barkod çıkart).");
+    const t = toast.loading("Kargo takip no sorgulanıyor…");
+    try {
+      const r = await axios.post(`${API}/influencer-pr/${e.id}/refresh-tracking`, {}, auth());
+      if (r.data?.gonderi_no) toast.success(`Takip no alındı: ${r.data.gonderi_no}`, { id: t });
+      else toast(r.data?.message || "Kargo firması henüz takip no üretmedi.", { id: t });
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Takip sorgulanamadı", { id: t });
+    }
+  };
+
   // İstemci-taraflı sütun filtreleri (yüklü kayıtlar üzerinde) — İş Birliği/Platform/Ürün/Beden/
   // Durum/Paylaştı/Not. Üst arama+tarih+durum sunucudan; bunlar ekrandaki tabloyu daraltır.
   const _plat = (e) => e.platform || (e.instagram ? "İnstagram" : e.tiktok ? "Tiktok" : "");
@@ -387,6 +401,7 @@ function PRTrackTab() {
                        onEdit={() => { setEditTarget(e); setShowForm(true); }}
                        onDelete={() => del(e.id)}
                        onShip={() => shipPR(e)}
+                       onTrack={() => trackPR(e)}
                        onPatch={patchEntry}
                        onItemShared={patchItemShared}
                        onHistory={() => e.influencer_id && setHistoryFor({ id: e.influencer_id, name: e.influencer_name })} />
@@ -440,7 +455,7 @@ function PRThumb({ src, name }) {
 
 // Gönderi Takibi satırı (Excel düzeni): görünür sütunlar + çoklu ürün kalemleri +
 // detaya-basınca (expand) profil alanları + inline düzenlenebilir Paylaşma Tarihi/Not/İletişim Tarihi.
-function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }) {
+function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onItemShared }) {
   const [open, setOpen] = useState(false);
   const st = prStatusMeta(e.status);
   const td = "px-2 py-2 align-top";
@@ -533,6 +548,21 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
                 ? (
                   <>
                     <span className="inline-flex items-center text-green-700 bg-green-50 rounded px-1 py-1" title={`Barkod çıkarıldı · ${e.cargo_barcode}`}><Barcode size={14} /></span>
+                    {/* Kargo takip — Siparişler mantığı: gerçek gönderi_no varsa yeşil kamyon + no (link),
+                        yoksa MNG/DHL'den ÇEK butonu (kamyon). */}
+                    {e.cargo_gonderi_no ? (
+                      <a href={e.cargo_tracking_url || `https://kargotakip.dhlecommerce.com.tr/?takipNo=${e.cargo_gonderi_no}`}
+                         target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()}
+                         title={`Kargo takip: ${e.cargo_gonderi_no}${e.cargo_last_status_text ? " · " + e.cargo_last_status_text : ""}`}
+                         className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-700 border border-emerald-200 bg-emerald-50 rounded px-1.5 py-1"
+                         data-testid={`pr-track-link-${e.id}`}>
+                        <Truck size={14} /><span className="font-mono text-[10px] font-bold text-gray-700 max-w-[86px] truncate">{e.cargo_gonderi_no}</span>
+                      </a>
+                    ) : (
+                      <button onClick={onTrack} title="Kargo takip no çek (MNG/DHL e-Commerce)"
+                        className="inline-flex items-center gap-1 text-amber-600 hover:text-amber-700 border border-amber-200 rounded px-1.5 py-1"
+                        data-testid={`pr-track-${e.id}`}><Truck size={14} /><span className="text-[10px] font-medium">takip çek</span></button>
+                    )}
                     <button
                       onClick={() => { const t = localStorage.getItem("token"); window.open(`${API}/influencer-pr/${e.id}/cargo-label?token=${encodeURIComponent(t || "")}&print=1`, "_blank", "width=420,height=640"); }}
                       title="Kargo etiketini yazdır"
