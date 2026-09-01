@@ -12,7 +12,7 @@ import {
   Plus, TrendingUp, CheckCircle, Trash2, X,
   Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Package,
   ClipboardList, ExternalLink, History, Filter, Download,
-  ChevronRight, ChevronDown, Barcode, Printer,
+  ChevronRight, ChevronDown, Barcode, Printer, FileText,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -474,6 +474,13 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
                 : <button onClick={onShip} title="Barkod Çıkart — stok düşer + MNG kargo barkodu oluşur"
                           className="inline-flex items-center text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded px-1.5 py-1"
                           data-testid={`pr-ship-${e.id}`}><Barcode size={15} /></button>
+            )}
+            {(e.products || []).length > 0 && (
+              <button
+                onClick={() => { const t = localStorage.getItem("token"); window.open(`${API}/influencer-pr/${e.id}/irsaliye?token=${encodeURIComponent(t || "")}&print=1`, "_blank"); }}
+                title="Sevk irsaliyesi (PDF) — gönderilen ürünler"
+                className="inline-flex items-center text-gray-600 hover:text-black border border-gray-200 rounded px-1.5 py-1"
+                data-testid={`pr-irsaliye-${e.id}`}><FileText size={14} /></button>
             )}
             {e.influencer_id && (
               <button onClick={onHistory} title="Geçmiş" className="text-gray-400 hover:text-black p-1" data-testid={`pr-history-${e.id}`}><History size={14} /></button>

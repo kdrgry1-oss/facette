@@ -953,6 +953,123 @@ async def influencer_pr_cargo_label(entry_id: str, token: str = None):
     return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
 
 
+@router.get("/influencer-pr/{entry_id}/irsaliye")
+async def influencer_pr_irsaliye(entry_id: str, token: str = None):
+    """Influencer PR gönderisinin A4 SEVK İRSALİYESİ (yazdırılabilir/PDF) — gönderilen ürünleri
+    (ad, beden, adet, barkod) influencer bilgileriyle listeler. Bedelsiz tanıtım/numune notu içerir.
+    token query ile kimlik; ?print=1 ile otomatik yazdır."""
+    from fastapi.responses import HTMLResponse
+    from .orders import _get_sender_info, verify_admin_token
+    import html as _h
+    await verify_admin_token(token)
+    e = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
+    if not e:
+        raise HTTPException(status_code=404, detail="PR kaydı bulunamadı")
+    inf = await db.influencers.find_one({"id": e.get("influencer_id")}, {"_id": 0}) or {}
+    addr = inf.get("shipping_address") or {}
+    rname = (addr.get("full_name") or inf.get("name") or e.get("influencer_name") or "—").strip()
+    rphone = (addr.get("phone") or inf.get("phone") or "").strip()
+    radres = (addr.get("adres") or addr.get("address") or "").strip()
+    rcity = " / ".join([x for x in [(addr.get("ilce") or addr.get("district") or "").strip(),
+                                     (addr.get("il") or addr.get("city") or "").strip()] if x])
+    rfull = ", ".join([x for x in [radres, rcity] if x]) or "—"
+    insta = (inf.get("instagram") or e.get("instagram") or "").strip()
+    sender = await _get_sender_info()
+    sender_company = sender.get("name") or "FACETTE"
+    sender_addr = f"{sender.get('address','')}, {sender.get('district','')}/{sender.get('city','')}".strip(" ,/")
+    sender_phone = sender.get("phone", "") or ""
+    tarih = (e.get("shipped_at") or e.get("date") or _now_iso())[:10]
+    irs_no = (e.get("cargo_barcode") or (e.get("id") or "")[:8]).strip()
+
+    prods = [p for p in (e.get("products") or []) if isinstance(p, dict)]
+    rows = ""
+    toplam = 0
+    for i, p in enumerate(prods, 1):
+        q = int(p.get("qty") or 1)
+        toplam += q
+        rows += (f"<tr><td class='c'>{i}</td><td>{_h.escape(str(p.get('name') or 'Ürün'))}</td>"
+                 f"<td class='c'>{_h.escape(str(p.get('size') or '-'))}</td>"
+                 f"<td class='c'>{q}</td>"
+                 f"<td class='c mono'>{_h.escape(str(p.get('barcode') or ''))}</td></tr>")
+    if not rows:
+        rows = "<tr><td colspan='5' class='c' style='padding:14px;color:#888'>Ürün bulunmuyor.</td></tr>"
+
+    def _esc(v):
+        return _h.escape(str(v if v is not None else ""))
+
+    html = f"""<!DOCTYPE html>
+<html lang="tr"><head><meta charset="UTF-8"><title>Sevk İrsaliyesi - {_esc(rname)}</title>
+<style>
+  @page {{ size: A4; margin: 14mm; }}
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#111; margin:0; }}
+  .hd {{ display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #111; padding-bottom:10px; }}
+  .brand {{ font-size:22px; font-weight:800; letter-spacing:3px; }}
+  .brand small {{ display:block; font-size:10px; font-weight:600; letter-spacing:1px; color:#555; margin-top:3px; }}
+  .doc {{ text-align:right; }}
+  .doc .t {{ font-size:16px; font-weight:800; letter-spacing:1px; }}
+  .doc .m {{ font-size:11px; color:#444; margin-top:4px; line-height:1.5; }}
+  .parties {{ display:flex; gap:16px; margin-top:14px; }}
+  .box {{ flex:1; border:1px solid #ccc; border-radius:6px; padding:10px 12px; }}
+  .box .lbl {{ font-size:10px; font-weight:700; letter-spacing:.5px; color:#666; text-transform:uppercase; margin-bottom:5px; }}
+  .box .nm {{ font-size:13px; font-weight:700; }}
+  .box .ln {{ font-size:11.5px; color:#333; line-height:1.5; }}
+  table {{ width:100%; border-collapse:collapse; margin-top:16px; font-size:12px; }}
+  th {{ background:#111; color:#fff; text-align:left; padding:8px 10px; font-size:11px; letter-spacing:.4px; }}
+  td {{ border-bottom:1px solid #e2e2e2; padding:8px 10px; }}
+  td.c, th.c {{ text-align:center; }}
+  .mono {{ font-family:'Courier New',monospace; }}
+  tfoot td {{ font-weight:800; border-top:2px solid #111; }}
+  .note {{ margin-top:14px; font-size:11px; color:#555; background:#f7f7f7; border-radius:6px; padding:10px 12px; }}
+  .sign {{ display:flex; gap:40px; margin-top:40px; }}
+  .sign .s {{ flex:1; text-align:center; }}
+  .sign .line {{ border-top:1px solid #999; margin-top:36px; padding-top:6px; font-size:11px; color:#555; }}
+</style></head><body>
+  <div class="hd">
+    <div class="brand">{_esc(sender_company)}<small>{_esc(sender_addr)}{(' · '+_esc(sender_phone)) if sender_phone else ''}</small></div>
+    <div class="doc">
+      <div class="t">SEVK İRSALİYESİ</div>
+      <div class="m">Belge No: <b>{_esc(irs_no)}</b><br>Tarih: <b>{_esc(tarih)}</b></div>
+    </div>
+  </div>
+
+  <div class="parties">
+    <div class="box">
+      <div class="lbl">Gönderen</div>
+      <div class="nm">{_esc(sender_company)}</div>
+      <div class="ln">{_esc(sender_addr)}</div>
+      {('<div class="ln">Tel: '+_esc(sender_phone)+'</div>') if sender_phone else ''}
+    </div>
+    <div class="box">
+      <div class="lbl">Alıcı (Influencer)</div>
+      <div class="nm">{_esc(rname)}{('  ·  '+_esc(insta)) if insta else ''}</div>
+      <div class="ln">{_esc(rfull)}</div>
+      {('<div class="ln">Tel: '+_esc(rphone)+'</div>') if rphone else ''}
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th class="c" style="width:34px">#</th><th>Ürün</th><th class="c" style="width:70px">Beden</th><th class="c" style="width:56px">Adet</th><th class="c" style="width:150px">Barkod</th></tr></thead>
+    <tbody>{rows}</tbody>
+    <tfoot><tr><td colspan="3" style="text-align:right">TOPLAM ADET</td><td class="c">{toplam}</td><td></td></tr></tfoot>
+  </table>
+
+  <div class="note">Bu sevk irsaliyesi, tanıtım/iş birliği kapsamında <b>bedelsiz numune ürün</b> gönderimi içindir. Satışa konu değildir.</div>
+
+  <div class="sign">
+    <div class="s"><div class="line">Teslim Eden (Kaşe / İmza)</div></div>
+    <div class="s"><div class="line">Teslim Alan (İmza)</div></div>
+  </div>
+
+<script>
+  window.addEventListener('load', () => {{
+    if (window.location.search.includes('print=1')) setTimeout(() => window.print(), 250);
+  }});
+</script>
+</body></html>"""
+    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
+
+
 @router.get("/influencers/{influencer_id}/history")
 async def influencer_history(influencer_id: str, current_user: dict = Depends(require_admin)):
     """Yan sayfa: bir influencerla GEÇMİŞ — daha önce ne gönderdik (seeding kampanyaları)
