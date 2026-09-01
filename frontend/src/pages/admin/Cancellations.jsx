@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { XCircle, Search, RefreshCw, X, Trash2 } from "lucide-react";
 import { optimizeImg } from "../../lib/img";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -296,37 +297,37 @@ export default function Cancellations() {
                       {Number(o.shipping_cost) > 0 && (
                         <span className="text-xs text-gray-500">Kargo +{Number(o.shipping_cost).toFixed(2)} TL</span>
                       )}
-                      <span className="font-medium">{money(o.total ?? o.total_amount ?? o.grand_total)}</span>
+                      <span className="text-sm font-semibold text-gray-900">{Number(o.total ?? o.total_amount ?? o.grand_total ?? 0).toFixed(2)} TL</span>
                     </div>
                   </td>
-                  <td className="whitespace-nowrap text-sm text-gray-900">{pmLabel}</td>
+                  <td className="text-sm text-gray-900">{pmLabel}</td>
                   <td>
                     <span className={`inline-block px-2 py-0.5 ${pb.bg} text-white text-[10px] uppercase font-bold tracking-wider rounded`}>{pb.label}</span>
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <select
-                      value={o.status || "cancelled"}
-                      disabled={savingId === o.id}
-                      onChange={(e) => changeStatus(o.id, e.target.value)}
-                      className="border rounded text-xs px-2 py-1 bg-white max-w-[150px] disabled:opacity-50"
-                      title="Sipariş durumunu değiştir"
-                    >
-                      {optsFor(o.status || "cancelled").map((s) => (
-                        <option key={s.key} value={s.key}>{s.label}</option>
-                      ))}
-                    </select>
-                    {savingId === o.id && <span className="ml-1 text-xs text-gray-400">…</span>}
+                    <Select value={o.status || "cancelled"} onValueChange={(v) => changeStatus(o.id, v)}>
+                      <SelectTrigger className="w-32 h-8 text-xs">
+                        <SelectValue>
+                          <span className="text-gray-700 font-medium">{statusLabelAll[o.status || "cancelled"] || "İptal Edildi"}</span>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {optsFor(o.status || "cancelled").map((s) => (
+                          <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </td>
-                  <td className="whitespace-nowrap text-sm text-gray-700">{dt}</td>
+                  <td className="text-sm text-gray-500 whitespace-nowrap">{dt}</td>
                   <td className="text-xs text-gray-600 max-w-[160px] truncate" title={o.cancel_reason || ""}>{o.cancel_reason || "—"}</td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => handleDelete(o.id, o.order_number)}
                       disabled={deletingId === o.id}
                       title="Siparişi sil (arşive taşınır, geri alınabilir)"
-                      className="p-1.5 rounded hover:bg-red-50 text-red-600 disabled:opacity-50"
+                      className="tci-btn tci-btn-red disabled:opacity-50"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 size={15} />
                     </button>
                   </td>
                 </tr>
