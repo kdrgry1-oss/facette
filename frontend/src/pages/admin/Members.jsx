@@ -47,6 +47,9 @@ export default function Members() {
   const [full360, setFull360] = useState(false);
   const [sortBy, setSortBy] = useState("created");
   const [sortDir, setSortDir] = useState("desc");
+  const [dateField, setDateField] = useState("created");
+  const [dStart, setDStart] = useState("");
+  const [dEnd, setDEnd] = useState("");
 
   const toggleSort = (k) => {
     if (sortBy === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -102,10 +105,12 @@ export default function Members() {
   const load = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page, limit: "25", sort: sortBy, dir: sortDir });
+      const params = new URLSearchParams({ page, limit: "25", sort: sortBy, dir: sortDir, date_field: dateField });
       if (search) params.set("search", search);
       if (segment) params.set("segment", segment);
       if (source) params.set("source", source);
+      if (dStart) params.set("start", dStart);
+      if (dEnd) params.set("end", dEnd);
       const { data } = await axios.get(`${API}/admin/members?${params}`, { headers: authHeaders() });
       setItems(data.items || []);
       setTotal(data.total || 0);
@@ -121,7 +126,7 @@ export default function Members() {
     } catch (_) {}
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [page, segment, source, sortBy, sortDir]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [page, segment, source, sortBy, sortDir, dateField, dStart, dEnd]);
   useEffect(() => { loadStats(); }, []);
   useEffect(() => {
     axios.get(`${API}/admin/member-groups`, { headers: authHeaders() })
@@ -260,6 +265,14 @@ export default function Members() {
           <option value="new">Yeni</option>
           <option value="prospect">Aday</option>
         </select>
+        <select value={dateField} onChange={(e) => { setDateField(e.target.value); setPage(1); }} className="px-2 py-2 border rounded-lg text-sm bg-white" title="Tarih alanı">
+          <option value="created">Katılım tarihi</option>
+          <option value="last_order">Son sipariş tarihi</option>
+        </select>
+        <input type="date" value={dStart} onChange={(e) => { setDStart(e.target.value); setPage(1); }} className="px-2 py-2 border rounded-lg text-sm" title="Başlangıç" />
+        <span className="text-gray-400 text-sm">–</span>
+        <input type="date" value={dEnd} onChange={(e) => { setDEnd(e.target.value); setPage(1); }} className="px-2 py-2 border rounded-lg text-sm" title="Bitiş" />
+        {(dStart || dEnd) && <button onClick={() => { setDStart(""); setDEnd(""); setPage(1); }} className="px-2 py-2 border rounded-lg text-sm text-gray-500" title="Tarihi temizle">✕</button>}
         <button onClick={() => { setPage(1); load(); }} className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-700">Ara</button>
       </div>
 

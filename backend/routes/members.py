@@ -79,6 +79,9 @@ async def list_members(
     source: Optional[str] = None,
     sort: Optional[str] = "created",
     dir: Optional[str] = "desc",
+    date_field: Optional[str] = "created",   # created (Katılım) | last_order (Son Sipariş)
+    start: Optional[str] = None,
+    end: Optional[str] = None,
     current_user: dict = Depends(require_admin),
 ):
     query: dict = {"is_admin": {"$ne": True}}
@@ -94,6 +97,16 @@ async def list_members(
         ]
     if source:
         query["acquisition_source"] = source
+
+    # TARİH FİLTRESİ — Katılım (created_at) veya Son Sipariş (cached_last_order) aralığı.
+    _dfld = "cached_last_order" if (date_field == "last_order") else "created_at"
+    if start or end:
+        _dq = {}
+        if start:
+            _dq["$gte"] = start
+        if end:
+            _dq["$lte"] = end if len(end) > 10 else end + "T23:59:59"
+        query[_dfld] = _dq
 
     skip = (page - 1) * limit
 
