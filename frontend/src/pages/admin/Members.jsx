@@ -4,7 +4,11 @@ import { toast } from "sonner";
 import {
   Users, Search, UserPlus, Eye, Mail, Phone, ShoppingCart, TrendingUp,
   Crown, Star, UserCheck, UserX, X, Trash2, Edit,
+  RotateCcw, Ban,
 } from "lucide-react";
+import { BarChart, Bar, XAxis, Tooltip as RTooltip, ResponsiveContainer } from "recharts";
+
+const tl = (n) => "₺" + (Number(n) || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -38,6 +42,8 @@ export default function Members() {
   const [source, setSource] = useState("");
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [m360, setM360] = useState(null);
+  const [d360, setD360] = useState({ start: "", end: "" });
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ email: "", first_name: "", last_name: "", phone: "", password: "" });
   // DENETİM FIX (#41): üye gruplarını yükle — detay modalında gruba atama için.
@@ -84,10 +90,23 @@ export default function Members() {
   const openDetail = async (id) => {
     setDetailId(id);
     setDetail(null);
+    setM360(null);
+    setD360({ start: "", end: "" });
     try {
       const { data } = await axios.get(`${API}/admin/members/${id}`, { headers: authHeaders() });
       setDetail(data);
     } catch (_) { toast.error("Detay alınamadı"); }
+    fetch360(id, {});
+  };
+
+  const fetch360 = async (id, rng) => {
+    try {
+      const qs = [];
+      if (rng?.start) qs.push(`start=${rng.start}`);
+      if (rng?.end) qs.push(`end=${rng.end}`);
+      const { data } = await axios.get(`${API}/admin/members/${id}/360${qs.length ? `?${qs.join("&")}` : ""}`, { headers: authHeaders() });
+      setM360(data);
+    } catch (_) { /* sessiz */ }
   };
 
   const handleCreate = async () => {
@@ -301,6 +320,106 @@ export default function Members() {
                     <div className="text-xs text-gray-500 uppercase">Son Sipariş</div>
                     <div className="text-sm font-medium mt-1">{detail.member.last_order_at ? new Date(detail.member.last_order_at).toLocaleDateString("tr-TR") : "—"}</div>
                   </div>
+                </div>
+
+                {/* ── MÜŞTERİ 360 — tarih bazlı analiz ── */}
+                <div className="border-t pt-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                    <h4 className="font-semibold text-sm flex items-center gap-1"><TrendingUp size={14} /> Müşteri 360 — Tarih Bazlı Analiz</h4>
+                    <div className="flex items-center gap-1.5">
+                      <input type="date" value={d360.start} onChange={(e) => setD360((s) => ({ ...s, start: e.target.value }))} className="border rounded px-2 py-1 text-xs" />
+                      <span className="text-gray-400 text-xs">–</span>
+                      <input type="date" value={d360.end} onChange={(e) => setD360((s) => ({ ...s, end: e.target.value }))} className="border rounded px-2 py-1 text-xs" />
+                      <button onClick={() => fetch360(detailId, d360)} className="px-2 py-1 bg-gray-900 text-white rounded text-xs">Uygula</button>
+                      {(d360.start || d360.end) && <button onClick={() => { setD360({ start: "", end: "" }); fetch360(detailId, {}); }} className="px-2 py-1 border rounded text-xs">Temizle</button>}
+                    </div>
+                  </div>
+                  {!m360 ? <div className="text-xs text-gray-400 py-4 text-center">Analiz yükleniyor…</div> : (
+                    <>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {[
+                          { l: "Net Ciro", v: tl(m360.kpi.net_revenue), c: "text-emerald-700", s: `Brüt ${tl(m360.kpi.gross_revenue)}` },
+                          { l: "Sipariş", v: m360.kpi.orders, s: `${m360.kpi.items_total} ürün` },
+                          { l: "Ort. Sepet", v: tl(m360.kpi.aov) },
+                          { l: "İade", v: tl(m360.kpi.returns_amount), c: "text-rose-700", s: `${m360.kpi.returns_count} adet` },
+                          { l: "İptal", v: tl(m360.kpi.cancels_amount), c: "text-red-700", s: `${m360.kpi.cancels_count} adet` },
+                          { l: "İade Oranı", v: `%${m360.kpi.return_rate}` },
+                          { l: "Son Sipariş", v: m360.kpi.recency_days != null ? `${m360.kpi.recency_days} gün önce` : "—" },
+                          { l: "Üyelik Yaşı", v: m360.kpi.tenure_days != null ? `${m360.kpi.tenure_days} gün` : "—" },
+                        ].map((t, i) => (
+                          <div key={i} className="bg-gray-50 rounded-lg p-2.5 border border-gray-100">
+                            <div className="text-[10px] text-gray-500 uppercase tracking-wide">{t.l}</div>
+                            <div className={`text-base font-bold ${t.c || "text-gray-900"}`}>{t.v}</div>
+                            {t.s && <div className="text-[10px] text-gray-400">{t.s}</div>}
+                          </div>
+                        ))}
+                      </div>
+
+                      {m360.monthly?.length > 0 && (
+                        <div className="mt-4">
+                          <div className="text-xs font-medium text-gray-600 mb-1">Aylık Ciro</div>
+                          <div style={{ width: "100%", height: 140 }}>
+                            <ResponsiveContainer>
+                              <BarChart data={m360.monthly}>
+                                <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                                <RTooltip formatter={(v) => tl(v)} />
+                                <Bar dataKey="revenue" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-3 mt-3">
+                        {[["Ödeme Yöntemi", m360.payment_breakdown], ["Kanal", m360.channel_breakdown], ["En Çok Ürün", m360.top_products], ["Kategori", m360.top_categories]].map(([lbl, arr], i) => (
+                          arr?.length > 0 ? (
+                            <div key={i}>
+                              <div className="text-[11px] font-semibold text-gray-600 mb-1">{lbl}</div>
+                              <div className="flex flex-wrap gap-1">
+                                {arr.map((a, j) => (<span key={j} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded text-[10px]" title={a.name}>{(a.name || "").slice(0, 22)} · {a.count}</span>))}
+                              </div>
+                            </div>
+                          ) : null
+                        ))}
+                        {m360.coupons?.length > 0 && (
+                          <div>
+                            <div className="text-[11px] font-semibold text-gray-600 mb-1">Kullandığı Kuponlar</div>
+                            <div className="flex flex-wrap gap-1">
+                              {m360.coupons.map((a, j) => (<span key={j} className="px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-100 rounded text-[10px]">{a.name} · {a.count}</span>))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {m360.returns?.length > 0 && (
+                        <div className="mt-3">
+                          <h4 className="font-semibold text-xs mb-1.5 flex items-center gap-1 text-rose-700"><RotateCcw size={13} /> İadeler ({m360.returns.length})</h4>
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {m360.returns.map((r, i) => (
+                              <div key={i} className="flex items-center justify-between text-[11px] p-1.5 bg-rose-50/50 rounded border border-rose-100">
+                                <span className="font-mono">{r.order_number}<span className="text-gray-400 ml-2">{r.reason || r.status}</span></span>
+                                <span className="font-semibold text-rose-700">-{tl(r.refund_amount)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {m360.cancels?.length > 0 && (
+                        <div className="mt-3">
+                          <h4 className="font-semibold text-xs mb-1.5 flex items-center gap-1 text-red-700"><Ban size={13} /> İptaller ({m360.cancels.length})</h4>
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {m360.cancels.map((c, i) => (
+                              <div key={i} className="flex items-center justify-between text-[11px] p-1.5 bg-red-50/50 rounded border border-red-100">
+                                <span className="font-mono">{c.order_number}<span className="text-gray-400 ml-2">{c.reason || ""}</span></span>
+                                <span className="font-semibold text-red-700">{tl(c.total)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
                 {detail.attribution_summary?.length > 0 && (
                   <div>

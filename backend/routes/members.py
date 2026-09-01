@@ -261,6 +261,116 @@ async def detail(mid: str, current_user: dict = Depends(require_admin)):
     }
 
 
+@router.get("/{mid}/360")
+async def member_360(mid: str, start: Optional[str] = None, end: Optional[str] = None,
+                     current_user: dict = Depends(require_admin)):
+    """Müşteri 360 — tek ekranda tarih-bazlı: brüt/net ciro, sipariş/iade/iptal, aylık ciro serisi,
+    ödeme/kanal/ürün/kategori kırılımı, kupon kullanımı, RFM benzeri metrikler (recency/tenure/AOV/
+    iade oranı). start/end (YYYY-AA-GG) verilirse created_at'e göre süzülür."""
+    u = await db.users.find_one({"id": mid, "is_admin": {"$ne": True}}, {"_id": 0, "password": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Üye bulunamadı")
+    q = {"$and": [_member_order_match(u)]}
+    dm = {}
+    if start:
+        dm["$gte"] = start
+    if end:
+        dm["$lte"] = end if len(end) > 10 else end + "T23:59:59"
+    if dm:
+        q["$and"].append({"created_at": dm})
+    orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
+
+    CANCELLED = {"cancelled", "cancel_refunded"}
+    JUNK = {"awaiting_payment", "payment_failed", "failed"}
+
+    valid, cancels = [], []
+    brut, qty_total = 0.0, 0
+    pay_ct, ch_ct, monthly, prod_ct, cat_ct, coupons = {}, {}, {}, {}, {}, {}
+    for o in orders:
+        st = (o.get("status") or "").lower()
+        tot = float(o.get("total") or o.get("total_amount") or 0)
+        if st in CANCELLED:
+            cancels.append(o)
+            continue
+        if st in JUNK:
+            continue
+        valid.append(o)
+        brut += tot
+        m = (o.get("created_at") or "")[:7]
+        if m:
+            monthly[m] = round(monthly.get(m, 0) + tot, 2)
+        pm = (o.get("payment_method") or "—").lower()
+        pay_ct[pm] = pay_ct.get(pm, 0) + 1
+        ch = (o.get("attribution") or {}).get("channel") or "direct"
+        ch_ct[ch] = ch_ct.get(ch, 0) + 1
+        cc = (o.get("coupon_code") or o.get("coupon") or "").strip()
+        if cc:
+            coupons[cc] = coupons.get(cc, 0) + 1
+        for it in (o.get("items") or o.get("lines") or []):
+            qn = int(it.get("quantity") or it.get("qty") or 1)
+            qty_total += qn
+            nm = (it.get("name") or it.get("product_name") or "Ürün")
+            prod_ct[nm] = prod_ct.get(nm, 0) + qn
+            ct = (it.get("category") or it.get("category_name") or "")
+            if ct:
+                cat_ct[ct] = cat_ct.get(ct, 0) + qn
+
+    oid = [o.get("id") for o in orders if o.get("id")]
+    ret_amt, ret_n, returns_list = 0.0, 0, []
+    if oid:
+        async for r in db.customer_returns.find({"order_id": {"$in": oid}}, {"_id": 0}):
+            ra = float(r.get("refund_amount") or 0)
+            ret_amt += ra
+            ret_n += 1
+            returns_list.append({"order_number": r.get("order_number"), "status": r.get("status"),
+                                 "refund_amount": round(ra, 2), "reason": r.get("reason"),
+                                 "created_at": r.get("created_at") or r.get("updated_at")})
+
+    sip_n = len(valid)
+    iptal_amt = round(sum(float(o.get("total") or 0) for o in cancels), 2)
+    net = round(brut - ret_amt, 2)
+
+    def _top(d, n=6):
+        return [{"name": k, "count": v} for k, v in sorted(d.items(), key=lambda x: -x[1])[:n]]
+
+    def _days(iso):
+        try:
+            return (datetime.now(timezone.utc) - datetime.fromisoformat(str(iso).replace("Z", "+00:00"))).days
+        except Exception:
+            return None
+
+    first_ord = min((o.get("created_at") for o in valid), default=None)
+    last_ord = max((o.get("created_at") for o in valid), default=None)
+
+    return {
+        "member": await _annotate(u),
+        "range": {"start": start, "end": end},
+        "kpi": {
+            "orders": sip_n, "gross_revenue": round(brut, 2), "net_revenue": net,
+            "returns_count": ret_n, "returns_amount": round(ret_amt, 2),
+            "cancels_count": len(cancels), "cancels_amount": iptal_amt,
+            "return_rate": round(ret_n / sip_n * 100, 1) if sip_n else 0,
+            "aov": round(brut / sip_n, 2) if sip_n else 0, "items_total": qty_total,
+            "first_order": first_ord, "last_order": last_ord,
+            "recency_days": _days(last_ord) if last_ord else None,
+            "tenure_days": _days(u.get("created_at")) if u.get("created_at") else None,
+            "accepts_marketing": bool(u.get("accepts_marketing")),
+        },
+        "monthly": [{"month": k, "revenue": monthly[k]} for k in sorted(monthly.keys())],
+        "payment_breakdown": _top(pay_ct),
+        "channel_breakdown": _top(ch_ct),
+        "top_products": _top(prod_ct),
+        "top_categories": _top(cat_ct),
+        "coupons": _top(coupons),
+        "orders": [{"order_number": o.get("order_number") or o.get("id"), "created_at": o.get("created_at"),
+                    "status": o.get("status"), "total": float(o.get("total") or 0),
+                    "platform": o.get("platform"), "payment_method": o.get("payment_method")} for o in orders[:200]],
+        "returns": returns_list[:100],
+        "cancels": [{"order_number": o.get("order_number") or o.get("id"), "created_at": o.get("created_at"),
+                     "total": float(o.get("total") or 0), "reason": o.get("cancel_reason")} for o in cancels[:100]],
+    }
+
+
 @router.post("")
 async def create_member(payload: dict, current_user: dict = Depends(require_admin)):
     email = (payload.get("email") or "").strip().lower()
