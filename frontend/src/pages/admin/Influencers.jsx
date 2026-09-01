@@ -462,11 +462,9 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
   const items = Array.isArray(e.products) && e.products.length ? e.products : null;
   const canShip = (items && e.influencer_id);
   const barcoded = !!e.cargo_barcode;
-  // Gerçek kargo takip no: gonderi_no → yoksa NZ barkodu (cargo_barcode GERÇEKSE). 'INF…' yedeği
-  // ve cargo_tracking_no'ya eşit barkod = sipariş no yedeği → takip no SAYILMAZ.
-  const _bcRaw = (e.cargo_barcode || "").trim();
-  const _bcFallback = /^INF/i.test(_bcRaw) || _bcRaw === (e.cargo_tracking_no || "").trim();
-  const trackNo = (e.cargo_gonderi_no || "").trim() || (_bcRaw && !_bcFallback ? _bcRaw : "");
+  // GERÇEK DHL takip no'su YALNIZ cargo_gonderi_no'dur (MNG FaturaSiparisListesi'nden çekilen,
+  // kargotakip.dhlecommerce.com.tr'de izlenebilir). cargo_barcode = MNG iç barkodu → takip no DEĞİL.
+  const trackNo = (e.cargo_gonderi_no || "").trim();
   const trackUrl = e.cargo_tracking_url || (trackNo ? `https://kargotakip.dhlecommerce.com.tr/?takipNo=${trackNo}` : "");
   const platform = e.platform || (e.instagram ? "İnstagram" : e.tiktok ? "Tiktok" : "—");
   const uname = e.handle || e.instagram || e.tiktok || "—";
