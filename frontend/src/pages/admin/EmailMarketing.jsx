@@ -673,7 +673,13 @@ export default function EmailMarketing() {
                       </span>
                     </td>
                     <td className="text-right">{c.sent || 0}</td>
-                    <td className="text-right text-red-500">{c.failed || 0}</td>
+                    <td className="text-right text-red-500">
+                      {(c.failed || 0) > 0 && c.error_sample ? (
+                        <span className="inline-flex items-center gap-1 cursor-help" title={`Hata sebebi: ${c.error_sample}`}>
+                          {c.failed}<AlertTriangle size={12} />
+                        </span>
+                      ) : (c.failed || 0)}
+                    </td>
                     <td className="text-right">{c.total || 0}</td>
                     <td className="text-right text-xs text-gray-400">{c.created_at ? new Date(c.created_at).toLocaleString("tr-TR") : ""}</td>
                   </tr>

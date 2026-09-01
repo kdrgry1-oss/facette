@@ -249,6 +249,7 @@ async def _run_campaign(campaign_id: str):
     _resume = camp.get("cursor") or ""
     sent = int(camp.get("sent") or 0)
     failed = int(camp.get("failed") or 0)
+    error_sample = camp.get("error_sample") or ""  # ilk hata mesajı (panelde 'neden' göstermek için)
     n = int(camp.get("total_processed") or 0)
     await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
         "status": "sending", "started_at": camp.get("started_at") or _now()}})
@@ -297,13 +298,17 @@ async def _run_campaign(campaign_id: str):
                 sent += 1
             else:
                 failed += 1
+                if not error_sample:
+                    error_sample = str(r.get("error") or "bilinmeyen hata")[:400]
         except Exception as e:
             failed += 1
+            if not error_sample:
+                error_sample = str(e)[:400]
             logger.warning(f"[email-marketing] gönderim hata {email}: {e}")
         # cursor HER kalemde yazılır ki yarıda kesilme en fazla 1 mükerrer mail versin.
         if n % 20 == 0:
             await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
-                "sent": sent, "failed": failed, "skipped": skipped,
+                "sent": sent, "failed": failed, "skipped": skipped, "error_sample": error_sample,
                 "total_processed": n, "cursor": s.get("id") or ""}})
         else:
             await db.email_campaigns.update_one({"id": campaign_id},
@@ -311,7 +316,7 @@ async def _run_campaign(campaign_id: str):
         await asyncio.sleep(0.05)  # SES kota dostu nazik hız
     await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
         "status": "sent", "sent": sent, "failed": failed, "skipped": skipped,
-        "total": n, "total_processed": n, "finished_at": _now(),
+        "total": n, "total_processed": n, "finished_at": _now(), "error_sample": error_sample,
     }})
     logger.info(f"[email-marketing] kampanya {campaign_id} bitti: {sent} gönderildi, {failed} hata / {n}")
 
