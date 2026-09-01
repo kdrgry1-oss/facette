@@ -750,9 +750,11 @@ async def _build_products_query(
     if search:
         import re as _re
         esc = _search_tr_regex(search)  # Türkçe duyarsız (İ/ı/ş/ç/ğ/ö/ü dahil)
+        # NOT: 'description' arama alanlarından ÇIKARILDI — ürün açıklamaları stil/kombin metni
+        # içerir ("bu ceketi eteğinizle kombinleyin" gibi) ve "etek" araması alakasız ceket/bluz
+        # getiriyordu. Arama artık isim/anahtar kelime/kod/kategori/özellik/renk üzerinden yürür.
         query["$or"] = [
             {"name": {"$regex": esc, "$options": "i"}},
-            {"description": {"$regex": esc, "$options": "i"}},
             {"keywords": {"$regex": esc, "$options": "i"}},
             {"stock_code": {"$regex": esc, "$options": "i"}},
             {"sku": {"$regex": esc, "$options": "i"}},
