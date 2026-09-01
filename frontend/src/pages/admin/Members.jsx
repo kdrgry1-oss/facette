@@ -44,6 +44,42 @@ export default function Members() {
   const [detail, setDetail] = useState(null);
   const [m360, setM360] = useState(null);
   const [d360, setD360] = useState({ start: "", end: "" });
+  const [full360, setFull360] = useState(false);
+
+  const open360Print = () => {
+    const t = localStorage.getItem("token");
+    const qs = [`token=${encodeURIComponent(t || "")}`, "print=1"];
+    if (d360.start) qs.push(`start=${d360.start}`);
+    if (d360.end) qs.push(`end=${d360.end}`);
+    window.open(`${API}/admin/members/${detailId}/360/print?${qs.join("&")}`, "_blank");
+  };
+
+  const export360CSV = () => {
+    if (!m360) return;
+    const k = m360.kpi, a = m360.advanced || {};
+    const L = [];
+    L.push(["Müşteri 360", `${detail?.member?.first_name || ""} ${detail?.member?.last_name || ""}`.trim() || detail?.member?.email || ""]);
+    L.push(["Dönem", `${d360.start || "…"} - ${d360.end || "…"}`]);
+    L.push([]);
+    L.push(["Metrik", "Değer"]);
+    const rows = [
+      ["Net Ciro", k.net_revenue], ["Brüt Ciro", k.gross_revenue], ["Sipariş", k.orders], ["Ort. Sepet (AOV)", k.aov],
+      ["İade Tutarı", k.returns_amount], ["İade Adedi", k.returns_count], ["İptal Tutarı", k.cancels_amount], ["İptal Adedi", k.cancels_count],
+      ["İade Oranı %", k.return_rate], ["Ürün Adedi", k.items_total], ["Son Sipariş (gün önce)", k.recency_days], ["Üyelik Yaşı (gün)", k.tenure_days],
+      ["RFM Segment", a.rfm?.segment], ["RFM (R/F/M)", `${a.rfm?.r}/${a.rfm?.f}/${a.rfm?.m}`], ["Kayıp Riski", a.churn?.level],
+      ["CLV (tahmini)", a.clv_estimate], ["Tekrar Alım (gün)", a.repurchase_days],
+      ["Favori Beden", (a.fav_size || []).map((x) => `${x.name}(${x.count})`).join(" ")],
+      ["Favori Renk", (a.fav_color || []).map((x) => `${x.name}(${x.count})`).join(" ")],
+    ];
+    rows.forEach((r) => L.push(r));
+    L.push([]); L.push(["Sipariş No", "Tarih", "Durum", "Tutar"]);
+    (m360.orders || []).forEach((o) => L.push([o.order_number, (o.created_at || "").slice(0, 10), o.status, o.total]));
+    const csv = "﻿" + L.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = `musteri360-${detailId}.csv`; link.click();
+    URL.revokeObjectURL(url);
+  };
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ email: "", first_name: "", last_name: "", phone: "", password: "" });
   // DENETİM FIX (#41): üye gruplarını yükle — detay modalında gruba atama için.
@@ -269,7 +305,7 @@ export default function Members() {
       {/* Detail drawer */}
       {detailId && (
         <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={() => setDetailId(null)}>
-          <div className="w-full max-w-2xl bg-white h-full overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className={`w-full ${full360 ? "max-w-full" : "max-w-2xl"} bg-white h-full overflow-y-auto transition-[max-width]`} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b p-4 sticky top-0 bg-white">
               <h3 className="font-bold text-lg">Üye Detayı</h3>
               <button onClick={() => setDetailId(null)} className="p-1.5 hover:bg-gray-100 rounded"><X size={18} /></button>
@@ -332,6 +368,10 @@ export default function Members() {
                       <input type="date" value={d360.end} onChange={(e) => setD360((s) => ({ ...s, end: e.target.value }))} className="border rounded px-2 py-1 text-xs" />
                       <button onClick={() => fetch360(detailId, d360)} className="px-2 py-1 bg-gray-900 text-white rounded text-xs">Uygula</button>
                       {(d360.start || d360.end) && <button onClick={() => { setD360({ start: "", end: "" }); fetch360(detailId, {}); }} className="px-2 py-1 border rounded text-xs">Temizle</button>}
+                      <span className="w-px h-5 bg-gray-200 mx-1" />
+                      <button onClick={open360Print} title="PDF olarak yazdır" className="px-2 py-1 border rounded text-xs hover:bg-gray-50">PDF</button>
+                      <button onClick={export360CSV} title="Excel (CSV) indir" className="px-2 py-1 border rounded text-xs hover:bg-gray-50">Excel</button>
+                      <button onClick={() => setFull360((f) => !f)} title="Tam ekran" className="px-2 py-1 border rounded text-xs hover:bg-gray-50">{full360 ? "Küçült" : "Tam ekran"}</button>
                     </div>
                   </div>
                   {!m360 ? <div className="text-xs text-gray-400 py-4 text-center">Analiz yükleniyor…</div> : (
@@ -354,6 +394,23 @@ export default function Members() {
                           </div>
                         ))}
                       </div>
+
+                      {m360.advanced && (
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            RFM: {m360.advanced.rfm.segment} <span className="opacity-70">(R{m360.advanced.rfm.r}/F{m360.advanced.rfm.f}/M{m360.advanced.rfm.m})</span>
+                          </span>
+                          {m360.advanced.churn && (
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold border ${m360.advanced.churn.level === "high" ? "bg-red-50 text-red-700 border-red-200" : m360.advanced.churn.level === "medium" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`} title={m360.advanced.churn.reason}>
+                              Kayıp riski: {{ low: "Düşük", medium: "Orta", high: "Yüksek" }[m360.advanced.churn.level] || m360.advanced.churn.level}
+                            </span>
+                          )}
+                          <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700 border border-gray-200">CLV ~ {tl(m360.advanced.clv_estimate)}</span>
+                          {m360.advanced.repurchase_days && <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700 border border-gray-200">Tekrar alım: {m360.advanced.repurchase_days} günde bir</span>}
+                          {m360.advanced.fav_size?.length > 0 && <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700 border border-gray-200">Favori beden: {m360.advanced.fav_size.map((x) => x.name).join(", ")}</span>}
+                          {m360.advanced.fav_color?.length > 0 && <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700 border border-gray-200">Favori renk: {m360.advanced.fav_color.map((x) => x.name).join(", ")}</span>}
+                        </div>
+                      )}
 
                       {m360.monthly?.length > 0 && (
                         <div className="mt-4">

@@ -261,15 +261,8 @@ async def detail(mid: str, current_user: dict = Depends(require_admin)):
     }
 
 
-@router.get("/{mid}/360")
-async def member_360(mid: str, start: Optional[str] = None, end: Optional[str] = None,
-                     current_user: dict = Depends(require_admin)):
-    """Müşteri 360 — tek ekranda tarih-bazlı: brüt/net ciro, sipariş/iade/iptal, aylık ciro serisi,
-    ödeme/kanal/ürün/kategori kırılımı, kupon kullanımı, RFM benzeri metrikler (recency/tenure/AOV/
-    iade oranı). start/end (YYYY-AA-GG) verilirse created_at'e göre süzülür."""
-    u = await db.users.find_one({"id": mid, "is_admin": {"$ne": True}}, {"_id": 0, "password": 0})
-    if not u:
-        raise HTTPException(status_code=404, detail="Üye bulunamadı")
+async def _member_360_data(u: dict, start=None, end=None):
+    """Müşteri 360 çekirdek hesabı (auth'suz) — JSON ucu + PDF/print ucu ortak kullanır."""
     q = {"$and": [_member_order_match(u)]}
     dm = {}
     if start:
@@ -286,6 +279,7 @@ async def member_360(mid: str, start: Optional[str] = None, end: Optional[str] =
     valid, cancels = [], []
     brut, qty_total = 0.0, 0
     pay_ct, ch_ct, monthly, prod_ct, cat_ct, coupons = {}, {}, {}, {}, {}, {}
+    size_ct, color_ct = {}, {}
     for o in orders:
         st = (o.get("status") or "").lower()
         tot = float(o.get("total") or o.get("total_amount") or 0)
@@ -314,6 +308,12 @@ async def member_360(mid: str, start: Optional[str] = None, end: Optional[str] =
             ct = (it.get("category") or it.get("category_name") or "")
             if ct:
                 cat_ct[ct] = cat_ct.get(ct, 0) + qn
+            sz = str(it.get("size") or "").strip()
+            if sz:
+                size_ct[sz] = size_ct.get(sz, 0) + qn
+            cl = str(it.get("color") or "").strip()
+            if cl:
+                color_ct[cl] = color_ct.get(cl, 0) + qn
 
     oid = [o.get("id") for o in orders if o.get("id")]
     ret_amt, ret_n, returns_list = 0.0, 0, []
@@ -342,6 +342,60 @@ async def member_360(mid: str, start: Optional[str] = None, end: Optional[str] =
     first_ord = min((o.get("created_at") for o in valid), default=None)
     last_ord = max((o.get("created_at") for o in valid), default=None)
 
+    # ── Gelişmiş: tekrar-satın-alma aralığı, RFM, churn riski, CLV tahmini ──
+    def _parse(iso):
+        try:
+            return datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        except Exception:
+            return None
+    vdates = sorted([d for d in (_parse(o.get("created_at")) for o in valid) if d])
+    repurchase_days = None
+    if len(vdates) >= 2:
+        gaps = [(vdates[i + 1] - vdates[i]).days for i in range(len(vdates) - 1)]
+        gaps = [g for g in gaps if g >= 0]
+        if gaps:
+            repurchase_days = round(sum(gaps) / len(gaps), 1)
+    rec = _days(last_ord) if last_ord else None
+
+    def _sc(v, ths):  # artan eşikler → 1..5
+        s = 1
+        for i, t in enumerate(ths):
+            if v is not None and v >= t:
+                s = i + 2
+        return min(s, 5)
+    r_score = 5 if rec is None else (5 if rec <= 30 else 4 if rec <= 60 else 3 if rec <= 120 else 2 if rec <= 240 else 1)
+    f_score = _sc(sip_n, [2, 3, 5, 10])
+    m_score = _sc(net, [500, 2000, 5000, 10000])
+    if sip_n == 0:
+        seg = "Ziyaretçi"
+    elif r_score >= 4 and f_score >= 4:
+        seg = "Şampiyon"
+    elif f_score >= 3 and m_score >= 3:
+        seg = "Sadık"
+    elif r_score >= 4 and f_score <= 2:
+        seg = "Yeni / Umut Vaat Eden"
+    elif r_score <= 2 and f_score >= 3:
+        seg = "Risk Altında"
+    elif r_score <= 2:
+        seg = "Kayıp / Uykuda"
+    else:
+        seg = "Gelişmekte"
+
+    churn = {"level": "low", "reason": "Aktif müşteri"}
+    if sip_n >= 1 and rec is not None:
+        if repurchase_days and rec > repurchase_days * 2 and rec > 45:
+            churn = {"level": "high", "reason": f"Ort. {int(repurchase_days)} günde bir alırken {rec} gündür sipariş yok"}
+        elif rec > 180:
+            churn = {"level": "high", "reason": f"{rec} gündür sipariş yok"}
+        elif rec > 90:
+            churn = {"level": "medium", "reason": f"{rec} gündür sipariş yok"}
+
+    tenure = _days(u.get("created_at")) or 0
+    orders_per_year = (sip_n / (tenure / 365.0)) if (tenure and tenure > 30) else float(sip_n)
+    aov_v = (brut / sip_n) if sip_n else 0.0
+    proj = (aov_v * orders_per_year * 2) if (churn["level"] != "high" and orders_per_year > 0) else 0.0
+    clv_estimate = round(net + proj, 2)
+
     return {
         "member": await _annotate(u),
         "range": {"start": start, "end": end},
@@ -362,6 +416,15 @@ async def member_360(mid: str, start: Optional[str] = None, end: Optional[str] =
         "top_products": _top(prod_ct),
         "top_categories": _top(cat_ct),
         "coupons": _top(coupons),
+        "advanced": {
+            "rfm": {"r": r_score, "f": f_score, "m": m_score, "total": r_score + f_score + m_score, "segment": seg},
+            "churn": churn,
+            "repurchase_days": repurchase_days,
+            "clv_estimate": clv_estimate,
+            "orders_per_year": round(orders_per_year, 1),
+            "fav_size": _top(size_ct, 3),
+            "fav_color": _top(color_ct, 3),
+        },
         "orders": [{"order_number": o.get("order_number") or o.get("id"), "created_at": o.get("created_at"),
                     "status": o.get("status"), "total": float(o.get("total") or 0),
                     "platform": o.get("platform"), "payment_method": o.get("payment_method")} for o in orders[:200]],
@@ -369,6 +432,89 @@ async def member_360(mid: str, start: Optional[str] = None, end: Optional[str] =
         "cancels": [{"order_number": o.get("order_number") or o.get("id"), "created_at": o.get("created_at"),
                      "total": float(o.get("total") or 0), "reason": o.get("cancel_reason")} for o in cancels[:100]],
     }
+
+
+@router.get("/{mid}/360")
+async def member_360(mid: str, start: Optional[str] = None, end: Optional[str] = None,
+                     current_user: dict = Depends(require_admin)):
+    """Müşteri 360 JSON — tarih-bazlı ciro/sipariş/iade/iptal + RFM/CLV/churn/favori beden-renk."""
+    u = await db.users.find_one({"id": mid, "is_admin": {"$ne": True}}, {"_id": 0, "password": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Üye bulunamadı")
+    return await _member_360_data(u, start, end)
+
+
+@router.get("/{mid}/360/print")
+async def member_360_print(mid: str, start: Optional[str] = None, end: Optional[str] = None, token: str = None):
+    """Müşteri 360 A4 rapor (PDF/yazdır). token query ile kimlik; ?print=1 ile otomatik yazdır."""
+    from fastapi.responses import HTMLResponse
+    from .orders import verify_admin_token
+    import html as _h
+    await verify_admin_token(token)
+    u = await db.users.find_one({"id": mid, "is_admin": {"$ne": True}}, {"_id": 0, "password": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Üye bulunamadı")
+    d = await _member_360_data(u, start, end)
+    m, k, a = d["member"], d["kpi"], d["advanced"]
+
+    def esc(v):
+        return _h.escape(str(v if v is not None else ""))
+
+    def tl(n):
+        return "₺" + f"{float(n or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    name = f"{m.get('first_name','')} {m.get('last_name','')}".strip() or m.get("email") or "Üye"
+    rng = (f"{esc(start or '…')} – {esc(end or '…')}") if (start or end) else "Tüm zamanlar"
+    _churn_tr = {"low": "Düşük", "medium": "Orta", "high": "Yüksek"}
+    kpis = [
+        ("Net Ciro", tl(k["net_revenue"])), ("Brüt Ciro", tl(k["gross_revenue"])),
+        ("Sipariş", str(k["orders"])), ("Ort. Sepet", tl(k["aov"])),
+        ("İade", f"{tl(k['returns_amount'])} ({k['returns_count']})"),
+        ("İptal", f"{tl(k['cancels_amount'])} ({k['cancels_count']})"),
+        ("İade Oranı", f"%{k['return_rate']}"), ("Ürün Adedi", str(k["items_total"])),
+        ("RFM Segment", esc(a['rfm']['segment']) + f" (R{a['rfm']['r']}/F{a['rfm']['f']}/M{a['rfm']['m']})"),
+        ("Kayıp Riski", esc(_churn_tr.get(a['churn']['level'], a['churn']['level']))),
+        ("CLV (tahmini)", tl(a["clv_estimate"])),
+        ("Tekrar Alım", (f"{a['repurchase_days']} günde bir" if a.get("repurchase_days") else "—")),
+        ("Son Sipariş", (f"{k['recency_days']} gün önce" if k.get("recency_days") is not None else "—")),
+        ("Üyelik Yaşı", (f"{k['tenure_days']} gün" if k.get("tenure_days") is not None else "—")),
+    ]
+    kpi_html = "".join(f"<div class='k'><div class='kl'>{esc(l)}</div><div class='kv'>{v}</div></div>" for l, v in kpis)
+
+    def _rows(items, cols):
+        r = "".join("<tr>" + "".join(f"<td>{esc(c(it))}</td>" for c in cols) + "</tr>" for it in items)
+        return r or "<tr><td colspan='9' style='color:#999'>—</td></tr>"
+
+    ord_rows = _rows(d["orders"], [lambda o: o.get("order_number"), lambda o: (o.get("created_at") or "")[:10],
+                                   lambda o: o.get("status"), lambda o: tl(o.get("total"))])
+    ret_rows = _rows(d["returns"], [lambda o: o.get("order_number"), lambda o: o.get("reason") or o.get("status"),
+                                    lambda o: tl(o.get("refund_amount"))])
+
+    def chips(arr):
+        return ", ".join(f"{esc(x['name'])}·{x['count']}" for x in (arr or [])) or "—"
+
+    html = f"""<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"><title>Müşteri 360 - {esc(name)}</title>
+<style>@page{{size:A4;margin:13mm}} *{{box-sizing:border-box}} body{{font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#141414;margin:0}}
+.h{{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:8px}} .brand{{font-weight:800;letter-spacing:2px;font-size:18px}}
+.t{{font-weight:800;font-size:15px}} .sub{{font-size:11px;color:#555}} h2{{font-size:12px;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.5px;color:#444;border-bottom:1px solid #ddd;padding-bottom:3px}}
+.who{{margin-top:10px}} .who .n{{font-size:16px;font-weight:800}} .who .m{{font-size:11px;color:#555}}
+.grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}} .k{{border:1px solid #e2e2e2;border-radius:6px;padding:7px 9px}}
+.kl{{font-size:9px;color:#777;text-transform:uppercase}} .kv{{font-size:13px;font-weight:700}}
+table{{width:100%;border-collapse:collapse;font-size:10.5px;margin-top:4px}} th{{background:#111;color:#fff;text-align:left;padding:5px 7px}} td{{border-bottom:1px solid #eee;padding:5px 7px}}
+.chips{{font-size:11px;color:#333;line-height:1.7}}</style></head><body>
+<div class="h"><div class="brand">FACETTE</div><div style="text-align:right"><div class="t">MÜŞTERİ 360 RAPORU</div><div class="sub">Dönem: {rng}</div></div></div>
+<div class="who"><div class="n">{esc(name)}</div><div class="m">{esc(m.get('email'))}{(' · '+esc(m.get('phone'))) if m.get('phone') else ''} · Segment: {esc(a['rfm']['segment'])}</div></div>
+<div class="grid">{kpi_html}</div>
+<h2>Kırılımlar &amp; Tercihler</h2>
+<div class="chips"><b>Ödeme:</b> {chips(d['payment_breakdown'])}<br><b>Kanal:</b> {chips(d['channel_breakdown'])}<br>
+<b>En çok ürün:</b> {chips(d['top_products'])}<br><b>Kategori:</b> {chips(d['top_categories'])}<br>
+<b>Favori beden:</b> {chips(a['fav_size'])} &nbsp;&nbsp; <b>Favori renk:</b> {chips(a['fav_color'])}<br>
+<b>Kuponlar:</b> {chips(d['coupons'])}{('<br><b>Kayıp riski:</b> '+esc(a['churn']['reason'])) if a['churn']['level']!='low' else ''}</div>
+<h2>Siparişler ({len(d['orders'])})</h2><table><thead><tr><th>Sipariş No</th><th>Tarih</th><th>Durum</th><th>Tutar</th></tr></thead><tbody>{ord_rows}</tbody></table>
+<h2>İadeler ({len(d['returns'])})</h2><table><thead><tr><th>Sipariş No</th><th>Sebep / Durum</th><th>İade Tutarı</th></tr></thead><tbody>{ret_rows}</tbody></table>
+<script>window.addEventListener('load',()=>{{if(location.search.includes('print=1'))setTimeout(()=>window.print(),300)}})</script>
+</body></html>"""
+    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
 
 
 @router.post("")
