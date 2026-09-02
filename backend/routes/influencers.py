@@ -1659,15 +1659,19 @@ async def create_campaign_cargo(campaign_id: str, current_user: dict = Depends(r
     try:
         res = await run_in_threadpool(_ship)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"MNG kargo hatası: {e}")
+        # 502 yerine 400: proxy/Cloudflare 5xx gövdesini maskeleyip gerçek sebebi frontend'e
+        # ulaştırmıyordu. 400 ile MNG'nin döndürdüğü ASIL hata "Kargo oluşturulamadı" toast'ında görünür.
+        logger.warning(f"[influencer] MNG create_shipment exception (kampanya={campaign_id}, ilce={ilce}): {e}")
+        raise HTTPException(status_code=400, detail=f"MNG kargo hatası: {e}")
 
     barkod = (res.get("barkod") or "").strip()
     if not res.get("ok"):
         _hata = str(res.get("hata") or "")
         # E005/"ZATEN VAR": kayıt MNG'de zaten oluşmuş (önceki denemede) — hata değil,
-        # barkod aşağıda tamamlanır. Diğer hatalarda 502.
+        # barkod aşağıda tamamlanır. Diğer hatalarda GERÇEK SEBEBİ 400 ile döndür.
         if not (("ZATEN VAR" in _hata.upper()) or ("E005" in _hata.upper())):
-            raise HTTPException(status_code=502, detail=f"Kargo oluşturulamadı: {_hata or res}")
+            logger.warning(f"[influencer] MNG kargo başarısız (kampanya={campaign_id}, ilce={ilce}): {_hata or res}")
+            raise HTTPException(status_code=400, detail=f"Kargo oluşturulamadı: {_hata or res}")
     # Barkod boşsa (SiparisGirisi barkodu doğrudan vermez) gerçek MNG barkodunu ayrı çağrıyla
     # dene; yine olmazsa sipariş no'ya düş (etiket sipariş no'yu kodlar → barkod ASLA boş kalmaz).
     if not barkod:
