@@ -7001,6 +7001,19 @@ async def _build_return_for_order(order: dict, payload: dict, actor: dict) -> di
         raise HTTPException(status_code=400, detail="İade sebebi seçmek zorunludur.")
     reason_code = (payload.get("reason_code") or "").strip()[:60]
 
+    # Havale/EFT iadesinde iade tutarı BANKA HESABINA döner → müşterinin girdiği IBAN + ad soyad
+    # kaydedilir (admin iadeyi bu hesaba yapar). Kart ödemesinde saklanmaz (para karta döner).
+    _pm = str(order.get("payment_method") or "").lower()
+    refund_bank_info = None
+    if _pm in ("bank_transfer", "havale", "eft", "bank"):
+        _iban = "".join(str(payload.get("refund_iban") or "").split()).upper()[:34]
+        if _iban:
+            refund_bank_info = {
+                "iban": _iban,
+                "name": str(payload.get("refund_name") or "").strip()[:120],
+                "bank": str(payload.get("refund_bank") or "").strip()[:80],
+            }
+
     rid = generate_id()
     iade_no = f"IW{order.get('order_number', '')}{rid[:6]}".replace(" ", "")
     icerik = "IADE - " + "; ".join(f"{i['quantity']}x {i['name']}" for i in items)
@@ -7024,6 +7037,7 @@ async def _build_return_for_order(order: dict, payload: dict, actor: dict) -> di
         "barcode_png_b64": png_b64, "status": "created",
         "created_at": now_iso, "valid_until": valid_until,
         "guest": bool(not (actor or {}).get("id")),
+        "refund_bank_info": refund_bank_info,  # havale iadesinde IBAN+ad soyad; kartta None
     }
     await db.customer_returns.insert_one({**rec})
     await _log_order_event(order["id"], "return", "İade talebi oluşturuldu", actor,
@@ -7035,6 +7049,7 @@ async def _build_return_for_order(order: dict, payload: dict, actor: dict) -> di
             "iade_no": iade_no, "gonderi_no": gonderi_no,
             "valid_until": valid_until, "reason": reason, "reason_code": reason_code,
             "created_at": now_iso, "status": "created", "items_count": len(items),
+            "refund_bank_info": refund_bank_info,  # havale iadesinde IBAN+ad soyad
             # Talep iptal edilirse sipariş bu statüye geri döner (müşteri iade-iptal için).
             "prev_status": order.get("status") or "delivered",
         },

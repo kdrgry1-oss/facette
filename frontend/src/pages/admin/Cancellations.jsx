@@ -319,7 +319,17 @@ export default function Cancellations() {
                     </Select>
                   </td>
                   <td className="text-sm text-gray-500 whitespace-nowrap">{dt}</td>
-                  <td className="text-xs text-gray-600 max-w-[160px] truncate" title={o.cancel_reason || ""}>{o.cancel_reason || "—"}</td>
+                  <td className="text-xs text-gray-600 max-w-[200px]">
+                    <div className="truncate" title={o.cancel_reason || ""}>{o.cancel_reason || "—"}</div>
+                    {/* Havale iptali → para bu hesaba iade edilir (müşteri iptalde girdi) */}
+                    {o.refund_bank_info?.iban && (
+                      <div className="mt-1 text-[11px] leading-snug bg-amber-50 border border-amber-200 rounded px-1.5 py-1 text-amber-900"
+                           title={`IBAN: ${o.refund_bank_info.iban}${o.refund_bank_info.name ? " · " + o.refund_bank_info.name : ""}${o.refund_bank_info.bank ? " · " + o.refund_bank_info.bank : ""}`}>
+                        <div className="font-mono font-semibold break-all">{o.refund_bank_info.iban}</div>
+                        <div className="truncate">{o.refund_bank_info.name || "—"}{o.refund_bank_info.bank ? ` · ${o.refund_bank_info.bank}` : ""}</div>
+                      </div>
+                    )}
+                  </td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => handleDelete(o.id, o.order_number)}

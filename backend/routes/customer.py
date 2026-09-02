@@ -2,7 +2,7 @@
 Customer account routes - Profile, addresses, orders
 """
 import re
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Body
 from datetime import datetime, timezone
 
 from .deps import db, logger, get_current_user, require_auth, generate_id
@@ -59,7 +59,7 @@ _CUSTOMER_CANCELLABLE = {"pending", "awaiting_payment", "payment_notified", "con
 
 
 @router.post("/my-orders/{order_id}/cancel")
-async def cancel_my_order(order_id: str, current_user: dict = Depends(require_auth)):
+async def cancel_my_order(order_id: str, payload: dict = Body(default={}), current_user: dict = Depends(require_auth)):
     """Üye, kendi siparişini YALNIZCA 'Hazırlanıyor' durumuna geçmeden iptal edebilir.
     Sunucu tarafı guard zorunludur — frontend'in butonu gizlemesine güvenilmez."""
     order = await db.orders.find_one(
@@ -100,6 +100,17 @@ async def cancel_my_order(order_id: str, current_user: dict = Depends(require_au
     else:
         _set["cancel_requested_at"] = now_iso
         _set["refund_pending"] = True   # personel: para iadesi bekliyor
+        # Havale/EFT ile ödenmiş siparişte para BANKA HESABINA iade edilir → müşterinin girdiği
+        # IBAN + ad soyad saklanır (personel iadeyi bu hesaba yapar). Kart iadesinde gerekmez.
+        _pm = str(order.get("payment_method") or "").lower()
+        if _pm in ("bank_transfer", "havale", "eft", "bank"):
+            _iban = "".join(str((payload or {}).get("refund_iban") or "").split()).upper()[:34]
+            if _iban:
+                _set["refund_bank_info"] = {
+                    "iban": _iban,
+                    "name": str((payload or {}).get("refund_name") or "").strip()[:120],
+                    "bank": str((payload or {}).get("refund_bank") or "").strip()[:80],
+                }
     await db.orders.update_one({"id": order.get("id")}, {"$set": _set})
 
     # Stok geri ekleme — YALNIZCA sipariş GERÇEKTEN iptal edildiyse (cancelled).

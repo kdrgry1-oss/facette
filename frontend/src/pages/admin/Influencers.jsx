@@ -12,7 +12,7 @@ import {
   Plus, TrendingUp, CheckCircle, Trash2, X,
   Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Package,
   ClipboardList, ExternalLink, History, Filter, Download,
-  ChevronRight, ChevronDown, Barcode, Printer, FileText,
+  ChevronRight, ChevronDown, Barcode, Printer, FileText, StickyNote,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -457,6 +457,7 @@ function PRThumb({ src, name }) {
 // detaya-basınca (expand) profil alanları + inline düzenlenebilir Paylaşma Tarihi/Not/İletişim Tarihi.
 function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onItemShared }) {
   const [open, setOpen] = useState(false);
+  const [noteEdit, setNoteEdit] = useState(false);
   const st = prStatusMeta(e.status);
   const td = "px-2 py-2 align-top";
   const items = Array.isArray(e.products) && e.products.length ? e.products : null;
@@ -538,10 +539,31 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
             </div>
           ) : <span className="text-[11px] text-gray-400">—</span>}
         </td>
-        {/* Not — inline text (düzenlenebilir) */}
+        {/* Not — ikon + hover'da popup; tıklayınca düzenleme kutusu (uzun notlar tabloyu bozmasın) */}
         <td className={td}>
-          <input type="text" defaultValue={e.note || ""} onBlur={(ev) => saveField("note", ev.target.value)} placeholder="Not…"
-                 className="border rounded px-1.5 py-1 text-xs w-[92px] focus:outline-none focus:border-black" data-testid={`pr-note-${e.id}`} />
+          {noteEdit ? (
+            <input type="text" autoFocus defaultValue={e.note || ""}
+              onBlur={(ev) => { saveField("note", ev.target.value); setNoteEdit(false); }}
+              onKeyDown={(ev) => { if (ev.key === "Enter") ev.currentTarget.blur(); else if (ev.key === "Escape") setNoteEdit(false); }}
+              placeholder="Not…"
+              className="border rounded px-1.5 py-1 text-xs w-[130px] focus:outline-none focus:border-black" data-testid={`pr-note-${e.id}`} />
+          ) : e.note ? (
+            <div className="relative group inline-block">
+              <button onClick={() => setNoteEdit(true)} title="Notu düzenle" data-testid={`pr-note-icon-${e.id}`}
+                className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100">
+                <StickyNote size={14} />
+              </button>
+              <div className="pointer-events-none absolute z-30 left-1/2 -translate-x-1/2 bottom-full mb-1.5 hidden group-hover:block
+                            w-max max-w-[240px] bg-gray-900 text-white text-[11px] leading-snug rounded-lg px-2.5 py-1.5 shadow-xl whitespace-pre-wrap text-left normal-case">
+                {e.note}
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setNoteEdit(true)} title="Not ekle"
+              className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-black border border-dashed border-gray-300 rounded px-2 py-1">
+              <StickyNote size={12} /> not
+            </button>
+          )}
         </td>
         {/* İşlemler: Barkod Çıkart / Düzenle / Sil (+ Geçmiş) */}
         <td className={`${td} whitespace-nowrap`}>

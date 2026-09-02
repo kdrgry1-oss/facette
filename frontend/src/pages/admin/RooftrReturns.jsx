@@ -770,7 +770,17 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                       <div className="text-gray-800">{r.customer_name}</div>
                       {r.phone && <div className="text-xs text-gray-400">{r.phone}</div>}
                     </td>
-                    <td className="px-3 py-2.5 text-xs text-gray-600 max-w-[140px] truncate" title={r.reason || ""}>{r.reason || "—"}</td>
+                    <td className="px-3 py-2.5 text-xs text-gray-600 max-w-[200px]">
+                      <div className="truncate" title={r.reason || ""}>{r.reason || "—"}</div>
+                      {/* Havale iadesi → para bu hesaba gönderilir (müşteri iade talebinde girdi) */}
+                      {r.refund_bank_info?.iban && (
+                        <div className="mt-1 text-[11px] leading-snug bg-amber-50 border border-amber-200 rounded px-1.5 py-1 text-amber-900"
+                             title={`IBAN: ${r.refund_bank_info.iban}${r.refund_bank_info.name ? " · " + r.refund_bank_info.name : ""}${r.refund_bank_info.bank ? " · " + r.refund_bank_info.bank : ""}`}>
+                          <div className="font-mono font-semibold break-all">{r.refund_bank_info.iban}</div>
+                          <div className="truncate">{r.refund_bank_info.name || "—"}{r.refund_bank_info.bank ? ` · ${r.refund_bank_info.bank}` : ""}</div>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs border ${r.payment_method === "credit_card" ? "bg-blue-100 text-blue-700 border-blue-200" : r.payment_method === "bank_transfer" ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-gray-100 text-gray-700 border-gray-200"}`}>
                         {payIcon(r.payment_method)} {r.payment_label}

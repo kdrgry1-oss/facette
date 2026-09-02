@@ -617,14 +617,30 @@ function OrderCard({ order, expanded, onToggle, onChanged }) {
     }
   };
   const [cancelling, setCancelling] = useState(false);
+  // Havale/EFT ile ÖDENMİŞ sipariş iptalinde para banka hesabına iade edilir → IBAN + ad soyad ZORUNLU.
+  const _isHavale = ["bank_transfer", "havale", "eft", "bank"].includes(String(order.payment_method || "").toLowerCase());
+  const needBank = _isHavale && (String(order.payment_status || "").toLowerCase() === "paid" || order.status === "confirmed");
+  const [bankOpen, setBankOpen] = useState(false);
+  const [cIban, setCIban] = useState("");
+  const [cName, setCName] = useState("");
+  const [cBank, setCBank] = useState("");
+  const cIbanClean = cIban.replace(/\s/g, "").toUpperCase();
+  const cIbanValid = /^TR\d{24}$/.test(cIbanClean);
   const handleCancel = async () => {
-    if (!window.confirm("Siparişinizi iptal etmek istediğinize emin misiniz?")) return;
+    // Havale-ödenmişte önce IBAN panelini aç (onay + IBAN tek adımda).
+    if (needBank && !bankOpen) { setBankOpen(true); return; }
+    if (needBank) {
+      if (!cIbanValid) { toast.error("Geçerli bir IBAN girin (TR ile başlayan 26 haneli)"); return; }
+      if (!cName.trim()) { toast.error("IBAN sahibinin ad soyadını girin"); return; }
+    } else if (!window.confirm("Siparişinizi iptal etmek istediğinize emin misiniz?")) {
+      return;
+    }
     setCancelling(true);
     try {
       const token = localStorage.getItem("token");
-      await axios.post(`${API}/my-orders/${order.id || order.order_number}/cancel`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await axios.post(`${API}/my-orders/${order.id || order.order_number}/cancel`,
+        needBank ? { refund_iban: cIbanClean, refund_name: cName.trim(), refund_bank: cBank.trim() } : {},
+        { headers: { Authorization: `Bearer ${token}` } });
       toast.success("Siparişiniz iptal edildi");
       onChanged && onChanged();
     } catch (err) {
@@ -734,16 +750,47 @@ function OrderCard({ order, expanded, onToggle, onChanged }) {
             </div>
           ) : null}
           {canCancel && (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
-              <span className="text-sm text-gray-700">Siparişiniz henüz hazırlanmaya başlamadı. Dilerseniz iptal edebilirsiniz.</span>
-              <button
-                onClick={handleCancel}
-                disabled={cancelling}
-                data-testid={`cancel-order-${order.id}`}
-                className="inline-block bg-red-600 text-white px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-red-700 disabled:opacity-50 shrink-0"
-              >
-                {cancelling ? "İptal ediliyor..." : "Siparişi İptal Et"}
-              </button>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-sm text-gray-700">
+                  {needBank
+                    ? "Havale/EFT ödemeniz iade edileceği için iptalde IBAN bilgisi gerekir."
+                    : "Siparişiniz henüz hazırlanmaya başlamadı. Dilerseniz iptal edebilirsiniz."}
+                </span>
+                {!(needBank && bankOpen) && (
+                  <button
+                    onClick={handleCancel}
+                    disabled={cancelling}
+                    data-testid={`cancel-order-${order.id}`}
+                    className="inline-block bg-red-600 text-white px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-red-700 disabled:opacity-50 shrink-0"
+                  >
+                    {cancelling ? "İptal ediliyor..." : "Siparişi İptal Et"}
+                  </button>
+                )}
+              </div>
+              {needBank && bankOpen && (
+                <div className="space-y-2 border-t border-gray-200 pt-3" data-testid="cancel-refund-bank">
+                  <p className="text-[12px] text-gray-600">İade tutarı aşağıdaki banka hesabına gönderilecektir. Lütfen bilgileri eksiksiz girin.</p>
+                  <input value={cIban} onChange={(e) => setCIban(e.target.value.toUpperCase())} placeholder="IBAN — TR00 0000 …"
+                    data-testid="cancel-iban"
+                    className={`w-full border p-2.5 text-sm bg-white font-mono tracking-wide focus:outline-none ${cIban && !cIbanValid ? "border-red-400" : "border-gray-300 focus:border-gray-600"}`} />
+                  {cIban && !cIbanValid && <p className="text-[11px] text-red-600">IBAN TR ile başlamalı ve 26 haneli olmalı.</p>}
+                  <input value={cName} onChange={(e) => setCName(e.target.value)} placeholder="IBAN Sahibi Ad Soyad"
+                    data-testid="cancel-iban-name"
+                    className="w-full border border-gray-300 p-2.5 text-sm bg-white focus:outline-none focus:border-gray-600" />
+                  <input value={cBank} onChange={(e) => setCBank(e.target.value)} placeholder="Banka (opsiyonel)"
+                    className="w-full border border-gray-300 p-2.5 text-sm bg-white focus:outline-none focus:border-gray-600" />
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={handleCancel} disabled={cancelling || !cIbanValid || !cName.trim()}
+                      className="bg-red-600 text-white px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-red-700 disabled:opacity-40">
+                      {cancelling ? "İptal ediliyor..." : "İptali Onayla"}
+                    </button>
+                    <button onClick={() => setBankOpen(false)} className="px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] border border-gray-300 text-gray-600 hover:bg-gray-100">
+                      Vazgeç
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {/* Items */}
