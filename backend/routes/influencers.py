@@ -788,34 +788,49 @@ async def export_pr_entries(
         g = p.get("gonderim_tarihi") if isinstance(p, dict) else None
         return str(g)[:10] if g else _exp_effdate(e)
 
-    # düz satır listesi: (hücre_değerleri, görsel_url)
+    def _platform(e):
+        return e.get("platform") or ("İnstagram" if e.get("instagram") else "Tiktok" if e.get("tiktok") else "")
+
+    # düz satır listesi: (hücre_değerleri, görsel_url).
+    # KOLON SIRASI = EKRAN: [1-12] ekranda görünen (Influencer/İş Birliği/İletişim/Görsel/Ürün/Beden/
+    # Barkod/Gönderim Tarihi/Durum/Paylaştı/Not) → [13-23] detay (expand satırındaki alanlar).
     flat = []
     for e in entries:
-        base = [
+        # 1-4: ekranın Influencer + İş Birliği + İletişim (platform + @kullanıcı)
+        front = [
             e.get("influencer_name") or "",
-            e.get("instagram") or _exp_uname(e, None) or "",
-            e.get("tiktok") or "",
-            e.get("phone") or "",
             e.get("anlasma_sekli") or "",
-            e.get("influencer_turu") or "",
-            e.get("adres") or "",
+            _platform(e),
+            _exp_uname(e, None) or "",
         ]
-        status_lbl = _PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or "")
+        # 13-23: detay (expand satırı) — her ürün satırında tekrar
+        detail = [
+            e.get("influencer_turu") or "",
+            e.get("phone") or "",
+            e.get("instagram") or "",
+            e.get("tiktok") or "",
+            e.get("contact") or "",
+            e.get("offer") or "",
+            e.get("response") or "",
+            e.get("follow_up") or "",
+            e.get("adres") or "",
+            e.get("cargo_barcode") or "",
+            e.get("cargo_gonderi_no") or e.get("cargo_tracking_no") or "",
+        ]
+        note = e.get("note") or ""
         prods = [p for p in (e.get("products") or []) if isinstance(p, dict)]
         if not prods:
             flat.append(([
-                *base, "", _exp_products(e), _exp_bedens(e), "",
-                status_lbl, _exp_shared(e), e.get("cargo_barcode") or "",
-                e.get("cargo_tracking_no") or "", e.get("note") or "", e.get("offer") or "",
-                _exp_effdate(e),
+                *front, "", _exp_products(e), _exp_bedens(e), "",
+                _exp_effdate(e), _exp_shared(e), note, *detail,
             ], None))
             continue
         for p in prods:
             flat.append(([
-                *base, "", _plabel(p), str(p.get("size") or ""), str(p.get("barcode") or ""),
-                status_lbl, ("Evet" if p.get("shared") else "Hayır"),
-                e.get("cargo_barcode") or "", e.get("cargo_tracking_no") or "",
-                e.get("note") or "", e.get("offer") or "", _pdate(e, p),
+                *front,
+                "", _plabel(p), str(p.get("size") or ""), str(p.get("barcode") or ""),
+                _pdate(e, p), ("Evet" if p.get("shared") else "Hayır"), note,
+                *detail,
             ], (p.get("image") or None)))
 
     # benzersiz görselleri eşzamanlı indir + küçült (best-effort; hata → görselsiz devam)
@@ -833,21 +848,28 @@ async def export_pr_entries(
             from io import BytesIO as _BIO
             from PIL import Image as _PILImage
             _sem = asyncio.Semaphore(8)
+            _ua = {"User-Agent": "Mozilla/5.0 (FacetteExcel/1.0)"}
+            _ok = 0
+            _err_sample = []
 
-            async def _grab(u):
+            async def _grab(cli, u):
                 async with _sem:
                     try:
-                        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as cli:
-                            r = await cli.get(u)
+                        r = await cli.get(u)
                         if r.status_code == 200 and r.content:
                             im = _PILImage.open(_BIO(r.content)).convert("RGB")
                             im.thumbnail((72, 72))
                             b = _BIO()
                             im.save(b, format="PNG")
                             img_cache[u] = b.getvalue()
-                    except Exception:
-                        pass
-            await asyncio.gather(*[_grab(u) for u in urls])
+                    except Exception as _ie:
+                        if len(_err_sample) < 2:
+                            _err_sample.append(f"{u[:60]}: {type(_ie).__name__}: {_ie}")
+            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=_ua) as _cli:
+                await asyncio.gather(*[_grab(_cli, u) for u in urls])
+            _ok = len(img_cache)
+            logger.info(f"[influencer] excel görsel: {_ok}/{len(urls)} indi"
+                        + (f" — örnek hata: {_err_sample}" if _err_sample and _ok == 0 else ""))
         except Exception as ex:
             logger.warning(f"[influencer] excel görsel indirme atlandı: {ex}")
 
@@ -937,12 +959,14 @@ async def export_pr_entries(
 
     # ── 2) GÖNDERİ TAKİBİ (veri) sayfası ──
     ws = wb.create_sheet("Gönderi Takibi")
-    headers = ["Influencer", "Instagram", "TikTok", "Telefon", "İş Birliği Türü", "Influencer Türü",
-               "Adres", "Görsel", "Ürün", "Beden", "Barkod", "Gönderim Durumu", "Paylaştı",
-               "Kargo Barkodu", "Kargo Takip", "Not", "Teklif", "Gönderim Tarihi"]
-    widths = [22, 18, 15, 13, 16, 15, 30, 12, 30, 9, 20, 16, 9, 16, 16, 26, 22, 14]
-    STATUS_COL = 12
-    IMG_COL = 8
+    # Ekran sırası (1-11) + detay (12-22). Gönderim Durumu sütunu kaldırıldı (kullanıcı isteği).
+    headers = ["Influencer", "İş Birliği", "İletişim (Platform)", "Kullanıcı Adı", "Görsel", "Ürün",
+               "Beden", "Barkod", "Gönderim Tarihi", "Paylaştı", "Not",
+               "Influencer Türü", "Telefon", "Instagram", "TikTok", "İletişim Kanalı", "Teklif",
+               "Cevap", "Follow-up", "Adres", "Kargo Barkodu", "Kargo Takip No"]
+    widths = [22, 13, 15, 18, 12, 30, 9, 20, 14, 9, 26, 14, 13, 16, 14, 16, 24, 22, 18, 30, 16, 18]
+    STATUS_COL = None
+    IMG_COL = 5
     ws.append(headers)
     for c in ws[1]:
         c.fill = PatternFill("solid", fgColor="1F2937")
@@ -958,12 +982,13 @@ async def export_pr_entries(
             c.border = border
             c.alignment = Alignment(vertical="top", wrap_text=True)
             c.fill = PatternFill("solid", fgColor=band)
-        sc = ws.cell(row=ri, column=STATUS_COL)
-        col = _status_colors.get(str(sc.value or ""))
-        if col:
-            sc.fill = PatternFill("solid", fgColor=col["bg"])
-            sc.font = Font(bold=True, color=col["fg"])
-            sc.alignment = Alignment(horizontal="center", vertical="center")
+        if STATUS_COL:
+            sc = ws.cell(row=ri, column=STATUS_COL)
+            col = _status_colors.get(str(sc.value or ""))
+            if col:
+                sc.fill = PatternFill("solid", fgColor=col["bg"])
+                sc.font = Font(bold=True, color=col["fg"])
+                sc.alignment = Alignment(horizontal="center", vertical="center")
         data = img_cache.get(img_url) if img_url else None
         if data:
             try:
