@@ -1642,6 +1642,10 @@ async def create_campaign_cargo(campaign_id: str, current_user: dict = Depends(r
 
     siparis_no = f"INF{campaign_id[:8].upper()}"
     icerik = ", ".join([p.get("name", "Ürün") for p in (camp.get("sent_products") or [])]) or "Numune Ürün"
+    # MNG E022: pChIcerik en fazla 200 karakter. Çok ürünlü gönderide (ör. 7 ürün) isim listesi
+    # sınırı aşıp kargoyu reddettiriyordu → 197 kes + "..." (toplam ≤200).
+    if len(icerik) > 200:
+        icerik = icerik[:197].rstrip(", ") + "..."
 
     from mng_kargo_client import create_shipment
     from fastapi.concurrency import run_in_threadpool
