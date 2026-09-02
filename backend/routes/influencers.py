@@ -884,81 +884,9 @@ async def export_pr_entries(
     thin = Side(style="thin", color="E5E7EB")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    # ── 1) ÖZET sayfası ──
-    from collections import Counter
-    total_entries = len(entries)
-    total_products = sum(len([p for p in (e.get("products") or []) if isinstance(p, dict)]) or 1
-                         for e in entries)
-    inf_count = len({(e.get("influencer_id") or e.get("influencer_name") or id(e)) for e in entries})
-    shared_yes = sum(1 for e in entries for p in (e.get("products") or [])
-                     if isinstance(p, dict) and p.get("shared"))
-    scount = Counter(_PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or "")
-                     for e in entries)
-
-    wso = wb.active
-    wso.title = "Özet"
-    wso.sheet_view.showGridLines = False
-    wso.merge_cells("A1:C1")
-    t = wso["A1"]
-    t.value = "GÖNDERİ TAKİBİ — ÖZET"
-    t.font = Font(bold=True, color="FFFFFF", size=15)
-    t.fill = PatternFill("solid", fgColor="1F2937")
-    t.alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    wso.row_dimensions[1].height = 34
-    for col, w in (("A", 30), ("B", 16), ("C", 22)):
-        wso.column_dimensions[col].width = w
-
-    metrics = [
-        ("Toplam Kayıt", total_entries, "5B3DF5"),
-        ("Toplam Ürün Gönderimi", total_products, "0EA5E9"),
-        ("Influencer Sayısı", inf_count, "059669"),
-        ("Paylaşan Ürün", shared_yes, "D97706"),
-    ]
-    r = 3
-    for label, val, hexc in metrics:
-        ca = wso.cell(row=r, column=1, value=label)
-        cb = wso.cell(row=r, column=2, value=val)
-        ca.font = Font(bold=True, color="374151", size=11)
-        ca.fill = PatternFill("solid", fgColor="F5F6F8")
-        ca.alignment = Alignment(vertical="center", indent=1)
-        ca.border = border
-        cb.font = Font(bold=True, color=hexc, size=14)
-        cb.alignment = Alignment(horizontal="center", vertical="center")
-        cb.fill = PatternFill("solid", fgColor="FFFFFF")
-        cb.border = border
-        wso.row_dimensions[r].height = 24
-        r += 1
-
-    r += 1
-    hc = wso.cell(row=r, column=1, value="DURUM KIRILIMI")
-    hc.font = Font(bold=True, color="FFFFFF", size=11)
-    hc.fill = PatternFill("solid", fgColor="1F2937")
-    hc.alignment = Alignment(vertical="center", indent=1)
-    wso.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
-    wso.cell(row=r, column=2).fill = PatternFill("solid", fgColor="1F2937")
-    wso.row_dimensions[r].height = 26
-    r += 1
-    _order = ["Gönderildi", "Yayınlandı", "Olumlu", "İletildi", "Cevap Bekleniyor",
-              "Beklemede", "Olumsuz", "İptal"]
-    for lbl in _order + [k for k in scount if k not in _order]:
-        n = scount.get(lbl, 0)
-        if not n:
-            continue
-        col = _status_colors.get(lbl, {"bg": "F3F4F6", "fg": "374151"})
-        ca = wso.cell(row=r, column=1, value=lbl)
-        cb = wso.cell(row=r, column=2, value=n)
-        ca.fill = PatternFill("solid", fgColor=col["bg"])
-        ca.font = Font(bold=True, color=col["fg"], size=11)
-        ca.alignment = Alignment(vertical="center", indent=1)
-        ca.border = border
-        cb.font = Font(bold=True, color="111827", size=11)
-        cb.alignment = Alignment(horizontal="center", vertical="center")
-        cb.border = border
-        wso.row_dimensions[r].height = 22
-        r += 1
-
-    # ── 2) GÖNDERİ TAKİBİ (veri) sayfası ──
-    ws = wb.create_sheet("Gönderi Takibi")
+    # ── TEK SAYFA: GÖNDERİ TAKİBİ (Özet sayfası kaldırıldı — kullanıcı isteği). ──
+    ws = wb.active
+    ws.title = "Gönderi Takibi"
     # Ekran sırası (1-11) + detay (12-22). Gönderim Durumu sütunu kaldırıldı (kullanıcı isteği).
     headers = ["Influencer", "İş Birliği", "İletişim (Platform)", "Kullanıcı Adı", "Görsel", "Ürün",
                "Beden", "Barkod", "Gönderim Tarihi", "Paylaştı", "Not",
