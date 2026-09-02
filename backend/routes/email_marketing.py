@@ -305,6 +305,27 @@ async def _run_campaign(campaign_id: str):
             if not error_sample:
                 error_sample = str(e)[:400]
             logger.warning(f"[email-marketing] gönderim hata {email}: {e}")
+
+        # ERKEN DURDURMA: ilk denemelerin TAMAMI başarısızsa (0 gönderim) config/SES sandbox
+        # bozuk demektir → 679 aboneyi boşa deneyip SES itibarını yakmadan kampanyayı DURDUR ve
+        # NET sebep yaz (panelde 'sending' sonsuza kadar takılı kalmasın).
+        if n >= 12 and sent == 0 and failed >= n:
+            _err = (error_sample or "Tüm gönderimler reddedildi")
+            _lo = _err.lower()
+            _sandbox = ("not verified" in _lo or "sandbox" in _lo or "messagerejected" in _lo)
+            if _sandbox:
+                _reason = ("AWS SES sandbox modunda: mail YALNIZ doğrulanmış adreslere gider, "
+                           "doğrulanmamış aboneler reddedilir. Toplu gönderim için AWS'den SES "
+                           f"production access (sandbox çıkışı) alınmalı. Örnek: {_err[:160]}")
+            else:
+                _reason = f"İlk {n} gönderimin tümü başarısız — gönderim durduruldu. Örnek: {_err[:160]}"
+            await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+                "status": "failed", "sent": sent, "failed": failed, "skipped": skipped,
+                "total_processed": n, "cursor": s.get("id") or "", "finished_at": _now(),
+                "error_sample": error_sample, "error": _reason, "aborted": True}})
+            logger.warning(f"[email-marketing] kampanya {campaign_id} ERKEN DURDURULDU: {_reason}")
+            return
+
         # cursor HER kalemde yazılır ki yarıda kesilme en fazla 1 mükerrer mail versin.
         if n % 20 == 0:
             await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
