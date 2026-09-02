@@ -1065,7 +1065,7 @@ export default function Checkout() {
 
               {/* 1) İletişim — yalnızca misafir (üye girişliyse gizli; mail otomatik) */}
               {!user && (
-              <section data-testid="contact-block">
+              <section data-testid="contact-block" className="border border-stone-200 rounded-xl p-4 md:p-5 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
                 <Step n={1} title="İletişim" icon={Mail} />
                 <input
                   type="email"
@@ -1089,8 +1089,9 @@ export default function Checkout() {
               </section>
               )}
 
-              {/* 2) Teslimat Adresi — Zara/Mango sadeliği: tek adres. Fatura varsayılan olarak
-                  teslimatla aynı; ayrı fatura adresi YALNIZCA istenirse açılır (tekrar eden alan yok). */}
+              {/* 2) Teslimat Adresi + Kurumsal Fatura — TEK KART (Zara/Mango sadeliği: tek adres.
+                  Fatura varsayılan teslimatla aynı; ayrı fatura YALNIZCA istenirse açılır). */}
+              <div className="border border-stone-200 rounded-xl p-4 md:p-5 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
               <section data-testid="address-block">
                 <div className="flex items-center justify-between">
                   <Step n={sBase + 1} title="Teslimat Adresi" icon={MapPin} />
@@ -1141,7 +1142,7 @@ export default function Checkout() {
 
               {/* 2.b) Kurumsal Fatura — sade/kompakt tik-kutu; üstteki 'aynı adres' satırına
                   yaklaştırıldı (-mt-4, space-y-7 boşluğunu azaltır). İşlev/tik→alan-açma aynı. */}
-              <div data-testid="corporate-invoice-block" className="-mt-4">
+              <div data-testid="corporate-invoice-block" className="mt-4 pt-4 border-t border-stone-100">
                 <label className="inline-flex items-center gap-2 text-sm cursor-pointer pt-1">
                   <input type="checkbox" checked={corporateInvoice}
                     onChange={(e) => setCorporateInvoice(e.target.checked)}
@@ -1185,9 +1186,10 @@ export default function Checkout() {
                   </div>
                 )}
               </div>
+              </div>
 
               {/* 3) Ödeme */}
-              <section data-testid="payment-block">
+              <section data-testid="payment-block" className="border border-stone-200 rounded-xl p-4 md:p-5 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
                 <Step n={sBase + 2} title="Ödeme" icon={CreditCard} />
                 <div className="space-y-3">
                   {/* Method radios */}
