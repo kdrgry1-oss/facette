@@ -70,7 +70,7 @@ function NavItem({ item, closeMobile }) {
 
       {/* Desktop dropdown */}
       {open && (
-        <div className="hidden lg:block absolute left-0 mt-1 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-[60] overflow-hidden">
+        <div className="hidden xl:block absolute left-0 mt-1 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-[60] overflow-hidden">
           {item.children.map((child) => {
             const isActive = location.pathname === child.path || (child.path && location.pathname.startsWith(child.path + "/"));
             // Dış bağlantı (ör. Zoho Webmail) → yeni sekmede aç.
@@ -108,7 +108,7 @@ function NavItem({ item, closeMobile }) {
 
       {/* Mobile inline expansion */}
       {open && (
-        <div className="lg:hidden ml-4 mt-1 space-y-1">
+        <div className="xl:hidden ml-4 mt-1 space-y-1">
           {item.children.map((child) => {
             const isActive = location.pathname === child.path || (child.path && location.pathname.startsWith(child.path + "/"));
             if (child.external) {
@@ -244,6 +244,8 @@ export default function AdminLayout() {
         <button
           className="xl:hidden ml-auto text-white hover:text-gray-300"
           onClick={() => setMobileOpen(!mobileOpen)}
+          aria-label={mobileOpen ? "Menüyü kapat" : "Menüyü aç"}
+          aria-expanded={mobileOpen}
           data-testid="admin-mobile-toggle"
         >
           {mobileOpen ? <X size={22} /> : <Menu size={22} />}
