@@ -623,6 +623,27 @@ _PR_STATUS_LABEL = {
 _AY_TR = ["", "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz",
           "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
 
+# Excel ortak renk paletleri (3 sekmede de tutarlı) — durum ve iş birliği türü rozetleri.
+_PR_STATUS_COLORS = {
+    "Gönderildi": {"bg": "D1FAE5", "fg": "065F46"}, "Yayınlandı": {"bg": "DBEAFE", "fg": "1E40AF"},
+    "Olumlu": {"bg": "D1FAE5", "fg": "065F46"}, "İletildi": {"bg": "E0E7FF", "fg": "3730A3"},
+    "Cevap Bekleniyor": {"bg": "FEF3C7", "fg": "92400E"}, "Beklemede": {"bg": "F3F4F6", "fg": "374151"},
+    "Olumsuz": {"bg": "FEE2E2", "fg": "991B1B"}, "İptal": {"bg": "FEE2E2", "fg": "991B1B"},
+}
+_ANLASMA_COLORS = {
+    "Barter": {"bg": "DBEAFE", "fg": "1E40AF"}, "PR": {"bg": "D1FAE5", "fg": "065F46"},
+    "Ücretli İş Birliği": {"bg": "FEF3C7", "fg": "92400E"},
+}
+
+
+def _exp_barcodes_str(e) -> str:
+    """Kalem barkodlarını ' • ' ile birleştir (export ortak yardımcısı)."""
+    prods = e.get("products")
+    if isinstance(prods, list) and prods:
+        return " • ".join(str(p.get("barcode")) for p in prods
+                          if isinstance(p, dict) and p.get("barcode"))
+    return ""
+
 
 # ── Export ortak yardımcıları (Gönderi Takibi / Takvim / Kayıtlı Influencer) ──
 def _exp_uname(e, inf) -> str:
@@ -972,22 +993,42 @@ async def export_calendar_entries(current_user: dict = Depends(require_admin)):
     entries = await db.influencer_pr.find({}, {"_id": 0}).to_list(5000)
     await _pr_enrich(entries)
     entries.sort(key=lambda e: _exp_effdate(e) or "9999")
+
+    def _ay_lbl(dstr):
+        try:
+            y, m = str(dstr)[:7].split("-")
+            return f"{_AY_TR[int(m)]} {y}"
+        except Exception:
+            return ""
+
     rows = []
     for e in entries:
+        _d = _exp_effdate(e)
         rows.append([
-            _exp_effdate(e),
+            _d,
+            _ay_lbl(_d),
             e.get("influencer_name") or "",
-            _exp_uname(e, None),
+            e.get("anlasma_sekli") or "",
+            e.get("platform") or "",
+            e.get("instagram") or _exp_uname(e, None) or "",
+            e.get("tiktok") or "",
+            e.get("phone") or "",
             _exp_products(e),
             _exp_bedens(e),
+            _exp_barcodes_str(e),
             _PR_STATUS_LABEL.get(e.get("status") or "beklemede", e.get("status") or ""),
             _exp_shared(e),
+            e.get("cargo_barcode") or "",
+            e.get("cargo_gonderi_no") or e.get("cargo_tracking_no") or "",
+            e.get("note") or "",
+            e.get("offer") or "",
         ])
-    return _xlsx_response(
-        "Gönderim Takvimi",
-        ["Tarih", "Influencer", "Kullanıcı Adı", "Ürün(ler)", "Beden(ler)",
-         "Gönderim Durumu", "Paylaştı mı"],
-        rows, [14, 22, 20, 40, 18, 16, 12], "gonderim-takvimi.xlsx")
+    headers = ["Tarih", "Ay", "Influencer", "İş Birliği Türü", "Platform", "Instagram", "TikTok",
+               "Telefon", "Ürün(ler)", "Beden(ler)", "Barkod(lar)", "Gönderim Durumu", "Paylaştı mı",
+               "Kargo Barkodu", "Kargo Takip", "Not", "Teklif"]
+    widths = [14, 14, 22, 15, 12, 18, 16, 14, 40, 16, 26, 16, 12, 16, 16, 30, 26]
+    return _xlsx_response("Gönderim Takvimi", headers, rows, widths, "gonderim-takvimi.xlsx",
+                          status_col=12, status_colors=_PR_STATUS_COLORS)
 
 
 @router.get("/influencer-registry/export")
@@ -1006,40 +1047,61 @@ async def export_influencers(q: Optional[str] = Query(None), current_user: dict 
         ]
     docs = await db.influencers.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
 
+    # Her influencer için PR gönderi sayısı (kaç kez ürün gönderildi) — tek aggregation.
+    pr_counts: dict = {}
+    try:
+        async for row in db.influencer_pr.aggregate([
+            {"$match": {"influencer_id": {"$ne": None}}},
+            {"$group": {"_id": "$influencer_id", "n": {"$sum": 1}}},
+        ]):
+            pr_counts[row["_id"]] = int(row.get("n") or 0)
+    except Exception as e:
+        logger.warning(f"[influencer] PR sayısı hesaplanamadı: {e}")
+
+    def _sa(d):
+        return d.get("shipping_address") if isinstance(d.get("shipping_address"), dict) else {}
+
     def _addr(d):
         a = (d.get("adres") or "").strip()
         if a:
             return a
-        sa = d.get("shipping_address") or {}
-        if isinstance(sa, dict):
-            return ", ".join(str(p) for p in [sa.get("adres"), sa.get("ilce"), sa.get("il")] if p)
-        return ""
+        sa = _sa(d)
+        return ", ".join(str(p) for p in [sa.get("adres"), sa.get("ilce"), sa.get("il")] if p)
+
+    def _dt(d):
+        return str(d.get("created_at") or "")[:10]
 
     rows = []
     for d in docs:
+        sa = _sa(d)
+        fc = int(d.get("follower_count") or 0)
         rows.append([
             d.get("name") or "",
             d.get("anlasma_sekli") or "",
-            d.get("handle") or d.get("instagram") or d.get("tiktok") or "",
             d.get("influencer_turu") or _influencer_turu(d.get("follower_count")),
+            d.get("platform") or "",
+            d.get("instagram") or d.get("handle") or "",
+            d.get("tiktok") or "",
+            (f"{fc:,}".replace(",", ".") if fc > 0 else ""),
+            d.get("coupon_code") or "",
             d.get("phone") or "",
             d.get("email") or "",
             _addr(d),
+            sa.get("il") or "",
+            sa.get("ilce") or "",
             d.get("beden_ust") or "",
             d.get("beden_alt") or "",
+            pr_counts.get(d.get("id"), 0),
+            _dt(d),
             d.get("notes") or "",
         ])
-    # İş Birliği Türü değere göre renkli (Barter/PR/Ücretli İş Birliği ayırt edilsin).
-    _anlasma_colors = {
-        "Barter": {"bg": "DBEAFE", "fg": "1E40AF"}, "PR": {"bg": "D1FAE5", "fg": "065F46"},
-        "Ücretli İş Birliği": {"bg": "FEF3C7", "fg": "92400E"},
-    }
+    headers = ["İsim Soyisim", "İş Birliği Türü", "Influencer Türü", "Platform", "Instagram", "TikTok",
+               "Takipçi", "Kupon Kodu", "Telefon", "E-posta", "Adres", "İl", "İlçe",
+               "Beden Üst", "Beden Alt", "PR Gönderi Sayısı", "Kayıt Tarihi", "Not"]
+    widths = [24, 16, 14, 12, 18, 16, 12, 15, 15, 26, 38, 14, 14, 11, 11, 15, 14, 32]
     return _xlsx_response(
-        "Kayıtlı Influencerlar",
-        ["İsim Soyisim", "İş Birliği Türü", "Kullanıcı Adı", "Influencer Türü",
-         "Telefon", "E-posta", "Adres", "Beden Üst", "Beden Alt", "Not"],
-        rows, [24, 18, 20, 15, 15, 26, 40, 11, 11, 34], "kayitli-influencerlar.xlsx",
-        status_col=2, status_colors=_anlasma_colors)
+        "Kayıtlı Influencerlar", headers, rows, widths, "kayitli-influencerlar.xlsx",
+        status_col=2, status_colors=_ANLASMA_COLORS)
 
 
 @router.put("/influencer-pr/{entry_id}")
