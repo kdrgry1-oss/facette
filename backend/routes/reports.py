@@ -597,18 +597,24 @@ async def _split_maps(order_numbers: list, order_ids: list) -> tuple:
                     continue
                 its = r.get("approved_items") or r.get("items") or []
                 qty = sum(max(1, int((it or {}).get("quantity") or 1)) for it in its)
+                # DENETİM (finansal F2): iade tutarı GERÇEK iade (refund_amount) ile hizalanmalı;
+                # eskiden ham liste fiyatı × adet alınıp donmuş KUPON İNDİRİMİ yok sayılıyordu →
+                # kısmi kuponlu iadede rapor gerçek kasadan çıkandan (net) yüksek gösteriyordu.
                 amt = 0.0
-                for it in its:
-                    try:
-                        amt += float((it or {}).get("price") or (it or {}).get("unit_price") or 0) \
-                               * max(1, int((it or {}).get("quantity") or 1))
-                    except Exception:
-                        pass
-                if amt <= 0:
-                    try:
-                        amt = float(r.get("refund_amount") or 0)
-                    except Exception:
-                        amt = 0.0
+                try:
+                    _ra = float(r.get("refund_amount") or 0)
+                except Exception:
+                    _ra = 0.0
+                if _ra > 0:
+                    amt = _ra   # onaylı iadede sunucunun hesapladığı net iade
+                else:
+                    for it in its:
+                        try:
+                            _p = float((it or {}).get("price") or (it or {}).get("unit_price") or 0)
+                            _d = float((it or {}).get("discount_amount") or 0)  # donmuş kupon indirimi (birim)
+                            amt += max(0.0, _p - _d) * max(1, int((it or {}).get("quantity") or 1))
+                        except Exception:
+                            pass
                 # Site tarafında "onaylı" = terminal statüler; gerisi açık talep.
                 tgt = closed if st in ("returned", "refunded", "partial_refunded",
                                        "return_approved", "approved", "completed") else open_

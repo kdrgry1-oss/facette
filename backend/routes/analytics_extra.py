@@ -202,10 +202,17 @@ async def marketplace_profit(
     pipeline = [
         # Denetim: iptal/ödenmemiş siparişler brüt/net kâra girmesin (yalnız gerçek satışlar).
         # İade grubu brütte KALIR ve aşağıda 'refunded' olarak düşülür.
+        # DENETİM (finansal F1): TAM iade (returned/refunded) siparişler hariç — eskiden gross'a
+        # dahil edilip sonra tam total'i "refunded" düşülüyordu ama COGS sayılmaya devam ettiği
+        # için her iade siparişi kârı kendi COGS'u kadar HAYALET zarara çekiyordu. Artık tam
+        # iadeler hem gross hem cogs'tan çıkarılır (net katkı 0). KISMİ iade (partial_refunded)
+        # gross'ta kalır; yalnız GERÇEK iade tutarı (refund_amount) net'ten düşülür (eskiden tüm
+        # sipariş total'i düşülüp koca siparişi zarara çekiyordu).
         {"$match": {"created_at": {"$gte": cutoff},
                     "status": {"$nin": ["cancelled", "cancel_refunded",
                                         "awaiting_payment", "payment_failed",
-                                        "pending", "payment_notified"]}}},
+                                        "pending", "payment_notified",
+                                        "returned", "refunded"]}}},
         {"$match": merge_match({})},  # ticimax_history ÇİFT kayıtları hariç (Trendyol kâr'ını şişirir)
         {"$group": {
             # Denetim: var olmayan 'channel' alanı yüzünden HER sipariş 'web'e düşüyordu.
@@ -215,8 +222,8 @@ async def marketplace_profit(
             "gross": {"$sum": {"$ifNull": ["$total", "$total_amount"]}},
             "shipping_cost": {"$sum": {"$ifNull": ["$shipping_cost", 0]}},
             "refunded": {"$sum": {"$cond": [
-                {"$in": ["$status", ["returned", "refunded", "partial_refunded"]]},
-                {"$ifNull": ["$total", "$total_amount"]},
+                {"$eq": ["$status", "partial_refunded"]},
+                {"$ifNull": ["$refund_amount", 0]},
                 0
             ]}},
         }},
@@ -230,10 +237,12 @@ async def marketplace_profit(
     # Birim maliyet zinciri: purchase_price(>0) → cost_price. Maliyeti bilinmeyen
     # kalemin cirosu revenue_nocost'ta toplanır ve aşağıda cog_fallback_ratio ile tahmin edilir.
     cogs_pipeline = [
+        # F1: tam iadeler COGS'tan da çıkar (mal stoğa döndü → COGS geri çevrilmeli).
         {"$match": {"created_at": {"$gte": cutoff},
                     "status": {"$nin": ["cancelled", "cancel_refunded",
                                         "awaiting_payment", "payment_failed",
-                                        "pending", "payment_notified"]}}},
+                                        "pending", "payment_notified",
+                                        "returned", "refunded"]}}},
         {"$match": merge_match({})},  # ticimax_history ÇİFT kayıtları hariç (COGS'u şişirir)
         {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
         {"$unwind": "$items"},
