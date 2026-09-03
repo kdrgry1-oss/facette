@@ -2799,6 +2799,18 @@ async def hb_accept_claim(claim_number: str, current_user: dict = Depends(requir
         raise HTTPException(status_code=400, detail=err)
     try:
         data = await asyncio.to_thread(client.accept_claim, claim_number)
+        # DENETİM (HB H1): Trendyol claim onayı stoğu geri ekliyor (integrations_trendyol:6708);
+        # HB iade kabulü de simetrik olarak eklemeliydi — eskiden yalnız GP üretiminde ekleniyordu.
+        # restock_claim_once idempotent (stock_restored guard) → GP de çağırsa çift olmaz.
+        try:
+            from .integrations_common import restock_claim_once
+            _rec = await db.trendyol_claims.find_one(
+                {"$or": [{"hb_claim_number": claim_number}, {"claim_id": claim_number}],
+                 "platform": "hepsiburada"}, {"_id": 0, "claim_id": 1})
+            if _rec and _rec.get("claim_id"):
+                await restock_claim_once(_rec["claim_id"], "hepsiburada_accept", current_user.get("email", ""))
+        except Exception as _re:
+            logger.warning(f"[hb accept restock] {_re}")
         await log_integration_event("hepsiburada", "accept_claim", "claim", claim_number, "success", "İade kabul")
         return {"success": True, "data": data}
     except HepsiburadaError as e:

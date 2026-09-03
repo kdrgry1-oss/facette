@@ -2472,6 +2472,28 @@ async def delete_order(
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
     order["deleted_at"] = datetime.now(timezone.utc).isoformat()
     order["deleted_by"] = current_user.get("email", "")
+    # DENETİM (bizlogic Y3): stoğu DÜŞÜLMÜŞ aktif bir sipariş silinince stok geri eklenmiyordu →
+    # kalıcı stok sızıntısı. Aktif fulfillment durumundaysa stoğu geri ekle + arşive işaretle
+    # (restore'da tekrar düşülür → simetri). Terminal (iptal/iade) siparişte stok zaten iade edilmiş.
+    _ACTIVE_STOCK = {"awaiting_payment", "payment_notified", "pending", "confirmed",
+                     "processing", "preparing", "shipped", "undelivered"}
+    _returned_on_delete = False
+    try:
+        if str(order.get("status") or "") in _ACTIVE_STOCK:
+            _already = await db.stock_movements.find_one(
+                {"order_id": order_id, "type": {"$in": ["order_cancelled", "return_restock",
+                 "auto_cancel_expired", "havale_auto_cancel", "order_deleted_restock"]}}, {"_id": 1})
+            if not _already:
+                _moves = await _stock_delta_for_order(order, +1)
+                await db.stock_movements.insert_one({
+                    "id": generate_id(), "type": "order_deleted_restock",
+                    "order_id": order_id, "order_number": order.get("order_number", ""),
+                    "items": _moves, "source": "delete_order",
+                    "created_at": datetime.now(timezone.utc).isoformat()})
+                _returned_on_delete = True
+    except Exception as _e:
+        logger.error(f"[delete restock {order_id}] {_e}")
+    order["_stock_returned_on_delete"] = _returned_on_delete
     try:
         await db.orders_deleted.replace_one({"id": order_id}, order, upsert=True)
     except Exception as _e:
@@ -2493,10 +2515,18 @@ async def restore_deleted_order(
         raise HTTPException(status_code=404, detail="Silinen sipariş bulunamadı")
     arch.pop("deleted_at", None)
     arch.pop("deleted_by", None)
+    # Y3 simetri: silmede stok geri eklendiyse, geri alırken TEKRAR düş (aksi halde restore stok şişirir).
+    _re_decrement = bool(arch.pop("_stock_returned_on_delete", False))
     now_iso = datetime.now(timezone.utc).isoformat()
     arch["updated_at"] = now_iso
     arch["restored_at"] = now_iso
     arch["restored_by"] = current_user.get("email", "")
+    if _re_decrement:
+        try:
+            await _stock_delta_for_order(arch, -1)
+            await db.stock_movements.delete_many({"order_id": order_id, "type": "order_deleted_restock"})
+        except Exception as _e:
+            logger.error(f"[restore re-decrement {order_id}] {_e}")
     await db.orders.replace_one({"id": order_id}, arch, upsert=True)
     await db.orders_deleted.delete_one({"id": order_id})
     await _log_order_event(order_id, "status", "Sipariş geri alındı (arşivden)", current_user, {},
