@@ -19,7 +19,7 @@ import httpx
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Request, HTTPException
 
-from .deps import db, logger, generate_id, get_current_user
+from .deps import db, logger, generate_id, get_current_user, limiter, safe_str
 from fastapi import Depends
 from notification_service import (
     _get_providers_config, SMS_IMPL, _sms_generic, normalize_phone_tr,
@@ -56,11 +56,26 @@ async def _send_sms(to: str, message: str) -> dict:
 
 
 @router.post("/otp/send")
+@(limiter.limit("3/minute;20/day") if limiter else (lambda f: f))
 async def otp_send(payload: dict, request: Request):
-    """Telefona OTP gönderir. body: {phone}."""
-    phone = normalize_phone_tr(str((payload or {}).get("phone") or ""))
-    if len(phone) < 12 or not phone.isdigit():
-        raise HTTPException(status_code=400, detail="Geçerli bir telefon numarası giriniz.")
+    """Telefona OTP gönderir. body: {phone}.
+    GÜVENLİK: IP başına hız-sınırı (3/dk, 20/gün) + YALNIZ TR mobil (90 5XX…) + saatlik global
+    devre kesici → SMS kredisi boşaltma / SMS bombardımanı engellenir (denetim SEC-1/SEC-6 F2/F4)."""
+    phone = normalize_phone_tr(safe_str((payload or {}).get("phone") or "", 20))
+    # Yalnız Türkiye mobil numaraları (90 + 10 hane, 905…) — yurtdışı/premium numaralarla drenaj engeli.
+    if not (len(phone) == 12 and phone.startswith("905") and phone.isdigit()):
+        raise HTTPException(status_code=400, detail="Geçerli bir Türkiye cep telefonu numarası giriniz.")
+    # Global devre kesici: son 1 saatte çok fazla OTP → geçici olarak durdur (kredi koruması).
+    try:
+        _hourly = await db.otp_verifications.count_documents(
+            {"created_at": {"$gte": (_now() - timedelta(hours=1)).isoformat()}})
+        if _hourly > 500:
+            logger.warning(f"[iys][otp] saatlik OTP eşiği aşıldı ({_hourly}) — geçici durduruldu")
+            raise HTTPException(status_code=503, detail="Doğrulama servisi geçici olarak yoğun. Kısa süre sonra tekrar deneyin.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     # 1 dk mükerrer koruması
     recent = await db.otp_verifications.find_one(
         {"phone": phone, "created_at": {"$gte": (_now() - timedelta(minutes=1)).isoformat()}},

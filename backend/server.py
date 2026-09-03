@@ -263,6 +263,17 @@ async def lifespan(app: FastAPI):
         await db.order_events.create_index([("order_id", 1), ("created_at", -1)])
         await db.order_events.create_index([("created_at", -1)])
         await db.orders_deleted.create_index([("deleted_at", -1)])
+        # DENETİM (DB-bütünlük): sıcak sorgular COLLSCAN'liyordu → indeks. unique DEĞİL (mevcut
+        # veride olası duplikeler boot'u kırmasın; benzersizlik ayrı dedup migration ister).
+        await db.orders.create_index("id")                       # ödeme callback {"id": order_id}
+        await db.stock_movements.create_index([("order_id", 1), ("type", 1)])   # iptal/restock idempotency
+        await db.stock_movements.create_index([("product_id", 1), ("created_at", -1)])
+        await db.coupons.create_index("code")                    # checkout apply_coupon (public)
+        await db.gift_cards.create_index("code")
+        await db.products.create_index("barcode")                # barkod→ürün çözümü
+        await db.products.create_index("variants.barcode")
+        await db.cargo_logs.create_index([("created_at", -1)])
+        await db.attribution_sessions.create_index("session_id")
         await db.users.create_index("email", unique=True)
         # Üye listesi/segment hızı: is_admin+created_at (sıralama), cached_segment (segment filtresi),
         # cached_spent (VIP/harcama sıralaması). Sipariş istatistiği artık users.cached_* önbelleğinden.

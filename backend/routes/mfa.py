@@ -15,9 +15,9 @@ from datetime import datetime, timezone, timedelta
 import jwt
 import pyotp
 import qrcode
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .deps import db, require_auth, create_token, JWT_SECRET, JWT_ALGORITHM, JWT_ISSUER
+from .deps import db, require_auth, create_token, JWT_SECRET, JWT_ALGORITHM, JWT_ISSUER, limiter
 from security.crypto import encrypt, decrypt
 
 router = APIRouter(prefix="/auth/mfa", tags=["MFA"])
@@ -195,8 +195,10 @@ async def mfa_enable_sms(payload: dict, current_user: dict = Depends(require_aut
 
 
 @router.post("/send")
-async def mfa_send_login_code(payload: dict):
-    """Login 2. adımında SMS kodunu (yeniden) gönderir. mfa_token ile kimlik doğrular."""
+@(limiter.limit("3/minute") if limiter else (lambda f: f))
+async def mfa_send_login_code(payload: dict, request: Request):
+    """Login 2. adımında SMS kodunu (yeniden) gönderir. mfa_token ile kimlik doğrular.
+    GÜVENLİK: IP hız-sınırı (3/dk) + kullanıcı başına 30 sn bekleme → SMS drenajı/bombardımanı engeli."""
     mfa_token = (payload or {}).get("mfa_token")
     if not mfa_token:
         raise HTTPException(status_code=400, detail="mfa_token zorunlu")
@@ -211,7 +213,24 @@ async def mfa_send_login_code(payload: dict):
     _phone = _resolve_mfa_phone(user) if user else ""
     if not user or not _phone or (user.get("mfa_method") not in (None, "", "sms") and user.get("mfa_secret_enc")):
         raise HTTPException(status_code=400, detail="SMS MFA aktif değil")
+    # Kullanıcı başına 30 sn bekleme — aynı token'la sınırsız SMS gönderimini engeller (kredi koruması).
+    try:
+        _last = user.get("mfa_last_sms_at")
+        if _last:
+            _lt = datetime.fromisoformat(str(_last).replace("Z", "+00:00"))
+            if _lt.tzinfo is None:
+                _lt = _lt.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - _lt).total_seconds() < 30:
+                raise HTTPException(status_code=429, detail="Çok sık deneme. Lütfen birkaç saniye sonra tekrar deneyin.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     sent = await send_mfa_sms_code(user)
+    try:
+        await db.users.update_one({"id": user["id"]}, {"$set": {"mfa_last_sms_at": datetime.now(timezone.utc).isoformat()}})
+    except Exception:
+        pass
     return {"success": True, "sent": sent, "phone_masked": _mask_phone(_phone)}
 
 
