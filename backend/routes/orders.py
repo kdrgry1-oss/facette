@@ -3522,6 +3522,14 @@ async def ship_order(
     if not existing:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
 
+    # DENETİM (bizlogic F4): ödeme guard'ı yoktu → ÖDENMEMİŞ (awaiting_payment) veya İPTAL sipariş
+    # kargoya verilebiliyordu (CLAUDE.md Değişmez 2/4). Yalnız ödenmiş/onaylı sipariş sevk edilir.
+    _ps = str(existing.get("payment_status") or "")
+    _st = str(existing.get("status") or "")
+    if _ps != "paid" and _st not in ("confirmed", "processing", "shipped", "delivered", "undelivered"):
+        raise HTTPException(status_code=400,
+            detail=f"Ödemesi tamamlanmamış/uygun olmayan sipariş kargoya verilemez (durum: {_st or '?'}, ödeme: {_ps or '?'}).")
+
     now_iso = datetime.now(timezone.utc).isoformat()
     await db.orders.update_one(
         {"id": order_id},
@@ -6278,13 +6286,15 @@ async def mng_cargo_webhook(payload: dict, request: Request):
         })
         return {"success": True, "matched": False}
 
-    # Sipariş durumu mapping
+    # Sipariş durumu mapping. DENETİM (bizlogic Y2/F6): "500" (kargo iadesi = teslim edilemeyip
+    # geri dönen paket) MÜŞTERİ İADESİ DEĞİL → order.status'u 'returned' YAPMA (stok/return kaydı
+    # olmadan sahte iade + ciro düşümü olurdu); yalnız cargo alanlarına yansır.
     status_map = {
         "100": ("preparing", "Şubeye Girdi"),
         "200": ("shipped", "Transfere Alındı"),
         "300": ("shipped", "Dağıtımda"),
         "400": ("delivered", "Teslim Edildi"),
-        "500": ("returned", "İade"),
+        "500": (None, "Kargo İadesi (şubede)"),
     }
     new_status, _ = status_map.get(islem_kodu, (None, None))
 
@@ -6294,10 +6304,22 @@ async def mng_cargo_webhook(payload: dict, request: Request):
         "cargo_last_event_at": tarih,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    # DENETİM Y2: terminal/geri-geçiş koruması — geç gelen kargo event'i iptal/iade/teslim
+    # edilmiş siparişi EZMESİN, delivered'ı shipped'e geri DÜŞÜRMESİN.
+    _cur_st = str(order.get("status") or "")
+    _TERMINAL = {"cancelled", "cancel_refunded", "refunded", "returned",
+                 "return_approved", "return_rejected", "delivered"}
+    _RANK = {"preparing": 1, "shipped": 2, "delivered": 3}
     if new_status:
-        update_set["status"] = new_status
-        if new_status == "delivered":
-            update_set["delivered_at"] = tarih
+        _allow = True
+        if _cur_st in _TERMINAL and not (new_status == "delivered" and _cur_st != "delivered"):
+            _allow = False
+        if _allow and _RANK.get(new_status, 0) < _RANK.get(_cur_st, 0):
+            _allow = False
+        if _allow:
+            update_set["status"] = new_status
+            if new_status == "delivered":
+                update_set["delivered_at"] = tarih
 
     history_entry = {
         "code": islem_kodu, "text": islem_adi, "at": tarih,
@@ -7031,6 +7053,10 @@ async def _build_return_for_order(order: dict, payload: dict, actor: dict) -> di
     if _pm in ("bank_transfer", "havale", "eft", "bank"):
         _iban = "".join(str(payload.get("refund_iban") or "").split()).upper()[:34]
         if _iban:
+            # DENETİM (bizlogic F11): verilen IBAN geçerli TR IBAN değilse reddet (yanlış hesaba iade engeli)
+            from routes.customer import valid_tr_iban as _viban
+            if not _viban(_iban):
+                raise HTTPException(status_code=400, detail="Geçerli bir TR IBAN girin.")
             refund_bank_info = {
                 "iban": _iban,
                 "name": str(payload.get("refund_name") or "").strip()[:120],
@@ -8396,6 +8422,24 @@ async def reject_return(return_id: str, payload: dict,
     await db.orders.update_one({"id": rec.get("order_id")}, {"$set": {
         "status": "return_rejected", "return_request.status": "rejected", "updated_at": now_iso,
     }})
+
+    # DENETİM (bizlogic Y1b/F2): iade ONAYINDA stok geri ekleniyor; sonradan REDDEDİLİRSE (ürün
+    # müşteriye geri gönderiliyor) o +stok HAYALET kalıp oversell yaratıyordu. Restock'u geri al.
+    if rec.get("stock_restored"):
+        try:
+            _mv = await db.stock_movements.find_one(
+                {"return_id": return_id, "type": "return_restock"}, {"_id": 0, "items": 1})
+            if _mv and _mv.get("items"):
+                await _reverse_stock_moves(_mv["items"])
+                await db.stock_movements.insert_one({
+                    "id": str(uuid.uuid4()), "type": "return_restock_reversed",
+                    "order_id": rec.get("order_id"), "order_number": rec.get("order_number", ""),
+                    "return_id": return_id, "items": _mv["items"], "source": "return_reject",
+                    "created_at": now_iso})
+                await db.customer_returns.update_one({"id": return_id}, {"$unset": {"stock_restored": ""}})
+                logger.info(f"[iade-ret] restock geri alındı return={return_id}")
+        except Exception as _e:
+            logger.error(f"[iade-ret de-restock {return_id}] {_e}")
 
     # Bildirim: reddedildi + SEBEP (+ varsa geri-gönderim takip kodu)
     import asyncio as _aio

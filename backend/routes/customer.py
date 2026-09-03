@@ -8,6 +8,20 @@ from datetime import datetime, timezone
 from .deps import db, logger, get_current_user, require_auth, generate_id
 
 
+def valid_tr_iban(iban: str) -> bool:
+    """TR IBAN doğrulaması (format TR+24 hane + mod-97 checksum). DENETİM (bizlogic F11):
+    havale iadesinde yanlış/eksik IBAN'a para gönderimi engellenir."""
+    s = "".join(str(iban or "").split()).upper()
+    if not re.fullmatch(r"TR\d{24}", s):
+        return False
+    rearranged = s[4:] + s[:4]
+    num = "".join((str(ord(ch) - 55) if ch.isalpha() else ch) for ch in rearranged)
+    try:
+        return int(num) % 97 == 1
+    except Exception:
+        return False
+
+
 def _owner_or_clauses(current_user: dict) -> list:
     """Bir siparişin bu üyeye ait olduğunu gösteren eşleşme koşulları.
     user_id ile birlikte e-postayı da kapsar: misafir (üyesiz) verilen ya da
@@ -105,12 +119,17 @@ async def cancel_my_order(order_id: str, payload: dict = Body(default={}), curre
         _pm = str(order.get("payment_method") or "").lower()
         if _pm in ("bank_transfer", "havale", "eft", "bank"):
             _iban = "".join(str((payload or {}).get("refund_iban") or "").split()).upper()[:34]
-            if _iban:
-                _set["refund_bank_info"] = {
-                    "iban": _iban,
-                    "name": str((payload or {}).get("refund_name") or "").strip()[:120],
-                    "bank": str((payload or {}).get("refund_bank") or "").strip()[:80],
-                }
+            _name = str((payload or {}).get("refund_name") or "").strip()[:120]
+            # F11: havale iadesinde geçerli TR IBAN + ad soyad ZORUNLU (yanlış hesaba iade engeli)
+            if not valid_tr_iban(_iban):
+                raise HTTPException(status_code=400, detail="Geçerli bir TR IBAN girin (iade bu hesaba yapılacak).")
+            if not _name:
+                raise HTTPException(status_code=400, detail="Hesap sahibi ad soyad zorunlu.")
+            _set["refund_bank_info"] = {
+                "iban": _iban,
+                "name": _name,
+                "bank": str((payload or {}).get("refund_bank") or "").strip()[:80],
+            }
     await db.orders.update_one({"id": order.get("id")}, {"$set": _set})
 
     # Stok geri ekleme — YALNIZCA sipariş GERÇEKTEN iptal edildiyse (cancelled).
