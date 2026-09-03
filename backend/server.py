@@ -601,6 +601,13 @@ class SecurityHeadersMiddleware(_BHM):
         if path.startswith("/api/"):
             response.headers.setdefault("Cross-Origin-Resource-Policy", "same-site")
             response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+        # DENETİM (auth-redteam #6): kimlik/PII yanıtlarına no-store — ara katman/tarayıcı
+        # önbelleğe almasın (token/PII sızıntısı). Public katalog uçları hariç.
+        _SENSITIVE = ("/api/auth", "/api/users", "/api/admin", "/api/my-orders",
+                      "/api/orders", "/api/customer", "/api/members", "/api/iys",
+                      "/api/settings", "/api/referrals", "/api/loyalty", "/api/gift")
+        if any(path.startswith(p) for p in _SENSITIVE):
+            response.headers.setdefault("Cache-Control", "no-store, private")
         return response
 
 

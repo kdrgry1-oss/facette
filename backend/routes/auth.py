@@ -108,8 +108,8 @@ async def register(request: Request):
     password = safe_str(password or "", 200)
     if not is_safe_email(email):
         raise HTTPException(status_code=400, detail="Geçersiz e-posta adresi")
-    if len(password) < 6:
-        raise HTTPException(status_code=400, detail="Şifre en az 6 karakter olmalı")
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Şifre en az 8 karakter olmalı")
 
     existing = await db.users.find_one({"email": email})
     if existing:
@@ -505,8 +505,8 @@ async def convert_guest_order(payload: dict, request: Request):
     password = (payload or {}).get("password", "")
     if not order_id:
         raise HTTPException(status_code=400, detail="order_id gerekli")
-    if not password or len(password) < 6:
-        raise HTTPException(status_code=400, detail="Şifre en az 6 karakter olmalı")
+    if not password or len(password) < 8:
+        raise HTTPException(status_code=400, detail="Şifre en az 8 karakter olmalı")
 
     order = await db.orders.find_one({"$or": [{"id": order_id}, {"order_number": order_id}]}, {"_id": 0})
     if not order:
@@ -659,8 +659,8 @@ async def change_password(
     # Personel/admin hesapları için güçlü şifre politikası (Amazon DPP); müşteri min 6
     if current_user.get("is_admin"):
         validate_strong_password(new, identifiers=[current_user.get("email"), current_user.get("name")])
-    elif len(new) < 6:
-        raise HTTPException(status_code=400, detail="Yeni şifre en az 6 karakter olmalı")
+    elif len(new) < 8:
+        raise HTTPException(status_code=400, detail="Yeni şifre en az 8 karakter olmalı")
     user = await db.users.find_one({"id": current_user["id"]})
     if not user or not verify_password(cur, user.get("password", "")):
         await write_audit_log(
@@ -832,8 +832,8 @@ async def forgot_password_verify_otp(request: Request, req: OTPVerifyReq):
 
 @router.post("/forgot-password/reset")
 async def forgot_password_reset(req: OTPResetReq):
-    if not req.new_password or len(req.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Şifre en az 6 karakter olmalı")
+    if not req.new_password or len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Şifre en az 8 karakter olmalı")
 
     now_ts = datetime.now(timezone.utc).timestamp()
     rec = await db.password_reset_otps.find_one(

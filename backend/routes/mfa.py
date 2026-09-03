@@ -333,6 +333,10 @@ async def mfa_verify(payload: dict):
     user = await db.users.find_one({"id": decoded["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=400, detail="MFA aktif değil")
+    # DENETİM (auth-redteam #7): login 1. adımı ile MFA doğrulama arasında hesap DEVRE DIŞI
+    # bırakılmışsa oturum verilmemeli — is_active False ise reddet.
+    if user.get("is_active") is False:
+        raise HTTPException(status_code=403, detail="Hesap devre dışı.")
     # OTOMATİK SMS-MFA: hesap resmî olarak MFA kurmamış olsa bile, admin + zorunlu MFA +
     # kayıtlı telefon varsa SMS doğrulaması geçerlidir (kurulum ekranı gerekmez).
     _auto_sms = False
