@@ -8,6 +8,7 @@ import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { trackViewItemList } from "../lib/dataLayer";
 import { slugify } from "../lib/slug";
+import { setCategorySeo } from "../lib/seo";
 import { dedupeColorGroups } from "../lib/colorGroups";
 import { sortLikeSize } from "../utils/sizeSort";
 import { resolveColor, needsBorder, MULTI_GRADIENT } from "../lib/colorMap";
@@ -241,6 +242,14 @@ export default function Category() {
   const parentCategory = currentCategory?.parent_id
     ? categories.find((c) => String(c.id) === String(currentCategory.parent_id)) || null
     : null;
+
+  // Per-sayfa SEO meta (title/description/canonical) — kategori sayfası artık ana sayfaya
+  // canonical'lanmıyor. slug "all" (tüm ürünler) hariç.
+  useEffect(() => {
+    if (slug && slug !== "all") {
+      try { setCategorySeo(categoryName, slug, "FACETTE", currentCategory?.description); } catch (_) {}
+    }
+  }, [slug, categoryName, currentCategory?.description]);
 
   // Sıralama menüsü (toolbar ortası) — seçim URL'e yazılır, liste yenilenir
   const [sortOpen, setSortOpen] = useState(false);

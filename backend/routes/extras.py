@@ -22,6 +22,9 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid
+import os
+import re as _re
+import html as _html
 
 from .deps import db, require_admin, require_auth, logger
 
@@ -302,3 +305,170 @@ async def get_public_meta(path: str):
         p = "/" + p
     doc = await db.seo_meta.find_one({"path": p}, {"_id": 0})
     return {"found": bool(doc), "meta": doc}
+
+
+# =============================================================================
+# EDGE SEO — per-sayfa meta çözümleyici (functions/_middleware.js buradan okur)
+# =============================================================================
+_FRONT_URL = (os.environ.get("FRONTEND_PUBLIC_URL") or "https://facette.com.tr").rstrip("/")
+# Ürün/kategori OLMAYAN, indekslenmeyen veya statik kök yollar → soft-404 taraması yapma.
+_SEO_NONINDEX_PREFIXES = ("/sepet", "/odeme", "/checkout", "/hesabim", "/account", "/admin",
+                          "/giris", "/login", "/kayit", "/register", "/order-success",
+                          "/siparis", "/sifremi", "/reset", "/iade", "/return")
+_SEO_KNOWN_STATIC = {"/", "/hakkimizda", "/iletisim", "/sss", "/kvkk", "/gizlilik"}
+
+
+def _clean_desc(s: str, limit: int = 160) -> str:
+    s = _re.sub(r"<[^>]+>", " ", str(s or ""))
+    s = _re.sub(r"\s+", " ", s).strip()
+    return (s[:limit].rstrip() + "…") if len(s) > limit else s
+
+
+async def _seo_company() -> dict:
+    try:
+        from company import get_company
+        return await get_company(db) or {}
+    except Exception:
+        return {}
+
+
+@seo_public_router.get("/page-meta")
+async def seo_page_meta(path: str = Query("/", max_length=512)):
+    """Bir storefront yolu için title/description/canonical/OG + (ürün) JSON-LD döndürür.
+    Cloudflare Pages edge middleware (functions/_middleware.js) her HTML isteğinde çağırır
+    ve dönen meta'yı ilk HTML'e enjekte eder → ürün/kategori sayfaları Google'da doğru
+    başlık/açıklama/canonical ile indekslenir (eskiden HEPSİ ana sayfaya canonical'lıydı).
+    Savunmacı: her hata found:false döner (middleware ilk HTML'i olduğu gibi bırakır)."""
+    try:
+        raw = path or "/"
+        # yalnız path kısmı, query/fragment at
+        raw = raw.split("?", 1)[0].split("#", 1)[0]
+        if not raw.startswith("/"):
+            raw = "/" + raw
+        p = raw.rstrip("/") or "/"
+        low = p.lower()
+        comp = await _seo_company()
+        brand = comp.get("company_name") or comp.get("website") or "FACETTE"
+        site = (comp.get("site_url") or _FRONT_URL).rstrip("/")
+
+        # Admin override varsa öncelik (mevcut seo_meta)
+        override = await db.seo_meta.find_one({"path": low}, {"_id": 0})
+
+        # İndekslenmeyen/panel yolları → noindex (soft-404 + özel alan koruması)
+        if any(low == pre or low.startswith(pre + "/") or low.startswith(pre) for pre in _SEO_NONINDEX_PREFIXES):
+            return {"found": True, "robots": "noindex,follow", "canonical": f"{site}{p}"}
+
+        # Ana sayfa / bilinen statikler → varsayılan (index.html zaten doğru) → dokunma
+        if low in _SEO_KNOWN_STATIC:
+            m = {"found": True, "robots": "index,follow", "canonical": f"{site}/"}
+            if override:
+                m.update({k: override.get(k) for k in ("title", "description", "og_image") if override.get(k)})
+                if override.get("noindex"):
+                    m["robots"] = "noindex,nofollow"
+            return m
+
+        # Slug çöz: /urun/{slug} veya /{slug}
+        slug = None
+        mprod = _re.match(r"^/urun/([^/]+)$", p)
+        if mprod:
+            slug = mprod.group(1)
+        elif _re.match(r"^/[^/]+$", p):
+            slug = p[1:]
+        if not slug:
+            # çok segmentli bilinmeyen yol → noindex
+            return {"found": True, "robots": "noindex,follow", "canonical": f"{site}{p}"}
+
+        slug_l = slug.lower()
+
+        # 1) ÜRÜN dene (aktif + silinmemiş; üyeye-özel değil)
+        prod = None
+        cands = await db.products.find(
+            {"$or": [{"slug": slug_l}, {"slug": slug}, {"slug_aliases": slug_l}, {"id": slug}]},
+            {"_id": 0, "name": 1, "slug": 1, "id": 1, "description": 1, "seo_description": 1,
+             "meta_description": 1, "meta_title": 1, "images": 1, "image": 1, "price": 1,
+             "sale_price": 1, "brand": 1, "barcode": 1, "stock_code": 1, "variants": 1,
+             "category_name": 1, "category_slug": 1, "is_active": 1, "is_deleted": 1,
+             "members_only": 1, "category_id": 1, "category_ids": 1}).to_list(10)
+        prod = (next((c for c in cands if c.get("is_active") is True and not c.get("is_deleted")), None)
+                or None)
+        if prod and not prod.get("members_only"):
+            _slug = prod.get("slug") or slug_l
+            canonical = f"{site}/urun/{_slug}"
+            title = (prod.get("meta_title") or f"{prod.get('name','')} | {brand}").strip()
+            desc = _clean_desc(prod.get("meta_description") or prod.get("seo_description")
+                               or prod.get("description") or prod.get("name") or "")
+            imgs = []
+            for im in (prod.get("images") or []):
+                if isinstance(im, str) and im.startswith("http"):
+                    imgs.append(im)
+                elif isinstance(im, dict):
+                    u = im.get("url") or im.get("src") or im.get("image")
+                    if u and str(u).startswith("http"):
+                        imgs.append(u)
+            if prod.get("image") and str(prod["image"]).startswith("http"):
+                imgs.insert(0, prod["image"])
+            imgs = list(dict.fromkeys(imgs))
+            og_image = imgs[0] if imgs else f"{site}/og-image.jpg"
+            price = prod.get("sale_price") or prod.get("price")
+            in_stock = True
+            if isinstance(prod.get("variants"), list) and prod["variants"]:
+                in_stock = any((v.get("stock") or 0) > 0 for v in prod["variants"])
+            crumbs = [{"name": "Ana Sayfa", "item": site}]
+            if prod.get("category_name"):
+                crumbs.append({"name": prod["category_name"],
+                               "item": f"{site}/{prod.get('category_slug') or ''}".rstrip("/")})
+            crumbs.append({"name": prod.get("name") or "", "item": canonical})
+            product_ld = {"@context": "https://schema.org/", "@type": "Product",
+                          "name": prod.get("name"), "image": imgs or None,
+                          "description": desc or prod.get("name"),
+                          "sku": prod.get("barcode") or prod.get("stock_code") or prod.get("id"),
+                          "brand": ({"@type": "Brand", "name": prod["brand"]} if prod.get("brand") else None),
+                          "offers": {"@type": "Offer", "url": canonical, "priceCurrency": "TRY",
+                                     "price": (str(price) if price is not None else None),
+                                     "availability": ("https://schema.org/InStock" if in_stock
+                                                      else "https://schema.org/OutOfStock")}}
+            product_ld = {k: v for k, v in product_ld.items() if v is not None}
+            breadcrumb_ld = {"@context": "https://schema.org/", "@type": "BreadcrumbList",
+                             "itemListElement": [{"@type": "ListItem", "position": i + 1,
+                                                  "name": c["name"], "item": c["item"]}
+                                                 for i, c in enumerate(crumbs)]}
+            m = {"found": True, "type": "product", "title": title, "description": desc,
+                 "canonical": canonical, "og_title": title, "og_description": desc,
+                 "og_url": canonical, "og_image": og_image, "og_type": "product",
+                 "robots": "index,follow", "jsonld": [product_ld, breadcrumb_ld]}
+            if override:
+                if override.get("title"): m["title"] = m["og_title"] = override["title"]
+                if override.get("description"): m["description"] = m["og_description"] = override["description"]
+                if override.get("og_image"): m["og_image"] = override["og_image"]
+                if override.get("noindex"): m["robots"] = "noindex,nofollow"
+            return m
+
+        # 2) KATEGORİ dene
+        cat = await db.categories.find_one(
+            {"$or": [{"slug": slug_l}, {"slug": slug}, {"slug_aliases": slug_l}]},
+            {"_id": 0, "name": 1, "slug": 1, "description": 1, "meta_title": 1,
+             "meta_description": 1, "image": 1, "members_only": 1})
+        if cat and not cat.get("members_only"):
+            _slug = cat.get("slug") or slug_l
+            canonical = f"{site}/{_slug}"
+            title = (cat.get("meta_title") or f"{cat.get('name','')} | {brand}").strip()
+            desc = _clean_desc(cat.get("meta_description") or cat.get("description")
+                               or f"{cat.get('name','')} kategorisindeki yeni sezon ürünleri {brand}'te keşfedin.")
+            og_image = (cat.get("image") if str(cat.get("image") or "").startswith("http")
+                        else f"{site}/og-image.jpg")
+            m = {"found": True, "type": "category", "title": title, "description": desc,
+                 "canonical": canonical, "og_title": title, "og_description": desc,
+                 "og_url": canonical, "og_image": og_image, "og_type": "website",
+                 "robots": "index,follow"}
+            if override:
+                if override.get("title"): m["title"] = m["og_title"] = override["title"]
+                if override.get("description"): m["description"] = m["og_description"] = override["description"]
+                if override.get("og_image"): m["og_image"] = override["og_image"]
+                if override.get("noindex"): m["robots"] = "noindex,nofollow"
+            return m
+
+        # 3) Ne ürün ne kategori → soft-404: noindex (Google indeks bütçesi boşa gitmesin)
+        return {"found": True, "robots": "noindex,follow", "canonical": f"{site}{p}"}
+    except Exception as e:
+        logger.warning(f"[seo] page-meta çözümlenemedi path={path}: {e}")
+        return {"found": False}

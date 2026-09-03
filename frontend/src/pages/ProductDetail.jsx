@@ -12,6 +12,7 @@ import { slugify } from "../lib/slug";
 import { priceView } from "../lib/price";
 import { resolveColor } from "../lib/colorMap";
 import { isRecommendedSize, recommendLetterSize } from "../lib/sizeRecommend";
+import { setProductSeo } from "../lib/seo";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { useAuth } from "../context/AuthContext";
@@ -305,6 +306,9 @@ export default function ProductDetail() {
   // "rich results" (fiyat, stok, marka) göstermesini sağlar.
   useEffect(() => {
     if (!product) return;
+    // Per-sayfa meta (title/description/canonical/OG) — edge basmış olsa da idempotent.
+    // Eskiden ürün sayfası ana sayfanın meta'sını taşıyordu (canonical=ana sayfa).
+    try { setProductSeo(product); } catch (_) {}
     // Edge SEO middleware (functions/_middleware.js) zaten JSON-LD bastıysa
     // client tarafında tekrar ekleme — Google'da duplicate Product/Breadcrumb olmasın.
     if (typeof document !== "undefined" && document.querySelector('script[data-seo="edge"]')) return;
