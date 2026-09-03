@@ -196,6 +196,7 @@ async def update_panel_user(user_id: str, payload: dict, current_user: dict = De
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
     update = {"updated_at": datetime.now(timezone.utc).isoformat()}
     unset = {}
+    _bump_tv = False
     for f in ("first_name", "last_name", "role_id", "is_active"):
         if f in payload:
             update[f] = payload[f]
@@ -205,6 +206,9 @@ async def update_panel_user(user_id: str, payload: dict, current_user: dict = De
             payload.get("last_name") or user.get("last_name")])
         update["password"] = hash_password(payload["password"])
         update["password_changed_at"] = datetime.now(timezone.utc).isoformat()
+        # DENETİM (SESN-26): admin şifre sıfırlarsa token_version artır → çalınmış/eski
+        # JWT'ler geçersizleşir. Aksi halde ele geçirilmiş oturum 7 gün canlı kalırdı.
+        _bump_tv = True
     # TELEFON (giriş SMS'i): YALNIZ admin buradan belirler. Set edilince MFA telefonu
     # (mfa_phone_enc, öncelikli) admin-yönetimli olur → kullanıcı kendisi DEĞİŞTİREMEZ.
     if "phone" in payload:
@@ -228,6 +232,8 @@ async def update_panel_user(user_id: str, payload: dict, current_user: dict = De
     _ops = {"$set": update}
     if unset:
         _ops["$unset"] = unset
+    if _bump_tv:
+        _ops["$inc"] = {"token_version": 1}
     await db.users.update_one({"id": user_id}, _ops)
     return {"success": True}
 

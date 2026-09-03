@@ -338,16 +338,45 @@ async def _get_template(db, event_key: str, channel: str) -> Optional[Dict]:
     )
 
 
+# DENETİM (bildirim Y2): OTP/şifre-sıfırlama kodları ve tam telefon numarası
+# notification_logs'a AÇIK yazılıyordu (admin log ekranından okunabilir). Loglamadan
+# önce hassas değişkenleri redakte et, alıcıyı maskele.
+_SENSITIVE_VAR_KEYS = {"otp", "otp_code", "code", "mfa_code", "sms_code", "reset_code",
+                       "verification_code", "password", "token", "otp_kodu", "kod"}
+
+
+def _redact_log_vars(variables: Optional[Dict]) -> Dict:
+    if not variables:
+        return {}
+    out = {}
+    for k, v in variables.items():
+        if str(k).strip().lower() in _SENSITIVE_VAR_KEYS:
+            out[k] = "***"
+        else:
+            out[k] = v
+    return out
+
+
+def _mask_to(to: str) -> str:
+    s = str(to or "")
+    if "@" in s:  # e-posta: ilk 2 karakter + alan
+        name, _, dom = s.partition("@")
+        return (name[:2] + "***@" + dom) if dom else "***"
+    if len(s) >= 4:  # telefon: yalnız son 4 hane
+        return "***" + s[-4:]
+    return "***"
+
+
 async def _log_event(db, *, event: str, channel: str, to: str, status: str,
                      response: str = "", variables: Optional[Dict] = None):
     try:
         await db.notification_logs.insert_one({
             "event": event,
             "channel": channel,
-            "to": to,
+            "to": _mask_to(to),
             "status": status,
             "response": response[:1000] if response else "",
-            "variables": variables or {},
+            "variables": _redact_log_vars(variables),
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
     except Exception as e:

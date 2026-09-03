@@ -363,7 +363,7 @@ def create_shipment(
             pChIrsaliyeNo=tr_safe(irsaliye_no),
             pPrKiymet=str(int(round(float(kiymet or 0)))),  # ondaliksiz: MNG '2410.0'yi '24100' okuyup E029 vermesini onler
             pChBarkod="",
-            pChIcerik=tr_safe(icerik)[:250],
+            pChIcerik=tr_safe(icerik)[:200],  # DENETİM A-1: MNG pChIcerik limiti 200 (E022)
             pGonderiHizmetSekli=hizmet_sekli,
             pTeslimSekli=teslim_sekli,
             pFlAlSms=al_sms,

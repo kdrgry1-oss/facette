@@ -1883,6 +1883,11 @@ async def update_order(
         "iyzico_retrieve_response", "iyzico_init_response", "iyzico_response",
         "iyzico_token", "iyzico_return_url", "payment_receipt",
         "capi_purchase_sent", "coupon_redemptions_recorded",
+        # DENETİM K1: durum makinesi TEK kapıdan geçmeli. `status` bu genel uçtan
+        # değiştirilirse update_order_status'taki finans-yetki kapısı + stok iadesi +
+        # kupon/çek/puan iadesi + iptal SMS'i ATLANIR (Değişmez 1/5/6 delinir). Statü
+        # YALNIZ PUT /orders/{id}/status (update_order_status) üzerinden değişir.
+        "status",
     }
     removed = [k for k in list(order_data.keys()) if k in _PROTECTED]
     for k in removed:
@@ -5429,12 +5434,15 @@ async def create_cargo_barcode(
     il = (ship.get("city") or "").strip()
     ilce = (ship.get("district") or "").strip()
     adres = (ship.get("address") or "").strip()
-    if not (il and adres):
-        raise HTTPException(status_code=400, detail="Alıcı il ve adresi eksik. MNG barkodu oluşturulamaz.")
+    # DENETİM A-2: ilçe de zorunlu — MNG pChIlce boşsa gönderiyi reddeder/yanlış şubeye
+    # yönlendirir (influencer yolu zaten dördünü şart koşuyor, sipariş yolu asimetrikti).
+    if not (il and ilce and adres):
+        raise HTTPException(status_code=400, detail="Alıcı il, ilçe ve adresi eksik. MNG barkodu oluşturulamaz.")
 
-    # İçerik: ürün isimleri (ilk 250 karakter)
+    # İçerik: ürün isimleri. DENETİM A-1: MNG pChIcerik gerçek limiti 200 karakter (E022);
+    # çok ürünlü siparişte 200-250 arası düşerse kargo reddedilir → "barkod oluşmuyor".
     items = order.get("items") or []
-    icerik = "; ".join([f"{it.get('quantity',1)}x {it.get('product_name','')}".strip() for it in items])[:250] or "Ürün"
+    icerik = "; ".join([f"{it.get('quantity',1)}x {it.get('product_name','')}".strip() for it in items])[:200] or "Ürün"
     kiymet = float(order.get("total") or order.get("subtotal") or 0)
 
     # Sipariş numarası (MNG için unique olmalı, varsa siparişin order_number'ı)
@@ -6134,7 +6142,10 @@ async def bulk_update_status(
 async def bulk_create_invoice(
     order_ids: List[str],
     invoice_type: str = Query("auto"),
-    current_user: dict = Depends(require_admin)
+    # DENETİM H1: tekli fatura kesimi require_permission("orders.invoice") ister;
+    # toplu uç yalnız require_admin'deydi → izinsiz personel toplu GİB faturası
+    # kesebiliyordu (BFLA). Tekli uçla aynı yetkiye bağlandı.
+    current_user: dict = Depends(require_permission("orders.invoice"))
 ):
     """Toplu fatura kesimi — invoice_type=auto ile her sipariş için VKN/TC kontrolü
     yapılır, mükellefse e-Fatura, değilse e-Arşiv kesilir.
