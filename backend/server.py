@@ -267,6 +267,14 @@ async def lifespan(app: FastAPI):
         # veride olası duplikeler boot'u kırmasın; benzersizlik ayrı dedup migration ister).
         await db.orders.create_index("id")                       # ödeme callback {"id": order_id}
         await db.orders.create_index("iyzico_payment_id")        # cross-order paymentId replay kontrolü
+        # DENETİM (race R1): idempotency_key partial-UNIQUE — eşzamanlı çift POST /orders'ı DB
+        # seviyesinde reddeder (çift sipariş). Ayrı try: mevcut duplike varsa DİĞER indeksleri kırmasın.
+        try:
+            await db.orders.create_index(
+                "idempotency_key", unique=True,
+                partialFilterExpression={"idempotency_key": {"$type": "string"}})
+        except Exception as _ie:
+            logger.warning(f"idempotency_key unique index atlandı (mevcut duplike olabilir): {_ie}")
         await db.stock_movements.create_index([("order_id", 1), ("type", 1)])   # iptal/restock idempotency
         await db.stock_movements.create_index([("product_id", 1), ("created_at", -1)])
         await db.coupons.create_index("code")                    # checkout apply_coupon (public)

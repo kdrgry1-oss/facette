@@ -1579,6 +1579,22 @@ async def create_order(
                 await _reverse_stock_moves(_oversell_moves)
             except Exception:
                 pass
+        # DENETİM (race R1): iki EŞZAMANLI POST /orders aynı idempotency_key ile check-then-insert
+        # yarışını geçip ikisi de buraya gelebiliyordu (çift sipariş/çift stok/çift ödeme). Artık
+        # orders.idempotency_key ÜZERİNDE partial-unique indeks var → ikinci insert DuplicateKeyError
+        # verir; stoğu geri alıp MEVCUT siparişi idempotent döndürürüz (çift sipariş engellenir).
+        try:
+            from pymongo.errors import DuplicateKeyError as _DupKey
+        except Exception:
+            _DupKey = None
+        if _DupKey is not None and isinstance(_ins_err, _DupKey) and _idem:
+            _ex2 = await db.orders.find_one(
+                {"idempotency_key": _idem}, {"_id": 0, "id": 1, "order_number": 1, "payment_status": 1})
+            if _ex2:
+                logger.info(f"[idempotency-race] eşzamanlı çift POST — mevcut sipariş döndürüldü key={_idem}")
+                return {"order_id": _ex2["id"], "order_number": _ex2["order_number"],
+                        "payment_status": _ex2.get("payment_status"), "idempotent": True,
+                        "message": "Mevcut sipariş kullanıldı"}
         raise
     logger.info(f"Order created: {order['order_number']}")
 
