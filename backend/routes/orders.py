@@ -1886,6 +1886,12 @@ async def update_order(
         "iyzico_retrieve_response", "iyzico_init_response", "iyzico_response",
         "iyzico_token", "iyzico_return_url", "payment_receipt",
         "capi_purchase_sent", "coupon_redemptions_recorded",
+        # DENETİM (payment redteam F3): mass-assignment savunmasını genişlet — ödeme/iade/çek/puan
+        # iç alanları genel uçtan EZİLEMEZ.
+        "payment_id", "iyzico_payment_id", "reconcile_payment_id", "needs_reconciliation",
+        "gift_card", "points_used", "points_refunded", "paid_with_gift_card_only",
+        "loyalty_awarded", "loyalty_points_earned", "gift_card_refunded",
+        "_restocked_by_autocancel", "_redecremented_after_reconcile", "stock_restored",
         # DENETİM K1: durum makinesi TEK kapıdan geçmeli. `status` bu genel uçtan
         # değiştirilirse update_order_status'taki finans-yetki kapısı + stok iadesi +
         # kupon/çek/puan iadesi + iptal SMS'i ATLANIR (Değişmez 1/5/6 delinir). Statü

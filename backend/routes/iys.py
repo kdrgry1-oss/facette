@@ -383,7 +383,13 @@ async def iys_netgsm_probe(payload: dict, current_user: dict = Depends(get_curre
     NetGSM'e GERÇEK add gönderilmez, yalnızca yol/erişim test edilir (recipient boşsa 400 döner)."""
     _admin_or_403(current_user)
     cfg = await _iys_config()
-    url = (payload or {}).get("url") or os.environ.get("NETGSM_IYS_URL") or "https://api.netgsm.com.tr/iys/add"
+    # DENETİM SEC-2 F7: URL artık İSTEMCİDEN ALINMAZ. Eskiden {url:"https://evil"} verilip
+    # NetGSM kullanıcı adı/şifresi (Basic auth) o adrese POST'lanarak SMS sağlayıcı kimliği
+    # sızdırılabiliyordu. Yalnız sabit/env NetGSM ucu; ek güvenlik: host beyaz-listesi.
+    url = os.environ.get("NETGSM_IYS_URL") or "https://api.netgsm.com.tr/iys/add"
+    from urllib.parse import urlparse as _up
+    if (_up(url).hostname or "") not in ("api.netgsm.com.tr", "www.netgsm.com.tr", "netgsm.com.tr"):
+        raise HTTPException(status_code=400, detail="Geçersiz NetGSM ucu")
     appkey = (payload or {}).get("appkey", cfg.get("appkey") or "")
     recipient = str((payload or {}).get("recipient") or "").strip()
     ch = str((payload or {}).get("type") or "MESAJ")

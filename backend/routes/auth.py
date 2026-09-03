@@ -1028,13 +1028,12 @@ async def google_signin(request: Request, payload: dict):
 
 @router.post("/google/session")
 async def google_session(request: Request, session_id: str = Query(...)):
-    """Emergent-managed Google Auth — session_id'yi kullanıcı + app JWT token'a çevirir.
-
-    Frontend, auth.emergentagent.com'dan dönen session_id'yi buraya POST eder.
-    Backend, Emergent session-data API'sini çağırıp kullanıcıyı oluşturur/günceller
-    ve uygulamanın kendi JWT token'ını döndürür (mevcut JWT auth ile uyumlu).
-    """
-    import httpx
+    """DEVRE DIŞI (DENETİM auth-3): Bu uç, 3. taraf demo host'unun (demobackend.emergentagent.com)
+    döndürdüğü kimliğe GÜVENİP e-posta ile mevcut hesaba otomatik bağlanıyordu → o host ele
+    geçirilir/taklit edilirse HESAP ELE GEÇİRME (ATO). Frontend kullanmıyor (gerçek Google login
+    ayrı akışta). Kapatıldı."""
+    raise HTTPException(status_code=410, detail="Bu giriş yöntemi kullanımdan kaldırıldı.")
+    import httpx  # noqa (ulaşılmaz — güvenlik için devre dışı)
     session_id = safe_str(session_id, 512)
     try:
         async with httpx.AsyncClient(timeout=15) as client:

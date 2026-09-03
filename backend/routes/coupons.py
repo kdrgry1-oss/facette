@@ -17,7 +17,27 @@ from typing import Optional, List
 import re
 import uuid
 
-from .deps import db, require_admin, require_auth, logger
+from .deps import db, require_admin, require_auth, get_current_user, logger
+
+
+def _is_personal_coupon(c: dict) -> bool:
+    """Kişiye özel ödül kuponu mu? (referral/doğum günü/hoş geldin → reward_email/reward_user_id)."""
+    return bool((c or {}).get("reward_email") or (c or {}).get("reward_user_id"))
+
+
+def _coupon_owner_ok(c: dict, user_id, email: str) -> bool:
+    """Kişiye özel kupon YALNIZ sahibi tarafından kullanılabilir (DENETİM SEC-2 F1). Kimlik
+    SUNUCUDAN türetilmeli (istemci iddiasına güvenilmez); kişisel değilse herkese açık."""
+    if not _is_personal_coupon(c):
+        return True
+    _em = (email or "").strip().lower()
+    ru = c.get("reward_user_id")
+    re_ = (c.get("reward_email") or "").strip().lower()
+    if user_id and ru and str(user_id) == str(ru):
+        return True
+    if _em and re_ and _em == re_:
+        return True
+    return False
 
 
 admin_router = APIRouter(prefix="/admin/coupons", tags=["admin-coupons"])
@@ -134,13 +154,16 @@ async def coupon_redemptions(cid: str, current_user: dict = Depends(require_admi
 # ---------------- Public: apply a coupon at checkout ----------------
 
 @public_router.post("/available")
-async def available_coupons(payload: dict):
+async def available_coupons(payload: dict, current_user: dict = Depends(get_current_user)):
     """Trendyol Go benzeri: bu sepet için kullanıcının kullanabileceği aktif kuponları döner.
     Hesaplanmış discount değerlerini de içerir (tıklanınca sepete direkt uygulanır).
-    Payload: {cart_total, items, user_id?}
-    """
+    Payload: {cart_total, items}
+    GÜVENLİK (DENETİM SEC-2 F1): kimlik yalnız JWT'den (istemci user_id/email'ine güvenilmez);
+    kişiye özel ödül kuponlarının KODU başkasına SIZDIRILMAZ (harvest engellendi)."""
     cart_total = float(payload.get("cart_total") or 0)
-    user_id = payload.get("user_id")
+    # user_id yalnız doğrulanmış token'dan; auth e-postası owner kontrolü için.
+    user_id = (current_user or {}).get("id")
+    _auth_email = ((current_user or {}).get("email") or "").strip().lower()
     items = payload.get("items") or []
     items = await _enrich_items_category_ids(items)
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -155,6 +178,10 @@ async def available_coupons(payload: dict):
 
     out = []
     for c in coupons:
+        # SEC-2 F1: kişiye özel ödül kuponunun KODUNU yalnız doğrulanmış SAHİBİNE göster
+        # (anonim/başkası bu listeden REF-/DG-/HG- kodlarını toplayamaz).
+        if _is_personal_coupon(c) and not _coupon_owner_ok(c, user_id, _auth_email):
+            continue
         # Min tutar
         min_total = float(c.get("min_cart_total") or 0)
         if min_total and cart_total < min_total:
@@ -467,6 +494,10 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
     """Tek kuponu dogrular + indirimini hesaplar. apply_coupon VE motor ayni cekirdegi kullanir."""
     if not c.get("is_active"):
         return {"valid": False, "reason": "Kupon pasif", "discount": 0}
+    # DENETİM SEC-2 F1: kişiye özel ödül kuponu (referral/doğum günü/hoş geldin) YALNIZ sahibine.
+    # create_order buraya SUNUCU-türetilmiş user_id/email geçirir → başkasının kuponu yakılamaz.
+    if not _coupon_owner_ok(c, user_id, email):
+        return {"valid": False, "reason": "Bu kupon size ait değil", "discount": 0}
     # Odeme yontemi filtresi: kampanyanin payment_methods listesi doluysa, secili yontem listede olmali.
     # ÖNEMLİ (önizleme): Sepet/vitrin değerlendirmesinde henüz ödeme yöntemi SEÇİLMEMİŞ olur
     # (payment_method boş). Bu durumda kampanyayı reddetmek, ödeme-kısıtlı kampanyalı ürünü
@@ -544,7 +575,7 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
 
 
 @public_router.post("/apply")
-async def apply_coupon(payload: dict):
+async def apply_coupon(payload: dict, current_user: dict = Depends(get_current_user)):
     code = (payload.get("code") or "").strip().upper()
     if not code:
         return {"valid": False, "reason": "Kupon kodu boş", "discount": 0}
@@ -554,28 +585,21 @@ async def apply_coupon(payload: dict):
     cart_total = float(payload.get("cart_total") or 0)
     items = payload.get("items") or []
     items = await _enrich_items_category_ids(items)
-    email = payload.get("email") or payload.get("customer_email") or ""
-    return await _evaluate_single(c, cart_total, items, payload.get("user_id"), email,
+    # SEC-2 F1: kimlik doğrulanmışsa token'dan (istemci user_id'sine güvenilmez); misafirde e-posta.
+    _uid = (current_user or {}).get("id") or payload.get("user_id")
+    email = ((current_user or {}).get("email")
+             or payload.get("email") or payload.get("customer_email") or "")
+    return await _evaluate_single(c, cart_total, items, _uid, email,
                                   payload.get("payment_method") or "")
 
 
 @public_router.post("/redeem")
 async def redeem_coupon(payload: dict, current_user: dict = Depends(require_auth)):
-    """Record a redemption. GÜVENLİK: Ana akış record_order_redemptions() FONKSİYONUNU
-    doğrudan çağırır; bu HTTP ucu kullanılmıyordu ve anonim erişimle kupon kullanım
-    sayacı şişirilebiliyordu → artık kimlik doğrulaması zorunlu."""
-    cid = payload.get("coupon_id")
-    if not cid:
-        return {"recorded": False}
-    await db.coupon_redemptions.insert_one({
-        "id": str(uuid.uuid4()),
-        "coupon_id": cid,
-        "order_id": payload.get("order_id"),
-        "user_id": payload.get("user_id"),
-        "discount": float(payload.get("discount", 0)),
-        "redeemed_at": _utcnow(),
-    })
-    return {"recorded": True}
+    """DEVRE DIŞI (DENETİM SEC-2 F2): Kupon kullanımı YALNIZ ödeme onayından sonra sunucu
+    tarafında record_order_redemptions() ile yazılır. Bu HTTP ucu ana akışta kullanılmıyordu
+    ve istemciden gelen coupon_id/order_id/user_id ile herhangi bir kuponun kullanım limiti /
+    bir kurbanın kişi-başı kotası ŞİŞİRİLEBİLİYORDU. Artık HİÇBİR ŞEY yazmaz."""
+    return {"recorded": False, "message": "Bu uç devre dışı; kupon kullanımı ödeme onayında kaydedilir."}
 
 
 # ==================== KAMPANYALAR (Campaigns) ====================

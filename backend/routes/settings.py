@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Dict, Any
 from datetime import datetime, timezone
 import re
 
-from .deps import db, require_admin
+from .deps import db, require_admin, limiter
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
@@ -61,8 +61,10 @@ async def resolve_free_shipping_threshold(settings: dict):
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 @router.post("/maintenance/notify")
-async def maintenance_notify_subscribe(payload: dict):
-    """Public: bakım modu sırasında 'açılınca haber ver' e-posta toplama."""
+@(limiter.limit("5/minute;50/day") if limiter else (lambda f: f))
+async def maintenance_notify_subscribe(payload: dict, request: Request):
+    """Public: bakım modu sırasında 'açılınca haber ver' e-posta toplama.
+    DENETİM SEC-5 F-18: hız-sınırı yoktu → sınırsız çöp kayıt. IP limiti eklendi."""
     email = (payload.get("email") or "").strip().lower()
     if not _EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="Geçerli bir e-posta adresi giriniz.")

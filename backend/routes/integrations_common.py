@@ -2313,8 +2313,10 @@ async def save_marketplace_settings(marketplace: str, payload: dict, current_use
     await db.settings.update_one({"id": marketplace}, {"$set": update_data}, upsert=True)
     return {"success": True, "message": f"{marketplace.capitalize()} ayarları kaydedildi"}
 @router.get("/{marketplace}/status")
-async def get_marketplace_status(marketplace: str):
-    """Get Hepsiburada / Temu integration status."""
+async def get_marketplace_status(marketplace: str, current_user: dict = Depends(require_admin)):
+    """Get Hepsiburada / Temu integration status.
+    DENETİM SEC-5 F-12: eskiden PUBLIC'ti ve merchant_id/supplier_id + canlı mod sızdırıyordu →
+    require_admin eklendi."""
     if marketplace not in ALLOWED_MARKETPLACES:
         raise HTTPException(status_code=404, detail="Bilinmeyen pazaryeri")
     settings = await db.settings.find_one({"id": marketplace}, {"_id": 0})

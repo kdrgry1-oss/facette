@@ -120,22 +120,12 @@ async def cancel_my_order(order_id: str, payload: dict = Body(default={}), curre
     # cancelled → _restock_order_once) idempotent olarak geri eklenir.
     if _new_status == "cancelled":
         try:
-            already = await db.stock_movements.find_one(
-                {"order_id": order.get("id"), "type": {"$in": ["order_cancelled", "return_restock",
-                    "auto_cancel_expired", "havale_auto_cancel", "manual_increment"]}}, {"_id": 1}
-            )
-            if not already:
-                from routes.orders import _stock_delta_for_order
-                moves = await _stock_delta_for_order(order, +1)
-                await db.stock_movements.insert_one({
-                    "id": generate_id(),
-                    "type": "order_cancelled",
-                    "order_id": order.get("id"),
-                    "order_number": order.get("order_number", ""),
-                    "items": moves,
-                    "source": "customer_cancel",
-                    "created_at": now_iso,
-                })
+            # DENETİM (payment redteam F1): eskiden yalnız stok geri ekleniyordu; müşteri hediye
+            # çeki/puan kullanmışsa REZERVE BAKİYE İADE EDİLMİYORDU (kalıcı müşteri kaybı, sipariş
+            # 'cancelled' olduğu için scheduler da süpürmez). _restock_order_once stok + hediye çeki
+            # (refund_gift_card_once) + puan (refund_points_once) iadesini idempotent yapar.
+            from routes.orders import _restock_order_once
+            await _restock_order_once(order, "order_cancelled")
         except Exception as _e:
             logger.error(f"[customer cancel restock {order_id}] {_e}")
 
