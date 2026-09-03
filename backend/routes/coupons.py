@@ -153,6 +153,44 @@ async def coupon_redemptions(cid: str, current_user: dict = Depends(require_admi
     return {"items": rows, "total": len(rows)}
 
 
+@admin_router.get("/exceptions")
+async def list_coupon_exceptions(current_user: dict = Depends(require_admin)):
+    """İlk-sipariş/kişi-başı-limit istisnası tanınan müşteri e-postaları."""
+    doc = await db.settings.find_one({"id": "coupon_first_order_exceptions"}, {"_id": 0, "emails": 1})
+    return {"emails": (doc or {}).get("emails") or []}
+
+
+@admin_router.post("/exceptions")
+async def edit_coupon_exceptions(payload: dict, current_user: dict = Depends(require_permission("campaigns.edit"))):
+    """İstisna listesine e-posta ekle/çıkar. payload: {email, action: 'add'|'remove'}.
+    İstisna: bu e-posta first_order_only + usage_limit_per_user kontrollerinden muaf olur."""
+    email = str((payload or {}).get("email") or "").strip().lower()
+    action = str((payload or {}).get("action") or "add").lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Geçerli e-posta gerekli")
+    op = {"$addToSet": {"emails": email}} if action != "remove" else {"$pull": {"emails": email}}
+    if action != "remove":
+        op["$setOnInsert"] = {"id": "coupon_first_order_exceptions"}
+    await db.settings.update_one({"id": "coupon_first_order_exceptions"}, op, upsert=True)
+    _EXEMPT_CACHE["at"] = 0.0  # cache'i hemen tazele
+    doc = await db.settings.find_one({"id": "coupon_first_order_exceptions"}, {"_id": 0, "emails": 1})
+    return {"success": True, "emails": (doc or {}).get("emails") or []}
+
+
+async def seed_coupon_exceptions():
+    """Başlangıçta ilk-sipariş istisna listesini garanti et (idempotent addToSet).
+    Kadir'in talebiyle eklenen müşteri destek istisnası."""
+    try:
+        await db.settings.update_one(
+            {"id": "coupon_first_order_exceptions"},
+            {"$addToSet": {"emails": "denizgungor2020@gmail.com"},
+             "$setOnInsert": {"id": "coupon_first_order_exceptions"}},
+            upsert=True)
+        _EXEMPT_CACHE["at"] = 0.0
+    except Exception as e:
+        logger.warning(f"[kupon-istisna seed] {e}")
+
+
 @admin_router.get("/diagnose")
 async def diagnose_coupon_for_user(code: str, email: str = "",
                                    current_user: dict = Depends(require_admin)):
@@ -555,11 +593,35 @@ async def _coupon_used_count(coupon_id: str, coupon_code: str = "", restrict_ors
     return len(order_ids)
 
 
+import time as _time
+_EXEMPT_CACHE = {"emails": set(), "at": 0.0}
+
+
+async def _get_first_order_exempt_emails() -> set:
+    """İlk-sipariş + kişi-başı-limit kontrolünden MUAF müşteri e-postaları (istisna listesi).
+    Admin, settings.id='coupon_first_order_exceptions'.emails üzerinden yönetir. 60 sn cache."""
+    now = _time.time()
+    if now - _EXEMPT_CACHE["at"] < 60:
+        return _EXEMPT_CACHE["emails"]
+    try:
+        doc = await db.settings.find_one({"id": "coupon_first_order_exceptions"}, {"_id": 0, "emails": 1})
+        emails = {str(e).strip().lower() for e in ((doc or {}).get("emails") or []) if str(e).strip()}
+    except Exception:
+        emails = _EXEMPT_CACHE["emails"]
+    _EXEMPT_CACHE["emails"] = emails
+    _EXEMPT_CACHE["at"] = now
+    return emails
+
+
 async def _evaluate_single(c: dict, cart_total: float, items: list,
                            user_id=None, email: str = "", payment_method: str = "") -> dict:
     """Tek kuponu dogrular + indirimini hesaplar. apply_coupon VE motor ayni cekirdegi kullanir."""
     if not c.get("is_active"):
         return {"valid": False, "reason": "Kupon pasif", "discount": 0}
+    # İSTİSNA: admin bazı müşterileri ilk-sipariş/kişi-başı-limit kontrolünden muaf tutabilir
+    # (ör. destek talebiyle hoş geldin kuponunu tekrar kullanma izni). E-posta muaf listesindeyse
+    # o iki kısıt atlanır; diğer tüm kontroller (pasif/tarih/min-tutar/ödeme yöntemi) geçerli kalır.
+    _exempt = (email or "").strip().lower() in (await _get_first_order_exempt_emails())
     # DENETİM SEC-2 F1: kişiye özel ödül kuponu (referral/doğum günü/hoş geldin) YALNIZ sahibine.
     # create_order buraya SUNUCU-türetilmiş user_id/email geçirir → başkasının kuponu yakılamaz.
     if not _coupon_owner_ok(c, user_id, email):
@@ -596,7 +658,7 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
         used = await _coupon_used_count(c["id"], c.get("code", ""), count_inflight=not _auto)
         if used >= c["usage_limit"]:
             return {"valid": False, "reason": "Kupon kullanım limiti dolmuş", "discount": 0}
-    if c.get("usage_limit_per_user"):
+    if c.get("usage_limit_per_user") and not _exempt:
         _em = (email or "").strip().lower()
         _ors = []
         if user_id:
@@ -609,7 +671,7 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
                                                     count_inflight=not bool(c.get("auto_apply")))
             if used_by_user >= c["usage_limit_per_user"]:
                 return {"valid": False, "reason": "Bu kupon için kullanım hakkınız kalmadı", "discount": 0}
-    if c.get("first_order_only"):
+    if c.get("first_order_only") and not _exempt:
         em = (email or "").strip().lower()
         ors = []
         if user_id:

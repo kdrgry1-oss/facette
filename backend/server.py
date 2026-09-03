@@ -409,6 +409,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Category slug repair start warning: {e}")
 
+    # Kupon ilk-sipariş istisna listesi (müşteri destek istisnası) — idempotent seed.
+    try:
+        import asyncio as _asyncio
+        from routes.coupons import seed_coupon_exceptions
+        _asyncio.create_task(seed_coupon_exceptions())
+    except Exception as e:
+        logger.warning(f"Coupon exception seed start warning: {e}")
+
     # Tek seferlik migrasyon: kapida odemeyi varsayilan olarak KAPAT.
     # Admin panelinden (Ayarlar > Odeme Yontemleri) tekrar acilabilir; bu blok
     # _cod_default_off_v1 isaretiyle korundugu icin SADECE BIR KEZ calisir ve
