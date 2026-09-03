@@ -495,19 +495,26 @@ async def capi_logs_export(
     cols = ["created_at", "provider", "event_name", "event_id", "ok", "status", "from_retry", "is_test",
             "s_email", "s_phone", "s_external_id", "s_fbp", "s_fbc", "s_ttclid", "s_ttp", "s_ip", "s_ua", "ip_version",
             "message"]
+    # GÜVENLİK (DENETİM SEC-4 F8): Excel/CSV formül enjeksiyonu — müşteri UA/email/mesaj gibi
+    # alanlar =HYPERLINK(...) ile başlayabilir; admin CSV'yi açınca çalışır. = + - @ / tab / CR
+    # ile başlayan metin hücrelerini tek-tırnakla kaçır.
+    def _cg(v):
+        s = "" if v is None else str(v)
+        return ("'" + s) if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
     w = _csv.writer(buf)
     w.writerow(cols)
     for r in rows:
         ms = r.get("match_signals") or {}
         msg = r.get("error") or r.get("response") or ""
         msg = str(msg).replace("\n", " ")[:300]
-        w.writerow([
+        w.writerow([_cg(x) for x in [
             r.get("created_at", ""), r.get("provider", ""), r.get("event_name", ""), r.get("event_id", ""),
             r.get("ok", ""), r.get("status", ""), r.get("from_retry", ""), r.get("is_test", ""),
             ms.get("email", ""), ms.get("phone", ""), ms.get("external_id", ""), ms.get("fbp", ""),
             ms.get("fbc", ""), ms.get("ttclid", ""), ms.get("ttp", ""), ms.get("ip", ""), ms.get("ua", ""),
             ms.get("ip_version", ""), msg,
-        ])
+        ]])
     fname = f"capi_logs_{(date_from or 'all')}_{(date_to or 'all')}.csv"
     return Response(
         content=buf.getvalue(),

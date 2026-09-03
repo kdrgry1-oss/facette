@@ -729,10 +729,10 @@ async def list_suppressions(limit: int = 200, current_user: dict = Depends(requi
 async def unsubscribe(e: str = "", t: str = ""):
     email = (e or "").strip().lower()
     sub = None
+    # DENETİM SEC-4 F17: token (t) ZORUNLU — eskiden yalnız e-posta ile herkes başkasını
+    # abonelikten çıkarabiliyordu. Kampanya linkleri zaten &t=<id> içeriyor.
     if email and t:
         sub = await db.newsletter_subscribers.find_one({"email": email, "id": t})
-    elif email:
-        sub = await db.newsletter_subscribers.find_one({"email": email})
     if sub:
         await db.newsletter_subscribers.update_one({"id": sub["id"]}, {"$set": {
             "active": False, "unsubscribed_at": _now(),

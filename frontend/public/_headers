@@ -13,6 +13,8 @@
   X-Frame-Options: SAMEORIGIN
   Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(self)
   Cross-Origin-Opener-Policy: same-origin
+  # DENETİM SEC-5 F-03: storefront (kart verisi girilen origin) HSTS taşımıyordu.
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
   # CSP: aşağıdaki satırı, sitede kullanılan TÜM 3. parti host'lar (GTM, Google,
   # Meta, TikTok, iyzico, fontlar, api.facette.com.tr) test edildikten SONRA aç.
   # Yanlış CSP storefront'u/analitiği kırabileceğinden varsayılan KAPALI bırakıldı.

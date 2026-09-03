@@ -574,7 +574,7 @@ IYZICO_BASE_URL=https://sandbox-api.iyzipay.com
 
 # Trendyol
 TRENDYOL_MODE=production
-TRENDYOL_API_KEY=ERet4fsWtkfxAPWPunGR
+TRENDYOL_API_KEY=*
 TRENDYOL_API_SECRET=*
 TRENDYOL_SUPPLIER_ID=*
 

@@ -87,13 +87,21 @@ DEFAULT_EVENTS = [
 CHANNELS = ["sms", "email", "whatsapp"]
 
 
-def render_template(text: str, variables: Dict[str, Any]) -> str:
-    """{variable} formatındaki placeholder'ları doldurur."""
+def render_template(text: str, variables: Dict[str, Any], escape_values: bool = False) -> str:
+    """{variable} formatındaki placeholder'ları doldurur.
+    escape_values=True (e-posta/HTML kanalı): DEĞİŞKEN değerleri html.escape ile kaçırılır
+    (şablonun kendi HTML'i korunur) → müşteri-kontrollü ad/adres alanlarıyla HTML/kimlik-avı
+    enjeksiyonu engellenir (DENETİM SEC-4 F7 / bildirim Y4)."""
     if not text:
         return ""
+    import html as _html_mod
+
     def repl(m):
         key = m.group(1).strip()
-        return str(variables.get(key, m.group(0)))
+        if key not in variables:
+            return m.group(0)
+        val = str(variables.get(key, ""))
+        return _html_mod.escape(val) if escape_values else val
     return re.sub(r"\{([a-zA-Z0-9_]+)\}", repl, text)
 
 
@@ -519,8 +527,9 @@ async def send_notification(
     if "email" in active_channels and to_email and cfg.get("email_active", True):
         tpl = await _get_template(db, event, "email")
         if _tpl_on(tpl):
+            # subject düz metin; body HTML → değişken değerleri kaçırılır (SEC-4 F7)
             subj = render_template(tpl.get("subject", ""), variables) or f"Bildirim: {event}"
-            html = render_template(tpl.get("body", ""), variables) or f"<p>{event}</p>"
+            html = render_template(tpl.get("body", ""), variables, escape_values=True) or f"<p>{event}</p>"
             try:
                 _snd = await _order_sender(db, event)
                 res = await _email_send(db, to_email, subj, html, **_snd)

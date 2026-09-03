@@ -183,22 +183,25 @@ async def _send_admin_new_order_email(order: dict, ship: dict, kind_label: str =
             return
         _tl = float(order.get("total") or 0)
         _tl_fmt = f"{_tl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        _who = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
-                or ship.get("full_name") or "Müşteri")
-        _phone = ship.get("phone") or order.get("phone") or "-"
-        _pm = order.get("payment_method") or "-"
+        # DENETİM SEC-4 F7: müşteri-kontrollü alanlar admin gelen kutusuna HAM HTML olarak
+        # gidiyordu (ad/adres alanına <a href=evil> → kimlik avı). Hepsini html.escape ile kaçır.
+        import html as _h
+        _who = _h.escape(f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
+                         or ship.get("full_name") or "Müşteri")
+        _phone = _h.escape(str(ship.get("phone") or order.get("phone") or "-"))
+        _pm = _h.escape(str(order.get("payment_method") or "-"))
         _rows = ""
         for _it in (order.get("items") or []):
-            _nm = _it.get("name") or _it.get("product_name") or "Ürün"
-            _qty = _it.get("quantity") or _it.get("qty") or 1
-            _var = " · ".join([x for x in (_it.get("color") or "", _it.get("size") or "") if x])
+            _nm = _h.escape(str(_it.get("name") or _it.get("product_name") or "Ürün"))
+            _qty = _h.escape(str(_it.get("quantity") or _it.get("qty") or 1))
+            _var = _h.escape(" · ".join([x for x in (_it.get("color") or "", _it.get("size") or "") if x]))
             _vh = (f" <span style='color:#888'>({_var})</span>") if _var else ""
             _rows += ("<tr><td style='padding:4px 8px;border-bottom:1px solid #eee'>"
                       f"{_nm}{_vh}</td><td style='padding:4px 8px;border-bottom:1px solid #eee;"
                       f"text-align:center'>{_qty}</td></tr>")
-        _adr = ship.get("address") or ""
-        _loc = " / ".join([x for x in (ship.get("district") or ship.get("ilce") or "",
-                                       ship.get("city") or ship.get("il") or "") if x])
+        _adr = _h.escape(str(ship.get("address") or ""))
+        _loc = _h.escape(" / ".join([x for x in (ship.get("district") or ship.get("ilce") or "",
+                                     ship.get("city") or ship.get("il") or "") if x]))
         _kl = (" · " + kind_label) if kind_label else ""
         _html = (
             f"<h2 style='margin:0 0 8px'>Yeni Sipariş{_kl}</h2>"

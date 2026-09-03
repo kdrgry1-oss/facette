@@ -26,7 +26,8 @@ import os
 import re as _re
 import html as _html
 
-from .deps import db, require_admin, require_auth, logger
+from fastapi import Request
+from .deps import db, require_admin, require_auth, logger, safe_str, get_current_user, limiter
 
 
 # --------------- ABANDONED CART ---------------
@@ -36,18 +37,26 @@ admin_cart_router = APIRouter(prefix="/admin/abandoned-carts", tags=["admin-aban
 
 
 @cart_router.post("/track")
-async def track_cart(payload: dict):
+@(limiter.limit("60/minute") if limiter else (lambda f: f))
+async def track_cart(payload: dict, request: Request,
+                     current_user: dict = Depends(get_current_user)):
     """Storefront saves live cart. Called on add/remove/update. Anonymous OK.
-    Payload: { session_id, user_id?, items:[{product_id,name,qty,price,image}], total, email?, phone? }
-    """
-    sid = payload.get("session_id") or str(uuid.uuid4())
+    Payload: { session_id, items:[{product_id,name,qty,price,image}], total, email?, phone? }
+    GÜVENLİK (DENETİM SEC-4 F1): session_id/email/phone artık safe_str ile string'e zorlanır
+    ({"$ne":null} gibi NoSQL operatör enjeksiyonu ile başka müşterinin sepetini ezme engellendi);
+    user_id İSTEMCİDEN DEĞİL yalnız doğrulanmış JWT'den alınır (rastgele hesaba sepet bağlama engeli)."""
+    sid = safe_str(payload.get("session_id") or "", 80) or str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    _items = payload.get("items")
+    if not isinstance(_items, list):
+        _items = []
     doc = {
         "session_id": sid,
-        "user_id": payload.get("user_id"),
-        "email": payload.get("email", ""),
-        "phone": payload.get("phone", ""),
-        "items": payload.get("items", []),
+        # user_id yalnız token'dan (istemci iddiasına GÜVENİLMEZ)
+        "user_id": (current_user or {}).get("id"),
+        "email": safe_str(payload.get("email") or "", 200),
+        "phone": safe_str(payload.get("phone") or "", 32),
+        "items": _items[:100],
         "total": float(payload.get("total", 0) or 0),
         "updated_at": now,
     }
@@ -60,9 +69,10 @@ async def track_cart(payload: dict):
 
 
 @cart_router.post("/mark-ordered")
-async def mark_cart_ordered(payload: dict):
+@(limiter.limit("60/minute") if limiter else (lambda f: f))
+async def mark_cart_ordered(payload: dict, request: Request):
     """Remove session from abandoned pool after successful order."""
-    sid = payload.get("session_id")
+    sid = safe_str(payload.get("session_id") or "", 80)  # SEC-4 F1: operatör enjeksiyonu engeli
     if sid:
         await db.cart_sessions.delete_one({"session_id": sid})
     return {"success": True}

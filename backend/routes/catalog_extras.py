@@ -12,7 +12,7 @@ import uuid
 import os
 import httpx
 
-from .deps import db, require_admin, require_auth, get_current_user, generate_id, logger, tr_day_start_utc, tr_day_end_utc
+from .deps import db, require_admin, require_auth, get_current_user, generate_id, logger, tr_day_start_utc, tr_day_end_utc, safe_str, limiter
 
 
 def _now() -> str:
@@ -213,9 +213,13 @@ havale_admin_router = APIRouter(prefix="/admin/havale-notifications", tags=["adm
 
 
 @havale_public_router.post("")
-async def customer_havale_notify(payload: dict):
-    """Customer tells us they paid via bank transfer."""
-    order_id = payload.get("order_id")
+@(limiter.limit("10/minute") if limiter else (lambda f: f))
+async def customer_havale_notify(payload: dict, request: Request):
+    """Customer tells us they paid via bank transfer.
+    GÜVENLİK (DENETİM SEC-4 F2): order_id safe_str ile string'e zorlanır ({"$regex":…} gibi
+    NoSQL operatör enjeksiyonu ile rastgele siparişe sahte 'ödedim' bildirimi iliştirme +
+    varlık taraması engellenir; IP hız-sınırı ile spam durdurulur."""
+    order_id = safe_str(payload.get("order_id") or "", 64)
     if not order_id:
         raise HTTPException(status_code=400, detail="order_id gerekli")
     # A3: Siparişin varlığını doğrula (rastgele order_id ile sahte bildirim/çöp engellenir).
@@ -230,11 +234,11 @@ async def customer_havale_notify(payload: dict):
     doc = {
         "id": str(uuid.uuid4()),
         "order_id": order_id,
-        "bank": payload.get("bank", ""),
-        "sender_name": payload.get("sender_name", ""),
+        "bank": safe_str(payload.get("bank") or "", 80),
+        "sender_name": safe_str(payload.get("sender_name") or "", 120),
         "amount": float(payload.get("amount") or 0),
-        "transfer_date": payload.get("transfer_date", ""),
-        "note": payload.get("note", ""),
+        "transfer_date": safe_str(payload.get("transfer_date") or "", 40),
+        "note": safe_str(payload.get("note") or "", 500),
         "status": "pending",  # pending | confirmed | rejected
         "created_at": _now(),
     }

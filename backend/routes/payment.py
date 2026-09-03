@@ -515,25 +515,28 @@ async def _notify_paid_order_confirmed(order_id: str) -> None:
             if _admin_to:
                 _tl2 = float(order.get("total") or 0)
                 _tl_fmt = f"{_tl2:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")  # 3,920.00 → 3.920,00
-                _who2 = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
-                         or ship.get("full_name") or "Müşteri")
-                _phone2 = ship.get("phone") or order.get("phone") or "-"
-                _pm = order.get("payment_method") or order.get("payment_type") or "Kart"
+                # DENETİM SEC-4 F7: müşteri-kontrollü alanları html.escape ile kaçır (admin
+                # gelen kutusuna HAM HTML/kimlik-avı bağlantısı enjeksiyonu engellenir).
+                import html as _h
+                _who2 = _h.escape(f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
+                                  or ship.get("full_name") or "Müşteri")
+                _phone2 = _h.escape(str(ship.get("phone") or order.get("phone") or "-"))
+                _pm = _h.escape(str(order.get("payment_method") or order.get("payment_type") or "Kart"))
                 _rows_html = ""
                 for _it in (order.get("items") or []):
-                    _nm = _it.get("name") or _it.get("product_name") or "Ürün"
-                    _qty = _it.get("quantity") or _it.get("qty") or 1
+                    _nm = _h.escape(str(_it.get("name") or _it.get("product_name") or "Ürün"))
+                    _qty = _h.escape(str(_it.get("quantity") or _it.get("qty") or 1))
                     _sz = _it.get("size") or ""
                     _clr = _it.get("color") or ""
-                    _var = " · ".join([x for x in (_clr, _sz) if x])
+                    _var = _h.escape(" · ".join([x for x in (_clr, _sz) if x]))
                     _var_html = (" <span style='color:#888'>(" + _var + ")</span>") if _var else ""
                     _rows_html += ("<tr><td style='padding:4px 8px;border-bottom:1px solid #eee'>"
-                                   + str(_nm) + _var_html + "</td>"
+                                   + _nm + _var_html + "</td>"
                                    "<td style='padding:4px 8px;border-bottom:1px solid #eee;text-align:center'>"
-                                   + str(_qty) + "</td></tr>")
-                _adr = ship.get("address") or ""
-                _loc = " / ".join([x for x in (ship.get("district") or ship.get("ilce") or "",
-                                               ship.get("city") or ship.get("il") or "") if x])
+                                   + _qty + "</td></tr>")
+                _adr = _h.escape(str(ship.get("address") or ""))
+                _loc = _h.escape(" / ".join([x for x in (ship.get("district") or ship.get("ilce") or "",
+                                             ship.get("city") or ship.get("il") or "") if x]))
                 _html = (
                     f"<h2 style='margin:0 0 8px'>🛍️ Yeni Sipariş (ödendi)</h2>"
                     f"<p style='margin:0 0 4px'><b>Sipariş No:</b> {order.get('order_number','')}</p>"

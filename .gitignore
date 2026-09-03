@@ -248,6 +248,11 @@ credentials.json
 .credentials
 
 # --- Hassas veri / yedekler ---
+# DENETİM SEC-5 F-14: at-rest sır dosyaları asla commit edilmesin
+backend/data/.jwt_secret
+backend/data/.admin_initial_password
+**/.jwt_secret
+**/.admin_initial_password
 backend/imports/
 db_backup/*.archive.gz
 data_export/
