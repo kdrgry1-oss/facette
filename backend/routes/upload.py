@@ -70,9 +70,12 @@ def _optimize_for_upload(data: bytes, content_type: str):
         return None, None, None
 
 
+# DENETİM (injection-redteam): image/svg+xml KALDIRILDI. SVG optimize edilmeden R2'ye
+# yazılıp cdn.facette.com.tr'den inline servis ediliyordu → herhangi bir üye çalıştırılabilir
+# SVG (stored-XSS) yükleyebiliyordu. Raster formatlar güvenli (PIL ile yeniden kodlanır).
 _ALLOWED_IMAGE_TYPES = {
     "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif",
-    "image/svg+xml", "image/avif", "image/heic", "image/heif", "image/bmp",
+    "image/avif", "image/heic", "image/heif", "image/bmp",
 }
 
 
@@ -276,10 +279,15 @@ async def image_to_jpeg(src: str, w: int = 2000):
         import httpx
         from PIL import Image, ImageOps
         import io
+        # DENETİM (cost-redteam #6): indirilen boyutu ve piksel sayısını sınırla
+        # (decompression-bomb RAM/CPU + CDN egress amplifikasyonu engeli).
+        Image.MAX_IMAGE_PIXELS = 40_000_000  # ~40MP üstü reddedilir
         async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
             r = await client.get(src)
             r.raise_for_status()
             raw = r.content
+        if len(raw) > 20 * 1024 * 1024:  # 20MB kaynak üst sınırı
+            raise HTTPException(status_code=413, detail="Kaynak görsel çok büyük")
         img = Image.open(io.BytesIO(raw))
         img = ImageOps.exif_transpose(img)
         # Şeffaflığı beyaz zemine indir (JPEG alfa desteklemez)

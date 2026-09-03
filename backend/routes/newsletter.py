@@ -15,7 +15,7 @@ import re
 from fastapi import APIRouter, Depends, Request, HTTPException
 from datetime import datetime, timezone
 
-from .deps import db, require_admin, generate_id
+from .deps import db, require_admin, generate_id, limiter
 
 public_router = APIRouter(prefix="/newsletter", tags=["newsletter-public"])
 admin_router = APIRouter(prefix="/admin/newsletter", tags=["newsletter-admin"])
@@ -24,9 +24,12 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @public_router.post("/subscribe")
+@(limiter.limit("10/minute;100/day") if limiter else (lambda f: f))
 async def subscribe(payload: dict, request: Request):
     """Bülten aboneliği. E-postayı tekilleştirerek kaydeder; İYS iznini
-    NetGSM üzerinden bildirir (best-effort — hata aboneliği engellemez)."""
+    NetGSM üzerinden bildirir (best-effort — hata aboneliği engellemez).
+    DENETİM (cost-redteam #10): hız-sınırı yoktu → her benzersiz e-posta bir İYS API çağrısı;
+    sınırsız İYS çağrısı/rıza sahteciliği. IP limiti eklendi."""
     email = (payload or {}).get("email", "")
     email = email.strip().lower() if isinstance(email, str) else ""
     if not email or not _EMAIL_RE.match(email):

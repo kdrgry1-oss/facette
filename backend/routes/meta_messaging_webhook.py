@@ -55,8 +55,10 @@ async def verify_webhook(request: Request):
 
 
 def _verify_signature(app_secret: str, raw: bytes, header: str) -> bool:
+    # DENETİM (cost-redteam #4): FAIL-CLOSED — app_secret yoksa sahte payload'lar LLM harcaması
+    # tetikleyebiliyordu; artık reddedilir (Meta panelinde app_secret zorunlu).
     if not app_secret:
-        return True
+        return False
     if not header or not header.startswith("sha256="):
         return False
     mac = hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()

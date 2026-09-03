@@ -224,8 +224,11 @@ async def backfill_questions(key: str = "", limit: int = 5000):
 
 
 def _verify_signature(app_secret: str, raw: bytes, header: str) -> bool:
+    # DENETİM (cost-redteam #4): app_secret yoksa eskiden True dönüyordu (FAIL-OPEN) → sahte
+    # payload'lar LLM/görsel/ses harcaması tetikleyebiliyordu. Artık FAIL-CLOSED: app_secret
+    # yapılandırılmamışsa webhook REDDEDİLİR (Meta panelinde app_secret zorunlu tutulmalı).
     if not app_secret:
-        return True  # app_secret ayarlı değilse imza kontrolü atlanır (Meta panelinden zorunlu kılınabilir)
+        return False
     if not header or not header.startswith("sha256="):
         return False
     mac = hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
@@ -236,9 +239,13 @@ def _verify_signature(app_secret: str, raw: bytes, header: str) -> bool:
 @router.post("/webhook")
 async def receive_webhook(request: Request, background: BackgroundTasks):
     raw = await request.body()
-    # API taban URL'sini yakala (kart ödeme linki callback'i için; white-label — host'tan türer).
+    # DENETİM (injection-redteam F3): api_base eskiden request.base_url'den (Host başlığı —
+    # istemci-kontrollü, uvicorn --proxy-headers yok) İMZA KONTROLÜNDEN ÖNCE yazılıyordu;
+    # bu değer iyzico callbackUrl'i oluyordu → Host:evil ile ödeme callback'i çalınabiliyordu.
+    # Artık YALNIZ güvenilir env'den (PUBLIC_BASE_URL) sabitlenir; Host'a güvenilmez.
     try:
-        base = str(request.base_url).rstrip("/")
+        base = (os.environ.get("PUBLIC_BASE_URL") or os.environ.get("REACT_APP_BACKEND_URL")
+                or "https://api.facette.com.tr").rstrip("/")
         if base:
             await db.whatsapp_meta_state.update_one(
                 {"_id": "api_base"}, {"$set": {"url": base, "at": _now()}}, upsert=True)

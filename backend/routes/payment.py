@@ -120,6 +120,27 @@ def _safe_return_base(return_url: str, request) -> str:
     return default
 
 
+def _safe_callback_url(callback_url: str, request) -> str:
+    """DENETİM (injection-redteam F4): iyzico callbackUrl İSTEMCİDEN geliyordu → saldırgan
+    callback_url=https://evil verip 3DS sonrası müşteriyi ödeme token'ıyla kendi adresine
+    yönlendirebiliyordu (open redirect + token sızıntısı). Yalnız KENDİ host'umuza izin ver;
+    yolu koru. Dış host → reddet."""
+    from urllib.parse import urlparse
+    ru = (callback_url or "").strip()
+    if not ru:
+        raise HTTPException(status_code=400, detail="callback_url gerekli")
+    p = urlparse(ru)
+    if p.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Geçersiz callback_url")
+    host = (p.hostname or "").lower()
+    req_host = (urlparse(str(request.base_url)).hostname or "").lower()
+    allowed = {req_host, "facette.com.tr", "www.facette.com.tr", "api.facette.com.tr"}
+    allowed.discard("")
+    if host not in allowed:
+        raise HTTPException(status_code=400, detail="callback_url yalnız kendi alan adımıza izinlidir")
+    return ru
+
+
 INIT_PATH = "/payment/iyzipos/checkoutform/initialize/auth/ecom"
 RETRIEVE_PATH = "/payment/iyzipos/checkoutform/auth/ecom/detail"
 # Doğrudan kart (kendi formumuz) — iyzico klasik Payment API yolları
@@ -408,6 +429,7 @@ async def initialize_payment(request: Request, order_id: str, callback_url: str,
        order.get("status") in ("confirmed", "shipped", "delivered", "cancelled"):
         raise HTTPException(status_code=400, detail="Bu sipariş için ödeme alınamaz")
 
+    callback_url = _safe_callback_url(callback_url, request)  # F4: dış callback reddedilir
     settings = await _get_iyzico_settings()
     payload = _build_initialize_payload(order, callback_url)
     body_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
@@ -808,7 +830,7 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
 async def initialize_3ds_payment(payload: dict, request: Request):
     """Kendi kart formumuzdan 3D Secure başlatır; threeDSHtmlContent döner."""
     order_id = (payload.get("order_id") or "").strip()
-    callback_url = (payload.get("callback_url") or "").strip()
+    callback_url = _safe_callback_url((payload.get("callback_url") or "").strip(), request)  # F4
     return_url = (payload.get("return_url") or "").strip()
     card = payload.get("card") or {}
     installment = int(payload.get("installment") or 1)

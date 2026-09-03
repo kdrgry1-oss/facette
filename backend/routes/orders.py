@@ -6103,6 +6103,9 @@ async def bulk_create_cargo_barcode(
     idi ve '/{order_id}/cargo-barcode' route'u daha önce tanımlı olduğu için FastAPI bu
     isteği order_id='bulk' sanıp tekil route'a yönlendiriyor, toplu işlem ÇALIŞMIYORDU.
     """
+    # DENETİM (cost-redteam #8): tek istekte MNG çağrı sayısını sınırla (burst-DoS/maliyet).
+    if order_ids and len(order_ids) > 200:
+        raise HTTPException(status_code=400, detail="Tek seferde en fazla 200 sipariş işlenebilir.")
     success = []
     errors = []
     for oid in order_ids or []:

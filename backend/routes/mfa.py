@@ -152,21 +152,41 @@ def _hmac_eq(a: str, b: str) -> bool:
 
 
 @router.post("/setup-sms")
-async def mfa_setup_sms(payload: dict, current_user: dict = Depends(require_auth)):
-    """SMS MFA kurulumu: telefon kaydeder (şifreli) + doğrulama kodu gönderir (henüz aktif değil)."""
-    _me = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "mfa_admin_managed": 1})
+@(limiter.limit("3/minute;20/day") if limiter else (lambda f: f))
+async def mfa_setup_sms(payload: dict, request: Request, current_user: dict = Depends(require_auth)):
+    """SMS MFA kurulumu: telefon kaydeder (şifreli) + doğrulama kodu gönderir (henüz aktif değil).
+    DENETİM (cost-redteam #1): bu uç limiter/cooldown/TR-only KONTROLÜ OLMADAN keyfi numaraya
+    SMS gönderiyordu (ücretsiz üye → sınırsız SMS pompası/bombardıman). IP limiti + TR-mobil +
+    kullanıcı-başı 30sn bekleme eklendi (iys/otp ve /mfa/send ile simetrik)."""
+    _me = await db.users.find_one({"id": current_user["id"]},
+                                  {"_id": 0, "mfa_admin_managed": 1, "mfa_last_sms_at": 1})
     if _me and _me.get("mfa_admin_managed"):
         raise HTTPException(status_code=403,
             detail="Giriş doğrulama telefonunuz yönetici tarafından belirlenir ve değiştirilemez. Değişiklik için yöneticinize başvurun.")
+    # Kullanıcı başına 30 sn bekleme (kredi koruması)
+    try:
+        _last = (_me or {}).get("mfa_last_sms_at")
+        if _last:
+            _lt = datetime.fromisoformat(str(_last).replace("Z", "+00:00"))
+            if _lt.tzinfo is None:
+                _lt = _lt.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - _lt).total_seconds() < 30:
+                raise HTTPException(status_code=429, detail="Çok sık deneme. Birkaç saniye sonra tekrar deneyin.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     phone = (payload or {}).get("phone", "")
     import sys as _sys
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
     from notification_service import normalize_phone_tr
     pn = normalize_phone_tr(phone)
-    if not pn or len(pn) < 10:
-        raise HTTPException(status_code=400, detail="Geçerli bir telefon numarası girin")
+    # Yalnız TR mobil (90 5XX…) — yurtdışı/premium numaralarla drenaj engeli.
+    if not (len(pn) == 12 and pn.startswith("905") and pn.isdigit()):
+        raise HTTPException(status_code=400, detail="Geçerli bir Türkiye cep telefonu numarası girin")
     await db.users.update_one({"id": current_user["id"]},
-                              {"$set": {"mfa_pending_phone_enc": encrypt(pn)}})
+                              {"$set": {"mfa_pending_phone_enc": encrypt(pn),
+                                        "mfa_last_sms_at": datetime.now(timezone.utc).isoformat()}})
     _u = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     _u["mfa_phone_enc"] = _u.get("mfa_pending_phone_enc")
     sent = await send_mfa_sms_code(_u)
