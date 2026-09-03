@@ -448,15 +448,30 @@ async def send_notification(
     # pasif bırakılınca giriş doğrulama kodu / şifre sıfırlama kodu HİÇ gitmiyordu
     # ("doğrulama kodu gitmiyor" kök nedeni). Şablon metni yine düzenlenebilir.
     _CRITICAL_EVENTS = {"password_reset_otp"}
+    # DENETİM (bildirim Y1): kritik event'te ŞABLON SATIRI HİÇ YOKSA (tpl is None) eski
+    # _tpl_on False dönüyordu → şifre sıfırlama/doğrulama kodu SMS'i HİÇ gitmiyordu (yeni/
+    # beyaz-etiket kurulumda seed tıklanmadıysa müşteri hesabına giremiyordu). Kritik
+    # event'lerde şablon yoksa aşağıdaki varsayılan gövdeyle yine de gönderilir.
+    _CRITICAL_DEFAULT_SMS = {
+        "password_reset_otp": "Facette dogrulama kodunuz: {otp_code} (5 dk gecerli).",
+    }
     def _tpl_on(_tpl) -> bool:
+        # Şablon VARSA (WhatsApp/email için de güvenli): aktif olmalı VEYA kritik event.
         return bool(_tpl) and (_tpl.get("enabled", True) or event in _CRITICAL_EVENTS)
+
+    def _sms_on(_tpl) -> bool:
+        # SMS'e özel: kritik event'te şablon HİÇ yoksa da (varsayılan gövdeyle) gönder.
+        if _tpl:
+            return _tpl.get("enabled", True) or event in _CRITICAL_EVENTS
+        return event in _CRITICAL_EVENTS and bool(_CRITICAL_DEFAULT_SMS.get(event))
 
     # --- SMS ---
     if "sms" in active_channels and to_phone:
         to = normalize_phone_tr(to_phone)
         tpl = await _get_template(db, event, "sms")
-        if _tpl_on(tpl):
-            msg = render_template(tpl.get("body", ""), variables) or f"[{event}]"
+        if _sms_on(tpl):
+            _body = (tpl or {}).get("body", "") or _CRITICAL_DEFAULT_SMS.get(event, "")
+            msg = render_template(_body, variables) or f"[{event}]"
             sms_active = cfg.get("sms_active")
             impl = SMS_IMPL.get(sms_active, _sms_generic)
             prov_cfg = providers.get(sms_active, {}) if sms_active else {}

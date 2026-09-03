@@ -846,10 +846,20 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
                     _ship_fn = (existing.get("shipping_address") or {}).get("first_name")
                     _need_pii = (RESTRICTED_ALLOWED and int(existing.get("pii_attempts") or 0) < 5 and
                                  (existing.get("needs_pii_refresh") or _ship_fn in ("", "Amazon", None)))
+                    # H3: needs_items_refresh (ilk import'ta kalem çekilememiş) veya resimsiz
+                    # kalem → yeniden çek. Boş kalem listesinde any(...) tetiklenmediğinden
+                    # needs_items_refresh bayrağı açıkça kontrol edilir.
                     _need_enrich = (not existing.get("items_enriched") and
-                                    any(not (it or {}).get("image") for it in (existing.get("items") or [])))
+                                    (existing.get("needs_items_refresh") or
+                                     any(not (it or {}).get("image") for it in (existing.get("items") or []))))
                     if _need_pii or _need_enrich:
                         _upd, _items_src = {}, existing.get("items")
+                        # H3: kalemler ilk turda çekilememişse şimdi tazele.
+                        if existing.get("needs_items_refresh") or not _items_src:
+                            _fetched = await _fetch_amazon_order_items(oid)
+                            if _fetched:
+                                _items_src = _fetched
+                                _upd["needs_items_refresh"] = False
                         if _need_pii:
                             _full = await _fetch_amazon_order_full(oid)
                             if (_full or {}).get("ShippingAddress"):
@@ -863,7 +873,10 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
                         if _need_enrich or _need_pii:
                             _tmp = await _amazon_enrich_items({"items": _items_src or []})
                             _upd["items"] = _tmp["items"]
-                            _upd["items_enriched"] = True
+                            # H3: kalem hâlâ boşsa enriched sayma → sonraki tur tekrar dener.
+                            _upd["items_enriched"] = bool(_tmp.get("items"))
+                            if not _tmp.get("items"):
+                                _upd["needs_items_refresh"] = True
                         if _upd:
                             await _db.orders.update_one({"_id": existing["_id"]}, {"$set": _upd})
                         # Geçmişe dönük stok düşümü: ilk import'ta eşleşme YOKTU → stok düşmemişti.
@@ -898,7 +911,12 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
                 # Ürün eşleştirme: Amazon SellerSKU → Facette ürünü (görsel + gerçek product_id +
                 # barkod + beden/renk). Trendyol/HB ile AYNI eşleyici; eşleşen kalemde resim gelir.
                 data = await _amazon_enrich_items(data)
-                data["items_enriched"] = True
+                # DENETİM H3: getOrderItems rate-limit/timeout ile BOŞ dönerse eskiden
+                # items_enriched=True yazılıp bir daha çekilmiyordu → kalıcı kabuk sipariş,
+                # stok HİÇ düşmüyordu (oversell + eksik COGS). Boşsa enriched sayma, refresh iste.
+                data["items_enriched"] = bool(items)
+                if not items:
+                    data["needs_items_refresh"] = True
                 data["id"] = generate_id()
                 # created_at = GERÇEK sipariş tarihi (PurchaseDate) — aylık pazaryeri sayımı doğru.
                 data["created_at"] = data.get("marketplace_order_date") or datetime.now(timezone.utc).isoformat()
