@@ -153,6 +153,62 @@ async def coupon_redemptions(cid: str, current_user: dict = Depends(require_admi
     return {"items": rows, "total": len(rows)}
 
 
+@admin_router.get("/diagnose")
+async def diagnose_coupon_for_user(code: str, email: str = "",
+                                   current_user: dict = Depends(require_admin)):
+    """TEŞHİS (admin): Bir müşterinin (email) belirli bir kupon KODUNU neden kullanamadığını
+    GİRİŞ YAPMIŞ gibi simüle eder — user_id + email ile _evaluate_single sonucunu ve destekleyici
+    sayıları döndürür."""
+    code = (code or "").strip().upper()
+    c = await db.coupons.find_one({"code": code}, {"_id": 0})
+    if not c:
+        return {"found": False, "reason": "Kupon kodu bulunamadı"}
+    em = (email or "").strip().lower()
+    u = await db.users.find_one({"email": em}, {"_id": 0, "id": 1, "email": 1, "created_at": 1}) if em else None
+    uid = (u or {}).get("id")
+    # Önceki (ödenmiş/tamamlanmış) sipariş sayısı (first_order kriteriyle aynı)
+    _ors = []
+    if uid: _ors.append({"user_id": uid})
+    if em: _ors.append({"customer_email": em})
+    prior_paid = 0
+    prior_all = 0
+    statuses = {}
+    if _ors:
+        prior_paid = await db.orders.count_documents({"$and": [{"$or": _ors},
+            {"$or": [{"payment_status": "paid"},
+                     {"status": {"$in": ["confirmed","processing","preparing","shipped","delivered","undelivered","returned","refunded","partial_refunded","cancel_requested"]}}]}]})
+        async for _o in db.orders.find({"$or": _ors}, {"_id": 0, "status": 1, "payment_status": 1}):
+            prior_all += 1
+            k = f"{_o.get('status')}/{_o.get('payment_status')}"
+            statuses[k] = statuses.get(k, 0) + 1
+    # bu kullanıcının bu kuponu redemption sayısı
+    _rors = []
+    if uid: _rors.append({"user_id": uid})
+    if em: _rors.extend([{"customer_email": em}, {"email": em}])
+    redemptions = await db.coupon_redemptions.count_documents(
+        {"coupon_id": c["id"], **({"$or": _rors} if _rors else {})}) if _rors else 0
+    total_used = await db.coupon_redemptions.count_documents({"coupon_id": c["id"]})
+    # GERÇEK değerlendirme (giriş yapmış gibi)
+    ev = await _evaluate_single(c, 1000.0, [], uid, em, "")
+    return {
+        "found": True, "code": code,
+        "user_found": bool(u), "user_id": uid, "user_created_at": (u or {}).get("created_at"),
+        "coupon": {"first_order_only": c.get("first_order_only"),
+                   "usage_limit": c.get("usage_limit"),
+                   "usage_limit_per_user": c.get("usage_limit_per_user"),
+                   "is_active": c.get("is_active"),
+                   "start_at": c.get("start_at"), "end_at": c.get("end_at"),
+                   "min_cart_total": c.get("min_cart_total"),
+                   "payment_methods": c.get("payment_methods"),
+                   "reward_email": c.get("reward_email"), "reward_user_id": c.get("reward_user_id"),
+                   "auto_apply": c.get("auto_apply")},
+        "prior_paid_orders": prior_paid, "prior_all_orders": prior_all,
+        "prior_status_breakdown": statuses,
+        "this_user_redemptions": redemptions, "coupon_total_redemptions": total_used,
+        "simulated_logged_in_result": ev,
+    }
+
+
 # ---------------- Public: apply a coupon at checkout ----------------
 
 @public_router.post("/available")
