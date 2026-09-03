@@ -535,10 +535,13 @@ async def _amazon_enrich_items(order_data: dict) -> dict:
     return order_data
 
 
-async def _amazon_push_stock_price(sku: str, quantity: int, price=None, currency: str = "TRY") -> dict:
+async def _amazon_push_stock_price(sku: str, quantity: int, price=None, currency: str = "TRY",
+                                   product_type: str = None) -> dict:
     """Tek Amazon SKU'su için stok (+opsiyonel fiyat) PATCH'ler — Listings Items 2021-08-01,
     tek çağrıda fulfillment_availability + purchasable_offer. AMAZON_ALLOW_WRITE=0 iken dry-run
-    (Amazon'a GİTMEZ, would_send döner). Stok/fiyat senkron job'ı bunu kullanır."""
+    (Amazon'a GİTMEZ, would_send döner). Stok/fiyat senkron job'ı bunu kullanır.
+    DENETİM (stok-sync #3): productType ARTIK gerçek tipten gelir; sabit 'PRODUCT' apparel'de
+    Amazon'ca INVALID dönüp PATCH uygulanmıyordu (sessiz oversell)."""
     seller = await _require_seller_id()
     _, _, mp = await get_valid_access_token()
     try:
@@ -561,9 +564,18 @@ async def _amazon_push_stock_price(sku: str, quantity: int, price=None, currency
             "value": [{"marketplace_id": mp, "currency": (currency or "TRY").upper(),
                        "our_price": [{"schedule": [{"value_with_tax": _pr}]}]}],
         })
-    body = {"productType": "PRODUCT", "patches": patches}
-    return await _spapi_send("PATCH", f"/listings/2021-08-01/items/{seller}/{sku}",
-                             body=body, params={"marketplaceIds": mp})
+    body = {"productType": (product_type or "PRODUCT"), "patches": patches}
+    res = await _spapi_send("PATCH", f"/listings/2021-08-01/items/{seller}/{sku}",
+                            body=body, params={"marketplaceIds": mp})
+    # DENETİM (stok-sync #2): Listings PATCH 200 dönse bile gövde status'u ACCEPTED değilse
+    # (INVALID) BAŞARI SAYMA — aksi halde amazon_sku_state ilerleyip SKU sonsuza dek atlanır
+    # (sessiz stok drifti/oversell). dry-run hariç.
+    if res.get("ok") and not res.get("dry_run"):
+        _st = str(((res.get("data") or {}).get("status") or "")).upper()
+        if _st and _st not in ("ACCEPTED", "VALID"):
+            res["ok"] = False
+            res["reject_status"] = _st
+    return res
 
 
 # ============================== ÜRÜN LİSTELEME (Amazon'a aktarma) ==============================

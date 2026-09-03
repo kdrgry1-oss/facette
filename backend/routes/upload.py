@@ -282,8 +282,12 @@ async def image_to_jpeg(src: str, w: int = 2000):
         # DENETİM (cost-redteam #6): indirilen boyutu ve piksel sayısını sınırla
         # (decompression-bomb RAM/CPU + CDN egress amplifikasyonu engeli).
         Image.MAX_IMAGE_PIXELS = 40_000_000  # ~40MP üstü reddedilir
-        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+        # DENETİM (verify-redteam #1): follow_redirects=False — aksi halde izinli host bir
+        # yönlendirmeyle iç ağ/özel IP'ye (SSRF) yönlendirebilirdi (allowlist yalnız ilk hop'ta).
+        async with httpx.AsyncClient(timeout=25, follow_redirects=False) as client:
             r = await client.get(src)
+            if r.status_code in (301, 302, 303, 307, 308):
+                raise HTTPException(status_code=400, detail="Yönlendirme kabul edilmez")
             r.raise_for_status()
             raw = r.content
         if len(raw) > 20 * 1024 * 1024:  # 20MB kaynak üst sınırı

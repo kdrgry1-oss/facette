@@ -963,7 +963,9 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
                "candidates": 0, "dry_run": False}
     try:
         from routes.amazon_spapi import (_get_config, _amazon_push_stock_price, ALLOW_WRITE,
-                                         _amazon_markup, _amazon_price_of, _amazon_seller_sku)
+                                         _amazon_markup, _amazon_price_of, _amazon_seller_sku,
+                                         _resolve_amazon_pt_and_defaults)
+        _pt_cache = {}  # stok-sync #3: ürün başına gerçek productType (sabit "PRODUCT" değil)
         cfg = await _get_config()
         if not cfg or not cfg.get("refresh_token_enc") or not cfg.get("selling_partner_id"):
             summary["error"] = "Amazon bağlı değil (OAuth/refresh token yok)."
@@ -1023,7 +1025,14 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
                     remaining += 1
                     continue
                 try:
-                    res = await _amazon_push_stock_price(sku, qty, pr)
+                    _pid = p.get("id")
+                    if _pid not in _pt_cache:
+                        try:
+                            _pt, _, _ = await _resolve_amazon_pt_and_defaults(p)
+                            _pt_cache[_pid] = _pt or "PRODUCT"
+                        except Exception:
+                            _pt_cache[_pid] = "PRODUCT"
+                    res = await _amazon_push_stock_price(sku, qty, pr, product_type=_pt_cache[_pid])
                 except Exception as _pe:
                     failed += 1
                     logger.error(f"[amazon] stok push {sku}: {_pe}")

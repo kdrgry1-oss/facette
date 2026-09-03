@@ -27,17 +27,19 @@ def _is_personal_coupon(c: dict) -> bool:
 
 def _coupon_owner_ok(c: dict, user_id, email: str) -> bool:
     """Kişiye özel kupon YALNIZ sahibi tarafından kullanılabilir (DENETİM SEC-2 F1). Kimlik
-    SUNUCUDAN türetilmeli (istemci iddiasına güvenilmez); kişisel değilse herkese açık."""
+    SUNUCUDAN türetilmeli (istemci iddiasına güvenilmez); kişisel değilse herkese açık.
+    DENETİM (verify-redteam #2): reward_user_id VARSA yalnız DOĞRULANMIŞ user_id eşleşmesi kabul —
+    istemci e-postası (shipping_address.email) taklit edilebildiği için e-posta dalına düşülmez."""
     if not _is_personal_coupon(c):
         return True
-    _em = (email or "").strip().lower()
     ru = c.get("reward_user_id")
+    if ru:
+        # Kayıtlı kullanıcıya ait ödül → yalnız o kullanıcı (token'dan) kullanabilir.
+        return bool(user_id and str(user_id) == str(ru))
+    # Yalnız e-posta ödülü (misafir referansı) → e-posta eşleşmesi (daha zayıf ama user_id yok).
+    _em = (email or "").strip().lower()
     re_ = (c.get("reward_email") or "").strip().lower()
-    if user_id and ru and str(user_id) == str(ru):
-        return True
-    if _em and re_ and _em == re_:
-        return True
-    return False
+    return bool(_em and re_ and _em == re_)
 
 
 admin_router = APIRouter(prefix="/admin/coupons", tags=["admin-coupons"])

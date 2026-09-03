@@ -2940,8 +2940,12 @@ async def _restock_authoritative(order: dict, move_type: str, want: dict = None)
         return None
     deducted = {}
     async for mv in db.stock_movements.find(
-            {"order_id": oid, "type": {"$in": _DEDUCT_MOVE_TYPES}}, {"_id": 0, "items": 1}):
-        for it in (mv.get("items") or []):
+            {"order_id": oid, "type": {"$in": _DEDUCT_MOVE_TYPES}}, {"_id": 0, "items": 1, "moves": 1}):
+        # DENETİM (stok-sync #1 KRİTİK): pazaryeri düşümleri (order_imported) deltaları "moves"
+        # anahtarında yazıyor; buradaki reader yalnız "items"a bakıyordu → pazaryeri düşümleri
+        # otoriter restock'a GÖRÜNMEZ olup çağıran tam-adet iadeye düşüyordu (hayalet +stok →
+        # Amazon'a push → oversell). İki anahtarı da oku.
+        for it in (mv.get("items") or mv.get("moves") or []):
             d = int(it.get("delta") or 0)
             if d >= 0:
                 continue
@@ -8457,17 +8461,20 @@ async def reject_return(return_id: str, payload: dict,
     # müşteriye geri gönderiliyor) o +stok HAYALET kalıp oversell yaratıyordu. Restock'u geri al.
     if rec.get("stock_restored"):
         try:
-            _mv = await db.stock_movements.find_one(
-                {"return_id": return_id, "type": "return_restock"}, {"_id": 0, "items": 1})
-            if _mv and _mv.get("items"):
-                await _reverse_stock_moves(_mv["items"])
-                await db.stock_movements.insert_one({
-                    "id": str(uuid.uuid4()), "type": "return_restock_reversed",
-                    "order_id": rec.get("order_id"), "order_number": rec.get("order_number", ""),
-                    "return_id": return_id, "items": _mv["items"], "source": "return_reject",
-                    "created_at": now_iso})
-                await db.customer_returns.update_one({"id": return_id}, {"$unset": {"stock_restored": ""}})
-                logger.info(f"[iade-ret] restock geri alındı return={return_id}")
+            # DENETİM (race R5): ATOMİK claim — iki eşzamanlı reject çift ters-çevirim yapmasın.
+            _claim = await db.customer_returns.update_one(
+                {"id": return_id, "stock_restored": True}, {"$unset": {"stock_restored": ""}})
+            if _claim.modified_count == 1:
+                _mv = await db.stock_movements.find_one(
+                    {"return_id": return_id, "type": "return_restock"}, {"_id": 0, "items": 1})
+                if _mv and _mv.get("items"):
+                    await _reverse_stock_moves(_mv["items"])
+                    await db.stock_movements.insert_one({
+                        "id": str(uuid.uuid4()), "type": "return_restock_reversed",
+                        "order_id": rec.get("order_id"), "order_number": rec.get("order_number", ""),
+                        "return_id": return_id, "items": _mv["items"], "source": "return_reject",
+                        "created_at": now_iso})
+                    logger.info(f"[iade-ret] restock geri alındı return={return_id}")
         except Exception as _e:
             logger.error(f"[iade-ret de-restock {return_id}] {_e}")
 
