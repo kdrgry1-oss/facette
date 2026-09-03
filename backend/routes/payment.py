@@ -757,6 +757,16 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
         if not _ord or not _payment_matches_order(data, _ord):
             logger.warning(f"[ODEME] dogrulama basarisiz, PAID iptal edildi order_id={order_id}")
             paid = False
+        # Defense-in-depth (payment redteam F4): aynı iyzico paymentId BAŞKA bir ödenmiş
+        # siparişe bağlıysa reddet (cross-order paymentId replay — tutar eşleşmesine ek kalkan).
+        _pid = data.get("paymentId")
+        if paid and _pid:
+            _dup = await db.orders.find_one(
+                {"iyzico_payment_id": _pid, "payment_status": "paid", "id": {"$ne": order_id}},
+                {"_id": 0, "id": 1})
+            if _dup:
+                logger.warning(f"[ODEME] paymentId {_pid} zaten sipariş {_dup['id']}'e bağlı — PAID iptal (replay) order_id={order_id}")
+                paid = False
     update = {
         "iyzico_retrieve_response": _payment_snapshot(data),
         "updated_at": datetime.now(timezone.utc).isoformat(),

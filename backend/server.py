@@ -266,6 +266,7 @@ async def lifespan(app: FastAPI):
         # DENETİM (DB-bütünlük): sıcak sorgular COLLSCAN'liyordu → indeks. unique DEĞİL (mevcut
         # veride olası duplikeler boot'u kırmasın; benzersizlik ayrı dedup migration ister).
         await db.orders.create_index("id")                       # ödeme callback {"id": order_id}
+        await db.orders.create_index("iyzico_payment_id")        # cross-order paymentId replay kontrolü
         await db.stock_movements.create_index([("order_id", 1), ("type", 1)])   # iptal/restock idempotency
         await db.stock_movements.create_index([("product_id", 1), ("created_at", -1)])
         await db.coupons.create_index("code")                    # checkout apply_coupon (public)

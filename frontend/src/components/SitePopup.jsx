@@ -16,6 +16,7 @@ import { Link, useLocation } from "react-router-dom";
 import axios from "axios";
 import { Tag, Gift, Mail, Lock, Check, X } from "lucide-react";
 
+import { safeUrl } from "../lib/safeUrl";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const CONSENT_TEXT =
@@ -92,7 +93,7 @@ export default function SitePopup() {
         <div className="p-6">
           {(popup.name || popup.title) && <h3 className="text-xl font-semibold mb-2 tracking-tight">{popup.name || popup.title}</h3>}
           {(popup.subtitle || popup.content) && <div className="text-sm text-gray-600 whitespace-pre-line mb-4">{popup.subtitle || popup.content}</div>}
-          {popup.link && <a href={popup.link} onClick={close} className="mt-2 inline-block bg-black text-white px-5 py-2 rounded-lg text-sm hover:bg-gray-800">{popup.button_text || "İncele"}</a>}
+          {popup.link && <a href={safeUrl(popup.link)} onClick={close} className="mt-2 inline-block bg-black text-white px-5 py-2 rounded-lg text-sm hover:bg-gray-800">{popup.button_text || "İncele"}</a>}
         </div>
       </div>
     </div>
