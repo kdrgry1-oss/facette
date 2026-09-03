@@ -74,7 +74,7 @@ async def get_attributes(current_user: dict = Depends(require_admin)):
 async def create_attribute(req: AttributeCreate, current_user: dict = Depends(require_admin)):
     """Create a new global product attribute"""
     try:
-        existing = await db.attributes.find_one({"name": {"$regex": f"^{req.name}$", "$options": "i"}})
+        existing = await db.attributes.find_one({"name": {"$regex": f"^{re.escape(req.name)}$", "$options": "i"}})
         if existing:
             raise HTTPException(status_code=400, detail="Bu özellik zaten mevcut.")
 
@@ -308,7 +308,7 @@ async def sync_attributes_from_trendyol(payload: dict = Body(default={}), curren
         new_count = 0
         update_count = 0
         for attr_name, val_set in attribute_map.items():
-            existing = await db.attributes.find_one({"name": {"$regex": f"^{attr_name}$", "$options": "i"}})
+            existing = await db.attributes.find_one({"name": {"$regex": f"^{re.escape(attr_name)}$", "$options": "i"}})
             if existing:
                 # Merge values
                 current_vals = set(existing.get("values", []))
@@ -388,7 +388,7 @@ async def sync_attributes_from_products(current_user: dict = Depends(require_adm
         new_count = 0
         update_count = 0
         for attr_name, val_set in attribute_map.items():
-            existing = await db.attributes.find_one({"name": {"$regex": f"^{attr_name}$", "$options": "i"}})
+            existing = await db.attributes.find_one({"name": {"$regex": f"^{re.escape(attr_name)}$", "$options": "i"}})
             if existing:
                 current_vals = set(existing.get("values", []))
                 merged_vals = list(current_vals.union(val_set))

@@ -874,8 +874,13 @@ async def _build_products_query(
         and_clauses.append({"ticimax_fields.YAYINTARIHI": pub_q})
 
     # --- Dinamik ticimax_fields parametreleri (tf_ / tfmin_ / tfmax_) ---
+    # DENETİM (injection F5): ticimax_fields MALİYET/tedarikçi gibi GİZLİ iç alanlar içerir.
+    # Public'te bunlarla filtreleme, tfmin_/tfmax_ aralık taramasıyla ürün MALİYETİNİN
+    # binary-search ile sızdırılmasına yol açıyordu → YALNIZ admin görünümünde uygulanır.
     range_acc: dict = {}
     for pkey, pval in request.query_params.items():
+        if not _admin_view:
+            continue
         if pval is None or pval == "":
             continue
         if pkey.startswith("tfmin_"):
@@ -1034,6 +1039,12 @@ async def get_products(
     )
 
     sort_order = -1 if order == "desc" else 1
+    # DENETİM (injection F5): public'te YALNIZ güvenli alanlarla sıralama — aksi halde
+    # sort=ticimax_fields.MALIYET ile ürünler maliyete göre sıralanıp gizli maliyet sızardı.
+    _SAFE_SORT = {"created_at", "updated_at", "price", "sale_price", "member_price_1",
+                  "name", "stock", "popularity", "sales_count", "order", "discount_percentage"}
+    if not _admin_view and sort not in _SAFE_SORT:
+        sort = "created_at"
     # Kategori sayfasında kullanıcı özel sıralama seçmediyse (default created_at):
     # urun_karti_id (sayısal) DESC — yüksek kart id = en yeni ürün, kategoride en üstte.
     _cat_view = bool(category or category_id)

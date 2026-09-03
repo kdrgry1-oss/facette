@@ -924,6 +924,12 @@ async def products_export_xlsx(
     for col, w in zip("ABCDEFGHIJKLMNO", [42, 10, 12, 14, 10, 12, 14, 16, 16, 18, 14, 10, 10, 8, 40]):
         ws.column_dimensions[col].width = w
     buf = _BytesIO()
+    # DENETİM (injection F8): Excel/CSV formül enjeksiyonu — =+-@ ile başlayan hücreleri kaçır
+    for _ws in wb.worksheets:
+        for _row in _ws.iter_rows():
+            for _c in _row:
+                if isinstance(_c.value, str) and _c.value[:1] in ('=', '+', '-', '@', '\t', '\r'):
+                    _c.value = "'" + _c.value
     wb.save(buf)
     return _Response(
         content=buf.getvalue(),

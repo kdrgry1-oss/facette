@@ -693,9 +693,9 @@ async def list_costs(
     pq: dict = {}
     if q:
         pq["$or"] = [
-            {"name": {"$regex": q, "$options": "i"}},
-            {"stock_code": {"$regex": q, "$options": "i"}},
-            {"sku": {"$regex": q, "$options": "i"}},
+            {"name": {"$regex": re.escape(q), "$options": "i"}},
+            {"stock_code": {"$regex": re.escape(q), "$options": "i"}},
+            {"sku": {"$regex": re.escape(q), "$options": "i"}},
         ]
     skip = (page - 1) * limit
     cursor = db.products.find(pq, {"_id": 0, "id": 1, "name": 1, "stock_code": 1,

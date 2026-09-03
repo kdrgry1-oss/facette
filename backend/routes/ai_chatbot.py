@@ -181,8 +181,8 @@ async def list_kb_entries(
     query = {}
     if q:
         query["$or"] = [
-            {"question": {"$regex": q, "$options": "i"}},
-            {"answer": {"$regex": q, "$options": "i"}},
+            {"question": {"$regex": re.escape(q), "$options": "i"}},
+            {"answer": {"$regex": re.escape(q), "$options": "i"}},
         ]
     items = await db.ai_knowledge_base.find(query, {"_id": 0}).sort("usage_count", -1).limit(500).to_list(500)
     total = await db.ai_knowledge_base.count_documents({})

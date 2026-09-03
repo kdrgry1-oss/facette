@@ -164,12 +164,12 @@ async def list_influencers(
     query = {}
     if q:
         query["$or"] = [
-            {"name": {"$regex": q, "$options": "i"}},
-            {"handle": {"$regex": q, "$options": "i"}},
-            {"instagram": {"$regex": q, "$options": "i"}},
-            {"tiktok": {"$regex": q, "$options": "i"}},
-            {"phone": {"$regex": q, "$options": "i"}},
-            {"coupon_code": {"$regex": q, "$options": "i"}},
+            {"name": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"handle": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"instagram": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"tiktok": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"phone": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"coupon_code": {"$regex": _re_i.escape(q), "$options": "i"}},
         ]
     if platform:
         query["platform"] = platform
@@ -592,11 +592,11 @@ async def list_pr_entries(
         query["status"] = status
     if q:
         query["$or"] = [
-            {"influencer_name": {"$regex": q, "$options": "i"}},
-            {"instagram": {"$regex": q, "$options": "i"}},
-            {"tiktok": {"$regex": q, "$options": "i"}},
-            {"note": {"$regex": q, "$options": "i"}},
-            {"offer": {"$regex": q, "$options": "i"}},
+            {"influencer_name": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"instagram": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"tiktok": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"note": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"offer": {"$regex": _re_i.escape(q), "$options": "i"}},
         ]
     if start_date or end_date:
         dr: dict = {}
@@ -731,6 +731,12 @@ def _xlsx_response(ws_title, headers, rows, widths, filename, status_col=None, s
     if rows:
         ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
     buf = BytesIO()
+    # DENETİM (injection F8): Excel/CSV formül enjeksiyonu — =+-@ ile başlayan hücreleri kaçır
+    for _ws in wb.worksheets:
+        for _row in _ws.iter_rows():
+            for _c in _row:
+                if isinstance(_c.value, str) and _c.value[:1] in ('=', '+', '-', '@', '\t', '\r'):
+                    _c.value = "'" + _c.value
     wb.save(buf)
     return Response(
         content=buf.getvalue(),
@@ -756,11 +762,11 @@ async def export_pr_entries(
         query["status"] = status
     if q:
         query["$or"] = [
-            {"influencer_name": {"$regex": q, "$options": "i"}},
-            {"instagram": {"$regex": q, "$options": "i"}},
-            {"tiktok": {"$regex": q, "$options": "i"}},
-            {"note": {"$regex": q, "$options": "i"}},
-            {"offer": {"$regex": q, "$options": "i"}},
+            {"influencer_name": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"instagram": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"tiktok": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"note": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"offer": {"$regex": _re_i.escape(q), "$options": "i"}},
         ]
     if start_date or end_date:
         dr: dict = {}
@@ -931,6 +937,12 @@ async def export_pr_entries(
         ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(flat) + 1}"
 
     buf = BytesIO()
+    # DENETİM (injection F8): Excel/CSV formül enjeksiyonu — =+-@ ile başlayan hücreleri kaçır
+    for _ws in wb.worksheets:
+        for _row in _ws.iter_rows():
+            for _c in _row:
+                if isinstance(_c.value, str) and _c.value[:1] in ('=', '+', '-', '@', '\t', '\r'):
+                    _c.value = "'" + _c.value
     wb.save(buf)
     return Response(
         content=buf.getvalue(),
@@ -991,12 +1003,12 @@ async def export_influencers(q: Optional[str] = Query(None), current_user: dict 
     query: dict = {}
     if q:
         query["$or"] = [
-            {"name": {"$regex": q, "$options": "i"}},
-            {"handle": {"$regex": q, "$options": "i"}},
-            {"instagram": {"$regex": q, "$options": "i"}},
-            {"tiktok": {"$regex": q, "$options": "i"}},
-            {"phone": {"$regex": q, "$options": "i"}},
-            {"coupon_code": {"$regex": q, "$options": "i"}},
+            {"name": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"handle": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"instagram": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"tiktok": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"phone": {"$regex": _re_i.escape(q), "$options": "i"}},
+            {"coupon_code": {"$regex": _re_i.escape(q), "$options": "i"}},
         ]
     docs = await db.influencers.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
 

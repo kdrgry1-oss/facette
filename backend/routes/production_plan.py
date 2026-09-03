@@ -28,6 +28,7 @@ Sütunlar:
  18. delivered_qty       (manuel, +%/-% otomatik)
 =============================================================================
 """
+import re
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 from typing import Optional, List, Dict, Any
@@ -124,9 +125,9 @@ async def list_plan(
         q["collection"] = collection
     if search:
         q["$or"] = [
-            {"model_no": {"$regex": search, "$options": "i"}},
-            {"product_description": {"$regex": search, "$options": "i"}},
-            {"manufacturer_name": {"$regex": search, "$options": "i"}},
+            {"model_no": {"$regex": re.escape(search), "$options": "i"}},
+            {"product_description": {"$regex": re.escape(search), "$options": "i"}},
+            {"manufacturer_name": {"$regex": re.escape(search), "$options": "i"}},
         ]
     rows = await db.production_plan.find(q, {"_id": 0}).sort("seq_no", 1).to_list(limit)
     return {"items": rows, "total": len(rows)}
@@ -298,6 +299,12 @@ async def export_excel(current_user: dict = Depends(require_admin)):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = 22
 
     out = BytesIO()
+    # DENETİM (injection F8): Excel/CSV formül enjeksiyonu — =+-@ ile başlayan hücreleri kaçır
+    for _ws in wb.worksheets:
+        for _row in _ws.iter_rows():
+            for _c in _row:
+                if isinstance(_c.value, str) and _c.value[:1] in ('=', '+', '-', '@', '\t', '\r'):
+                    _c.value = "'" + _c.value
     wb.save(out)
     out.seek(0)
     filename = f"imalat-plani-{datetime.now().strftime('%Y%m%d-%H%M')}.xlsx"
