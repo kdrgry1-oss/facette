@@ -55,8 +55,20 @@ class SocialSettingsReq(BaseModel):
     facebook_redirect_uri: Optional[str] = ""
 
 
+_SOCIAL_SECRETS = {"apple_private_key", "facebook_app_secret"}
+
+
 async def _get_social_settings() -> Dict[str, Any]:
     doc = await db.settings.find_one({"id": "social_auth"}, {"_id": 0}) or {}
+    # DENETİM (kimlik B-2): Apple özel anahtarı + Facebook app secret at-rest şifreli;
+    # okurken çöz (legacy düz-metin olduğu gibi döner → migration güvenli).
+    try:
+        from security.crypto import decrypt as _dec
+        for f in _SOCIAL_SECRETS:
+            if doc.get(f):
+                doc[f] = _dec(doc[f])
+    except Exception:
+        pass
     return doc
 
 
@@ -104,12 +116,21 @@ async def admin_save_settings(req: SocialSettingsReq, current_user: dict = Depen
         "facebook_enabled", "facebook_app_id", "facebook_app_secret", "facebook_redirect_uri",
     ]
     payload = req.model_dump()
-    SECRETS = {"apple_private_key", "facebook_app_secret"}
+    SECRETS = _SOCIAL_SECRETS
     for f in fields:
         v = payload.get(f)
         if f in SECRETS and (not v or (isinstance(v, str) and "****" in v)):
-            v = existing.get(f, "")  # eski değeri koru
+            v = existing.get(f, "")  # eski değeri koru (çözülmüş düz metin)
         data[f] = v
+    # DENETİM B-2: sırları at-rest Fernet ile şifrele (idempotent, boş/şifreli atlanır).
+    try:
+        from security.crypto import encrypt as _enc2, is_encrypted as _isenc
+        for f in SECRETS:
+            v = data.get(f)
+            if isinstance(v, str) and v and not _isenc(v):
+                data[f] = _enc2(v)
+    except Exception:
+        pass
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     data["updated_by"] = current_user.get("email", "")
     await db.settings.update_one({"id": "social_auth"}, {"$set": data}, upsert=True)

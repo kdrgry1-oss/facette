@@ -44,7 +44,8 @@ _OPT_IN = {"başla", "basla", "devam", "aç", "ac"}
 
 async def _wa_cfg() -> dict:
     s = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
-    return ((s.get("providers") or {}).get("whatsapp_meta") or {})
+    from notification_service import decrypt_provider_block  # B-1: page_access_token/app_secret şifreli
+    return decrypt_provider_block((s.get("providers") or {}).get("whatsapp_meta") or {})
 
 
 # ── Webhook doğrulama (Meta panel: Callback URL kaydı) ──────────────────────

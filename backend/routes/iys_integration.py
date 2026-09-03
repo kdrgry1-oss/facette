@@ -119,7 +119,8 @@ class IYSRegister(IYSQuery):
 async def _netgsm_prov() -> dict:
     """providers.netgsm bloğu (İYS + SMS kimlikleri burada; iys.py._iys_config ile aynı kaynak)."""
     doc = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
-    return (doc.get("providers", {}) or {}).get("netgsm", {}) or {}
+    from notification_service import decrypt_provider_block  # B-1: sırlar at-rest şifreli
+    return decrypt_provider_block((doc.get("providers", {}) or {}).get("netgsm", {}) or {})
 
 
 def _iys_fields(prov: dict) -> dict:

@@ -149,7 +149,8 @@ async def _iys_config() -> dict:
     'Alt kullanıcı ile giriş: kullanıcı adı = abone no' bilgisiyle birebir. Böylece İYS'ye ayrı
     kimlik verilir, SMS OTP'nin şifre/appkey'i BOZULMAZ."""
     doc = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
-    prov = (doc.get("providers", {}) or {}).get("netgsm", {}) or {}
+    from notification_service import decrypt_provider_block  # B-1: sırlar at-rest şifreli
+    prov = decrypt_provider_block((doc.get("providers", {}) or {}).get("netgsm", {}) or {})
     return {
         "username": prov.get("username") or os.environ.get("NETGSM_USERCODE", ""),
         # İYS alt kullanıcısının şifre/appkey'i öncelikli; yoksa SMS'inkine düş.

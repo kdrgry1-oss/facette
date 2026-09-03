@@ -325,11 +325,49 @@ async def _order_sender(db, event: str) -> Dict:
 # ORCHESTRATION
 # =============================================================================
 
+# DENETİM (kimlik B-1): providers.* sırları (Netgsm password, WhatsApp/Meta
+# page_access_token & app_secret, Telegram auth_token …) DB'de AÇIK yazılıyordu.
+# Kaydederken Fernet ile şifrelenir (notifications.save_providers), okuyan HER yer
+# aşağıdaki yardımcılarla çözer. decrypt legacy düz-metni olduğu gibi döndürür →
+# migration güvenli (eski değerler yeni kayda kadar bozulmaz).
+PROVIDER_SECRET_FIELDS = {"password", "auth_token", "api_hash", "api_key",
+                          "access_token", "api_secret", "app_secret", "page_access_token"}
+
+
+def decrypt_provider_block(block: Optional[Dict]) -> Dict:
+    """Tek bir provider bloğundaki (ör. providers.netgsm) sır alanlarını çözer."""
+    if not block or not isinstance(block, dict):
+        return block or {}
+    try:
+        from security.crypto import decrypt as _dec
+    except Exception:
+        return dict(block)
+    out = dict(block)
+    for f in PROVIDER_SECRET_FIELDS:
+        if out.get(f):
+            try:
+                out[f] = _dec(out[f])
+            except Exception:
+                pass
+    return out
+
+
+def decrypt_providers_doc(doc: Optional[Dict]) -> Dict:
+    """Tüm providers alt-bloklarındaki sırları çözer (full notification_providers doc)."""
+    if not doc or not isinstance(doc, dict):
+        return doc or {}
+    out = dict(doc)
+    provs = out.get("providers") or {}
+    out["providers"] = {k: decrypt_provider_block(v) for k, v in provs.items()}
+    return out
+
+
 async def _get_providers_config(db) -> Dict:
-    return await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {
-        "sms_active": None, "whatsapp_active": False, "email_active": True,
-        "providers": {},
-    }
+    doc = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0})
+    if not doc:
+        return {"sms_active": None, "whatsapp_active": False, "email_active": True,
+                "providers": {}}
+    return decrypt_providers_doc(doc)
 
 
 async def _get_template(db, event_key: str, channel: str) -> Optional[Dict]:

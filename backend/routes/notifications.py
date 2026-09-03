@@ -31,6 +31,7 @@ from notification_service import (
     _get_template,
 )
 from email_layout import email_shell, info_row
+from security.crypto import encrypt as _enc, is_encrypted
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -126,6 +127,12 @@ async def save_providers(req: ProviderConfigReq, current_user: dict = Depends(re
                         merged[f] = old[f]
         # __has_ bayraklarını DB'ye yazma
         merged = {k: v for k, v in merged.items() if not k.startswith("__has_")}
+        # DENETİM (kimlik B-1): sır alanlarını at-rest Fernet ile şifrele. Zaten şifreli
+        # (v1:…) veya boş değerlere dokunma → idempotent, migration güvenli.
+        for f in SECRET_FIELDS:
+            v = merged.get(f)
+            if isinstance(v, str) and v and not is_encrypted(v):
+                merged[f] = _enc(v)
         merged_provs[pkey] = merged
 
     data = {

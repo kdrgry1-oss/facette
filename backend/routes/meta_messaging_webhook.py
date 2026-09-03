@@ -40,7 +40,8 @@ _GRAPH_VER = "v23.0"
 
 async def _cfg() -> dict:
     s = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
-    return ((s.get("providers") or {}).get("meta_messaging") or {})
+    from notification_service import decrypt_provider_block  # B-1: page_access_token/app_secret şifreli
+    return decrypt_provider_block((s.get("providers") or {}).get("meta_messaging") or {})
 
 
 @router.get("/webhook")
