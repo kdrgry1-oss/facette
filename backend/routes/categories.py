@@ -24,13 +24,66 @@ def _req_is_member(request) -> bool:
     return False
 
 def generate_slug(name: str) -> str:
-    slug = name.lower()
-    tr_map = {'ı': 'i', 'ğ': 'g', 'ü': 'u', 'ş': 's', 'ö': 'o', 'ç': 'c'}
-    for tr, en in tr_map.items():
-        slug = slug.replace(tr, en)
-    slug = re.sub(r'[^a-z0-9\s-]', '', slug)
-    slug = re.sub(r'[\s_]+', '-', slug).strip('-')
-    return slug
+    # DENETİM (kategori slug): "İ".lower() → "i" + U+0307 (birleşik nokta) ürettiğinden naif
+    # slug "GİYİM" → "gi-yi-m" gibi BOZUK çıkıyordu. Türkçe harfleri ÖNCE ASCII'ye çevir, sonra
+    # kalan birleşik işaretleri (Mn) temizle → frontend lib/slug.js ile birebir aynı.
+    import unicodedata
+    tr_map = {'ı': 'i', 'İ': 'i', 'I': 'i', 'ş': 's', 'Ş': 's', 'ç': 'c', 'Ç': 'c',
+              'ğ': 'g', 'Ğ': 'g', 'ö': 'o', 'Ö': 'o', 'ü': 'u', 'Ü': 'u'}
+    s = "".join(tr_map.get(ch, ch) for ch in str(name or ""))
+    s = s.lower()
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")  # birleşik işaretleri at
+    s = re.sub(r'[^a-z0-9\s-]', '', s)
+    s = re.sub(r'[\s_]+', '-', s)
+    s = re.sub(r'-+', '-', s).strip('-')
+    return s
+
+async def repair_category_slugs():
+    """BOZUK kategori slug'larını (eski İ→i̇ bug'ından 'gi-yi-m', 'en-yeni-ler' gibi) TEK
+    SEFERDE onarır: doğru slug'ı kanonik yapar, eskisini slug_aliases + 301 redirect ile korur
+    → mevcut URL'ler kırılmaz, SEO düzelir. settings.category_slug_repair_v1 ile idempotent."""
+    try:
+        flag = await db.settings.find_one({"id": "category_slug_repair_v1"}, {"_id": 0})
+        if flag and flag.get("done"):
+            return
+        cats = await db.categories.find({}, {"_id": 0}).to_list(length=None)
+        used = {str(c.get("slug") or "").lower() for c in cats if c.get("slug")}
+        fixed = 0
+        for c in cats:
+            old = str(c.get("slug") or "")
+            correct = generate_slug(c.get("name") or "")
+            if not correct or correct == old.lower():
+                continue
+            if correct in used and correct != old.lower():
+                continue  # çakışma → dokunma (veri güvenliği)
+            aliases = list(c.get("slug_aliases") or [])
+            if old and old not in aliases:
+                aliases.append(old)
+            await db.categories.update_one({"id": c["id"]},
+                                           {"$set": {"slug": correct, "slug_aliases": aliases}})
+            used.discard(old.lower())
+            used.add(correct)
+            if old and old != correct:
+                try:
+                    await db.seo_redirects.update_one(
+                        {"from_path": f"/{old}"},
+                        {"$setOnInsert": {"id": generate_id(), "from_path": f"/{old}",
+                                          "to_path": f"/{correct}", "status_code": 301, "hits": 0,
+                                          "is_active": True,
+                                          "created_at": datetime.now(timezone.utc).isoformat()}},
+                        upsert=True)
+                except Exception:
+                    pass
+            fixed += 1
+        await db.settings.update_one({"id": "category_slug_repair_v1"},
+                                     {"$set": {"done": True, "fixed": fixed,
+                                               "at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+        if fixed:
+            logger.info(f"[kategori-slug onarım] {fixed} kategori düzeltildi (alias+301 korundu)")
+    except Exception as e:
+        logger.error(f"[kategori-slug onarım] hata: {e}")
+
 
 @router.get("")
 async def get_categories(

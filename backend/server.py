@@ -391,6 +391,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Coupon cancel-release backfill start warning: {e}")
 
+    # Tek seferlik onarım: eski İ-bug'ından bozuk kategori slug'ları (gi-yi-m → giyim)
+    # düzeltilir; eski slug alias+301 ile korunur (URL kırılmaz, SEO düzelir).
+    try:
+        import asyncio as _asyncio
+        from routes.categories import repair_category_slugs
+        _asyncio.create_task(repair_category_slugs())
+    except Exception as e:
+        logger.warning(f"Category slug repair start warning: {e}")
+
     # Tek seferlik migrasyon: kapida odemeyi varsayilan olarak KAPAT.
     # Admin panelinden (Ayarlar > Odeme Yontemleri) tekrar acilabilir; bu blok
     # _cod_default_off_v1 isaretiyle korundugu icin SADECE BIR KEZ calisir ve
