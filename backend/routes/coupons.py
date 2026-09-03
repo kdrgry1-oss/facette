@@ -200,10 +200,18 @@ async def available_coupons(payload: dict, current_user: dict = Depends(get_curr
         # halde 3DS reddi/yarım kalan deneme hoşgeldin kuponunu yakıyordu (elle-giriş yolu #368
         # zaten böyle süzüyordu; iki yol artık tutarlı).
         if c.get("first_order_only") and _ors:
+            # "önceki sipariş" YALNIZ gerçekten ödenmiş/tamamlanmış (awaiting_payment/pending
+            # yarıda kalan denemeler hoşgeldin kuponunu YAKMAZ) — _evaluate_single ile birebir.
             prior = await db.orders.count_documents({
-                "$or": _ors,
-                "status": {"$nin": ["cancelled"]},
-                "payment_status": {"$nin": ["failed", "expired"]},
+                "$and": [
+                    {"$or": _ors},
+                    {"$or": [
+                        {"payment_status": "paid"},
+                        {"status": {"$in": ["confirmed", "processing", "preparing", "shipped",
+                                            "delivered", "undelivered", "returned", "refunded",
+                                            "partial_refunded", "cancel_requested"]}},
+                    ]},
+                ],
             })
             if prior > 0:
                 continue
@@ -554,13 +562,21 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
             ors.append({"customer_email": em})
         if not ors:
             return {"valid": False, "reason": "İlk siparişe özel kupon için giriş yapın", "discount": 0}
-        # Y6: İptal/başarısız/expired siparişleri "önceki sipariş" saymayız; aksi halde ödemesi
-        # başarısız olan bir deneme müşteriyi "ilk sipariş" hakkından mahrum bırakıyordu.
+        # DENETİM (canlı olay): "önceki sipariş" YALNIZ GERÇEKTEN ödenmiş/tamamlanmış sipariştir.
+        # Eskiden awaiting_payment/pending (3DS yarıda kalan, henüz ödenmemiş) siparişler de
+        # sayılıyordu → müşteri kartı çekilmeden ilk-sipariş kuponu hakkını KAYBEDİYORDU
+        # (HOSGELDIN10 "kullanamıyorum" kök nedeni). Yalnız payment_status=paid VEYA fulfillment
+        # statüsündeki siparişler önceki sipariş sayılır.
         prior = await db.orders.count_documents({
-            "$or": ors,
-            # "cancel_refunded" (İptal Ödemesi Yapıldı) de iptaldir — ilk sipariş hakkını yakmaz.
-            "status": {"$nin": ["cancelled", "cancel_refunded"]},
-            "payment_status": {"$nin": ["failed", "expired"]},
+            "$and": [
+                {"$or": ors},
+                {"$or": [
+                    {"payment_status": "paid"},
+                    {"status": {"$in": ["confirmed", "processing", "preparing", "shipped",
+                                        "delivered", "undelivered", "returned", "refunded",
+                                        "partial_refunded", "cancel_requested"]}},
+                ]},
+            ],
         })
         if prior > 0:
             return {"valid": False, "reason": "Kupon sadece ilk siparişe özeldir", "discount": 0}

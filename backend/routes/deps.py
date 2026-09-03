@@ -507,9 +507,20 @@ async def get_effective_permissions(user: dict) -> list:
         # (kullanıcı/rol yönetimi + escalation kapalı) AMA tüm OPERASYONEL yetkileri alır
         # (iade/refund/sipariş vb. işleri aksamasın). Least-privilege isteniyorsa panelden
         # kişiye özel rol atanır → o zaman yalnız rolündeki yetkiler geçerli olur.
+        # DENETİM (RBAC son adım): rolsüz personel operasyonel işleri yapabilir AMA
+        # kimlik/ayar/geri-alınamaz-silme yetkilerini ALMAZ (denylist). Süper-admin ('*')
+        # yukarıda ayrıldı → SAHİP hesabı bundan etkilenmez; yalnız gerçekten rolsüz personel.
+        _ROLELESS_DENY = {
+            "integrations.iyzico", "integrations.trendyol", "integrations.hepsiburada",
+            "integrations.temu", "integrations.mng", "integrations.netgsm",
+            "integrations.dogan_edonusum",
+            "settings.company", "settings.site", "settings.emails",
+            "admin.users", "admin.roles", "admin.logs", "admin.backup",
+            "products.delete", "customers.delete",
+        }
         try:
             from permissions import ALL_PERMISSION_KEYS
-            return list(ALL_PERMISSION_KEYS)
+            return [k for k in ALL_PERMISSION_KEYS if k not in _ROLELESS_DENY]
         except Exception:
             return []
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
