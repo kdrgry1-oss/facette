@@ -713,6 +713,23 @@ async def _amazon_product_type_schema(product_type: str) -> dict:
     return doc
 
 
+def _amazon_image_url(u: str) -> str:
+    """Amazon WebP KABUL ETMEZ (yalnız JPEG/PNG/TIFF/GIF). Ürün görsellerimiz R2'de
+    WebP → Amazon sessizce düşürüyordu. cdn.facette.com.tr veya .webp uzantılı görselleri
+    backend JPEG proxy'sine (/api/upload/to-jpeg) yönlendir; zaten JPEG/PNG olanlar kalır."""
+    try:
+        from urllib.parse import urlparse, quote
+        pu = urlparse(u)
+        host = pu.hostname or ""
+        is_webp = pu.path.lower().endswith(".webp")
+        if host == "cdn.facette.com.tr" or is_webp:
+            base = _public_base() or "https://api.facette.com.tr"
+            return f"{base}/api/upload/to-jpeg?src={quote(u, safe='')}"
+    except Exception:
+        pass
+    return u
+
+
 def _product_images(product: dict) -> list:
     urls = []
     for im in (product.get("images") or []):
@@ -726,7 +743,35 @@ def _product_images(product: dict) -> list:
         u = product.get(k)
         if u and str(u).startswith("http") and u not in urls:
             urls.insert(0, u)
-    return list(dict.fromkeys(urls))[:9]  # main + 8 other
+    urls = list(dict.fromkeys(urls))[:9]  # main + 8 other (Amazon limiti)
+    return [_amazon_image_url(u) for u in urls]  # WebP → JPEG proxy
+
+
+def _pick_variation_theme(enum, has_color: bool, has_size: bool) -> str:
+    """productType şemasındaki geçerli variation_theme enum'undan (renk+beden / renk / beden)
+    uygun olanı seçer. Eskiden 'SIZE_NAME/COLOR_NAME' gibi GEÇERSİZ sabitler gönderiliyordu →
+    Amazon varyasyon ailesini reddediyor, bedenler/renkler düşüyordu. Enum boşsa kanonik
+    değerlere (SIZE/COLOR, COLOR, SIZE) düşer."""
+    enum = [str(v) for v in (enum or []) if v]
+
+    def _u(v):
+        return v.upper()
+
+    if has_color and has_size:
+        # İkisini de içeren enum değeri; renk-önce yaygın kalıpları tercih et
+        for v in enum:
+            if "COLOR" in _u(v) and "SIZE" in _u(v):
+                return v
+        return enum[0] if enum else "COLOR/SIZE"
+    if has_color:
+        for v in enum:
+            if "COLOR" in _u(v) and "SIZE" not in _u(v):
+                return v
+        return "COLOR" if not enum else enum[0]
+    for v in enum:
+        if "SIZE" in _u(v) and "COLOR" not in _u(v):
+            return v
+    return "SIZE" if not enum else enum[0]
 
 
 async def _amazon_markup() -> float:
@@ -839,7 +884,9 @@ def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, b
         attrs["externally_assigned_product_identifier"] = [
             {"value": barcode, "type": "ean", "marketplace_id": mp}]
     if variant.get("size"):
-        attrs["size"] = [{"value": str(variant["size"]), "language_tag": "tr_TR", "marketplace_id": mp}]
+        # DENETİM (Amazon P3): beden değeri (M / 38) LOKALİZE DEĞİL — birçok apparel productType
+        # 'size' alanında language_tag KABUL ETMEZ, göndermek varyantı düşürüyordu. language_tag'siz.
+        attrs["size"] = [{"value": str(variant["size"]), "marketplace_id": mp}]
     if variant.get("color") or product.get("color"):
         _clr = str(variant.get("color") or product.get("color") or "").strip()
         if _clr:
@@ -1074,8 +1121,14 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
             return
         n_color = len({str(pp.get("color") or "").strip() for pp, _ in specs if str(pp.get("color") or "").strip()})
         _has_size = any(str(v.get("size") or "").strip() for _, v in specs)
-        theme = ("SIZE_NAME/COLOR_NAME" if n_color > 1 and _has_size
-                 else "COLOR_NAME" if n_color > 1 else "SIZE_NAME")
+        # DENETİM (Amazon P3): variation_theme'i productType şemasının GEÇERLİ enum'undan seç
+        # (sabit 'SIZE_NAME/COLOR_NAME' Amazon'ca reddediliyordu → beden/renk düşüyordu).
+        try:
+            _sch = await _amazon_product_type_schema(pt)
+            _theme_enum = (_sch.get("values") or {}).get("variation_theme") or []
+        except Exception:
+            _theme_enum = []
+        theme = _pick_variation_theme(_theme_enum, n_color > 1, _has_size)
         if len(specs) > 1:
             parent_sku = (group_key or f"{p0.get('id')}-P")
             pattrs = _amazon_listing_attributes(p0, {}, pt, mp, _amazon_price_of(p0, markup), 0,
@@ -1086,7 +1139,7 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
                        "externally_assigned_product_identifier", "list_price"):
                 pattrs.pop(_k, None)
             pattrs["parentage_level"] = [{"marketplace_id": mp, "value": "parent"}]
-            pattrs["variation_theme"] = [{"name": theme}]
+            pattrs["variation_theme"] = [{"marketplace_id": mp, "name": theme}]
             _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, parent_sku, pattrs)
             _r["product"] = f"{p0.get('name')} (ana ürün)"
             _tally(_r, _ok, _dry)
@@ -1101,7 +1154,7 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
                                                     default_attrs=cat_defaults, attr_mappings=cat_mappings,
                                                     list_price=round(float(pp.get("price") or 0), 2))
                 cattrs["parentage_level"] = [{"marketplace_id": mp, "value": "child"}]
-                cattrs["variation_theme"] = [{"name": theme}]
+                cattrs["variation_theme"] = [{"marketplace_id": mp, "name": theme}]
                 cattrs["child_parent_sku_relationship"] = [
                     {"marketplace_id": mp, "child_relationship_type": "variation", "parent_sku": parent_sku}]
                 _r, _ok, _dry = await _amazon_put_listing(seller, mp, pt, _csku, cattrs)
@@ -1118,28 +1171,54 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
             _tally(_r, _ok, _dry)
 
     # Ürünleri STOK KODUNA göre grupla (renk grubu) — aynı stok kodundaki TÜM renkler tek listede.
+    # DENETİM (Amazon P2): grup anahtarı eskiden yalnız p.get("stock_code")'du → stok kodu
+    # `sku`/varyant içinde olan ürünler gruplanamayıp tekil/parent'sız listeleniyordu.
+    # Trendyol ile AYNI çözücüyü (_resolve_stock_code = productMainId) kullan. İSİM GUARD:
+    # aynı stok kodunu FARKLI modeller paylaşabildiğinden (_model_key) model bazında ayır →
+    # over-merge önlenir; parent_sku benzersizliği için ikinci+ modele -N eklenir.
     from collections import defaultdict as _dd
-    _scodes = {str(p.get("stock_code") or "").strip() for p in products if str(p.get("stock_code") or "").strip()}
-    _sibs = _dd(dict)
+    from .integrations_common import _resolve_stock_code as _rsc
+    try:
+        from .products import _model_key as _mk
+    except Exception:
+        def _mk(_p):
+            return str((_p or {}).get("name") or "")
+    _scodes = {_rsc(p) for p in products if _rsc(p)}
+    _sibs = _dd(list)
     if _scodes:
-        _sq = {"stock_code": {"$in": list(_scodes)}}
-        if not _filtered:
-            _sq["is_active"] = True
-        async for sp in db.products.find(_sq, {"_id": 0}):
-            _sibs[str(sp.get("stock_code") or "").strip()][str(sp.get("id"))] = sp
-    _groups, _singles, _seen = _dd(list), [], set()
+        _codes = list(_scodes)
+        _sq = {"$or": [{"stock_code": {"$in": _codes}}, {"sku": {"$in": _codes}}]}
+        _q2 = _sq if _filtered else {"$and": [_sq, {"is_active": True}]}
+        async for sp in db.products.find(_q2, {"_id": 0}):
+            _sk = _rsc(sp)
+            if _sk:
+                _sibs[_sk].append(sp)
+    _groups, _gk_sku, _sc_n, _singles, _seen = {}, {}, _dd(int), [], set()
     for p in products:
-        sc = str(p.get("stock_code") or "").strip()
-        if sc:
-            for pid, sp in (_sibs.get(sc) or {str(p.get("id")): p}).items():
-                if pid not in _seen:
-                    _seen.add(pid)
-                    _groups[sc].append(sp)
-        elif str(p.get("id")) not in _seen:
-            _seen.add(str(p.get("id")))
-            _singles.append(p)
-    for gk, gps in _groups.items():
-        await _list_family(gps, gk)
+        sc = _rsc(p)
+        if not sc:
+            pid = str(p.get("id"))
+            if pid not in _seen:
+                _seen.add(pid)
+                _singles.append(p)
+            continue
+        model = _mk(p)
+        gkey = f"{sc}||{model}"
+        if gkey not in _groups:
+            _groups[gkey] = []
+            _n = _sc_n[sc]
+            _sc_n[sc] += 1
+            _gk_sku[gkey] = sc if _n == 0 else f"{sc}-{_n + 1}"
+        for sp in (_sibs.get(sc) or [p]):
+            if _mk(sp) != model:      # aynı SKU ama farklı model → ayrı aile
+                continue
+            pid = str(sp.get("id"))
+            if pid not in _seen:
+                _seen.add(pid)
+                _groups[gkey].append(sp)
+    for gkey, gps in _groups.items():
+        if gps:
+            await _list_family(gps, _gk_sku[gkey])
     for sp in _singles:
         await _list_family([sp], "")
     return {"success": True, "dry_run": not ALLOW_WRITE, "pushed": pushed, "successful": pushed,

@@ -320,6 +320,8 @@ _SEO_KNOWN_STATIC = {"/", "/hakkimizda", "/iletisim", "/sss", "/kvkk", "/gizlili
 
 def _clean_desc(s: str, limit: int = 160) -> str:
     s = _re.sub(r"<[^>]+>", " ", str(s or ""))
+    s = _html.unescape(s)                 # &nbsp; &amp; … çöz
+    s = s.replace("\xa0", " ")            # non-breaking space
     s = _re.sub(r"\s+", " ", s).strip()
     return (s[:limit].rstrip() + "…") if len(s) > limit else s
 
@@ -348,7 +350,8 @@ async def seo_page_meta(path: str = Query("/", max_length=512)):
         p = raw.rstrip("/") or "/"
         low = p.lower()
         comp = await _seo_company()
-        brand = comp.get("company_name") or comp.get("website") or "FACETTE"
+        # SEO başlığı için KISA marka adı (store_name) — uzun yasal ünvan (company_name) değil.
+        brand = comp.get("store_name") or comp.get("website") or "FACETTE"
         site = (comp.get("site_url") or _FRONT_URL).rstrip("/")
 
         # Admin override varsa öncelik (mevcut seo_meta)

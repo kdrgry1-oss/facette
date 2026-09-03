@@ -251,6 +251,59 @@ async def _serve(path: str, w: int = 0, q: int = 90):
     return Response(content=content, media_type=ctype, headers=headers)
 
 
+# =============================================================================
+# JPEG proxy — pazaryeri (Amazon) görsel aktarımı için. Amazon WebP KABUL ETMEZ
+# (yalnız JPEG/PNG/TIFF/GIF); ürün görsellerimiz R2'de WebP saklanıyor → Amazon
+# webp'leri sessizce düşürüyordu ("resimler aktarılmıyor"). Bu uç origin görseli
+# çekip tam çözünürlükte (≤2000px) JPEG'e çevirir. Cloudflare cdn-cgi transform
+# kotasına (ERROR 9422) bağlı DEĞİL → güvenilir. Amazon URL'i bir kez çekip cache'ler.
+# =============================================================================
+_JPEG_ALLOWED_HOSTS = {"cdn.facette.com.tr", "static.ticimax.cloud"}
+
+
+@router.get("/to-jpeg")
+async def image_to_jpeg(src: str, w: int = 2000):
+    """src (yalnız izinli CDN host) görselini tam çözünürlükte JPEG'e çevirip döndürür.
+    SSRF koruması: host beyaz-listesi. Amazon media_location için kullanılır."""
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(src)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Geçersiz URL")
+    if u.scheme not in ("http", "https") or (u.hostname or "") not in _JPEG_ALLOWED_HOSTS:
+        raise HTTPException(status_code=400, detail="İzin verilmeyen kaynak")
+    try:
+        import httpx
+        from PIL import Image, ImageOps
+        import io
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+            r = await client.get(src)
+            r.raise_for_status()
+            raw = r.content
+        img = Image.open(io.BytesIO(raw))
+        img = ImageOps.exif_transpose(img)
+        # Şeffaflığı beyaz zemine indir (JPEG alfa desteklemez)
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGBA")
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[-1])
+            img = bg
+        else:
+            img = img.convert("RGB")
+        _w = max(200, min(int(w or 2000), 2000))
+        if img.width > _w:
+            img.thumbnail((_w, _w * 4), Image.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=90, optimize=True, progressive=True)
+        return Response(content=out.getvalue(), media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"[to-jpeg] dönüştürme hatası src={src[:120]}: {e}")
+        raise HTTPException(status_code=502, detail="Görsel dönüştürülemedi")
+
+
 @router.get("/files/{path:path}")
 async def get_file(path: str, w: int = 0, q: int = 90):
     return await _serve(path, w, q)
