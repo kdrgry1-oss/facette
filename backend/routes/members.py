@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from .deps import db, require_admin, hash_password, generate_id, logger
+from .deps import db, require_admin, hash_password, generate_id, logger, require_permission
 
 router = APIRouter(prefix="/admin/members", tags=["admin-members"])
 
@@ -587,7 +587,7 @@ async def update_member(mid: str, payload: dict, current_user: dict = Depends(re
 
 
 @router.delete("/{mid}")
-async def delete_member(mid: str, current_user: dict = Depends(require_admin)):
+async def delete_member(mid: str, current_user: dict = Depends(require_permission("customers.delete"))):
     res = await db.users.delete_one({"id": mid, "is_admin": {"$ne": True}})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Üye bulunamadı")

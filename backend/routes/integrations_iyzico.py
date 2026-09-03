@@ -106,7 +106,7 @@ async def get_iyzico_settings(current_user: dict = Depends(require_admin)):
 
 
 @router.post("/iyzico/settings")
-async def save_iyzico_settings(payload: dict, current_user: dict = Depends(require_admin)):
+async def save_iyzico_settings(payload: dict, current_user: dict = Depends(require_permission("integrations.iyzico"))):
     if payload.get("is_active"):
         existing = await db.settings.find_one({"id": "iyzico"}, {"_id": 0}) or {}
         api_key = payload.get("api_key") or existing.get("api_key")

@@ -6,7 +6,7 @@ from typing import Optional
 from datetime import datetime, timezone
 import re
 
-from .deps import db, logger, require_admin, generate_id, generate_short_id
+from .deps import db, logger, require_admin, generate_id, generate_short_id, require_permission
 
 router = APIRouter(prefix="/categories", tags=["Categories"])
 
@@ -289,7 +289,7 @@ async def merge_categories(payload: dict, current_user: dict = Depends(require_a
 @router.delete("/{category_id}")
 async def delete_category(
     category_id: str,
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_permission("products.categories"))
 ):
     """Delete category (admin only)"""
     result = await db.categories.delete_one({"id": {"$in": _id_variants(category_id)}})

@@ -30,7 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from datetime import datetime, timezone
 
-from .deps import db, require_admin, generate_id, logger
+from .deps import db, require_admin, generate_id, logger, require_permission
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -135,7 +135,7 @@ async def save_settings(payload: dict, current_user: dict = Depends(require_admi
 
 
 @admin_router.post("/test")
-async def send_test(payload: dict, current_user: dict = Depends(require_admin)):
+async def send_test(payload: dict, current_user: dict = Depends(require_permission("tasarim.email"))):
     """Test e-postası gönderir. `subject`+`html` VERİLİRSE kullanıcının KAMPANYA İÇERİĞİNİ
     (markalı kabukla) gönderir — composer'dan 'Test olarak gönder'. Verilmezse SES Ayarları'nın
     sabit "SES Test" davranışı korunur. Placeholder'lar ({customer_name}/{kod}/{indirim}/URUN_LINKI)
@@ -343,7 +343,7 @@ async def _run_campaign(campaign_id: str):
 
 
 @admin_router.post("/campaigns")
-async def create_campaign(payload: dict, current_user: dict = Depends(require_admin)):
+async def create_campaign(payload: dict, current_user: dict = Depends(require_permission("tasarim.email"))):
     subject = (payload or {}).get("subject", "").strip()
     html = (payload or {}).get("html", "").strip()
     if not subject or not html:

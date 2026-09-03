@@ -3,7 +3,7 @@ from typing import Dict, Any
 from datetime import datetime, timezone
 import re
 
-from .deps import db, require_admin, limiter
+from .deps import db, require_admin, limiter, require_permission
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
@@ -140,7 +140,7 @@ async def get_settings():
 @router.post("")
 async def update_settings(
     settings_data: dict,
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_permission("settings.site"))
 ):
     """Update global settings"""
     settings_data.pop("_id", None)
@@ -382,7 +382,7 @@ async def get_email_smtp(current_user: dict = Depends(require_admin)):
 
 
 @router.post("/email-smtp")
-async def save_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(require_admin)):
+async def save_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(require_permission("settings.emails"))):
     existing = await db.settings.find_one({"id": "email_smtp"}, {"_id": 0}) or {}
     pwd = payload.get("password")
     data = {

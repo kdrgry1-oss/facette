@@ -43,7 +43,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from datetime import datetime, timezone
 
-from .deps import db, require_admin
+from .deps import db, require_admin, require_permission
 try:
     from security.crypto import encrypt as _encrypt, decrypt as _decrypt, is_encrypted as _is_enc
 except Exception:  # kripto yoksa güvenli-degrade (yine de çalışsın)
@@ -511,7 +511,7 @@ async def get_config(kind: str, current_user: dict = Depends(require_admin)):
 
 @router.post("/{kind}/config")
 async def save_config(kind: str, payload: dict,
-                      current_user: dict = Depends(require_admin)):
+                      current_user: dict = Depends(require_permission("integrations.view"))):
     """
     Tüm config'i (active_provider + providers map) günceller. Provider
     credential'ları `providers.<key>.<field>` şeklinde saklanır.

@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 import httpx
 import hashlib
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, get_effective_permissions
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, get_effective_permissions, require_permission
 from facette_defaults import (
     facette_company_value,     # yalnız GPSR (Üretici/İthalatçı) — beyaz-etiket, dinamik
     FACETTE_FIXED_ATTR_DEFAULTS,  # statik seed haritası (yalnız DB'de doküman YOKSA fallback)
@@ -267,7 +267,7 @@ async def get_trendyol_settings(current_user: dict = Depends(require_admin)):
 @router.post("/trendyol/settings")
 async def save_trendyol_settings(
     settings: dict,
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_permission("integrations.trendyol"))
 ):
     """Save Trendyol settings"""
     from datetime import datetime, timezone

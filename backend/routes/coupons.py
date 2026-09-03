@@ -17,7 +17,7 @@ from typing import Optional, List
 import re
 import uuid
 
-from .deps import db, require_admin, require_auth, get_current_user, logger
+from .deps import db, require_admin, require_auth, get_current_user, logger, require_permission
 
 
 def _is_personal_coupon(c: dict) -> bool:
@@ -71,7 +71,7 @@ async def list_coupons(
 
 
 @admin_router.post("")
-async def create_coupon(payload: dict, current_user: dict = Depends(require_admin)):
+async def create_coupon(payload: dict, current_user: dict = Depends(require_permission("campaigns.create"))):
     code = (payload.get("code") or "").strip().upper()
     if not code:
         raise HTTPException(status_code=400, detail="Kupon kodu gerekli")

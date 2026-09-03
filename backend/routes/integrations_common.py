@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 import httpx
 import hashlib
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, _search_tr_regex
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, _search_tr_regex, require_permission
 from facette_defaults import facette_fixed_value_for  # tüm-pazaryeri sabit varsayılan (gap-fill)
 
 router = APIRouter(tags=["Integrations-Common"])
@@ -2260,7 +2260,7 @@ async def get_marketplace_settings(marketplace: str, current_user: dict = Depend
         settings["secret_key"] = "********"
     return settings
 @router.post("/{marketplace}/settings")
-async def save_marketplace_settings(marketplace: str, payload: dict, current_user: dict = Depends(require_admin)):
+async def save_marketplace_settings(marketplace: str, payload: dict, current_user: dict = Depends(require_permission("integrations.view"))):
     """Save Hepsiburada / Temu settings (generic)."""
     if marketplace not in ALLOWED_MARKETPLACES:
         raise HTTPException(status_code=404, detail="Bilinmeyen pazaryeri")

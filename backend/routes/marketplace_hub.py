@@ -61,7 +61,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 
-from .deps import db, require_admin
+from .deps import db, require_admin, require_permission
 
 router = APIRouter(prefix="/marketplace-hub", tags=["Marketplace Hub"])
 
@@ -385,7 +385,7 @@ async def get_account(key: str, current_user: dict = Depends(require_admin)):
 
 
 @router.post("/accounts/{key}")
-async def save_account(key: str, payload: dict, current_user: dict = Depends(require_admin)):
+async def save_account(key: str, payload: dict, current_user: dict = Depends(require_permission("integrations.view"))):
     """Hesap bilgileri + transfer rules + auto-sync'i kaydeder."""
     if key not in MARKETPLACES:
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")

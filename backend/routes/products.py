@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import re
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id, build_used_urun_id_set, next_urun_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id, build_used_urun_id_set, next_urun_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc, require_permission
 from product_schema import BOOL_COLS as PRODUCT_BOOL_COLS
 from fastapi import Response, UploadFile, File, Form
 import pandas as pd
@@ -2805,7 +2805,7 @@ async def update_product(
 @router.delete("/{product_id}")
 async def delete_product(
     product_id: str,
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_permission("products.delete"))
 ):
     """Ürünü çöp kutusuna taşır (soft delete). Kalıcı silme için /permanent kullanın."""
     # Full doc: pazaryeri 0-stok kancası barkod/varyant/isim ister.
@@ -2848,7 +2848,7 @@ async def restore_product(
 @router.delete("/{product_id}/permanent")
 async def permanent_delete_product(
     product_id: str,
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_permission("products.delete"))
 ):
     """Ürünü veritabanından KALICI olarak siler (geri alınamaz)."""
     result = await db.products.delete_one({"id": product_id})
