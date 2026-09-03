@@ -267,11 +267,24 @@ async def update_havale_status(nid: str, payload: dict, current_user: dict = Dep
     update = {"status": status, "reviewed_at": _now(), "reviewed_by": current_user.get("email", "")}
     await db.havale_notifications.update_one({"id": nid}, {"$set": update})
     if status == "confirmed" and n.get("order_id"):
-        # Mark order paid
-        await db.orders.update_one(
-            {"id": n["order_id"]},
-            {"$set": {"payment_status": "paid", "status": "processing", "havale_confirmed_at": _now()}},
-        )
+        # DENETİM K2: eskiden KOŞULSUZ payment_status=paid + status=processing yazıyordu.
+        # (1) İptal/expired (scheduler'ın süpürüp STOĞU GERİ EKLEDİĞİ) bir siparişi diriltip
+        #     oversell yaratıyordu; (2) "processing" statüsü kanonik "confirmed"dan farklıydı.
+        # Artık YALNIZ ödeme bekleyen statülerde onaylar; terminal siparişi diriltmez.
+        _o = await db.orders.find_one({"id": n["order_id"]}, {"_id": 0, "status": 1, "payment_status": 1})
+        _cur = (_o or {}).get("status")
+        if (_o or {}).get("payment_status") == "paid":
+            pass  # zaten ödenmiş — idempotent, tekrar yazma
+        elif _cur in ("awaiting_payment", "payment_notified", "pending"):
+            await db.orders.update_one(
+                {"id": n["order_id"], "status": {"$in": ["awaiting_payment", "payment_notified", "pending"]}},
+                {"$set": {"payment_status": "paid", "status": "confirmed", "havale_confirmed_at": _now()}},
+            )
+        else:
+            # cancelled/expired/returned … → diriltme; personele bildir.
+            logger.warning(f"[havale] onay reddedildi: sipariş {n['order_id']} durumu '{_cur}' (diriltme engellendi)")
+            raise HTTPException(status_code=409,
+                detail=f"Sipariş '{_cur}' durumunda — havale onayıyla diriltilemez. Önce siparişi kontrol edin.")
     return {"success": True}
 
 
