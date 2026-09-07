@@ -147,10 +147,11 @@ export default function Login() {
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: handleGoogleCredential,
-        // ÇEREZSİZ GİRİŞ: Chrome'un üçüncü-taraf çerez engeli GIS popup'ını (gsi/transform)
-        // boş açıyordu. FedCM tarayıcı-yerel hesap seçicisini kullanır → çerez gerektirmez,
-        // popup boş kalmaz. auto_select kapalı (kullanıcı seçsin).
-        use_fedcm_for_prompt: true,
+        // Google, use_fedcm_for_prompt alanını kullanımdan kaldırdı. Tıklanan GIS
+        // düğmesinin üçüncü taraf çerezsiz FedCM akışını kullanması için yeni alan
+        // doğrudan düğme yapılandırmasında açılmalıdır.
+        use_fedcm_for_button: true,
+        button_auto_select: false,
         auto_select: false,
         itp_support: true,
       });
@@ -163,9 +164,8 @@ export default function Login() {
           locale: "tr",
         });
       }
-      // Giriş sayfasında FedCM tabanlı One-Tap hesap seçiciyi de göster (çerezsiz yol).
-      // Butona basıldığında popup boş kalsa bile buradan çerezsiz giriş yapılabilir.
-      try { window.google.accounts.id.prompt(); } catch (_e) { /* sessiz */ }
+      // One Tap burada bilerek çağrılmaz. Sayfadaki üyelik popup'ı ile üst üste gelen
+      // ikinci bir istem oluşturmak yerine kullanıcı Google düğmesini kendisi seçer.
     };
     if (window.google?.accounts?.id) {
       init();

@@ -12,7 +12,9 @@
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: SAMEORIGIN
   Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(self)
-  Cross-Origin-Opener-Policy: same-origin
+  # FedCM desteklemeyen tarayıcılarda GIS popup'ının ana pencereyle haberleşebilmesi
+  # gerekir. `same-origin` tek başına bu kanalı kesip boş/tepkisiz popup üretiyordu.
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
   # DENETİM SEC-5 F-03: storefront (kart verisi girilen origin) HSTS taşımıyordu.
   Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
   # CSP: aşağıdaki satırı, sitede kullanılan TÜM 3. parti host'lar (GTM, Google,
