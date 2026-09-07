@@ -91,7 +91,11 @@ export function CartProvider({ children }) {
         if (!API) return;
         let sid = localStorage.getItem("cart_session_id");
         if (!sid) {
-          sid = (window.crypto?.randomUUID?.() || (String(Date.now()) + Math.random().toString(36).slice(2)));
+          if (!window.crypto?.getRandomValues) return;
+          sid = window.crypto.randomUUID?.() || Array.from(
+            window.crypto.getRandomValues(new Uint8Array(16)),
+            (byte) => byte.toString(16).padStart(2, "0")
+          ).join("");
           localStorage.setItem("cart_session_id", sid);
         }
         const payload = {

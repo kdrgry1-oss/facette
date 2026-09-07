@@ -15,7 +15,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from .deps import db, require_admin, tr_range_to_utc
-from .report_dedup import dup_nor, merge_match, load_dup_dep
+from .report_dedup import (
+    dup_nor, merge_match, load_dup_dep, canonical_order_stages,
+    effective_order_date_match, split_confirmed_return,
+)
 
 
 router = APIRouter(prefix="/admin/reports", tags=["admin-reports"],
@@ -129,14 +132,30 @@ def _season_from_attrs(attrs) -> str:
     return ""
 
 
-def _base_match(s: str, e: str, source: Optional[str] = None) -> dict:
-    """Tüm satış raporlarının ortak $match'i: tarih aralığı + iptal/iade hariç + kaynak."""
-    m = {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}}
+def _sales_stages(s: str, e: str, source: Optional[str] = None) -> list:
+    """Canonical report population in the only safe operation order.
+
+    The latest terminal copy must win *before* valid-sale statuses are filtered;
+    otherwise an older paid copy of a later-cancelled marketplace order survives.
+    """
+    clauses = [effective_order_date_match(s, e)]
     sc = _source_cond(source)
     if sc:
-        m.update(sc)
-    # ticimax_history ÇİFT kayıtlarını (canlı native twin'i olan) rapordan HARİÇ tut.
-    return merge_match(m)
+        clauses.append(sc)
+    return [
+        {"$match": merge_match({"$and": clauses})},
+        *canonical_order_stages(),
+        {"$match": {"status": {"$nin": _EXCLUDED_STATUSES}}},
+    ]
+
+
+def _effective_date_expr() -> dict:
+    """Marketplace order date, with a strict empty/null fallback to created_at."""
+    return {"$cond": [
+        {"$in": ["$marketplace_order_date", [None, ""]]},
+        "$created_at",
+        "$marketplace_order_date",
+    ]}
 
 
 @router.get("/sales-summary")
@@ -170,10 +189,13 @@ async def sales_summary(
                  "error", "exception", "undelivered", "waitinginaction", "inanalysis", "unresolved"}
     _ret_meta = {}   # order_number -> {"total", "site", "channel", "oa", "ret_amount"}
     _ret_oids = []   # customer_returns kalem eşleşmesi için sipariş id'leri
-    async for _o in db.orders.find(
-            merge_match({"status": {"$in": _RETURN_ST}}),  # ticimax ÇİFT kayıtları hariç
-            {"_id": 0, "order_number": 1, "id": 1, "total": 1, "platform": 1, "marketplace": 1,
-             "return_approved_at": 1, "refund_paid_at": 1, "updated_at": 1}):
+    async for _o in db.orders.aggregate([
+            {"$match": merge_match({"status": {"$in": _RETURN_ST}})},
+            *canonical_order_stages(),
+            {"$project": {"_id": 0, "order_number": 1, "id": 1, "total": 1,
+             "platform": 1, "marketplace": 1, "return_approved_at": 1,
+             "refund_paid_at": 1, "updated_at": 1}},
+    ]):
         _on = str(_o.get("order_number") or "")
         if not _on:
             continue
@@ -225,18 +247,9 @@ async def sales_summary(
         _m = merge_match(_m)  # ticimax_history ÇİFT kayıtları hariç
         pipe = [
             {"$addFields": {
-                "_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]},
-                "_term": {"$cond": [{"$in": ["$status", _CANCEL_ST + _RETURN_ST]}, 1, 0]},
-                "_dk": {"$ifNull": ["$order_number", "$id"]}}},
+                "_eff_date": _effective_date_expr()}},
             {"$match": _m},
-            # KOPYA belge tekilleştir: aynı order_number = tek sipariş. Farklı içe-aktarım
-            # yolları (platform vs marketplace anahtarı) ikinci belge yaratabiliyor; rapor
-            # her belgeyi ayrı sayıp adet/ciroyu şişiriyordu. Terminal (iptal/iade) kopya
-            # tercih edilir (Trendyol'un gerçek durumu), sonra en güncel. Boş order_number →
-            # id ile tekil (farklı siparişler collapse OLMAZ). Salt-okunur.
-            {"$sort": {"_term": -1, "updated_at": -1, "created_at": -1}},
-            {"$group": {"_id": "$_dk", "doc": {"$first": "$$ROOT"}}},
-            {"$replaceRoot": {"newRoot": "$doc"}},
+            *canonical_order_stages(),
             {"$group": {
                 "_id": None,
                 "revenue_all": {"$sum": {"$ifNull": ["$total", 0]}},
@@ -260,6 +273,7 @@ async def sales_summary(
             _mm = merge_match(_mm)  # ticimax_history ÇİFT kayıtları hariç
             _pipe = [
                 {"$match": _mm},
+                *canonical_order_stages(),
                 {"$addFields": {"_ad": {"$ifNull": [f"${date_field}", f"${fallback_field}"]}}},
                 {"$match": {"_ad": {"$gte": s_iso, "$lt": e_iso}}},
                 {"$group": {"_id": None, "t": {"$sum": {"$ifNull": ["$total", 0]}},
@@ -364,8 +378,8 @@ async def sales_by_hour(
     Reklam planlaması için zirve saat aralığı da döner."""
     s, e = _iso_range(start_date, end_date)
     pipeline = [
-        {"$match": _base_match(s, e, source)},
-        {"$addFields": {"_d": {"$dateFromString": {"dateString": "$created_at", "onError": None}}}},
+        *_sales_stages(s, e, source),
+        {"$addFields": {"_d": {"$dateFromString": {"dateString": _effective_date_expr(), "onError": None}}}},
         {"$match": {"_d": {"$ne": None}}},
         {"$group": {"_id": {"$hour": {"date": "$_d", "timezone": "+03:00"}},
                     "orders": {"$sum": 1},
@@ -392,8 +406,8 @@ async def sales_by_weekday(
     """Gün Analizi: haftanın hangi günü daha çok satıyor (TR saati) — sipariş + ciro."""
     s, e = _iso_range(start_date, end_date)
     pipeline = [
-        {"$match": _base_match(s, e, source)},
-        {"$addFields": {"_d": {"$dateFromString": {"dateString": "$created_at", "onError": None}}}},
+        *_sales_stages(s, e, source),
+        {"$addFields": {"_d": {"$dateFromString": {"dateString": _effective_date_expr(), "onError": None}}}},
         {"$match": {"_d": {"$ne": None}}},
         {"$group": {"_id": {"$isoDayOfWeek": {"date": "$_d", "timezone": "+03:00"}},
                     "orders": {"$sum": 1},
@@ -431,13 +445,8 @@ async def day_orders(
         s, e = d0.isoformat(), (d0 + timedelta(days=1)).isoformat()
     else:
         raise HTTPException(status_code=400, detail="date veya start_date+end_date gerekli")
-    m = {"created_at": {"$gte": s, "$lt": e}, "status": {"$nin": _EXCLUDED_STATUSES}}
-    sc = _source_cond(source)
-    if sc:
-        m.update(sc)
-    m = merge_match(m)  # ticimax_history ÇİFT kayıtları hariç
     pipeline = [
-        {"$match": m},
+        *_sales_stages(s, e, source),
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
         {"$group": {
             "_id": {"name": {"$ifNull": ["$items.product_name", {"$ifNull": ["$items.name", "Ürün"]}]},
@@ -454,12 +463,16 @@ async def day_orders(
     async for r in db.orders.aggregate(pipeline):
         rows.append({"name": r["_id"]["name"], "size": r["_id"]["size"],
                      "qty": int(r["qty"]), "revenue": round(float(r["revenue"]), 2)})
-    order_count = await db.orders.count_documents(m)
+    _counts = await db.orders.aggregate([
+        *_sales_stages(s, e, source),
+        {"$count": "n"},
+    ]).to_list(1)
+    order_count = int(_counts[0]["n"]) if _counts else 0
     # DENETİM HATA-2: total_qty 300 satır LİMİTİNDEN SONRA toplanıyordu → uzun listelerde
     # sessizce eksik (30g'de 87 adet kayıp). Toplam artık limitsiz ayrı toplamadan gelir.
     _tq = 0
     async for r in db.orders.aggregate([
-            {"$match": m},
+            *_sales_stages(s, e, source),
             {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
             {"$group": {"_id": None, "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}}}}]):
         _tq = int(r["qty"])
@@ -478,13 +491,13 @@ async def sales(
     s, e = _iso_range(start_date, end_date)
     fmt = {"day": "%Y-%m-%d", "week": "%Y-%V", "month": "%Y-%m"}[group_by]
     pipeline = [
-        {"$match": _base_match(s, e, source)},
+        *_sales_stages(s, e, source),
         {
             "$group": {
                 # DENETİM HATA-6: timezone verilmeyince günler UTC'ye göre kesiliyordu —
                 # TR gününün ilk 3 saati önceki güne yazılıyordu. TR saatiyle grupla.
                 "_id": {"$dateToString": {"format": fmt, "timezone": "+03:00",
-                                          "date": {"$dateFromString": {"dateString": "$created_at"}}}},
+                                          "date": {"$dateFromString": {"dateString": _effective_date_expr()}}}},
                 "orders": {"$sum": 1},
                 "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
                 # ADET = kalem adetleri toplamı. Eskiden $size (KALEM SAYISI) idi: aynı üründen
@@ -790,7 +803,7 @@ async def _returned_barcode_qty(order_numbers: list) -> dict:
     kalemlerini iade sayıyordu; 3 ürünlük siparişten 1 ürün iade edilse ürün raporunda
     3 iade + 0 net satış görünüyordu. Bu harita ile yalnız gerçekten iade edilen kalem
     İade'ye yazılır, kalanlar satışa geri döner. Kalem bilgisi YOKSA sipariş için hiç
-    kayıt dönmez ve çağıran taraf eski (tüm sipariş iade) davranışına düşer — güvenli.
+    kayıt dönmez; çağıran taraf yalnız kesin tam-iade durumunda tüm siparişi iade sayabilir.
     """
     out: dict = {}
     if not order_numbers:
@@ -817,10 +830,17 @@ async def _returned_barcode_qty(order_numbers: list) -> dict:
                      max(1, int((it or {}).get("quantity") or 1)))
         async for r in db.customer_returns.find(
                 {"order_number": {"$in": chunk}},
-                {"_id": 0, "order_number": 1, "status": 1, "approved_items": 1, "items": 1}):
-            if str(r.get("status") or "").lower() in ("cancelled", "canceled", "rejected", "return_rejected"):
+                {"_id": 0, "order_number": 1, "status": 1, "approval": 1,
+                 "approved_items": 1, "items": 1}):
+            _rst = str(r.get("status") or "").lower()
+            if _rst in ("cancelled", "canceled", "rejected", "return_rejected"):
                 continue
-            for it in (r.get("approved_items") or r.get("items") or []):
+            _approved = r.get("approved_items") or []
+            _approval_at = str((r.get("approval") or {}).get("at") or "")
+            if not _approved and not _approval_at and _rst not in (
+                    "approved", "return_approved", "returned", "refunded", "completed", "complete"):
+                continue
+            for it in (_approved or r.get("items") or []):
                 _put(r.get("order_number"),
                      (it or {}).get("barcode") or (it or {}).get("sku"),
                      max(1, int((it or {}).get("quantity") or 1)))
@@ -857,7 +877,7 @@ async def sales_breakdown(
         _match.update(sc)
     _match = merge_match(_match)  # ticimax_history ÇİFT kayıtları hariç
     _pipe = [
-        {"$addFields": {"_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
+        {"$addFields": {"_eff_date": _effective_date_expr()}},
         {"$match": _match},
         {"$project": proj},
     ]
@@ -956,7 +976,7 @@ async def top_products(
     EN ÇOK SATAN BEDEN ve PLATFORM DAĞILIMI döner. Frontend cirodan yükseğe sıralar/filtreler."""
     s, e = _iso_range(start_date, end_date, days_default=90)
     pipeline = [
-        {"$match": _base_match(s, e, source)},
+        *_sales_stages(s, e, source),
         # Sipariş platformu: platform > marketplace > 'site'
         # DENETİM O1: "Ciro (Net)" sipariş-düzeyi indirimi (kupon + havale/EFT) DÜŞMELİ.
         # _sub = sipariş kalem toplamı, _disc = kupon(+discount_amount) + payment_discount.
@@ -989,7 +1009,8 @@ async def top_products(
             {"case": {"$ne": ["$_pid", ""]}, "then": {"$concat": ["pid:", "$_pid"]}},
         ], "default": {"$concat": ["nm:", "$_nm"]}}}}},
         {"$group": {
-            "_id": {"k": "$_key", "sz": "$_sz", "plat": "$_plat"},
+            "_id": {"k": "$_key", "sz": "$_sz", "plat": "$_plat",
+                    "on": {"$toString": {"$ifNull": ["$order_number", ""]}}},
             "name": {"$first": "$_nm"},
             "barcode": {"$first": "$_bc"},
             "pid": {"$first": "$_pid"},
@@ -1004,6 +1025,11 @@ async def top_products(
     raw = []
     async for r in db.orders.aggregate(pipeline):
         raw.append(r)
+    # Sipariş statüsü henüz iadeye çevrilmemiş olsa bile Accepted Trendyol claim / onaylı
+    # site iadesi kanoniktir. Bu adetler net satıştan çıkarılıp iade sütununa taşınır.
+    _valid_ret_bc = await _returned_barcode_qty(list({
+        str(r.get("_id", {}).get("on") or "") for r in raw if r.get("_id", {}).get("on")
+    }))
     # Ürün eşleştirme: barkod/pid -> PARENT ürün (id, ad, stok). Birleştirme parent id ile yapılır.
     pids = [r.get("pid") for r in raw if r.get("pid")]
     bcs = [r.get("barcode") for r in raw if r.get("barcode")]
@@ -1041,6 +1067,7 @@ async def top_products(
                     by_bc[str(v["barcode"])] = info
     # PARENT ürün bazında birleştir → mükerrer beden/renk satırları tek ürün olur.
     merged = {}
+    claim_cr_map: dict = {}
     for r in raw:
         pm = by_bc.get(r.get("barcode") or "") or by_id.get(r.get("pid") or "") or {}
         name = pm.get("name") or r.get("name") or "(isimsiz ürün)"
@@ -1064,12 +1091,31 @@ async def top_products(
                 "stock_code": pm.get("stock_code") or "",
                 "season": pm.get("season") or "",
             }
-        _q = int(r["qty"])
+        _q_gross = int(r["qty"])
+        _rev_gross = float(r["revenue"])
+        _on = str(r.get("_id", {}).get("on") or "")
+        _bc = str(r.get("barcode") or "").strip()
+        _claim_q = 0
+        _rb = _valid_ret_bc.get(_on)
+        if _rb and _bc:
+            _claim_q = min(_q_gross, int(_rb.get(_bc, 0)))
+            _rb[_bc] = int(_rb.get(_bc, 0)) - _claim_q
+        _q, _rev, _claim_q, _ = split_confirmed_return(_q_gross, _rev_gross, _claim_q)
+        if _claim_q > 0:
+            _cd = claim_cr_map.setdefault(gkey, {"cancel": 0, "return": 0,
+                                                  "by_plat": {}, "by_size": {}})
+            _cd["return"] += _claim_q
+            _cpl = (r["_id"].get("plat") or "site").strip().lower() or "site"
+            _cp = _cd["by_plat"].setdefault(_cpl, {"cancel": 0, "return": 0})
+            _cp["return"] += _claim_q
+            _csz = _norm_size(r["_id"].get("sz"))
+            _cs = _cd["by_size"].setdefault(_csz, {"cancel": 0, "return": 0})
+            _cs["return"] += _claim_q
         m["qty"] += _q
-        m["revenue"] += float(r["revenue"])
+        m["revenue"] += _rev
         # DENETİM O10: sipariş sayısı DISTINCT order_number üzerinden — grup satırı sayımı değil.
         for _onv in (r.get("onums") or []):
-            if _onv:
+            if _onv and _q > 0:
                 m["_onums"].add(str(_onv))
         _sz = _norm_size(r["_id"].get("sz"))
         m["_sizes"][_sz] = m["_sizes"].get(_sz, 0) + _q
@@ -1077,7 +1123,7 @@ async def top_products(
         # Platform kırılımı: adet + NET ciro (platform filtresinde satırı o platforma daraltmak için).
         _pv = m["_plats"].get(_pl) or {"qty": 0, "revenue": 0.0}
         _pv["qty"] += _q
-        _pv["revenue"] += float(r["revenue"])
+        _pv["revenue"] += _rev
         m["_plats"][_pl] = _pv
     # Kullanıcı isteği: kataloğdan SİLİNMİŞ ya da hiçbir ürün kartına eşleşmeyen
     # kalemlerin satırları ürün raporunda GÖSTERİLMEZ (yalnız mevcut kartlar listelenir).
@@ -1145,8 +1191,13 @@ async def top_products(
     _CR_CANCEL = ["cancelled", "cancel_refunded"]
     _CR_RETURN = ["return_requested", "return_approved", "return_in_transit",
                   "returned", "refunded", "partial_refunded"]
+    _cr_clauses = [effective_order_date_match(s, e)]
+    if source and _source_cond(source):
+        _cr_clauses.append(_source_cond(source))
     _cr_pipe = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$in": _CR_CANCEL + _CR_RETURN}}},
+        {"$match": merge_match({"$and": _cr_clauses})},
+        *canonical_order_stages(),
+        {"$match": {"status": {"$in": _CR_CANCEL + _CR_RETURN}}},
         {"$addFields": {"_plat": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}},
                         "_kind": {"$cond": [{"$in": ["$status", _CR_CANCEL]}, "cancel", "return"]}}},
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
@@ -1157,7 +1208,7 @@ async def top_products(
                             # Kısmi iade ayrıştırması sipariş bazında yapılır → grup anahtarına
                             # sipariş no eklendi (hangi kalemin iade edildiği siparişe bağlı).
                             "on": {"$toString": {"$ifNull": ["$order_number", ""]}},
-                            "kind": "$_kind", "plat": "$_plat"},
+                            "kind": "$_kind", "status": "$status", "plat": "$_plat"},
                     "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
                     "rev": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]},
                                                    {"$ifNull": ["$items.quantity", 1]}]}}}},
@@ -1203,15 +1254,15 @@ async def top_products(
         keep_q, keep_r = 0, 0.0
         if i["kind"] == "return":
             _rb = _ret_bc.get(i.get("on") or "")
-            if _rb:  # kalem bilgisi VAR → böl. Yoksa eski davranış (tüm sipariş iade).
+            if _rb:  # kalem bilgisi VAR → yalnız onaylı/adetli kalemi böl.
                 _bc = str(i.get("bc") or "").strip()  # DENETİM O7: barkod anahtarı iki tarafta da strip'li
                 _allowed = int(_rb.get(_bc, 0))
-                _ret_q = min(qty, _allowed)
-                _rb[_bc] = _allowed - _ret_q          # aynı barkod başka satırda tekrar sayılmasın
-                keep_q = qty - _ret_q
-                if keep_q > 0 and qty > 0:
-                    keep_r = rev * (keep_q / qty)
-                qty = _ret_q
+                keep_q, keep_r, qty, rev = split_confirmed_return(qty, rev, _allowed)
+                _rb[_bc] = _allowed - qty              # aynı barkod başka satırda tekrar sayılmasın
+            elif i.get("status") not in ("returned", "refunded"):
+                # Açık talebi veya kalemi bilinmeyen kısmi iadeyi tam iade varsayma.
+                keep_q, keep_r = qty, rev
+                qty, rev = 0, 0.0
         if keep_q > 0:
             k = keep_map.setdefault(gk, {"qty": 0, "revenue": 0.0, "sizes": {}, "plats": {}})
             k["qty"] += keep_q
@@ -1231,6 +1282,17 @@ async def top_products(
         bp[i["kind"]] += qty
         bs = d["by_size"].setdefault(_norm_size(i.get("sz")), {"cancel": 0, "return": 0})
         bs[i["kind"]] += qty
+
+    # Statüsü aktif kalmış fakat claim/return kaynağında onaylı iadesi bulunan siparişler.
+    for _gk, _src in claim_cr_map.items():
+        _dst = cr_map.setdefault(_gk, {"cancel": 0, "return": 0, "by_plat": {}, "by_size": {}})
+        _dst["return"] += _src["return"]
+        for _pk, _pv in _src["by_plat"].items():
+            _d = _dst["by_plat"].setdefault(_pk, {"cancel": 0, "return": 0})
+            _d["return"] += _pv["return"]
+        for _sk, _sv in _src["by_size"].items():
+            _d = _dst["by_size"].setdefault(_sk, {"cancel": 0, "return": 0})
+            _d["return"] += _sv["return"]
 
     out = []
     for gkey, m in merged.items():
@@ -1354,7 +1416,7 @@ async def profitability(
 
     # Ana kırılım: (kategori, kanal) → ciro, maliyet, adet, sipariş. Maliyet: purchase_price köprüsü.
     pipeline = [
-        {"$match": _base_match(s, e, source)},
+        *_sales_stages(s, e, source),
         {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
         {"$unwind": "$items"},
         {"$addFields": {"_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}}}},
@@ -1395,7 +1457,7 @@ async def profitability(
     # Denetim bulgusu: eskiden kâr hesabından hiç düşülmüyordu → kâr indirim kadar şişiyordu.
     cargo_by_ch = _dd(float)
     async for r in db.orders.aggregate([
-        {"$match": _base_match(s, e, source)},
+        *_sales_stages(s, e, source),
         {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
         {"$group": {"_id": "$_ch", "shipping": {"$sum": {"$ifNull": ["$shipping_cost", 0]}},
                     # İndirim = kupon/kampanya (discount) + havale/EFT ödeme indirimi (payment_discount).
@@ -1487,7 +1549,7 @@ async def category_report(
     # productCode taşır, Facette id'siyle eşleşmez → barkod köprüsü şart). Kategori adı: kategori
     # dokümanı > ürünün category_name'i > kalemin kendi category'si > (Kategorisiz).
     pipeline = [
-        {"$match": _base_match(s, e, source)},
+        *_sales_stages(s, e, source),
         # DENETİM O1: "Ciro (Net)" sipariş-düzeyi indirimi (kupon + havale/EFT) DÜŞMELİ.
         # _sub = sipariş kalem toplamı, _disc = kupon(+discount_amount) + payment_discount.
         {"$addFields": {
@@ -1590,7 +1652,7 @@ async def payment_report(
     # platforma göre Trendyol / Hepsiburada / Temu olarak AYRI gösterilir.
     _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", ""]}]}}
     pipeline = [
-        {"$match": _base_match(s, e, source)},
+        *_sales_stages(s, e, source),
         {"$group": {"_id": {"$cond": [
             {"$in": [_plat, ["trendyol", "hepsiburada", "temu", "n11", "amazon"]]},
             _plat,
@@ -1628,10 +1690,8 @@ async def sales_by_platform(
     kaynakları DEĞİL; sipariş platform alanından). İptal/iade hariç."""
     s, e = _iso_range(start_date, end_date)
     _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}
-    # ticimax_history ÇİFT kayıtları hariç (Trendyol satırını şişirir)
-    _m = merge_match({"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}})
     pipeline = [
-        {"$match": _m},
+        *_sales_stages(s, e),
         {"$group": {"_id": {"$cond": [{"$in": [_plat, ["trendyol", "hepsiburada", "temu", "n11", "amazon"]]}, _plat, "site"]},
                     "orders": {"$sum": 1},
                     "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
@@ -1659,14 +1719,15 @@ async def cancel_return_products(
     _RETURN_ST = ["return_requested", "return_approved", "return_in_transit",
                   "returned", "refunded", "partial_refunded"]
     _CANCEL_ST = ["cancelled", "cancel_refunded"]
-    m = {"created_at": {"$gte": s, "$lte": e}, "status": {"$in": _RETURN_ST + _CANCEL_ST}}
+    clauses = [effective_order_date_match(s, e)]
     sc = _source_cond(source)
     if sc:
-        m.update(sc)
-    m = merge_match(m)  # ticimax_history ÇİFT kayıtları hariç
+        clauses.append(sc)
     _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}
     pipeline = [
-        {"$match": m},
+        {"$match": merge_match({"$and": clauses})},
+        *canonical_order_stages(),
+        {"$match": {"status": {"$in": _RETURN_ST + _CANCEL_ST}}},
         {"$addFields": {"_plat": _plat,
                         "_kind": {"$cond": [{"$in": ["$status", _CANCEL_ST]}, "cancel", "return"]},
                         # DENETİM O2: kısmi iptal/iade tutarına sipariş-düzeyi havale/EFT indirimi
@@ -1684,7 +1745,8 @@ async def cancel_return_products(
                     "plat": "$_plat", "kind": "$_kind",
                     # Kısmi iade ayrıştırması sipariş+barkod bazında yapılır.
                     "on": {"$toString": {"$ifNull": ["$order_number", ""]}},
-                    "bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}}},
+                    "bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
+                    "status": "$status"},
             "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
             # DENETİM HATA-3: unit_price İSKONTO ÖNCESİ liste fiyatı — tutarlar %11-14 şişiyordu.
             # Önce items.price (ödenen net birim), yoksa unit_price kullanılır (by-source ile eşitlenir).
@@ -1729,6 +1791,11 @@ async def cancel_return_products(
                 _rb[_bc] = _allowed - _rq
                 _t = _t * (_rq / _q) if _q else 0.0
                 _q = _rq
+            elif i.get("status") not in ("returned", "refunded"):
+                # Talep/açık/kısmi durumunda kalem kanıtı yoksa tüm siparişi iade
+                # varsaymak oranı şişirir. Yalnız kesin tam-iade statüsü fallback'tir.
+                _q = 0
+                _t = 0.0
             if _q <= 0:
                 continue
             d["return_qty"] += _q
@@ -1765,7 +1832,7 @@ async def cancel_return_by_source(
     # sipariş kümesini verir → 855↔891 gibi sapmaların ana nedeni kapanır. (Salt-okunur; stok/
     # ürün-kalem verisine DOKUNMAZ.)
     _pipe = [
-        {"$addFields": {"_eff_date": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
+        {"$addFields": {"_eff_date": _effective_date_expr()}},
         {"$match": merge_match({"_eff_date": {"$gte": s, "$lte": e}})},  # ticimax ÇİFT hariç
         {"$project": proj},
     ]
@@ -1819,8 +1886,7 @@ async def cargo_report(
     s, e = _iso_range(start_date, end_date)
     pipeline = [
         # Denetim: ödenmemiş/iptal/iade siparişler kargolanmaz → kargo hacmine katılmasın.
-        # ticimax_history ÇİFT kayıtları hariç (canlı twin'i zaten sayılıyor).
-        {"$match": merge_match({"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}})},
+        *_sales_stages(s, e),
         {"$group": {"_id": {"$ifNull": ["$cargo_provider_name", "$cargo.company"]}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$shipping_cost", 0]}}}},
         {"$sort": {"orders": -1}},
     ]
@@ -1834,8 +1900,10 @@ async def cargo_report(
 async def members_report(current_user: dict = Depends(require_admin)):
     # Top 20 members by spend
     pipeline = [
-        {"$match": {"user_id": {"$ne": None}, "status": {"$nin": _EXCLUDED_STATUSES}}},
-        {"$group": {"_id": "$user_id", "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}, "last_order": {"$max": "$created_at"}}},
+        {"$match": merge_match({"user_id": {"$ne": None}})},
+        *canonical_order_stages(),
+        {"$match": {"status": {"$nin": _EXCLUDED_STATUSES}}},
+        {"$group": {"_id": "$user_id", "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}, "last_order": {"$max": _effective_date_expr()}}},
         {"$sort": {"revenue": -1}},
         {"$limit": 20},
         {"$lookup": {"from": "users", "localField": "_id", "foreignField": "id", "as": "u"}},
@@ -1891,59 +1959,33 @@ async def returns_by_size(
 async def returns_by_product(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     current_user: dict = Depends(require_admin),
 ):
-    """En çok iade edilen ürünler + iade oranları (aynı dönem satışa göre)."""
-    start, end = _iso_range(start_date, end_date, 180)
-    ret_pipe = [
-        # DENETİM O6: reddedilmiş/iptal iadeler DIŞLANIR (tam 4-durum seti).
-        {"$match": {"created_at": {"$gte": start, "$lte": end},
-                    "status": {"$nin": ["rejected", "return_rejected", "cancelled", "canceled"]}}},
-        {"$unwind": "$items"},
-        {"$group": {
-            "_id": "$items.product_id",
-            "returned": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
-            "product_name": {"$first": {"$ifNull": ["$items.name", "$items.product_name"]}},
-        }},
-        {"$sort": {"returned": -1}},
-        {"$limit": limit},
-    ]
-    returns_map = {}
-    async for r in db.customer_returns.aggregate(ret_pipe):
-        returns_map[r["_id"]] = r
+    """Ürün bazında kesin iade adedi ve oranı; ana ürün raporuyla aynı veri kümesi.
 
-    product_ids = list(returns_map.keys())
-    sales_map = {}
-    if product_ids:
-        sales_pipe = [
-            {"$match": merge_match({"created_at": {"$gte": start, "$lte": end}, "status": {"$nin": _EXCLUDED_STATUSES}})},
-            {"$unwind": "$items"},
-            {"$match": {"items.product_id": {"$in": product_ids}}},
-            {"$group": {
-                "_id": "$items.product_id",
-                "sold": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
-            }},
-        ]
-        async for r in db.orders.aggregate(sales_pipe):
-            sales_map[r["_id"]] = r["sold"]
-
+    Dönem sipariş tarihine göredir. Accepted Trendyol claim ve onaylı site iade
+    kalemleri sayılır; iptal adedi oran paydasına girmez.
+    """
+    data = await top_products(
+        limit=5000, start_date=start_date, end_date=end_date,
+        source=None, current_user=current_user,
+    )
     out = []
-    for pid, r in returns_map.items():
-        # DENETİM K4: satış pipeline'ı iade statüsündeki siparişleri (_EXCLUDED_STATUSES) dışladığı
-        # için iade edilen adetler paydadan düşüyordu ("2 satıldı 2 iade" → "0 satış, oran —").
-        # Brüt satış = net satış + iade edilen adet; oran brüt satışa bölünür.
-        sold_net = sales_map.get(pid, 0)
-        gross_sold = sold_net + r["returned"]
-        rate = (r["returned"] / gross_sold * 100) if gross_sold else None
+    for r in data.get("items", []):
+        returned = int(r.get("return_qty") or 0)
+        if returned <= 0:
+            continue
+        gross_sold = int(r.get("qty") or 0) + returned
         out.append({
-            "product_id": pid,
-            "product_name": r.get("product_name") or "—",
-            "returned": r["returned"],
+            "product_id": r.get("product_id"),
+            "product_name": r.get("name") or "—",
+            "returned": returned,
             "sold": gross_sold,
-            "return_rate_pct": round(rate, 1) if rate is not None else None,
+            "return_rate_pct": round(returned / gross_sold * 100, 1) if gross_sold else None,
         })
-    return {"items": out, "start": start, "end": end}
+    out.sort(key=lambda r: (-r["returned"], -(r["return_rate_pct"] or 0)))
+    return {"items": out[:limit], "range_days": data.get("range_days")}
 
 
 @router.get("/returns/reasons")
@@ -1976,42 +2018,41 @@ async def fast_selling_products(
     recommend_ads = true → ilk 60 gün içindeki yeni ürün + min sold'u geçti → reklam önerisi.
     """
     now = datetime.now(timezone.utc)
-    start_ts = (now - timedelta(days=window_days)).isoformat()
-    pipeline = [
-        {"$match": merge_match({"created_at": {"$gte": start_ts}, "status": {"$nin": _EXCLUDED_STATUSES}})},
-        {"$unwind": "$items"},
-        {"$group": {
-            "_id": "$items.product_id",
-            "sold": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
-            "product_name": {"$first": {"$ifNull": ["$items.name", "$items.product_name"]}},
-            "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
-        }},
-        {"$match": {"sold": {"$gte": min_sold}}},
-        {"$sort": {"sold": -1}},
-        {"$limit": limit},
-    ]
+    start_day = (now - timedelta(days=window_days - 1)).date().isoformat()
+    end_day = now.date().isoformat()
+    # Tek ürün motoru: ürün raporu, Excel ve hızlı-satan aynı barkod/varyant/parent
+    # eşleştirmesini, sipariş tekilleştirmesini ve net ciro hesabını kullanır.
+    canonical = await top_products(
+        limit=5000, start_date=start_day, end_date=end_day,
+        source=None, current_user=current_user,
+    )
     out = []
-    async for r in db.orders.aggregate(pipeline):
-        pid = r["_id"]
-        product = await db.products.find_one({"id": pid}, {"_id": 0, "created_at": 1, "name": 1, "sale_price": 1, "images": 1, "stock": 1})
+    rows = [r for r in canonical.get("items", []) if int(r.get("qty") or 0) >= min_sold]
+    rows.sort(key=lambda r: (-int(r.get("qty") or 0), -float(r.get("revenue") or 0)))
+    for r in rows[:limit]:
+        pid = r.get("product_id")
+        product = await db.products.find_one(
+            {"id": pid}, {"_id": 0, "created_at": 1, "name": 1, "images": 1, "stock": 1}) or {}
         product_age_days = None
-        if product and product.get("created_at"):
+        created_at = r.get("created_at") or product.get("created_at")
+        if created_at:
             try:
-                c = datetime.fromisoformat(product["created_at"])
+                c = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
                 product_age_days = (now - c).days
             except Exception:
                 pass
         age = product_age_days if product_age_days is not None else 999
-        recommend_ads = age <= 60 and r["sold"] >= min_sold
+        recommend_ads = age <= 60 and int(r.get("qty") or 0) >= min_sold
         out.append({
             "product_id": pid,
-            "product_name": (product or {}).get("name") or r.get("product_name") or "—",
-            "sold_in_window": r["sold"],
-            "revenue": round(r["revenue"], 2),
+            "product_name": product.get("name") or r.get("name") or "—",
+            "sold_in_window": int(r.get("qty") or 0),
+            "order_count": int(r.get("orders") or 0),
+            "revenue": round(float(r.get("revenue") or 0), 2),
             "product_age_days": product_age_days,
             "window_days": window_days,
-            "stock": (product or {}).get("stock"),
-            "image": ((product or {}).get("images") or [None])[0] if (product or {}).get("images") else None,
+            "stock": r.get("current_stock"),
+            "image": (product.get("images") or [None])[0] if product.get("images") else None,
             "recommend_ads": recommend_ads,
         })
     return {"items": out, "window_days": window_days, "min_sold": min_sold}
@@ -2083,7 +2124,7 @@ async def sales_by_location(
     if group == "district":
         gid["city"] = "$shipping_address.city"
     pipeline = [
-        {"$match": _base_match(s, e, source)},
+        *_sales_stages(s, e, source),
         {"$group": {
             "_id": gid,
             "orders": {"$sum": 1},
@@ -2166,8 +2207,7 @@ async def sales_by_source(
     (Instagram/Google/Meta/direct) — attribution.source/channel'dan türetilir."""
     s, e = _iso_range(start_date, end_date)
     pipeline = [
-        # ticimax_history ÇİFT kayıtları hariç (Trendyol kanalını şişirir)
-        {"$match": merge_match({"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}})},
+        *_sales_stages(s, e),
         {"$group": {
             "_id": {
                 "platform": {"$ifNull": ["$platform", ""]},
@@ -2206,7 +2246,7 @@ async def never_sold(
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     sold = set()
     pipeline = [
-        {"$match": {"created_at": {"$gte": cutoff}, "status": {"$nin": _EXCLUDED_STATUSES}}},
+        *_sales_stages(cutoff, datetime.now(timezone.utc).isoformat()),
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
         {"$group": {"_id": {"$ifNull": ["$items.product_id", "$items.id"]}}},
     ]
@@ -2269,9 +2309,9 @@ async def sales_by_hour(
     """Günün SAATLERİNE göre satış dağılımı (TR saati, +03:00). En yoğun saatler."""
     s, e = _iso_range(start_date, end_date)
     pipeline = [
-        {"$match": _base_match(s, e, source)},
+        *_sales_stages(s, e, source),
         {"$group": {
-            "_id": {"$dateToString": {"format": "%H", "date": {"$dateFromString": {"dateString": "$created_at"}}, "timezone": "+03:00"}},
+            "_id": {"$dateToString": {"format": "%H", "date": {"$dateFromString": {"dateString": _effective_date_expr()}}, "timezone": "+03:00"}},
             "orders": {"$sum": 1},
             "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
         }},
@@ -2300,7 +2340,7 @@ async def sales_by_payment(
     """Ödeme tipine göre satış (Havale / Kart / Kapıda vb.)."""
     s, e = _iso_range(start_date, end_date)
     pipeline = [
-        {"$match": _base_match(s, e, source)},
+        *_sales_stages(s, e, source),
         {"$group": {"_id": {"$ifNull": ["$payment_method", ""]}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
     ]
     agg = {}
@@ -2321,8 +2361,8 @@ async def coupon_performance(
     """Kupon performansı: her kupon kaç siparişte kullanıldı, ne kadar indirim + ciro getirdi."""
     s, e = _iso_range(start_date, end_date)
     pipeline = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES},
-                    "coupon_code": {"$nin": [None, ""]}}},
+        *_sales_stages(s, e),
+        {"$match": {"coupon_code": {"$nin": [None, ""]}}},
         {"$group": {
             "_id": "$coupon_code",
             "orders": {"$sum": 1},
@@ -2353,14 +2393,16 @@ async def customer_type(
     # Denetim: firstOrder (ilk sipariş tarihi) TÜM siparişlerden hesaplanmalı — iptal/iade dahil.
     # Aksi halde gerçek ilk siparişi iptal olan müşteri yanlışlıkla "YENİ" sayılıyordu. Ciro/adet
     # ise yalnız GEÇERLİ (dışlanmamış) siparişlerden sayılır.
-    _in_range = {"$and": [{"$gte": ["$created_at", s]}, {"$lte": ["$created_at", e]}]}
+    _in_range = {"$and": [{"$gte": ["$_report_date", s]}, {"$lte": ["$_report_date", e]}]}
     _valid = {"$not": [{"$in": ["$status", _EXCLUDED_STATUSES]}]}
     _valid_in_range = {"$and": [_in_range, _valid]}
     pipeline = [
         {"$match": merge_match({})},  # ticimax_history ÇİFT kayıtları hariç (aynı müşteriyi/ciroyu şişirir)
+        *canonical_order_stages(),
+        {"$addFields": {"_report_date": _effective_date_expr()}},
         {"$group": {
             "_id": key,
-            "firstOrder": {"$min": "$created_at"},
+            "firstOrder": {"$min": "$_report_date"},
             "ordersInRange": {"$sum": {"$cond": [_valid_in_range, 1, 0]}},
             "revInRange": {"$sum": {"$cond": [_valid_in_range, {"$ifNull": ["$total", 0]}, 0]}},
         }},

@@ -103,6 +103,8 @@ venv/
 
 # Temporary / Test files
 test_*.py
+!backend/tests/test_sns_security.py
+!backend/tests/test_report_rules.py
 setup_*.py
 fix_*.py
 test_attributes.xlsx

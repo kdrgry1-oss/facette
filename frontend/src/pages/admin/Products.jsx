@@ -64,6 +64,7 @@ import SeoTab from "../../components/admin/product-form/SeoTab";
 import CombineProductsTab from "../../components/admin/product-form/CombineProductsTab";
 import ProductDetailFields from "../../components/admin/product-form/ProductDetailFields";
 import ProductFilters from "../../components/admin/ProductFilters";
+import { sanitizeHtml } from "../../lib/sanitizeHtml";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 // API.replace('/api','') HATALIYDI: "https://api.facette.com.tr/api" icinde ilk "/api"
@@ -102,8 +103,9 @@ function DescriptionEditor({ value, onChange, onGenerate, generating }) {
   const previewRef = useRef(null);
   useEffect(() => {
     const el = previewRef.current;
-    if (el && el.innerHTML !== (value || "")) {
-      el.innerHTML = value || "";
+    const safeValue = sanitizeHtml(value || "");
+    if (el && el.innerHTML !== safeValue) {
+      el.innerHTML = safeValue;
     }
   }, [value, mode]);
   const tabBtn = (m, label) => (
@@ -121,7 +123,7 @@ function DescriptionEditor({ value, onChange, onGenerate, generating }) {
   const stripHtml = (html) => {
     if (!html) return "";
     const t = document.createElement("div");
-    t.innerHTML = html;
+    t.innerHTML = sanitizeHtml(html);
     return (t.textContent || t.innerText || "").trim();
   };
   const charsHtml = (value || "").length;
@@ -4879,4 +4881,3 @@ function TeknikDetayPanel({ details = {}, onChange }) {
     </div>
   );
 }
-

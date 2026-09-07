@@ -95,7 +95,7 @@ export default function Category() {
   // --- Facet (mevcut beden/renk seçenekleri) ---
   const [facetSizes, setFacetSizes] = useState([]);
   const [facetColors, setFacetColors] = useState([]);
-  const facetCacheRef = useRef({}); // slug -> { sizes, colors }
+  const facetCacheRef = useRef(new Map()); // slug -> { sizes, colors }
 
   // O15: Kategori (slug) değişince sayfayı 1'e sıfırla — aksi halde başka kategoriye geçince
   // yeni kategori ESKİ sayfa numarasında açılıp boş/eksik liste (stok yokmuş gibi) gösteriyordu.
@@ -172,9 +172,10 @@ export default function Category() {
 
   const loadFacets = async () => {
     const key = slug || "all";
-    if (facetCacheRef.current[key]) {
-      setFacetSizes(facetCacheRef.current[key].sizes);
-      setFacetColors(facetCacheRef.current[key].colors);
+    if (facetCacheRef.current.has(key)) {
+      const cached = facetCacheRef.current.get(key);
+      setFacetSizes(cached.sizes);
+      setFacetColors(cached.colors);
       return;
     }
     try {
@@ -199,7 +200,7 @@ export default function Category() {
         if (c && !colorMap.has(c.toLowerCase())) colorMap.set(c.toLowerCase(), c);
       }
       const colors = [...colorMap.values()];
-      facetCacheRef.current[key] = { sizes, colors };
+      facetCacheRef.current.set(key, { sizes, colors });
       setFacetSizes(sizes);
       setFacetColors(colors);
     } catch (err) {

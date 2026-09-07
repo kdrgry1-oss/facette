@@ -15,6 +15,7 @@ import httpx
 import hashlib
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, get_effective_permissions, require_permission
+from .report_dedup import canonical_order_stages, effective_order_date_match, merge_match
 from facette_defaults import (
     facette_company_value,     # yalnız GPSR (Üretici/İthalatçı) — beyaz-etiket, dinamik
     FACETTE_FIXED_ATTR_DEFAULTS,  # statik seed haritası (yalnız DB'de doküman YOKSA fallback)
@@ -4501,19 +4502,40 @@ async def trendyol_reconcile(
     ours: dict = {}
     panel_docs = 0
     dup_onums: dict = {}
-    _pipe_ours = [
-        {"$addFields": {"_eff": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
-        {"$match": {"_eff": {"$gte": s_iso, "$lte": e_iso},
-                    "$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]}},
-        {"$project": {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
-                      "items.quantity": 1, "partial_cancel_amount": 1}},
-    ]
+    _ty_local_match = merge_match({"$and": [
+        effective_order_date_match(s_iso, e_iso),
+        {"$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]},
+    ]})
+    # Ham belge sayısı ve sipariş-no kopyaları tanı amacıyla ayrıca tutulur.
+    async for r in db.orders.aggregate([
+        {"$match": _ty_local_match},
+        {"$group": {"_id": {"$toString": {"$ifNull": ["$order_number", ""]}},
+                    "docs": {"$sum": 1}}},
+    ]):
+        n = int(r.get("docs") or 0)
+        panel_docs += n
+        if r.get("_id") and n > 1:
+            dup_onums[str(r["_id"])] = n
+    if apply:
+        # Kullanıcının açık onayı gereken yazma modu için eski hedef-seçim davranışını
+        # aynen koru. Bu çalışma yalnız salt-okunur mutabakatı değiştirir.
+        _pipe_ours = [
+            {"$addFields": {"_eff": {"$ifNull": ["$marketplace_order_date", "$created_at"]}}},
+            {"$match": {"_eff": {"$gte": s_iso, "$lte": e_iso},
+                        "$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]}},
+            {"$project": {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
+                          "items.quantity": 1, "partial_cancel_amount": 1}},
+        ]
+    else:
+        _pipe_ours = [
+            {"$match": _ty_local_match},
+            *canonical_order_stages(),
+            {"$project": {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
+                          "items.quantity": 1, "partial_cancel_amount": 1}},
+        ]
     async for o in db.orders.aggregate(_pipe_ours):
         onum = str(o.get("order_number") or "")
         if onum:
-            panel_docs += 1
-            if onum in ours:
-                dup_onums[onum] = dup_onums.get(onum, 1) + 1
             ours[onum] = o
 
     def _units(o):
@@ -4682,19 +4704,24 @@ async def trendyol_verify_orderdate(
 
     # Bizim taraf — TÜM Trendyol siparişleri, marketplace_order_date (??created_at) UTC ayına göre.
     our_pipe = [
-        {"$match": {"$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]}},
+        {"$match": merge_match({"$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]})},
+        *canonical_order_stages(),
         {"$addFields": {
-            "_eff": {"$ifNull": ["$marketplace_order_date", "$created_at"]},
+            "_eff": {"$cond": [
+                {"$in": ["$marketplace_order_date", [None, ""]]},
+                "$created_at", "$marketplace_order_date"]},
             "_u": {"$sum": {"$map": {"input": {"$ifNull": ["$items", []]}, "as": "it",
                                      "in": {"$ifNull": ["$$it.quantity", 1]}}}}}},
         {"$addFields": {"_mon": {"$substrBytes": ["$_eff", 0, 7]}}},
-        {"$group": {"_id": "$_mon", "orders": {"$sum": 1}, "units": {"$sum": "$_u"}}},
+        {"$group": {"_id": "$_mon", "orders": {"$sum": 1}, "units": {"$sum": "$_u"},
+                    "amount": {"$sum": {"$ifNull": ["$total", 0]}}}},
     ]
     our_m: dict = {}
     async for r in db.orders.aggregate(our_pipe):
         mon = r.get("_id") or ""
         if mon:
-            our_m[mon] = {"orders": int(r.get("orders") or 0), "units": int(r.get("units") or 0)}
+            our_m[mon] = {"orders": int(r.get("orders") or 0), "units": int(r.get("units") or 0),
+                          "amount": round(float(r.get("amount") or 0), 2)}
 
     return {
         "lastmod_window": {"start": start_date, "end": end_date},

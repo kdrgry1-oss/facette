@@ -24,7 +24,12 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 
 from .deps import db, require_admin, generate_id
-from .report_dedup import merge_match, load_dup_dep
+from .report_dedup import (
+    canonical_order_stages,
+    effective_order_date_match,
+    load_dup_dep,
+    merge_match,
+)
 
 
 router = APIRouter(prefix="/admin/reports2", tags=["admin-reports-v2"],
@@ -77,8 +82,13 @@ _UNPAID_CANCEL = [
     "cancelled", "cancel_refunded",
     "awaiting_payment", "payment_failed", "pending", "payment_notified",
 ]
-# İADE sayılan durumlar (return-rate pay'ı): order-seviyesi statü iade grubuna düştüyse.
-_RETURN_STATUSES = ["returned", "refunded", "partial_refunded"]
+def _canonical_order_window(days: int, excluded: list[str]) -> list:
+    """One date/order population shared by every v2 order-backed report."""
+    return [
+        {"$match": merge_match(effective_order_date_match(_days_ago(days), _now().isoformat()))},
+        *canonical_order_stages(),
+        {"$match": {"status": {"$nin": excluded}}},
+    ]
 
 
 async def _build_cost_map(product_ids: Optional[List[str]] = None) -> dict:
@@ -243,10 +253,9 @@ async def _velocity_smart_match(days: int, product_index: list) -> dict:
 
     Returns: { product_id: daily_velocity }
     """
-    since = _days_ago(days)
     # Tüm sipariş kalemlerini bir kere çek
     pipeline = [
-        {"$match": merge_match({"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}})},
+        *_canonical_order_window(days, _EXCLUDED),
         {"$unwind": "$items"},
         {"$project": {"name": {"$ifNull": ["$items.product_name", "$items.name"]},
                        "qty": {"$ifNull": ["$items.quantity", 1]}}},
@@ -305,7 +314,7 @@ async def stockout_forecast(
     for entry in product_index:
         p = entry["p"]
         pid = str(p["id"])
-        velocity = max(velocity_by_pid.get(pid, 0.0), velocity_by_smart.get(pid, 0.0))
+        velocity = velocity_by_pid.get(pid, 0.0) or velocity_by_smart.get(pid, 0.0)
         if velocity < min_velocity:
             continue
         stock = _effective_stock(p)  # O5: varyant stoğu dahil efektif stok
@@ -362,32 +371,25 @@ async def stockout_forecast(
 # 2) HIZLI / YAVAŞ SATAN ÜRÜNLER — velocity bazlı
 # ---------------------------------------------------------------------------
 async def _velocity_aggregate(days: int):
-    since = _days_ago(days)
-    pipeline = [
-        {"$match": merge_match({"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}})},
-        {"$unwind": "$items"},
-        {"$group": {
-            "_id": "$items.product_id",
-            "name": {"$first": {"$ifNull": ["$items.name", "$items.product_name"]}},
-            "sold_qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
-            "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.quantity", 1]},
-                                                 {"$ifNull": ["$items.price", 0]}]}},
-            "order_count": {"$sum": 1},
-        }},
-    ]
-    out = []
-    async for r in db.orders.aggregate(pipeline):
-        if not r["_id"]:
-            continue
-        out.append({
-            "product_id": str(r["_id"]),
-            "name": r.get("name") or "—",
-            "sold_qty": int(r["sold_qty"]),
-            "revenue": round(float(r["revenue"]), 2),
-            "order_count": int(r["order_count"]),
-            "daily_velocity": round(r["sold_qty"] / max(days, 1), 3),
-        })
-    return out
+    # v1 ürün raporu barkod → varyant → parent ürün çözümünün kanonik sahibidir.
+    # Böylece hızlı/yavaş satan, Excel ve ürün raporu aynı adet/sipariş/ciroyu gösterir.
+    from .reports import top_products
+    now = _now()
+    data = await top_products(
+        limit=5000,
+        start_date=(now - timedelta(days=days - 1)).date().isoformat(),
+        end_date=now.date().isoformat(),
+        source=None,
+        current_user={},
+    )
+    return [{
+        "product_id": str(r.get("product_id") or ""),
+        "name": r.get("name") or "—",
+        "sold_qty": int(r.get("qty") or 0),
+        "revenue": round(float(r.get("revenue") or 0), 2),
+        "order_count": int(r.get("orders") or 0),
+        "daily_velocity": round(int(r.get("qty") or 0) / max(days, 1), 3),
+    } for r in data.get("items", []) if r.get("product_id") and int(r.get("qty") or 0) > 0]
 
 
 @router.get("/fast-movers")
@@ -484,7 +486,7 @@ async def dead_stock(
     pipeline = [
         # İptal/ödenmemiş siparişte geçen ürün "satıldı" SAYILMAZ (aksi halde gerçek ölü
         # stok gizlenirdi). İade edilenler hareket sayılır (paydada değil, sold-set'te kalır).
-        {"$match": {"created_at": {"$gte": _days_ago(days)}, "status": {"$nin": _UNPAID_CANCEL}}},
+        *_canonical_order_window(days, _UNPAID_CANCEL),
         {"$unwind": "$items"},
         {"$group": {"_id": "$items.product_id"}},
     ]
@@ -525,44 +527,30 @@ async def return_rate(
     min_orders: int = Query(5, ge=1, description="En az kaç sipariş olmalı"),
     _=Depends(require_admin),
 ):
-    """Belirli periyotta iade oranı `threshold`% üzerinde olan ürünleri listeler.
+    """Belirli periyotta kesin kalem-bazlı iade oranı eşiğini aşan ürünleri listeler.
 
-    O9 DENETİM NOTU: Bu oran SİPARİŞ-STATÜSÜ bazlı bir ÜST-SINIR TAHMİNİDİR — order-seviyesi
-    statü iade grubuna düşünce siparişin TÜM kalemleri (3 kalemli siparişte 1'i iade edilse bile
-    3'ü) iade sayılır; gerçek kalem-bazlı iade adedi `customer_returns` koleksiyonundadır. Kesin
-    ürün-bazlı iade için /reports/returns/by-product kullanın. UI'da "üst-sınır tahmini" olarak
-    etiketlenir (kullanıcı bunu KESİN değer sanmasın)."""
-    since = _days_ago(days)
-    pipeline = [
-        # Payda (total_sold): iptal/ödenmemiş HARİÇ; iade edilenler SATILDI sayılır (paydada kalır).
-        # Pay (returned_qty): order-seviyesi statü iade grubuna düşenler (returned/refunded/partial).
-        # NOT: sitedeki KISMİ iadeler siparişi açık bırakabildiğinden ve tam-iade siparişin TÜM
-        # kalemlerini iade saydığından bu order-statü tabanlı oran bir TAHMİN'dir (bkz. O9 notu).
-        {"$match": merge_match({"created_at": {"$gte": since}, "status": {"$nin": _UNPAID_CANCEL}})},
-        {"$unwind": "$items"},
-        {"$group": {
-            "_id": "$items.product_id",
-            "name": {"$first": "$items.name"},
-            "total_sold": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
-            "returned_qty": {"$sum": {"$cond": [{"$in": ["$status", _RETURN_STATUSES]},
-                                                  {"$ifNull": ["$items.quantity", 1]}, 0]}},
-        }},
-        {"$match": {"total_sold": {"$gte": min_orders}}},
-    ]
+    Kaynak, v1 ürün-iade raporuyla aynıdır: onaylı site iadeleri ve Accepted Trendyol
+    claim kalemleri. Payda iptaller hariç brüt satış, pay yalnız iade edilen adettir.
+    """
+    from .reports import returns_by_product
+    now = _now()
+    exact = await returns_by_product(
+        start_date=(now - timedelta(days=days - 1)).date().isoformat(),
+        end_date=now.date().isoformat(), limit=500,
+        current_user={},
+    )
     items = []
-    async for r in db.orders.aggregate(pipeline):
-        sold = int(r.get("total_sold") or 0)
-        ret = int(r.get("returned_qty") or 0)
-        if sold == 0:
-            continue
-        rate = (ret / sold) * 100
-        if rate >= threshold:
+    for r in exact.get("items", []):
+        sold = int(r.get("sold") or 0)
+        ret = int(r.get("returned") or 0)
+        rate = r.get("return_rate_pct")
+        if sold >= min_orders and rate is not None and float(rate) >= threshold:
             items.append({
-                "product_id": str(r["_id"]),
-                "name": r.get("name") or "—",
+                "product_id": str(r.get("product_id") or ""),
+                "name": r.get("product_name") or "—",
                 "sold": sold,
                 "returned": ret,
-                "return_rate_pct": round(rate, 2),
+                "return_rate_pct": round(float(rate), 2),
                 "severity": "critical" if rate >= 40 else ("high" if rate >= 30 else "warning"),
             })
     items.sort(key=lambda x: -x["return_rate_pct"])
@@ -587,8 +575,6 @@ async def profit_by_channel(
     O4 DENETİM FIX: kargo (shipping) eskiden hesaplanıp net'e KATILMIYORDU → artık düşülür.
     D1 DENETİM FIX: "refunds/İade" kolonu kaldırıldı — iade siparişleri sorgudan (_EXCLUDED)
     zaten elendiğinden daima 0 dönen ölü koddu (yanıltıcıydı)."""
-    since = _days_ago(days)
-
     # Pazaryeri komisyon varsayılanları (yüzde) — gelecekte ayrı config'den okunabilir
     DEFAULT_COMMISSION_PCT = {
         "trendyol": 18.0, "hepsiburada": 17.0, "n11": 12.0, "amazon": 15.0,
@@ -599,8 +585,7 @@ async def profit_by_channel(
     cost_map = await _product_cost_lookup()  # manuel > cost_price > purchase_price
 
     pipeline = [
-        # ticimax_history ÇİFT kayıtları hariç (Trendyol kanal ciro/kâr'ını şişirir)
-        {"$match": merge_match({"created_at": {"$gte": since}, "status": {"$nin": _EXCLUDED}})},
+        *_canonical_order_window(days, _EXCLUDED),
         {"$project": {
             # Y16: Kanal `platform` alanında tutulur (marketplace/source değil). Ayrıca 2-arg
             # $ifNull kullanılır (3-arg Mongo 5.0 gerektiriyordu, eski sürümde patlıyordu).

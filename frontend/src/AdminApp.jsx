@@ -87,7 +87,6 @@ import MenuSettings from "./pages/admin/MenuSettings";
 import ReportsExtended from "./pages/admin/ReportsExtended";
 import MobileApp from "./pages/admin/MobileApp";
 import AIAssistant from "./pages/admin/AIAssistant";
-import FooterDesign from "./pages/admin/FooterDesign";
 import MarketplaceProfit from "./pages/admin/MarketplaceProfit";
 import Themes from "./pages/admin/Themes";
 import RooftrExcelUpload from "./pages/admin/RooftrExcelUpload";
@@ -163,7 +162,6 @@ export default function AdminApp() {
         <Route path="iys" element={<IysAdmin />} />
         <Route path="mobil-uygulama" element={<MobileApp />} />
         <Route path="ai-asistan" element={<AIAssistant />} />
-        <Route path="footer-tasarim" element={<FooterDesign />} />
         <Route path="pazaryeri-karlilik" element={<MarketplaceProfit />} />
         <Route path="trendyol-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
         <Route path="trendyol-loglar" element={<TrendyolLogs />} />

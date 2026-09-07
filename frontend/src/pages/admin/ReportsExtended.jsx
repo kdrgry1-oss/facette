@@ -465,19 +465,18 @@ function ReturnRateAlerts() {
           <input type="number" min={1} max={100} value={minOrders} onChange={(e)=>setMinOrders(+e.target.value)} className="border rounded px-2 py-1 text-sm w-20" /></label>
         <button onClick={load} className="ml-auto text-sm text-blue-700 hover:underline flex items-center gap-1"><RefreshCw className={`w-3.5 h-3.5 ${loading?"animate-spin":""}`}/>Yenile</button>
       </div>
-      <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
+      <div className="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm">
         ⚠️ {data.total ?? 0} ürün iade oranı eşiği aşıyor. Bu ürünleri inceleyin — beden/kalite/açıklama sorunu olabilir.
-        <div className="mt-1.5 text-xs text-amber-800">
-          <b>Not (üst-sınır tahmini — sipariş bazlı):</b> Oran, sipariş statüsü üzerinden hesaplanır; iade statüsüne düşen bir siparişin
-          TÜM kalemleri iade sayılır (3 kalemli siparişin 1'i iade edilse bile 3 iade görünür). Bu yüzden gerçek iade oranı bu değerin
-          <b> altında</b> olabilir. Kalem bazlı kesin iade için "İadeler" raporunu kullanın.
+        <div className="mt-1.5 text-xs text-emerald-800">
+          <b>Kesin kalem hesabı:</b> İade % = İade / (Net Satış + İade). İptaller hem paydan
+          hem paydadan hariçtir; yalnız onaylı site iadeleri ve Accepted Trendyol iade kalemleri sayılır.
         </div>
       </div>
       <Table rows={data.items} testid="returns-table"
         cols={[
           { k: "name", l: "Ürün" },
           { k: "sold", l: "Satış", num: true },
-          { k: "returned", l: "İade (tahmini)", num: true },
+          { k: "returned", l: "İade", num: true },
           { k: "return_rate_pct", l: "Oran %", num: true, render: (r) => (
               <span className={`px-2 py-0.5 rounded text-xs font-medium ${r.severity==="critical"?"bg-red-100 text-red-800":r.severity==="high"?"bg-orange-100 text-orange-800":"bg-amber-100 text-amber-800"}`}>{r.return_rate_pct}%</span>
             ) },

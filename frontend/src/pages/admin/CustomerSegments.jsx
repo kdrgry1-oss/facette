@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Users, Trophy, HeartPulse, Rocket, AlertOctagon, UserMinus, Search, Download, Mail, X, Send } from "lucide-react";
+import { sanitizeHtml } from "../../lib/sanitizeHtml";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -288,7 +289,7 @@ function CampaignModal({ recipients, segmentLabel, onClose }) {
           {/* Önizleme */}
           <details className="border border-gray-200 rounded-lg">
             <summary className="px-3 py-2 cursor-pointer text-sm font-medium hover:bg-gray-50">📧 Önizleme</summary>
-            <div className="p-3 bg-gray-50 border-t" dangerouslySetInnerHTML={{ __html: html }} />
+            <div className="p-3 bg-gray-50 border-t" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html, { allowStyle: true }) }} />
           </details>
 
           {result && (

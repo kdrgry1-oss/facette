@@ -18,10 +18,12 @@ from zeep import helpers as _zh  # noqa: E402
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger("variant_sync")
 
-OLD_KEY = "HANXFWINXLDBY0WH47WMB6QKTE20T5"
+OLD_KEY = os.environ.get("TICIMAX_API_KEY", "").strip()
 
 
 async def main():
+    if not OLD_KEY:
+        raise RuntimeError("TICIMAX_API_KEY ortam değişkeni zorunludur")
     c = _urun_client()
     vf = c.get_type("ns2:VaryasyonFiltre")
     sf = c.get_type("ns2:UrunSayfalama")

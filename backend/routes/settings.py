@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Dict, Any
 from datetime import datetime, timezone
-import re
 
 from .deps import db, require_admin, limiter, require_permission
 
@@ -58,7 +57,11 @@ async def resolve_free_shipping_threshold(settings: dict):
             threshold = None
     return threshold
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+def _valid_email(value: str) -> bool:
+    if not value or len(value) > 254 or any(ch.isspace() for ch in value):
+        return False
+    local, separator, domain = value.rpartition("@")
+    return bool(separator and local and "." in domain and not domain.startswith(".") and not domain.endswith("."))
 
 @router.post("/maintenance/notify")
 @(limiter.limit("5/minute;50/day") if limiter else (lambda f: f))
@@ -66,7 +69,7 @@ async def maintenance_notify_subscribe(payload: dict, request: Request):
     """Public: bakım modu sırasında 'açılınca haber ver' e-posta toplama.
     DENETİM SEC-5 F-18: hız-sınırı yoktu → sınırsız çöp kayıt. IP limiti eklendi."""
     email = (payload.get("email") or "").strip().lower()
-    if not _EMAIL_RE.match(email):
+    if not _valid_email(email):
         raise HTTPException(status_code=400, detail="Geçerli bir e-posta adresi giriniz.")
     existing = await db.maintenance_subscribers.find_one({"email": email})
     if existing:

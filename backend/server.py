@@ -140,44 +140,24 @@ async def lifespan(app: FastAPI):
         if not admin:
             from routes.deps import hash_password, generate_id
             from datetime import datetime, timezone
-            import secrets as _secrets
-            # Y13: Sabit 'admin123' KULLANILMAZ ve şifre ASLA loglanmaz. Şifre ADMIN_INITIAL_PASSWORD
-            # ortam değişkeninden alınır; yoksa güçlü rastgele üretilip yalnızca korumalı bir dosyaya
-            # (backend/data/.admin_initial_password, chmod 600) yazılır ve log'a sadece DOSYA YOLU düşer.
+            # Bootstrap parolası diske veya loga yazılmaz. Yeni ortamda yönetici
+            # oluşturmak için güçlü parola deployment secret'ı olarak verilmelidir.
             _admin_pw = (os.environ.get("ADMIN_INITIAL_PASSWORD") or "").strip()
-            _generated = False
-            if len(_admin_pw) < 8:
-                _admin_pw = _secrets.token_urlsafe(16)
-                _generated = True
-            await db.users.insert_one({
-                "id": generate_id(),
-                "email": "admin@facette.com",
-                "password": hash_password(_admin_pw),
-                "first_name": "Admin",
-                "last_name": "User",
-                "is_admin": True,
-                "is_super_admin": True,
-                "is_active": True,
-                "must_change_password": _generated,
-                "created_at": datetime.now(timezone.utc).isoformat()
-            })
-            if _generated:
-                try:
-                    _pdir = os.path.join(os.path.dirname(__file__), "data")
-                    os.makedirs(_pdir, exist_ok=True)
-                    _pf = os.path.join(_pdir, ".admin_initial_password")
-                    with open(_pf, "w") as _fh:
-                        _fh.write(_admin_pw)
-                    try:
-                        os.chmod(_pf, 0o600)
-                    except Exception:
-                        pass
-                    logger.warning(f"Admin olusturuldu (admin@facette.com). Ilk sifre: {_pf} dosyasinda. "
-                                   "Giris sonrasi degistirin; dosyayi silin.")
-                except Exception:
-                    logger.warning("Admin olusturuldu; rastgele sifre dosyaya yazilamadi — "
-                                   "sifre-sifirlama ile giris yapin.")
+            if len(_admin_pw) < 12:
+                logger.error("Admin bootstrap atlandı: ADMIN_INITIAL_PASSWORD en az 12 karakter olmalı")
             else:
+                await db.users.insert_one({
+                    "id": generate_id(),
+                    "email": "admin@facette.com",
+                    "password": hash_password(_admin_pw),
+                    "first_name": "Admin",
+                    "last_name": "User",
+                    "is_admin": True,
+                    "is_super_admin": True,
+                    "is_active": True,
+                    "must_change_password": True,
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                })
                 logger.info("Admin olusturuldu (admin@facette.com) — ADMIN_INITIAL_PASSWORD kullanildi.")
         elif not admin.get("is_super_admin"):
             await db.users.update_one(

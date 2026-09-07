@@ -1,6 +1,6 @@
 """
 Ticimax SOAP Web Service Client  –  facette.com.tr
-Default WS Key (UyeKodu): AKG0M8DTRSEBAIA898JA6HW22EDIU3 (override via DB settings)
+WS Key (UyeKodu): TICIMAX_API_KEY environment variable
 
 Gerçek WSDL imzaları (doğrulanmış):
   SelectKategori  : UyeKodu, kategoriID=0, dil='tr', parentID
@@ -24,7 +24,7 @@ warnings.filterwarnings("ignore")
 logger = logging.getLogger(__name__)
 
 TICIMAX_DOMAIN  = os.environ.get("TICIMAX_DOMAIN") or "facette.ticimaxeticaret.com"
-TICIMAX_API_KEY = os.environ.get("TICIMAX_API_KEY") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
+TICIMAX_API_KEY = os.environ.get("TICIMAX_API_KEY", "").strip()
 RATE_LIMIT_SLEEP = 13   # Ticimax rate limit: 12 sn, biz 13 sn bekliyoruz
 
 URUN_WSDL    = f"https://{TICIMAX_DOMAIN}/Servis/UrunServis.svc?wsdl"
@@ -85,7 +85,6 @@ def set_domain(domain: str):
     _urun_client_cache = None
     _siparis_client_cache = None
     _uye_client_cache = None
-    logger.info(f"Ticimax domain set → {domain}")
     logger.info(f"Ticimax domain set → {domain}")
 
 

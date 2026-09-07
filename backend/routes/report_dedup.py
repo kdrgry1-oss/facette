@@ -94,6 +94,70 @@ def merge_match(base: dict) -> dict:
     return out
 
 
+def canonical_order_stages() -> list:
+    """Mongo aggregation stages that enforce one document per real order.
+
+    Marketplace imports can leave two documents with the same ``order_number``.
+    Reports must consistently select the newest terminal/partial-cancel document,
+    while orders without an order number remain distinct by their internal id.
+    Call this immediately after the report's initial ``$match`` and before any
+    ``$unwind`` or metric grouping.
+    """
+
+    terminal = [
+        "cancelled", "cancel_refunded", "return_requested", "return_approved",
+        "return_in_transit", "returned", "refunded", "partial_refunded",
+    ]
+    return [
+        {"$addFields": {
+            "_report_order_number": {"$trim": {"input": {"$toString": {"$ifNull": ["$order_number", ""]}}}},
+            "_report_terminal": {"$cond": [{"$in": ["$status", terminal]}, 1, 0]},
+            "_report_partial_cancel": {"$cond": [{"$gt": [{"$ifNull": ["$partial_cancel_amount", 0]}, 0]}, 1, 0]},
+        }},
+        {"$addFields": {
+            "_report_dedupe_key": {"$cond": [
+                {"$ne": ["$_report_order_number", ""]},
+                {"$concat": ["order:", "$_report_order_number"]},
+                {"$concat": ["id:", {"$toString": {"$ifNull": ["$id", "$_id"]}}]},
+            ]},
+        }},
+        {"$sort": {
+            "_report_dedupe_key": 1,
+            "_report_terminal": -1,
+            "_report_partial_cancel": -1,
+            "updated_at": -1,
+            "created_at": -1,
+        }},
+        {"$group": {"_id": "$_report_dedupe_key", "_report_doc": {"$first": "$$ROOT"}}},
+        {"$replaceRoot": {"newRoot": "$_report_doc"}},
+    ]
+
+
+def effective_order_date_match(start: str, end: str | None = None) -> dict:
+    """Date predicate shared by every order-backed report.
+
+    Marketplace order time is authoritative. ``created_at`` is only the
+    fallback for site orders and legacy records where marketplace time is empty.
+    """
+
+    bounds = {"$gte": start}
+    if end is not None:
+        bounds["$lte"] = end
+    return {"$or": [
+        {"marketplace_order_date": dict(bounds)},
+        {"marketplace_order_date": {"$in": [None, ""]}, "created_at": dict(bounds)},
+    ]}
+
+
+def split_confirmed_return(quantity: int, amount: float, returned: int) -> tuple[int, float, int, float]:
+    """Split one order line into kept/net and confirmed-return portions."""
+    qty = max(0, int(quantity or 0))
+    ret = min(qty, max(0, int(returned or 0)))
+    kept = qty - ret
+    kept_amount = float(amount or 0) * kept / qty if qty else 0.0
+    return kept, kept_amount, ret, float(amount or 0) - kept_amount
+
+
 async def load_dup_dep():
     """Router bağımlılığı — handler'dan ÖNCE cache'i tazeler (salt-okuma)."""
     try:

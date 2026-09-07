@@ -7,7 +7,7 @@
 #      (App Store Connect'ten indirdiğin .p8 + Key ID + Issuer ID).
 #      Bu entegrasyona verdiğin İSİM aşağıdaki `app_store_connect: CodemagicKey`
 #      ile AYNI olmalı.
-#   2) App Store Connect'teki uygulamanın (Facette Admin) Bundle ID'si `com.facette.app`
+#   2) App Store Connect'teki uygulamanın (Facette Admin) Bundle ID'si `tr.com.facette.admin`
 #      olmalı (farklıysa aşağıdaki bundle_identifier'ı ona göre değiştir).
 # NOT: Canlı backend adresi (api.facette.com.tr) yaml'a GÖMÜLÜ (gizli değil) — env var GEREKMEZ.
 
@@ -71,7 +71,7 @@ workflows:
           keychain add-certificates
 
           # 2) Hesaptaki TÜM bundle id'leri listele (platform filtresi OLMADAN) ve
-          #    com.facette.app'in resource id'sini çöz. fetch-signing-files'ın
+          #    tr.com.facette.admin'un resource id'sini çöz. fetch-signing-files'ın
           #    platform=IOS filtresi mevcut (universal) bundle'ı göremiyordu.
           app-store-connect bundle-ids list --json > /tmp/bids.json 2>/dev/null || app-store-connect list-bundle-ids --json > /tmp/bids.json 2>/dev/null || echo "[]" > /tmp/bids.json
           echo "=== HESAPTAKI BUNDLE ID'LER (identifier | platform | resourceId) ==="

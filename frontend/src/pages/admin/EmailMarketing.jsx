@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { Mail, Send, Save, Users, RefreshCw, CheckCircle2, AlertTriangle,
   FileText, Eye, Copy, Trash2, X, Star,
   Bold, Italic, List, Link2, AlignLeft, AlignCenter, AlignRight, Heading, Code, SquarePlus, Image, ImagePlus } from "lucide-react";
+import { sanitizeHtml } from "../../lib/sanitizeHtml";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const h = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -51,8 +52,9 @@ export default function EmailMarketing() {
     const el = visualRef.current;
     if (!el) return;
     if (camp.html !== lastEditorHtml.current) {
-      el.innerHTML = camp.html || "";
-      lastEditorHtml.current = camp.html || "";
+      const safeHtml = sanitizeHtml(camp.html || "", { allowStyle: true });
+      el.innerHTML = safeHtml;
+      lastEditorHtml.current = safeHtml;
     }
   }, [camp.html, editMode]);
 
@@ -619,6 +621,7 @@ export default function EmailMarketing() {
               {previewHtml ? (
                 <div style={{ width: EMAIL_W * pvScale, height: pvH * pvScale, margin: "0 auto" }}>
                   <iframe title="onizleme" srcDoc={previewHtml} onLoad={onPreviewLoad} data-testid="live-preview"
+                    sandbox="allow-same-origin" referrerPolicy="no-referrer"
                     style={{ width: EMAIL_W, height: pvH, transform: `scale(${pvScale})`, transformOrigin: "top left", border: 0, background: "#fff", display: "block" }} />
                 </div>
               ) : (
@@ -699,7 +702,7 @@ export default function EmailMarketing() {
               <div className="text-sm font-semibold truncate">Önizleme · {previewModal.subject || "(konu yok)"}</div>
               <button onClick={() => setPreviewModal(null)} className="text-gray-400 hover:text-black"><X size={18} /></button>
             </div>
-            <iframe title="tpl-onizleme" srcDoc={previewModal.html} className="flex-1 w-full bg-white rounded-b-xl" />
+            <iframe title="tpl-onizleme" srcDoc={previewModal.html} sandbox="allow-same-origin" referrerPolicy="no-referrer" className="flex-1 w-full bg-white rounded-b-xl" />
           </div>
         </div>
       )}

@@ -2844,7 +2844,7 @@ def start_scheduler():
         coalesce=True,
     )
     _scheduler.start()
-    logger.info("[scheduler] Background scheduler started (auto-cancel every 30 min + marketplace auto-sync every 1 min + abandoned cart reminders daily + Ticimax orders every 6h)")
+    logger.info("[scheduler] Background scheduler started (auto-cancel every 30 min + marketplace auto-sync every 1 min + abandoned cart reminders daily; Ticimax sync disabled)")
     return _scheduler
 
 

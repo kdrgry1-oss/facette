@@ -6,9 +6,8 @@ name: Security Scan
 #   3) Dependency Audit       → açığı olan kütüphaneler          → iş özeti (Summary)
 #
 # NOT: Bu tarama KODU denetler; CANLI saldırı tespiti DEĞİLDİR (onu Cloudflare WAF +
-# uygulamadaki rate-limit/ban katmanı yapar). Deploy'u bloklamaz (Railway/Cloudflare
-# git push ile ayrı deploy eder). Bulgular "başarısız" değil "rapor" olarak yansır:
-# tarayıcılar continue-on-error ile yeşil geçer, bulgular Security sekmesi + Summary'de.
+# uygulamadaki rate-limit/ban katmanı yapar). Tarayıcının çalışamaması ve secret
+# bulgusu job'u kırmızı yapar; ayrıntılar Security sekmesi + Summary'de görünür.
 # (Amazon SP-API Restricted Role / DPP: otomatik SAST + secret + bağımlılık taraması.)
 
 on:
@@ -51,9 +50,6 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
-        # Repo'da GitHub "default setup" açıksa gelişmiş CodeQL çakışabilir; o durumda
-        # kırmızı X yerine uyarı bırak (çakışma varsa loglarda görünür, sonuç yine yazılır).
-        continue-on-error: true
 
   # 2) Secret scanning — gitleaks (CLI, tam git geçmişi). Marketplace action'a bağımlı
   #    DEĞİL (lisans/kurulum takılmaları yaşanmasın); SARIF Security sekmesine yüklenir.
@@ -73,9 +69,8 @@ jobs:
           gitleaks version
       - name: Run gitleaks
         run: |
-          # --exit-code 0: bulgu olsa da adım YEŞİL kalsın (bulgular rapordadır, kırmızı X değil).
           gitleaks detect --source . --report-format sarif --report-path gitleaks.sarif \
-            --redact --exit-code 0 || true
+            --redact --exit-code 1
       - name: Özet (kaç bulgu)
         if: always()
         run: |
@@ -103,9 +98,18 @@ jobs:
             const fs = require('fs');
             let n = 0;
             try { n = (JSON.parse(fs.readFileSync('gitleaks.sarif','utf8')).runs[0].results || []).length; } catch (e) {}
-            if (!n) { core.info('gitleaks: bulgu yok, issue açılmadı.'); return; }
             const { owner, repo } = context.repo;
             const title = '🔐 Security: gitleaks sır bulgusu (SLA takibi)';
+            const open = await github.rest.issues.listForRepo({ owner, repo, state: 'open', labels: 'security', per_page: 50 });
+            const dup = open.data.find(i => i.title === title);
+            if (!n) {
+              if (dup) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: dup.number, body: 'Yeni tarama: **0 bulgu**. Otomatik yeniden test başarılı; issue kapatılıyor.' });
+                await github.rest.issues.update({ owner, repo, issue_number: dup.number, state: 'closed' });
+              }
+              core.info('gitleaks: bulgu yok.');
+              return;
+            }
             const today = new Date().toISOString().slice(0, 10);
             const body = [
               `**Discovery date:** ${today}`,
@@ -120,8 +124,6 @@ jobs:
               '',
               `Run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
             ].join('\n');
-            const open = await github.rest.issues.listForRepo({ owner, repo, state: 'open', labels: 'security', per_page: 50 });
-            const dup = open.data.find(i => i.title === title);
             if (dup) {
               await github.rest.issues.createComment({ owner, repo, issue_number: dup.number, body: `Yeni tarama (${today}): **${n}** bulgu.\n\n${body}` });
               core.info(`Mevcut issue #${dup.number} güncellendi.`);

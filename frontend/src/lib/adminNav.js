@@ -58,7 +58,6 @@ export const navigationGroups = [
       { label: "Kâr & Stok Değer", path: "/admin/raporlar/kar-stok", icon: TrendingUp },
       { label: "Ürün Raporları", path: "/admin/raporlar/urun", icon: Package },
       { label: "Stok Raporu", path: "/admin/raporlar/stok", icon: Package },
-      { label: "Üye Raporu", path: "/admin/raporlar/uye", icon: Users },
       { label: "Pazaryeri Karlılık", path: "/admin/pazaryeri-karlilik", icon: TrendingUp },
     ],
   },

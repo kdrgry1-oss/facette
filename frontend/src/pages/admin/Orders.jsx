@@ -36,6 +36,7 @@ import MultiSelect from "../../components/admin/MultiSelect";
 import OrderMarketplaceInfo from "../../components/admin/OrderMarketplaceInfo";
 import OrderPaymentDetail from "../../components/admin/OrderPaymentDetail";
 import { toast } from "sonner";
+import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import {
   Dialog,
   DialogContent,
@@ -679,14 +680,17 @@ export default function AdminOrders({ unpaidView = false }) {
         toast.error("Yazdırılacak etiket bulunamadı");
         return;
       }
-      // İlk etiketin <head> içeriği (Google Fonts link + stil + @page) bir kez kullanılır.
-      const headInner = (valid[0].match(/<head[^>]*>([\s\S]*?)<\/head>/i)?.[1] || "")
-        .replace(/<title[\s\S]*?<\/title>/i, "");
-      // Her etiketin body'si; içindeki tekil <script> çıkarılır.
-      const bodies = valid.map((html) => {
-        const m = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-        return (m ? m[1] : html).replace(/<script[\s\S]*?<\/script>/gi, "");
-      });
+      // HTML'i regex ile ayıklamak güvenli değildir. DOMParser ile parse et; yalnız
+      // sabit stil metnini ve allowlist temizleyiciden geçen body içeriğini taşı.
+      const parsed = valid.map((html) => new DOMParser().parseFromString(html, "text/html"));
+      const labelCss = Array.from(parsed[0].head.querySelectorAll("style"))
+        .map((style) => style.textContent || "")
+        .join("\n")
+        .replace(/@import[^;]+;?/gi, "")
+        .replace(/url\s*\([^)]*\)/gi, "")
+        .replace(/<\/?style/gi, "");
+      const headInner = `<style>${labelCss}</style>`;
+      const bodies = parsed.map((doc) => sanitizeHtml(doc.body.innerHTML, { allowStyle: true }));
       const doc =
         `<!doctype html><html lang="tr"><head>` + headInner +
         `<style>` +

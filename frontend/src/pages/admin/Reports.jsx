@@ -12,7 +12,7 @@ const COLORS = ["#3b82f6", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#ef4444"
 
 function useDateRange() {
   const today = new Date();
-  const [from, setFrom] = useState(new Date(today.getTime() - 30 * 864e5).toISOString().slice(0, 10));
+  const [from, setFrom] = useState(new Date(today.getTime() - 29 * 864e5).toISOString().slice(0, 10));
   const [to, setTo] = useState(today.toISOString().slice(0, 10));
   return { from, setFrom, to, setTo };
 }
@@ -430,9 +430,30 @@ export function ProductsReport() {
   const [sizeFilter, setSizeFilter] = useState("");
   const [collFilter, setCollFilter] = useState("");   // Sezon filtresi (İlkbahar/Yaz/Sonbahar/Kış)
   const [velFilter, setVelFilter] = useState("");      // D4 — satış hızı (green/yellow/red)
+  const [recon, setRecon] = useState(null);
+  const [reconLoading, setReconLoading] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set()); // açılır: beden dağılımı
   const [top90Map, setTop90Map] = useState({});              // İvme: 90 günlük haftalık hız haritası
   const toggleExpand = (k) => setExpanded(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
+
+  const reconcileTrendyol = async () => {
+    const dayCount = Math.floor((new Date(to) - new Date(from)) / 864e5) + 1;
+    if (dayCount > 62) {
+      toast.error("Trendyol mutabakatı en fazla 62 günlük aralıkta çalışır.");
+      return;
+    }
+    setReconLoading(true);
+    try {
+      const r = await axios.get(`${API}/integrations/trendyol/reconcile`, {
+        headers: authHeaders(), params: { start_date: from, end_date: to, apply: false, list_limit: 20 },
+      });
+      setRecon(r.data);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Trendyol mutabakatı alınamadı");
+    } finally {
+      setReconLoading(false);
+    }
+  };
 
   const load = async () => {
     const [t, c] = await Promise.all([
@@ -559,12 +580,41 @@ export function ProductsReport() {
           <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Ürün Raporları <ReportScopeBadge kind="exclude" /></h1>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={reconcileTrendyol} disabled={reconLoading}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-semibold hover:bg-orange-700 disabled:opacity-50 shadow-sm"
+            data-testid="trendyol-reconcile">
+            {reconLoading ? "Karşılaştırılıyor…" : "Trendyol ile Mutabakat"}
+          </button>
           <button onClick={exportXlsx} className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 shadow-sm" data-testid="products-export-xlsx">
             ⬇ Excel İndir
           </button>
           <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
         </div>
       </div>
+
+      {recon && (
+        <div className={`rounded-xl border p-4 ${recon.diff?.orders || recon.diff?.units || Math.abs(recon.diff?.amount || 0) > 0.01 ? "bg-amber-50 border-amber-300" : "bg-emerald-50 border-emerald-300"}`}
+          data-testid="trendyol-reconcile-result">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="font-semibold">Trendyol ↔ Panel Mutabakatı</h3>
+              <p className="text-xs text-gray-600 mt-1">{recon.range?.start} → {recon.range?.end} · Salt okunur; hiçbir siparişi değiştirmez.</p>
+            </div>
+            <div className="grid grid-cols-3 gap-5 text-sm text-right">
+              <div><div className="text-gray-500">Sipariş farkı</div><b>{recon.diff?.orders ?? 0}</b></div>
+              <div><div className="text-gray-500">Ürün adedi farkı</div><b>{recon.diff?.units ?? 0}</b></div>
+              <div><div className="text-gray-500">Tutar farkı</div><b>₺{(recon.diff?.amount || 0).toLocaleString("tr-TR")}</b></div>
+            </div>
+          </div>
+          <div className="grid md:grid-cols-2 gap-3 mt-3 text-sm">
+            <div className="bg-white/70 rounded-lg p-3"><b>Trendyol:</b> {recon.trendyol?.orders || 0} sipariş · {recon.trendyol?.units || 0} adet · ₺{(recon.trendyol?.amount || 0).toLocaleString("tr-TR")}</div>
+            <div className="bg-white/70 rounded-lg p-3"><b>Panel (tekil):</b> {recon.panel?.orders || 0} sipariş · {recon.panel?.units || 0} adet · ₺{(recon.panel?.amount || 0).toLocaleString("tr-TR")}</div>
+          </div>
+          <p className="text-xs text-gray-600 mt-3">
+            Ham kopya belge: {recon.duplicates?.extra_docs || 0} · Panelde eksik: {recon.missing_in_panel?.count || 0} · Panelde fazla: {recon.extra_in_panel?.count || 0} · İptal durum farkı: {recon.cancel_mismatch?.count || 0}
+          </p>
+        </div>
+      )}
 
 
       <div className="bg-white rounded-xl border p-5">

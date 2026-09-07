@@ -35,6 +35,7 @@ from .deps import db, require_admin, generate_id, logger, require_permission
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from email_ses import get_ses_config, is_configured, send_ses_email  # noqa: E402
+from security.sns import validate_subscribe_url, verify_sns_message  # noqa: E402
 
 admin_router = APIRouter(prefix="/admin/email-marketing", tags=["email-marketing-admin"])
 public_router = APIRouter(prefix="/email-marketing", tags=["email-marketing-public"])
@@ -662,19 +663,32 @@ async def ses_webhook(payload: dict, request: Request):
     if not _secret or not _given or not _hmac.compare_digest(_given, _secret):
         raise HTTPException(status_code=403, detail="forbidden")
 
+    # Paylaşılan webhook anahtarı tek başına yeterli değildir: AWS'nin önerdiği
+    # şekilde SNS mesaj imzasını doğrula. SigningCertURL doğrulanmadan ağ isteği
+    # yapılmaz; böylece sertifika alanı SSRF aracı olarak kullanılamaz.
+    _expected_topic = (_os.environ.get("SES_SNS_TOPIC_ARN", "") or "").strip()
+    try:
+        await verify_sns_message(payload or {}, expected_topic_arn=_expected_topic)
+    except Exception:
+        logger.warning("[email-marketing] geçersiz SNS imzası veya topic reddedildi")
+        raise HTTPException(status_code=403, detail="invalid SNS message")
+
     _type = (payload or {}).get("Type") or ""
 
     # 1) Abonelik onayı: SNS ilk kurulumda SubscribeURL gönderir; GET ile onaylanır.
     if _type == "SubscriptionConfirmation":
         _url = (payload or {}).get("SubscribeURL") or ""
-        if _url:
-            try:
-                import httpx as _hx
-                async with _hx.AsyncClient(timeout=20) as _c:
-                    await _c.get(_url)
-                logger.info("[email-marketing] SNS aboneliği onaylandı")
-            except Exception as e:
-                logger.warning(f"[email-marketing] SNS onay hatası: {e}")
+        if not validate_subscribe_url(_url, payload or {}):
+            raise HTTPException(status_code=403, detail="invalid SNS confirmation URL")
+        try:
+            import httpx as _hx
+            async with _hx.AsyncClient(timeout=20, follow_redirects=False) as _c:
+                _response = await _c.get(_url)
+                _response.raise_for_status()
+            logger.info("[email-marketing] SNS aboneliği onaylandı")
+        except Exception:
+            logger.warning("[email-marketing] SNS abonelik onayı başarısız")
+            raise HTTPException(status_code=502, detail="SNS confirmation failed")
         return {"ok": True}
 
     # 2) Bildirim: Message alanı JSON string'dir.

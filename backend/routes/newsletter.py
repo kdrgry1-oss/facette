@@ -11,7 +11,6 @@ ENDPOINTS:
   GET  /api/admin/newsletter/subscribers  — Admin (abone listesi)
 =============================================================================
 """
-import re
 from fastapi import APIRouter, Depends, Request, HTTPException
 from datetime import datetime, timezone
 
@@ -20,7 +19,11 @@ from .deps import db, require_admin, generate_id, limiter
 public_router = APIRouter(prefix="/newsletter", tags=["newsletter-public"])
 admin_router = APIRouter(prefix="/admin/newsletter", tags=["newsletter-admin"])
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+def _valid_email(value: str) -> bool:
+    if not value or len(value) > 254 or any(ch.isspace() for ch in value):
+        return False
+    local, separator, domain = value.rpartition("@")
+    return bool(separator and local and "." in domain and not domain.startswith(".") and not domain.endswith("."))
 
 
 @public_router.post("/subscribe")
@@ -32,10 +35,8 @@ async def subscribe(payload: dict, request: Request):
     sınırsız İYS çağrısı/rıza sahteciliği. IP limiti eklendi."""
     email = (payload or {}).get("email", "")
     email = email.strip().lower() if isinstance(email, str) else ""
-    if not email or not _EMAIL_RE.match(email):
+    if not _valid_email(email):
         raise HTTPException(status_code=400, detail="Geçerli bir e-posta adresi girin.")
-    if len(email) > 254:
-        raise HTTPException(status_code=400, detail="E-posta adresi çok uzun.")
 
     # KVKK / ticari-ileti onayı ZORUNLU — açık rıza olmadan İYS'ye ONAY işlenmez (yasal).
     consent = bool((payload or {}).get("consent"))

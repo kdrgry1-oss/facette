@@ -176,7 +176,7 @@ async def register(request: Request):
         from email_smtp import send_smtp_email
         await send_smtp_email(db, email, "E-posta Doğrulama — FACETTE", _vhtml)
     except Exception as _ve:
-        logger.warning(f"verification email failed for {email}: {_ve}")
+        logger.warning("verification email failed (%s)", type(_ve).__name__)
     # Hoş geldin e-postası (best-effort; kaydı asla bloklamaz)
     try:
         import os as _os
@@ -226,7 +226,7 @@ async def register(request: Request):
             channels=["email"],
         )
     except Exception as _e:
-        logger.warning(f"welcome email failed for {email}: {_e}")
+        logger.warning("welcome email failed (%s)", type(_e).__name__)
     await write_audit_log(
         "register", user_id=user["id"], email=email,
         ip=client_ip_from_request(request),
@@ -786,9 +786,9 @@ async def forgot_password_request_otp(request: Request, req: OTPRequestReq):
                 channels=["sms"],
             )
         except Exception as e:
-            logger.warning(f"OTP sms failed: {e}")
+            logger.warning("OTP sms failed (%s)", type(e).__name__)
     else:
-        logger.info(f"OTP request for unknown phone (silent): ***{str(phone_norm)[-4:]}")  # PII/CRLF sızıntısı yok
+        logger.info("OTP request for unknown phone ignored")
 
     return {"success": True, "message": "Eğer numara sistemimizde kayıtlıysa SMS kodu gönderildi."}
 

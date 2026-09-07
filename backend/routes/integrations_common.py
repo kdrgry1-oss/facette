@@ -1665,10 +1665,10 @@ async def import_xml_products(
         from urllib.parse import urlparse
         import socket, ssl, ipaddress, http.client
         p = urlparse(url or "")
-        if p.scheme not in ("http", "https") or not p.hostname:
-            raise HTTPException(status_code=400, detail="Geçersiz URL")
+        if p.scheme != "https" or not p.hostname:
+            raise HTTPException(status_code=400, detail="Geçersiz URL; HTTPS zorunludur")
         host = p.hostname
-        port = p.port or (443 if p.scheme == "https" else 80)
+        port = p.port or 443
         try:
             infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         except Exception:
@@ -1685,12 +1685,9 @@ async def import_xml_products(
         conn = None
         try:
             sock = socket.create_connection((pinned, port), timeout=timeout)
-            if p.scheme == "https":
-                ctx = ssl.create_default_context()
-                sock = ctx.wrap_socket(sock, server_hostname=host)  # SNI + sertifika = host
-                conn = http.client.HTTPSConnection(host, port, timeout=timeout)
-            else:
-                conn = http.client.HTTPConnection(host, port, timeout=timeout)
+            ctx = ssl.create_default_context()
+            sock = ctx.wrap_socket(sock, server_hostname=host)  # SNI + sertifika = host
+            conn = http.client.HTTPSConnection(host, port, timeout=timeout)
             conn.sock = sock  # pinli IP'ye bağlı soketi kullan (yeniden çözme YOK)
             path = (p.path or "/") + (("?" + p.query) if p.query else "")
             conn.request("GET", path, headers={"Host": host, "User-Agent": "FacetteFeed/1.0", "Accept": "*/*"})

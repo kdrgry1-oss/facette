@@ -50,7 +50,7 @@
 | **Rate Limit** | Brute force engeli (`/auth/login` → 5/dk + IP-block) | `slowapi` + `routes/deps.py: register_failed_login_ip` |
 | **NoSQL Injection guard** | `$`/`{}` payload reddi | `routes/deps.py: safe_str / is_safe_email` |
 | **Audit Log** | Auth + vault + admin kritik aksiyonlar | `auth_audit_logs` koleksiyonu |
-| **Secrets Vault (AES-256-GCM)** | API keyleri DB'de düz metin yok | `security/crypto.py`, `routes/secrets_vault.py` |
+| **Secrets Vault (Fernet)** | API keyleri DB'de düz metin yok; AES-128-CBC + HMAC-SHA256 | `security/crypto.py`, `routes/secrets_vault.py` |
 | **Field redaction** | Non-superadmin maskelenmiş görür | `security/redactor.py` |
 | **Error monitoring + email alerts** | 5xx burst → `kdrgry@gmail.com` | `security/monitoring.py`, `security/alerts.py` |
 | **Circuit breaker** | Bozuk upstream'i izole et | `security/circuit_breaker.py` |

@@ -116,7 +116,7 @@ async def _send_reward_email(email: str, subject: str, heading: str, body_html: 
         html = email_shell(title=heading, intro_html=inner, preheader=subject)
         await send_smtp_email(db, email, subject, html, wrap=False)
     except Exception as e:
-        logger.warning(f"[referral] ödül maili gönderilemedi ({email[-6:] if email else ''}): {e}")
+        logger.warning("[referral] ödül maili gönderilemedi (%s)", type(e).__name__)
 
 
 # ============================ REFERANS KODU / KAYIT ============================
