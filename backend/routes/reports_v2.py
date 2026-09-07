@@ -234,7 +234,9 @@ async def _build_product_lookup() -> dict:
     products = []
     # O5 DENETİM FIX: varyant-stoklu ürünler (top-level stock=0) de dahil edilir; efektif stok
     # için variants.stock projeksiyona eklenir.
-    async for p in db.products.find({"$or": [{"stock": {"$gt": 0}}, {"variants.stock": {"$gt": 0}}]},
+    async for p in db.products.find({"$and": [
+            {"$or": [{"stock": {"$gt": 0}}, {"variants.stock": {"$gt": 0}}]},
+            {"is_deleted": {"$ne": True}}, {"is_active": {"$ne": False}}]},
                                        {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1,
                                         "stock_code": 1, "barcode": 1, "brand": 1, "category_name": 1,
                                         "manufacturer": 1, "variants.stock": 1}):
@@ -447,7 +449,9 @@ async def slow_movers(
     items = []
     # O5 DENETİM FIX: varyant-stoklu ürünler (top-level stock=0) de aranır; efektif stok
     # eşiği Python tarafında uygulanır (variants projeksiyona eklendi).
-    cursor = db.products.find({"$or": [{"stock": {"$gte": min_stock}}, {"variants.stock": {"$gt": 0}}]},
+    cursor = db.products.find({"$and": [
+            {"$or": [{"stock": {"$gte": min_stock}}, {"variants.stock": {"$gt": 0}}]},
+            {"is_deleted": {"$ne": True}}, {"is_active": {"$ne": False}}]},
                                {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1, "stock_code": 1,
                                 "brand": 1, "category_name": 1, "created_at": 1, "variants.stock": 1})
     async for p in cursor:
@@ -482,20 +486,24 @@ async def dead_stock(
     _=Depends(require_admin),
 ):
     """N gündür HİÇ satılmamış stokta olan ürünler — likidasyon/kampanya adayları."""
-    sold_ids = set()
-    pipeline = [
-        # İptal/ödenmemiş siparişte geçen ürün "satıldı" SAYILMAZ (aksi halde gerçek ölü
-        # stok gizlenirdi). İade edilenler hareket sayılır (paydada değil, sold-set'te kalır).
-        *_canonical_order_window(days, _UNPAID_CANCEL),
-        {"$unwind": "$items"},
-        {"$group": {"_id": "$items.product_id"}},
-    ]
-    async for r in db.orders.aggregate(pipeline):
-        if r["_id"]: sold_ids.add(str(r["_id"]))
+    # Kanonik ürün motoru barkod/varyant/productCode → yerel parent ürün köprüsünü uygular.
+    # İade edilen ürün hareket sayılır; yalnız iptaller satış hareketi değildir.
+    from .reports import top_products
+    now = _now()
+    sold_data = await top_products(
+        limit=5000,
+        start_date=(now - timedelta(days=days - 1)).date().isoformat(),
+        end_date=now.date().isoformat(), source=None, current_user={},
+    )
+    sold_ids = {str(r.get("product_id")) for r in sold_data.get("items", [])
+                if r.get("product_id") and
+                int(r.get("gross_qty") or 0) - int(r.get("cancel_qty") or 0) > 0}
 
     items = []
     # O5 DENETİM FIX: varyant-stoklu ürünler (top-level stock=0) de dahil; efektif stok kullanılır.
-    cursor = db.products.find({"$or": [{"stock": {"$gt": 0}}, {"variants.stock": {"$gt": 0}}]},
+    cursor = db.products.find({"$and": [
+            {"$or": [{"stock": {"$gt": 0}}, {"variants.stock": {"$gt": 0}}]},
+            {"is_deleted": {"$ne": True}}, {"is_active": {"$ne": False}}]},
                                {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1, "stock_code": 1,
                                 "brand": 1, "variants.stock": 1})
     async for p in cursor:

@@ -83,6 +83,17 @@ def _source_cond(source: Optional[str]) -> dict:
     return {}  # bilinmeyen kaynak → toplu
 
 
+def _channel_expr() -> dict:
+    """Bilinen pazaryerini platform/marketplace alanlarından öncelikli seç."""
+    platform = {"$toLower": {"$ifNull": ["$platform", ""]}}
+    marketplace = {"$toLower": {"$ifNull": ["$marketplace", ""]}}
+    return {"$cond": [
+        {"$in": [platform, _MARKETPLACES]}, platform,
+        {"$cond": [{"$in": [marketplace, _MARKETPLACES]}, marketplace,
+                    {"$cond": [{"$in": [platform, ["", "facette", "web"]]}, "site", platform]}]},
+    ]}
+
+
 def _norm_size(s) -> str:
     """Beden anahtarını TEK-BİÇİM yapar → aynı beden farklı ayraçla (XS-S / XS/S / 'XS S')
     RAPORDA AYRI SATIR ÇIKMASIN. Büyük harf; '/ \\ _ - boşluk' ayraçları tek '/' olur.
@@ -749,6 +760,7 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
             r_qty = min(int(c["qty"]) or 1, units)
             returns["revenue"] += r_amt
             returns["units"] += r_qty
+            returns["orders"] += 1
             total = round(total - r_amt, 2)
             units -= r_qty
             if total <= 0.005 and units <= 0:
@@ -899,6 +911,10 @@ async def products_export_xlsx(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     source: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    size: Optional[str] = Query(None),
+    season: Optional[str] = Query(None),
+    velocity: Optional[str] = Query(None),
     current_user: dict = Depends(require_admin),
 ):
     """Ürün raporunun Excel çıktısı — ekrandaki listeyle aynı veri (tüm ürünler,
@@ -922,7 +938,17 @@ async def products_export_xlsx(
                  "yellow": PatternFill("solid", fgColor="FFEB9C"),
                  "red": PatternFill("solid", fgColor="FFC7CE")}
     _VEL_LABEL = {"green": "Hızlı", "yellow": "Orta", "red": "Yavaş"}
-    for r in data.get("items", []):
+    export_rows = data.get("items", [])
+    if q:
+        needle = q.strip().casefold()
+        export_rows = [r for r in export_rows if needle in str(r.get("name") or "").casefold()]
+    if size:
+        export_rows = [r for r in export_rows if any(x.get("size") == size for x in r.get("size_breakdown") or [])]
+    if season:
+        export_rows = [r for r in export_rows if r.get("season") == season]
+    if velocity:
+        export_rows = [r for r in export_rows if (r.get("velocity") or {}).get("code") == velocity]
+    for r in export_rows:
         _crd = "; ".join(f"{x['platform']}: iptal {x['cancel']} / iade {x['return']}"
                          for x in (r.get("cancel_return_by_platform") or []))
         _vel = r.get("velocity") or {}
@@ -986,7 +1012,7 @@ async def top_products(
         # Sipariş platformu: platform > marketplace > 'site'
         # DENETİM O1: "Ciro (Net)" sipariş-düzeyi indirimi (kupon + havale/EFT) DÜŞMELİ.
         # _sub = sipariş kalem toplamı, _disc = kupon(+discount_amount) + payment_discount.
-        {"$addFields": {"_plat": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}},
+        {"$addFields": {"_plat": _channel_expr(),
                         "_sub": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
                                  "in": {"$add": ["$$value", {"$multiply": [
                                      {"$ifNull": ["$$this.quantity", 1]},
@@ -1227,7 +1253,7 @@ async def top_products(
         {"$match": merge_match({"$and": _cr_clauses})},
         *canonical_order_stages(),
         {"$match": {"status": {"$in": _CR_CANCEL + _CR_RETURN}}},
-        {"$addFields": {"_plat": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}},
+        {"$addFields": {"_plat": _channel_expr(),
                         "_kind": {"$cond": [{"$in": ["$status", _CR_CANCEL]}, "cancel", "return"]}}},
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
         {"$group": {"_id": {"bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
@@ -1480,7 +1506,7 @@ async def profitability(
     pipeline = [
         *_sales_stages(s, e, source),
         {"$addFields": {
-            "_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}},
+            "_ch": _channel_expr(),
             "_sub": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
                      "in": {"$add": ["$$value", {"$multiply": [
                          {"$ifNull": ["$$this.quantity", 1]},
@@ -1543,7 +1569,7 @@ async def profitability(
     cargo_by_ch = _dd(float)
     async for r in db.orders.aggregate([
         *_sales_stages(s, e, source),
-        {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
+        {"$addFields": {"_ch": _channel_expr()}},
         {"$group": {"_id": "$_ch", "shipping": {"$sum": {"$ifNull": ["$shipping_cost", 0]}},
                     "orders": {"$sum": 1}}},
     ]):
@@ -1628,7 +1654,7 @@ async def category_report(
         # DENETİM O1: "Ciro (Net)" sipariş-düzeyi indirimi (kupon + havale/EFT) DÜŞMELİ.
         # _sub = sipariş kalem toplamı, _disc = kupon(+discount_amount) + payment_discount.
         {"$addFields": {
-            "_plat": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}},
+            "_plat": _channel_expr(),
             "_sub": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
                      "in": {"$add": ["$$value", {"$multiply": [
                          {"$ifNull": ["$$this.quantity", 1]},
@@ -1732,7 +1758,7 @@ async def payment_report(
     s, e = _iso_range(start_date, end_date)
     # Pazaryeri siparişleri "marketplace" olarak tek kalemde toplanıyordu — artık
     # platforma göre Trendyol / Hepsiburada / Temu olarak AYRI gösterilir.
-    _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", ""]}]}}
+    _plat = _channel_expr()
     pipeline = [
         *_sales_stages(s, e, source),
         {"$group": {"_id": {"$cond": [
@@ -1771,7 +1797,7 @@ async def sales_by_platform(
     """Kanal Bazında Satış — yalnız SİTE + PAZARYERLERİ (Instagram/Google gibi trafik
     kaynakları DEĞİL; sipariş platform alanından). İptal/iade hariç."""
     s, e = _iso_range(start_date, end_date)
-    _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}
+    _plat = _channel_expr()
     pipeline = [
         *_sales_stages(s, e),
         {"$group": {"_id": {"$cond": [{"$in": [_plat, ["trendyol", "hepsiburada", "temu", "n11", "amazon"]]}, _plat, "site"]},
@@ -1805,7 +1831,7 @@ async def cancel_return_products(
     sc = _source_cond(source)
     if sc:
         clauses.append(sc)
-    _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}
+    _plat = _channel_expr()
     pipeline = [
         {"$match": merge_match({"$and": clauses})},
         *canonical_order_stages(),
@@ -1893,6 +1919,7 @@ async def cancel_return_products(
 async def cancel_return_by_source(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    source: Optional[str] = Query(None),
     current_user: dict = Depends(require_admin),
 ):
     """Kanal (Site/Trendyol/Hepsiburada/Temu) bazında satış · iptal · iade.
@@ -1913,9 +1940,13 @@ async def cancel_return_by_source(
     # göre saydığından, created_at (senkron-anı olabilir) yerine bununla saymak Trendyol'la AYNI
     # sipariş kümesini verir → 855↔891 gibi sapmaların ana nedeni kapanır. (Salt-okunur; stok/
     # ürün-kalem verisine DOKUNMAZ.)
+    _clauses = [{"_eff_date": {"$gte": s, "$lte": e}}]
+    _sc = _source_cond(source)
+    if _sc:
+        _clauses.append(_sc)
     _pipe = [
         {"$addFields": {"_eff_date": _effective_date_expr()}},
-        {"$match": merge_match({"_eff_date": {"$gte": s, "$lte": e}})},  # ticimax ÇİFT hariç
+        {"$match": merge_match({"$and": _clauses})},  # ticimax ÇİFT hariç
         {"$project": proj},
     ]
     orders = [o async for o in db.orders.aggregate(_pipe)]
@@ -1938,7 +1969,9 @@ async def cancel_return_by_source(
 
     # Site satırı tarih aralığında sıfır olsa da kaybolmasın. Böylece "Dün" / "Son 7 Gün"
     # geçişinde tablo yalnız Trendyol varmış izlenimi vermez; gerçek sıfır açıkça görünür.
-    by_ch.setdefault("site", [])
+    if (source or "all").strip().lower() in ("", "all", "toplu", "hepsi", "tum", "tümü",
+                                                "site", "facette", "web", "kendi"):
+        by_ch.setdefault("site", [])
 
     items = []
     for key, rows in by_ch.items():

@@ -12,8 +12,9 @@ const plat = (p) => PLAT[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—");
 export default function ProfitabilityAnalysis() {
   const today = new Date();
   // Bugün dahil tam 30 takvim günü: bugün - 29 gün.
-  const [from, setFrom] = useState(new Date(today.getTime() - 29 * 864e5).toISOString().slice(0, 10));
-  const [to, setTo] = useState(today.toISOString().slice(0, 10));
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const [from, setFrom] = useState(ymd(new Date(today.getTime() - 29 * 864e5)));
+  const [to, setTo] = useState(ymd(today));
   const [source, setSource] = useState("all");
   const [data, setData] = useState(null);
   const [cfg, setCfg] = useState(null);
@@ -34,7 +35,6 @@ export default function ProfitabilityAnalysis() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [source]);
 
   const setDatePreset = (kind) => {
-    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const tn = new Date();
     let f, tt;
     if (kind === "today") { f = tt = ymd(tn); }

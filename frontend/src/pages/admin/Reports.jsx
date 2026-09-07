@@ -12,8 +12,8 @@ const COLORS = ["#3b82f6", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#ef4444"
 
 function useDateRange() {
   const today = new Date();
-  const [from, setFrom] = useState(new Date(today.getTime() - 29 * 864e5).toISOString().slice(0, 10));
-  const [to, setTo] = useState(today.toISOString().slice(0, 10));
+  const [from, setFrom] = useState(_ymd(new Date(today.getTime() - 29 * 864e5)));
+  const [to, setTo] = useState(_ymd(today));
   return { from, setFrom, to, setTo };
 }
 
@@ -126,7 +126,7 @@ export function SalesReport() {
       .then((r) => setHourData(r.data)).catch(() => {});
     axios.get(`${API}/admin/reports/sales-by-weekday`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
       .then((r) => setWeekdayData(r.data)).catch(() => {});
-    axios.get(`${API}/admin/reports/cancel-return-by-source`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
+    axios.get(`${API}/admin/reports/cancel-return-by-source`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
       .then((r) => setCancelRet(r.data.items || [])).catch(() => {});
     // İl/İlçe & Kanal (eski ayrı sekme buraya taşındı — kullanıcı isteği)
     axios.get(`${API}/admin/reports/by-location`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group: "city", source, limit: 100 } })
@@ -466,7 +466,7 @@ export function ProductsReport() {
     axios.get(`${API}/admin/reports/cancel-return-products`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
       .then((r) => setCrRows(r.data.items || [])).catch(() => {});
     // İVME: seçili aralıktaki hız, 90 günlük tabana kıyaslanır (yükselen/sönen ürün tespiti)
-    const d90 = new Date(new Date(to).getTime() - 90 * 864e5).toISOString().slice(0, 10);
+    const d90 = _ymd(new Date(new Date(`${to}T12:00:00`).getTime() - 89 * 864e5));
     axios.get(`${API}/admin/reports/products/top`, { headers: authHeaders(), params: { start_date: d90, end_date: to + "T23:59:59", limit: 2000 } })
       .then((r) => {
         const m = {};
@@ -555,12 +555,19 @@ export function ProductsReport() {
   })();
   const exportXlsx = async () => {
     try {
-      const r = await fetch(`${API}/admin/reports/products/export-xlsx?start_date=${from}&end_date=${to}T23:59:59`, { headers: authHeaders() });
+      const params = new URLSearchParams({ start_date: from, end_date: `${to}T23:59:59` });
+      if (platFilter) params.set("source", platFilter);
+      if (q) params.set("q", q);
+      if (sizeFilter) params.set("size", sizeFilter);
+      if (collFilter) params.set("season", collFilter);
+      if (velFilter) params.set("velocity", velFilter);
+      const r = await fetch(`${API}/admin/reports/products/export-xlsx?${params}`, { headers: authHeaders() });
+      if (!r.ok) throw new Error(`Excel API ${r.status}`);
       const b = await r.blob();
       const u = URL.createObjectURL(b);
       const a = document.createElement("a"); a.href = u; a.download = "urun-raporu.xlsx"; a.click();
       URL.revokeObjectURL(u);
-    } catch { /* sessiz */ }
+    } catch { toast.error("Excel raporu indirilemedi."); }
   };
   const SortTh = ({ k, children, right }) => (
     <th onClick={() => toggleSort(k)} className={`p-3 cursor-pointer select-none hover:text-gray-900 ${right ? "text-right" : "text-left"}`}>
@@ -939,13 +946,13 @@ export function ProductsReport() {
 // --- Stock ---
 export function StockReport() {
   const [data, setData] = useState(null);
-  useEffect(() => {
-    axios.get(`${API}/admin/reports/stock`, { headers: authHeaders() }).then((r) => setData(r.data));
-  }, []);
+  const loadStock = () => axios.get(`${API}/admin/reports/stock`, { headers: authHeaders() })
+    .then((r) => setData(r.data)).catch(() => toast.error("Stok raporu alınamadı."));
+  useEffect(() => { loadStock(); /* eslint-disable-next-line */ }, []);
 
   return (
     <div className="space-y-5" data-testid="stock-report-page">
-      <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Stok Raporu <ReportScopeBadge kind="stock" /></h1>
+      <div className="flex items-center justify-between"><h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Stok Raporu <ReportScopeBadge kind="stock" /></h1><button onClick={loadStock} className="px-3 py-2 border rounded text-sm inline-flex gap-1 items-center"><RefreshCw size={14}/> Yenile</button></div>
 
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
         <span className="font-semibold">Bu raporda:</span> Deponuzun anlık durumunu görürsünüz — <b>toplam stok adedi</b>, güncel satış fiyatı üzerinden <b>toplam stok değeri (₺)</b> ve <b>stoğu biten ürün sayısı</b>. Altta <b>kritik stok (≤5 adet)</b> ve <b>tamamen tükenmiş</b> ürünler listelenir; hangi ürünleri acilen yeniden sipariş etmeniz veya ürettirmeniz gerektiğini buradan fark eder, "Düzenle" ile doğrudan ürüne gidersiniz.

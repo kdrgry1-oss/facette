@@ -23,7 +23,7 @@ const _TAB_SCOPE = {
   stock: "stock", forecast: "stock", costs: "stock",
   fast: "exclude", slow: "exclude",
   returns: "returns",
-  profit: "cancelOnly",
+  profit: "exclude",
 };
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -50,7 +50,7 @@ export default function ReportsExtended() {
     <div data-testid="reports-extended-page" className="space-y-6">
       <div>
         <h1 className="text-2xl font-light text-gray-900 flex items-center gap-2 flex-wrap">Gelişmiş Raporlar <ReportScopeBadge kind={_TAB_SCOPE[tab] || "exclude"} /></h1>
-        <p className="text-sm text-gray-500 mt-1">Stok değer, satış hızı, iade oranı uyarısı, kanal bazlı net kâr ve maliyet yönetimi.</p>
+        <p className="text-sm text-gray-500 mt-1">Stok değer, satış hızı, iade oranı uyarısı, kanal bazlı tahmini brüt marj ve maliyet yönetimi.</p>
       </div>
 
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
@@ -461,7 +461,7 @@ function ReturnRateAlerts() {
           <select value={days} onChange={(e)=>setDays(+e.target.value)} className="border rounded px-2 py-1 text-sm">
             <option value={30}>30g</option><option value={60}>60g</option><option value={90}>90g</option><option value={180}>180g</option>
           </select></label>
-        <label className="text-sm text-gray-600 flex items-center gap-1">Min Sipariş:
+        <label className="text-sm text-gray-600 flex items-center gap-1">Min Satılan Adet:
           <input type="number" min={1} max={100} value={minOrders} onChange={(e)=>setMinOrders(+e.target.value)} className="border rounded px-2 py-1 text-sm w-20" /></label>
         <button onClick={load} className="ml-auto text-sm text-blue-700 hover:underline flex items-center gap-1"><RefreshCw className={`w-3.5 h-3.5 ${loading?"animate-spin":""}`}/>Yenile</button>
       </div>
