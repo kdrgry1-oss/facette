@@ -147,10 +147,10 @@ export default function Login() {
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: handleGoogleCredential,
-        // Google, use_fedcm_for_prompt alanını kullanımdan kaldırdı. Tıklanan GIS
-        // düğmesinin üçüncü taraf çerezsiz FedCM akışını kullanması için yeni alan
-        // doğrudan düğme yapılandırmasında açılmalıdır.
-        use_fedcm_for_button: true,
+        // Bazı gömülü/uygulama içi tarayıcılar FedCM desteklediğini bildirse de hesap
+        // seçiciyi beyaz ekran olarak açıyor. Klasik GIS popup'ını kullan; storefront
+        // COOP başlığı same-origin-allow-popups olduğu için pencere iletişimi güvenlidir.
+        use_fedcm_for_button: false,
         button_auto_select: false,
         auto_select: false,
         itp_support: true,
