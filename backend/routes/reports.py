@@ -815,6 +815,36 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
             "partial_cancel_orders": partial_cancels}
 
 
+async def _canonical_report_context(s: str, e: str, source: Optional[str] = None) -> tuple:
+    """Load the one canonical order population used by every sales summary block.
+
+    Cards, channel rows and payment rows used to build their date population with
+    three slightly different pipelines.  On legacy marketplace/site copies this
+    allowed one block to select a Site document while another selected its
+    Trendyol twin.  Returning the exact same documents and return maps makes such
+    a contradiction impossible.
+    """
+    clauses = [effective_order_date_match(s, e)]
+    sc = _source_cond(source)
+    if sc:
+        clauses.append(sc)
+    pipeline = [
+        {"$match": merge_match({"$and": clauses})},
+        *canonical_order_stages(),
+        {"$project": {
+            "_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
+            "items.quantity": 1, "partial_cancel_amount": 1,
+            "partial_cancel_units": 1, "platform": 1, "marketplace": 1,
+            "payment_method": 1,
+        }},
+    ]
+    orders = [order async for order in db.orders.aggregate(pipeline)]
+    onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
+    oids = list({str(o.get("id")) for o in orders if o.get("id")})
+    closed, open_ = await _split_maps(onums, oids)
+    return orders, closed, open_
+
+
 async def _returned_barcode_qty(order_numbers: list) -> dict:
     """{order_number: {barcode: iade_adedi}} — hangi KALEMİN kaç adedi iade edildi.
 
@@ -891,27 +921,7 @@ async def sales_breakdown(
     (Trendyol 'Brüt Satış Adedi') aynı birim. `orders` = sipariş sayısı.
     Tarih aralığı TR yerel gün, kaynak filtreli."""
     s, e = _iso_range(start_date, end_date)
-    sc = _source_cond(source)
-    proj = {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
-            "items.quantity": 1, "partial_cancel_amount": 1, "partial_cancel_units": 1}
-    # SIFIR-SAPMA + tutarlılık: ciro kartları da aralık üyeliğini EFFECTIVE DATE ile belirler
-    # (marketplace_order_date ?? created_at) — cancel_return_by_source tablosuyla AYNI taban,
-    # Trendyol orderDate kümesiyle örtüşür. (Salt-okunur; stok/kalem'e dokunmaz.)
-    _match = {"_eff_date": {"$gte": s, "$lte": e}}
-    if sc:
-        _match.update(sc)
-    _match = merge_match(_match)  # ticimax_history ÇİFT kayıtları hariç
-    _pipe = [
-        {"$addFields": {"_eff_date": _effective_date_expr()}},
-        {"$match": _match},
-        *canonical_order_stages(),
-        {"$project": proj},
-    ]
-    orders = [o async for o in db.orders.aggregate(_pipe)]
-    onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
-    oids = list({str(o.get("id")) for o in orders if o.get("id")})
-    closed, open_ = await _split_maps(onums, oids)
-
+    orders, closed, open_ = await _canonical_report_context(s, e, source)
     return _bucket_orders(orders, closed, open_)
 
 
@@ -1796,23 +1806,7 @@ async def payment_report(
     # iptal/iade ayrıştırmasını kullanır. `_sales_stages` terminal siparişleri tamamen
     # dışladığı için kısmi iade/iptalde müşteride kalan net tutarı da kaybediyordu;
     # bu da ödeme kırılımı toplamını ana "Net Satış" kartıyla çeliştiriyordu.
-    sc = _source_cond(source)
-    clauses = [effective_order_date_match(s, e)]
-    if sc:
-        clauses.append(sc)
-    pipeline = [
-        {"$match": merge_match({"$and": clauses})},
-        *canonical_order_stages(),
-        {"$project": {
-            "_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
-            "items.quantity": 1, "partial_cancel_amount": 1, "partial_cancel_units": 1,
-            "platform": 1, "marketplace": 1, "payment_method": 1,
-        }},
-    ]
-    orders = [o async for o in db.orders.aggregate(pipeline)]
-    onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
-    oids = list({str(o.get("id")) for o in orders if o.get("id")})
-    closed, open_ = await _split_maps(onums, oids)
+    orders, closed, open_ = await _canonical_report_context(s, e, source)
 
     grouped: dict = {}
     for order in orders:
@@ -1829,10 +1823,12 @@ async def payment_report(
     for key, rows in grouped.items():
         bucket = _bucket_orders(rows, closed, open_)
         label = _LABELS.get(key, key or "—")
-        m = merged.setdefault(label, {"orders": 0, "revenue": 0.0})
+        m = merged.setdefault(label, {"orders": 0, "units": 0, "revenue": 0.0})
         m["orders"] += int(bucket["net"]["orders"] or 0)
+        m["units"] += int(bucket["net"]["units"] or 0)
         m["revenue"] += float(bucket["net"]["revenue"] or 0)
-    out = [{"method": k, "orders": v["orders"], "revenue": round(v["revenue"], 2)}
+    out = [{"method": k, "orders": v["orders"], "units": v["units"],
+            "revenue": round(v["revenue"], 2)}
            for k, v in sorted(merged.items(), key=lambda kv: -kv[1]["revenue"])]
     return {"items": out}
 
@@ -1981,28 +1977,7 @@ async def cancel_return_by_source(
     Her kanal için: sipariş · ADET · tutar (net/iptal/iade) + açık iade projeksiyonu.
     """
     s, e = _iso_range(start_date, end_date)
-    proj = {"_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
-            "items.quantity": 1, "partial_cancel_amount": 1, "partial_cancel_units": 1,
-            "platform": 1, "marketplace": 1}
-    # SIFIR-SAPMA (Kadir): aralık üyeliğini EFFECTIVE DATE ile belirle — pazaryeri siparişinde
-    # OTANTİK orderDate (marketplace_order_date), yoksa created_at. Trendyol raporunu orderDate'e
-    # göre saydığından, created_at (senkron-anı olabilir) yerine bununla saymak Trendyol'la AYNI
-    # sipariş kümesini verir → 855↔891 gibi sapmaların ana nedeni kapanır. (Salt-okunur; stok/
-    # ürün-kalem verisine DOKUNMAZ.)
-    _clauses = [{"_eff_date": {"$gte": s, "$lte": e}}]
-    _sc = _source_cond(source)
-    if _sc:
-        _clauses.append(_sc)
-    _pipe = [
-        {"$addFields": {"_eff_date": _effective_date_expr()}},
-        {"$match": merge_match({"$and": _clauses})},  # ticimax ÇİFT hariç
-        *canonical_order_stages(),
-        {"$project": proj},
-    ]
-    orders = [o async for o in db.orders.aggregate(_pipe)]
-    onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
-    oids = list({str(o.get("id")) for o in orders if o.get("id")})
-    closed, open_ = await _split_maps(onums, oids)
+    orders, closed, open_ = await _canonical_report_context(s, e, source)
 
     _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu", "n11": "n11", "amazon": "Amazon"}
     by_ch: dict = {}

@@ -101,6 +101,25 @@ export function SalesReport() {
   const [data, setData] = useState(null);
   const [paymentData, setPayData] = useState([]);
   const [brk, setBrk] = useState(null);
+  const [cancelRet, setCancelRet] = useState([]);
+  const paymentNet = paymentData.reduce((a, row) => ({
+    revenue: a.revenue + Number(row.revenue || 0),
+    orders: a.orders + Number(row.orders || 0),
+    units: a.units + Number(row.units || 0),
+  }), { revenue: 0, orders: 0, units: 0 });
+  const channelNet = cancelRet.reduce((a, row) => ({
+    revenue: a.revenue + Number(row.revenue || 0),
+    orders: a.orders + Number(row.orders || 0),
+    units: a.units + Number(row.units || 0),
+  }), { revenue: 0, orders: 0, units: 0 });
+  const integrityMismatch = Boolean(brk && paymentData.length && cancelRet.length) && (
+    Math.abs(Number(brk.net?.revenue || 0) - paymentNet.revenue) > 0.02 ||
+    Number(brk.net?.orders || 0) !== paymentNet.orders ||
+    Number(brk.net?.units || 0) !== paymentNet.units ||
+    Math.abs(Number(brk.net?.revenue || 0) - channelNet.revenue) > 0.02 ||
+    Number(brk.net?.orders || 0) !== channelNet.orders ||
+    Number(brk.net?.units || 0) !== channelNet.units
+  );
 
   const load = async () => {
     const [s, p, b] = await Promise.all([
@@ -122,7 +141,6 @@ export function SalesReport() {
     axios.get(`${API}/admin/reports/by-location`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group: "city", source, limit: 100 } })
       .then((r) => setLocData(r.data.rows || [])).catch(() => {});
   };
-  const [cancelRet, setCancelRet] = useState([]);
   const [locData, setLocData] = useState([]);
 
 
@@ -156,6 +174,12 @@ export function SalesReport() {
         </div>
       </div>
 
+      {integrityMismatch && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800" data-testid="report-integrity-warning">
+          Rapor tutarlılık kontrolü başarısız: üst kart, kanal ve ödeme toplamları eşleşmiyor.
+          Bu dönem karar amaçlı kullanılmamalıdır.
+        </div>
+      )}
 
       {/* Ciro kırılımı — 4 kademe: dahil → sadece iptal → sadece iade → net (elde kalan) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
