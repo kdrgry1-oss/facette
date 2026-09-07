@@ -3,8 +3,12 @@ Authentication routes - Login, Register, Google OAuth
 """
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlencode
+import hashlib
+import hmac
 import uuid
 import os
+import secrets
 
 from .deps import (
     db, logger, hash_password, verify_password, 
@@ -61,6 +65,75 @@ def _next_pw_history(user: dict) -> list:
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "") or "49503095707-cahr1ntbc30lqeho6nj1pbggq3tatien.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+
+
+async def _google_user_from_credential(credential: str) -> dict:
+    """Google GIS ID tokenini doğrula ve yerel kullanıcıyı bul/oluştur."""
+    try:
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+    except Exception:
+        raise HTTPException(status_code=500, detail="Google dogrulama kutuphanesi yuklu degil")
+
+    credential = safe_str(credential, 4096)
+    if not credential:
+        raise HTTPException(status_code=400, detail="Google kimlik tokeni eksik")
+    try:
+        idinfo = google_id_token.verify_oauth2_token(
+            credential, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+    except Exception:
+        raise HTTPException(status_code=401, detail="Google tokeni dogrulanamadi")
+
+    if not idinfo.get("email_verified", False):
+        raise HTTPException(status_code=400, detail="Google e-postasi dogrulanmamis")
+    email = safe_str(idinfo.get("email", ""), 256).lower().strip()
+    if not is_safe_email(email):
+        raise HTTPException(status_code=400, detail="Google hesabindan gecerli e-posta alinamadi")
+    name = safe_str(idinfo.get("name", ""), 200)
+    picture = safe_str(idinfo.get("picture", ""), 500)
+    first_name, _, last_name = name.partition(" ")
+
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        user = {
+            "id": generate_id(),
+            "email": email,
+            "password": hash_password(uuid.uuid4().hex),
+            "first_name": first_name or name or email.split("@")[0],
+            "last_name": last_name or "",
+            "phone": "",
+            "is_admin": False,
+            "is_active": True,
+            "auth_provider": "google",
+            "picture": picture,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.users.insert_one(user)
+    else:
+        updates = {}
+        if not user.get("auth_provider"):
+            updates["auth_provider"] = "google"
+        if picture and not user.get("picture"):
+            updates["picture"] = picture
+        if updates:
+            await db.users.update_one({"id": user["id"]}, {"$set": updates})
+            user.update(updates)
+
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="Hesabiniz devre disi")
+    return user
+
+
+def _public_auth_user(user: dict) -> dict:
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "first_name": user.get("first_name", ""),
+        "last_name": user.get("last_name", ""),
+        "is_admin": user.get("is_admin", False),
+        "picture": user.get("picture", ""),
+    }
 
 @router.post("/register")
 @(limiter.limit("5/minute") if limiter else (lambda f: f))
@@ -949,65 +1022,15 @@ async def forgot_password_email(request: Request, req: EmailResetReq):
     return generic
 
 @router.post("/google")
+@(limiter.limit("10/minute") if limiter else (lambda f: f))
 async def google_signin(request: Request, payload: dict):
     """Standart Google Sign-In — frontend GIS'ten gelen ID token'i dogrular,
     kullaniciyi olusturur/bulur ve uygulama JWT'sini dondurur (kendi Client ID'miz)."""
-    try:
-        from google.oauth2 import id_token as google_id_token
-        from google.auth.transport import requests as google_requests
-    except Exception:
-        raise HTTPException(status_code=500, detail="Google dogrulama kutuphanesi yuklu degil")
-
     credential = safe_str((payload or {}).get("credential", ""), 4096)
-    if not credential:
-        raise HTTPException(status_code=400, detail="Google kimlik tokeni eksik")
-    try:
-        idinfo = google_id_token.verify_oauth2_token(
-            credential, google_requests.Request(), GOOGLE_CLIENT_ID
-        )
-    except Exception:
-        raise HTTPException(status_code=401, detail="Google tokeni dogrulanamadi")
-
-    if not idinfo.get("email_verified", False):
-        raise HTTPException(status_code=400, detail="Google e-postasi dogrulanmamis")
-    email = safe_str(idinfo.get("email", ""), 256).lower().strip()
-    if not is_safe_email(email):
-        raise HTTPException(status_code=400, detail="Google hesabindan gecerli e-posta alinamadi")
-    name = safe_str(idinfo.get("name", ""), 200)
-    picture = safe_str(idinfo.get("picture", ""), 500)
-    first_name, _, last_name = name.partition(" ")
+    user = await _google_user_from_credential(credential)
+    email = user["email"]
     ip = client_ip_from_request(request)
     ua = request.headers.get("user-agent")
-
-    user = await db.users.find_one({"email": email}, {"_id": 0})
-    if not user:
-        user = {
-            "id": generate_id(),
-            "email": email,
-            "password": hash_password(uuid.uuid4().hex),  # Google kullanicisi
-            "first_name": first_name or name or email.split("@")[0],
-            "last_name": last_name or "",
-            "phone": "",
-            "is_admin": False,
-            "is_active": True,
-            "auth_provider": "google",
-            "picture": picture,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.users.insert_one(user)
-    else:
-        updates = {}
-        if not user.get("auth_provider"):
-            updates["auth_provider"] = "google"
-        if picture and not user.get("picture"):
-            updates["picture"] = picture
-        if updates:
-            await db.users.update_one({"id": user["id"]}, {"$set": updates})
-
-    if not user.get("is_active", True):
-        await write_audit_log("google_login", user_id=user["id"], email=email, ip=ip,
-                              user_agent=ua, success=False, meta={"reason": "inactive"})
-        raise HTTPException(status_code=403, detail="Hesabiniz devre disi")
 
     token = create_token(user["id"], user.get("is_admin", False), token_version=user.get("token_version", 0))
     await write_audit_log("google_login", user_id=user["id"], email=email, ip=ip,
@@ -1015,15 +1038,80 @@ async def google_signin(request: Request, payload: dict):
     return {
         "success": True,
         "token": token,
-        "user": {
-            "id": user["id"],
-            "email": user["email"],
-            "first_name": user.get("first_name", ""),
-            "last_name": user.get("last_name", ""),
-            "is_admin": user.get("is_admin", False),
-            "picture": user.get("picture", ""),
-        },
+        "user": _public_auth_user(user),
     }
+
+
+@router.post("/google/callback")
+@(limiter.limit("10/minute") if limiter else (lambda f: f))
+async def google_redirect_callback(request: Request):
+    """GIS tam-sayfa dönüşü: Google credential -> kısa ömürlü, tek kullanımlık kod.
+
+    Uygulama JWT'si URL'ye asla yazılmaz. Google'ın çift-gönderimli CSRF çerezi de
+    form alanıyla sabit-zamanlı karşılaştırılır.
+    """
+    from fastapi.responses import RedirectResponse
+
+    site_url = os.environ.get("SITE_URL", "https://facette.com.tr").rstrip("/")
+    body = await request.body()
+    if len(body) > 16_384:
+        return RedirectResponse(f"{site_url}/giris?google_error=invalid_response", status_code=303)
+    try:
+        form = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+    except Exception:
+        form = {}
+    credential = safe_str((form.get("credential") or [""])[0], 4096)
+    form_csrf = safe_str((form.get("g_csrf_token") or [""])[0], 512)
+    cookie_csrf = safe_str(request.cookies.get("g_csrf_token", ""), 512)
+    if not form_csrf or not cookie_csrf or not hmac.compare_digest(form_csrf, cookie_csrf):
+        return RedirectResponse(f"{site_url}/giris?google_error=csrf", status_code=303)
+
+    try:
+        user = await _google_user_from_credential(credential)
+    except HTTPException as exc:
+        code = "inactive" if exc.status_code == 403 else "verification"
+        return RedirectResponse(f"{site_url}/giris?google_error={code}", status_code=303)
+
+    raw_code = secrets.token_urlsafe(32)
+    now_ts = datetime.now(timezone.utc).timestamp()
+    await db.google_login_codes.delete_many({"expires_at": {"$lte": now_ts}})
+    await db.google_login_codes.insert_one({
+        "code_hash": hashlib.sha256(raw_code.encode("utf-8")).hexdigest(),
+        "user_id": user["id"],
+        "used": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": now_ts + 120,
+    })
+    return RedirectResponse(
+        f"{site_url}/giris?{urlencode({'google_code': raw_code})}", status_code=303
+    )
+
+
+@router.post("/google/exchange")
+@(limiter.limit("10/minute") if limiter else (lambda f: f))
+async def google_exchange(request: Request, payload: dict):
+    """Tam-sayfa Google dönüş kodunu atomik olarak yalnız bir kez JWT'ye çevir."""
+    raw_code = safe_str((payload or {}).get("code", ""), 256)
+    if not raw_code:
+        raise HTTPException(status_code=400, detail="Google giris kodu eksik")
+    code_hash = hashlib.sha256(raw_code.encode("utf-8")).hexdigest()
+    now_ts = datetime.now(timezone.utc).timestamp()
+    code_doc = await db.google_login_codes.find_one_and_update(
+        {"code_hash": code_hash, "used": False, "expires_at": {"$gt": now_ts}},
+        {"$set": {"used": True, "used_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if not code_doc:
+        raise HTTPException(status_code=401, detail="Google giris kodu gecersiz veya suresi dolmus")
+    user = await db.users.find_one({"id": code_doc["user_id"]}, {"_id": 0})
+    if not user or not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="Hesabiniz devre disi")
+
+    token = create_token(user["id"], user.get("is_admin", False), token_version=user.get("token_version", 0))
+    await write_audit_log(
+        "google_login", user_id=user["id"], email=user["email"],
+        ip=client_ip_from_request(request), user_agent=request.headers.get("user-agent"), success=True,
+    )
+    return {"success": True, "token": token, "user": _public_auth_user(user)}
 
 
 @router.post("/google/session")

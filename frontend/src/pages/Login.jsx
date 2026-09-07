@@ -8,6 +8,7 @@ import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || "49503095707-cahr1ntbc30lqeho6nj1pbggq3tatien.apps.googleusercontent.com";
+const GOOGLE_LOGIN_URI = `${process.env.REACT_APP_BACKEND_URL}/api/auth/google/callback`;
 
 export default function Login() {
   const navigate = useNavigate();
@@ -32,22 +33,34 @@ export default function Login() {
 
   const googleBtnRef = useRef(null);
 
-  // Google ile giriş — kendi Client ID'miz üzerinden Google Identity Services (GIS).
-  const handleGoogleCredential = async (response) => {
-    setLoading(true);
-    try {
-      const res = await axios.post(`${API}/auth/google`, { credential: response.credential });
-      if (res.data?.success) {
-        loginWithToken(res.data.token, res.data.user);
-        toast.success("Google ile giriş başarılı!");
-        navigate(_redirectTo);
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Google ile giriş başarısız");
-    } finally {
-      setLoading(false);
+  // Tam-sayfa Google dönüşü: URL'deki kısa ömürlü kodu backend'de bir kez JWT'ye çevir.
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    const code = q.get("google_code");
+    const error = q.get("google_error");
+    if (!code && !error) return;
+    window.history.replaceState({}, "", "/giris");
+    if (error) {
+      toast.error(error === "csrf" ? "Google giriş doğrulaması güvenlik kontrolünden geçemedi" : "Google ile giriş başarısız");
+      return;
     }
-  };
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await axios.post(`${API}/auth/google/exchange`, { code });
+        if (res.data?.token) {
+          loginWithToken(res.data.token, res.data.user);
+          toast.success("Google ile giriş başarılı!");
+          let to = "/hesabim";
+          try { to = sessionStorage.getItem("google_redirect_to") || to; } catch {}
+          navigate(to);
+        }
+      } catch (err) {
+        toast.error(err.response?.data?.detail || "Google ile giriş başarısız");
+      } finally { setLoading(false); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- Facebook ile giriş (sunucu-taraflı OAuth code akışı) ----
   const FB_REDIRECT = typeof window !== "undefined" ? `${window.location.origin}/giris` : "";
@@ -146,11 +159,9 @@ export default function Login() {
       if (!window.google?.accounts?.id) return;
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
-        callback: handleGoogleCredential,
-        // Bazı gömülü/uygulama içi tarayıcılar FedCM desteklediğini bildirse de hesap
-        // seçiciyi beyaz ekran olarak açıyor. Klasik GIS popup'ını kullan; storefront
-        // COOP başlığı same-origin-allow-popups olduğu için pencere iletişimi güvenlidir.
-        use_fedcm_for_button: false,
+        ux_mode: "redirect",
+        login_uri: GOOGLE_LOGIN_URI,
+        state_cookie_domain: window.location.hostname.endsWith("facette.com.tr") ? "facette.com.tr" : undefined,
         button_auto_select: false,
         auto_select: false,
         itp_support: true,
@@ -162,10 +173,11 @@ export default function Login() {
           type: "icon",       // kompakt ikon buton → Facebook ile yan yana sığar
           shape: "square",
           locale: "tr",
+          click_listener: () => {
+            try { sessionStorage.setItem("google_redirect_to", _redirectTo); } catch {}
+          },
         });
       }
-      // One Tap burada bilerek çağrılmaz. Sayfadaki üyelik popup'ı ile üst üste gelen
-      // ikinci bir istem oluşturmak yerine kullanıcı Google düğmesini kendisi seçer.
     };
     if (window.google?.accounts?.id) {
       init();
