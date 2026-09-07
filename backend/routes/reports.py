@@ -904,10 +904,10 @@ async def sales_breakdown(
     _pipe = [
         {"$addFields": {"_eff_date": _effective_date_expr()}},
         {"$match": _match},
+        *canonical_order_stages(),
         {"$project": proj},
     ]
     orders = [o async for o in db.orders.aggregate(_pipe)]
-    orders = _dedupe_by_order_number(orders)  # kopya belge = tek sipariş (sapma önle)
     onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
     oids = list({str(o.get("id")) for o in orders if o.get("id")})
     closed, open_ = await _split_maps(onums, oids)
@@ -1769,8 +1769,8 @@ async def payment_report(
     # iptal/iade ayrıştırmasını kullanır. `_sales_stages` terminal siparişleri tamamen
     # dışladığı için kısmi iade/iptalde müşteride kalan net tutarı da kaybediyordu;
     # bu da ödeme kırılımı toplamını ana "Net Satış" kartıyla çeliştiriyordu.
-    clauses = [effective_order_date_match(s, e)]
     sc = _source_cond(source)
+    clauses = [effective_order_date_match(s, e)]
     if sc:
         clauses.append(sc)
     pipeline = [
@@ -1969,10 +1969,10 @@ async def cancel_return_by_source(
     _pipe = [
         {"$addFields": {"_eff_date": _effective_date_expr()}},
         {"$match": merge_match({"$and": _clauses})},  # ticimax ÇİFT hariç
+        *canonical_order_stages(),
         {"$project": proj},
     ]
     orders = [o async for o in db.orders.aggregate(_pipe)]
-    orders = _dedupe_by_order_number(orders)  # kopya belge = tek sipariş (sapma önle)
     onums = list({str(o.get("order_number")) for o in orders if o.get("order_number")})
     oids = list({str(o.get("id")) for o in orders if o.get("id")})
     closed, open_ = await _split_maps(onums, oids)
