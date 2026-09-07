@@ -11,7 +11,8 @@ const plat = (p) => PLAT[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—");
 
 export default function ProfitabilityAnalysis() {
   const today = new Date();
-  const [from, setFrom] = useState(new Date(today.getTime() - 30 * 864e5).toISOString().slice(0, 10));
+  // Bugün dahil tam 30 takvim günü: bugün - 29 gün.
+  const [from, setFrom] = useState(new Date(today.getTime() - 29 * 864e5).toISOString().slice(0, 10));
   const [to, setTo] = useState(today.toISOString().slice(0, 10));
   const [source, setSource] = useState("all");
   const [data, setData] = useState(null);
