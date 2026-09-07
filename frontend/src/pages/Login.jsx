@@ -9,6 +9,7 @@ import axios from "axios";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || "49503095707-cahr1ntbc30lqeho6nj1pbggq3tatien.apps.googleusercontent.com";
 const GOOGLE_LOGIN_URI = `${process.env.REACT_APP_BACKEND_URL}/api/auth/google/callback`;
+const GOOGLE_REDIRECT_FLOW_VERSION = "2026-09-07-2";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -234,7 +235,7 @@ export default function Login() {
           {/* Sosyal giriş — ikon butonlar yan yana (Google + Facebook + Apple), eşit ölçü */}
           <div className="flex items-center justify-center gap-3 mb-6">
             {/* Google — resmi GIS ikon butonu (kırpma yok; kendi boyutunda render olur) */}
-            <div ref={googleBtnRef} data-testid="google-login-btn" className="flex items-center justify-center" />
+            <div ref={googleBtnRef} data-testid="google-login-btn" data-flow-version={GOOGLE_REDIRECT_FLOW_VERSION} className="flex items-center justify-center" />
             {/* Facebook */}
             {socialProviders.facebook && (
               <button type="button" onClick={handleFacebookLogin} disabled={loading}
