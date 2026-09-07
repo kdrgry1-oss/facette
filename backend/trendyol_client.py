@@ -257,7 +257,9 @@ class TrendyolClient:
 
     # ------------------ ORDERS ------------------
 
-    async def get_orders(self, start_date_ms: int = None, end_date_ms: int = None, status: str = None, order_number: str = None, size: int = 50, page: int = 0) -> Dict:
+    async def get_orders(self, start_date_ms: int = None, end_date_ms: int = None,
+                         status: str = None, order_number: str = None, size: int = 50,
+                         page: int = 0, order_by_field: str = "PackageLastModifiedDate") -> Dict:
         """
         Fetches orders from Trendyol.
         Endpoint: GET /order/sellers/{supplierId}/orders
@@ -274,7 +276,8 @@ class TrendyolClient:
             params["orderNumber"] = order_number
         else:
             # Sadece order_number yoksa siralamayi ekle, spesifik sipariste siralama istenmez
-            params["orderByField"] = "PackageLastModifiedDate"
+            params["orderByField"] = ("CreatedDate" if order_by_field == "CreatedDate"
+                                      else "PackageLastModifiedDate")
             params["orderByDirection"] = "DESC"
             
         async with httpx.AsyncClient(timeout=30.0) as client:

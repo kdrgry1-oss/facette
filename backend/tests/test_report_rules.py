@@ -1,4 +1,5 @@
 import importlib.util
+import asyncio
 from pathlib import Path
 import sys
 import types
@@ -59,3 +60,34 @@ def test_confirmed_return_is_removed_from_net_but_cancel_is_not_in_denominator()
 
 def test_confirmed_return_cannot_exceed_sold_quantity():
     assert split_confirmed_return(2, 300.0, 9) == (0, 0.0, 2, 300.0)
+
+
+def test_trendyol_reconciliation_can_request_created_date(monkeypatch):
+    import trendyol_client
+
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"content": []}
+
+    class ClientContext:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def get(self, _url, **kwargs):
+            captured.update(kwargs.get("params") or {})
+            return Response()
+
+    monkeypatch.setattr(trendyol_client.httpx, "AsyncClient", lambda **_: ClientContext())
+    client = trendyol_client.TrendyolClient("supplier", "key", "secret", "production")
+    asyncio.run(client.get_orders(
+        start_date_ms=1, end_date_ms=2, order_by_field="CreatedDate"
+    ))
+    assert captured["orderByField"] == "CreatedDate"

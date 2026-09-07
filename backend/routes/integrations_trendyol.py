@@ -4392,7 +4392,8 @@ def _ty_pkg_totals(pkg: dict) -> tuple:
     return units, round(amount, 2)
 
 
-async def _ty_fetch_orders_range(client, start_ms: int, end_ms: int) -> dict:
+async def _ty_fetch_orders_range(client, start_ms: int, end_ms: int,
+                                 order_by_field: str = "PackageLastModifiedDate") -> dict:
     """Aralıktaki TÜM Trendyol paketlerini sipariş numarasına göre toplar.
     Trendyol orders ucu ~14 günlük pencereye izin verdiğinden aralık bölünür."""
     _WIN = 14 * 24 * 3600 * 1000
@@ -4405,7 +4406,7 @@ async def _ty_fetch_orders_range(client, start_ms: int, end_ms: int) -> dict:
         while guard < 400:
             guard += 1
             resp = await client.get_orders(start_date_ms=win_s, end_date_ms=win_e,
-                                           size=200, page=page)
+                                           size=200, page=page, order_by_field=order_by_field)
             chunk = resp.get("content", []) or []
             for pkg in chunk:
                 onum = str(pkg.get("orderNumber") or "")
@@ -4491,7 +4492,9 @@ async def trendyol_reconcile(
                             detail=f"Mutabakat aralığı en fazla 62 gün olabilir (seçilen: {int(_days)} gün). "
                                    f"Ay ay çalıştırın.")
 
-    ty = await _ty_fetch_orders_range(client, start_ms, end_ms)
+    # Trendyol API'de tarih filtresinin anlamını orderByField belirler. Raporun panel
+    # tarafı sipariş tarihidir; bu nedenle elma-elma karşılaştırmada CreatedDate şarttır.
+    ty = await _ty_fetch_orders_range(client, start_ms, end_ms, order_by_field="CreatedDate")
 
     # Bizim taraf — aynı TR yerel aralık, Trendyol kaynaklı siparişler.
     # KRİTİK: aralık üyeliği EFFECTIVE DATE ile belirlenir (marketplace_order_date ?? created_at)
@@ -4645,7 +4648,12 @@ async def trendyol_reconcile(
             "order_numbers": [{"order_number": k, "doc_count": v} for k, v in
                               sorted(dup_onums.items(), key=lambda x: -x[1])][:list_limit],
         },
-        "missing_in_panel": {"count": len(missing), "items": missing[:list_limit]},
+        "missing_in_panel": {
+            "count": len(missing),
+            "active_count": sum(1 for x in missing if not x.get("fully_cancelled")),
+            "cancelled_count": sum(1 for x in missing if x.get("fully_cancelled")),
+            "items": missing[:list_limit],
+        },
         "extra_in_panel": {"count": len(extra), "items": extra[:list_limit]},
         "cancel_mismatch": {"count": len(cancel_mm), "items": cancel_mm[:list_limit]},
         "partial_cancel": {"count": len(partial_mm), "items": partial_mm[:list_limit]},

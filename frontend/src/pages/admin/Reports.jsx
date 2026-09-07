@@ -611,7 +611,9 @@ export function ProductsReport() {
             <div className="bg-white/70 rounded-lg p-3"><b>Panel (tekil):</b> {recon.panel?.orders || 0} sipariş · {recon.panel?.units || 0} adet · ₺{(recon.panel?.amount || 0).toLocaleString("tr-TR")}</div>
           </div>
           <p className="text-xs text-gray-600 mt-3">
-            Ham kopya belge: {recon.duplicates?.extra_docs || 0} · Panelde eksik: {recon.missing_in_panel?.count || 0} · Panelde fazla: {recon.extra_in_panel?.count || 0} · İptal durum farkı: {recon.cancel_mismatch?.count || 0}
+            Ham kopya belge: {recon.duplicates?.extra_docs || 0} · Panelde eksik: {recon.missing_in_panel?.count || 0}
+            {recon.missing_in_panel?.count ? ` (${recon.missing_in_panel.active_count || 0} aktif, ${recon.missing_in_panel.cancelled_count || 0} iptal)` : ""}
+            {' · '}Panelde fazla: {recon.extra_in_panel?.count || 0} · İptal durum farkı: {recon.cancel_mismatch?.count || 0}
           </p>
         </div>
       )}
