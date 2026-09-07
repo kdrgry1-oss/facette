@@ -4924,6 +4924,99 @@ async def create_invoice_for_order(
 
 
 # ---------------------------------------------------------------------------
+# MANUEL FATURA YÜKLEME — Doğan/otomatik entegratör kullanılMADAN, dışarıda
+# kesilmiş faturayı (PDF/görsel) siparişe ekler. Kullanım: Doğan geçici down
+# (503/TR7) veya elle kesim gereken durumlar. Orders.jsx handleUploadManualInvoice.
+# ---------------------------------------------------------------------------
+_MANUAL_INVOICE_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
+_MANUAL_INVOICE_EXT = {"application/pdf": "pdf", "image/jpeg": "jpg",
+                       "image/png": "png", "image/webp": "webp"}
+_MAX_INVOICE_BYTES = 15 * 1024 * 1024  # 15 MB
+
+
+@router.post("/{order_id}/upload-invoice")
+async def upload_manual_invoice(
+    order_id: str,
+    file: UploadFile = File(...),
+    invoice_number: str = Form(""),
+    invoice_type: str = Form("manual"),
+    current_user: dict = Depends(require_permission("orders.invoice")),
+):
+    """Manuel kesilmiş faturayı (PDF/görsel) siparişe yükler ve siparişi 'faturalandı'
+    işaretler. Otomatik entegratör (Doğan) kullanılMAZ. Ön-engeller create-invoice ile
+    AYNI (onaylı sipariş + havale onayı). Ödeme/statü/stok değişmezlerine DOKUNMAZ; yalnız
+    fatura kaydını (dosya URL + no) tutar, son fatura hatasını/kilidini temizler."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    # create-invoice ile aynı ön-engeller: onaylanmamış / havale-onaysız siparişe fatura eklenmez.
+    _ensure_order_confirmed(order, "manuel fatura yükleme")
+    _hblk = _havale_invoice_block(order)
+    if _hblk:
+        raise HTTPException(status_code=400, detail=_hblk)
+
+    ct = (file.content_type or "").split(";")[0].strip().lower()
+    if ct not in _MANUAL_INVOICE_TYPES:
+        raise HTTPException(status_code=400,
+                            detail="Yalnız PDF veya görsel (JPEG/PNG/WebP) yüklenebilir.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Boş dosya.")
+    if len(data) > _MAX_INVOICE_BYTES:
+        raise HTTPException(status_code=400, detail="Dosya çok büyük (maks 15MB).")
+
+    _fname = f"{uuid.uuid4()}.{_MANUAL_INVOICE_EXT.get(ct, 'pdf')}"
+    _url = ""
+    # 1) Cloudflare R2 (tercih) → invoices/{order_id}/{fname}
+    try:
+        from services import r2_storage as _r2
+        if _r2.is_enabled():
+            _key = f"invoices/{order_id}/{_fname}"
+            _url = _r2.put_object(_key, data, ct)
+            await db.files.insert_one({
+                "id": str(uuid.uuid4()), "storage_path": _fname, "r2_key": _key, "r2_url": _url,
+                "original_filename": file.filename, "content_type": ct, "size": len(data),
+                "is_deleted": False, "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+    except Exception as _re:
+        logger.error(f"[manuel fatura R2 {order_id}] {_re}")
+        _url = ""
+    # 2) Fallback: MongoDB (base64) → /api/upload/files/{fname} ile servis
+    if not _url:
+        import base64 as _b64
+        await db.files.insert_one({
+            "id": str(uuid.uuid4()), "storage_path": _fname, "original_filename": file.filename,
+            "content_type": ct, "size": len(data), "data_b64": _b64.b64encode(data).decode("ascii"),
+            "is_deleted": False, "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        _url = f"/api/upload/files/{_fname}"
+
+    _now = datetime.now(timezone.utc).isoformat()
+    _invno = (safe_str(invoice_number, 40) or "").strip() or \
+             f"MANUEL-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    _itype = ((safe_str(invoice_type, 20) or "").strip().lower()) or "manual"
+    await db.orders.update_one({"id": order_id}, {"$set": {
+        "invoice_issued": True,
+        "invoice_manual": True,
+        "invoice_provider": "manual",
+        "invoice_number": _invno,
+        "invoice_type": _itype,
+        "invoice_pdf_url": _url,
+        "invoice_issued_at": _now,
+        "invoice_issued_by": current_user.get("email", ""),
+        "invoice_last_error": "",
+        "invoice_in_progress": False,
+        "updated_at": _now,
+    }})
+    await _log_order_event(order_id, "invoice",
+                           f"Manuel fatura yüklendi: {_invno} ({file.filename or _fname})",
+                           current_user, {"invoice_number": _invno, "manual": True, "url": _url})
+    return {"success": True, "invoice_issued": True, "invoice_number": _invno,
+            "invoice_pdf_url": _url, "manual": True,
+            "message": f"Manuel fatura yüklendi: {_invno}"}
+
+
+# ---------------------------------------------------------------------------
 # FATURA YAZDIR (HTML) — Orders.jsx handleBulkPrintInvoices iframe src olarak
 # bu endpoint'i kullanır. Basit bir A4 fatura HTML'i döner; gerçek XSL-UBL
 # dönüşümü canlıda provider'dan gelen PDF URL'siyle değiştirilir.
