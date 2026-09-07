@@ -7,7 +7,8 @@ import { useAuth } from "../context/AuthContext";
 import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || "49503095707-cahr1ntbc30lqeho6nj1pbggq3tatien.apps.googleusercontent.com";
+// Facette'ye ait, erişilebilir Google Cloud projesindeki Web istemcisi.
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID_V2 || "681857904365-4pnp7jm4q6vsdqgtsrjte4e1ve2outei.apps.googleusercontent.com";
 const GOOGLE_LOGIN_URI = `${process.env.REACT_APP_BACKEND_URL}/api/auth/google/callback`;
 const GOOGLE_REDIRECT_FLOW_VERSION = "2026-09-07-2";
 

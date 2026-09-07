@@ -65,6 +65,7 @@ def _next_pw_history(user: dict) -> list:
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "") or "49503095707-cahr1ntbc30lqeho6nj1pbggq3tatien.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_FACETTE_CLIENT_ID = "681857904365-4pnp7jm4q6vsdqgtsrjte4e1ve2outei.apps.googleusercontent.com"
 
 
 async def _google_user_from_credential(credential: str) -> dict:
@@ -78,11 +79,17 @@ async def _google_user_from_credential(credential: str) -> dict:
     credential = safe_str(credential, 4096)
     if not credential:
         raise HTTPException(status_code=400, detail="Google kimlik tokeni eksik")
-    try:
-        idinfo = google_id_token.verify_oauth2_token(
-            credential, google_requests.Request(), GOOGLE_CLIENT_ID
-        )
-    except Exception:
+    idinfo = None
+    # Eski mobil/web istemcisini kırmadan Facette'nin yeni Web istemcisini kabul et.
+    for audience in dict.fromkeys((GOOGLE_FACETTE_CLIENT_ID, GOOGLE_CLIENT_ID)):
+        try:
+            idinfo = google_id_token.verify_oauth2_token(
+                credential, google_requests.Request(), audience
+            )
+            break
+        except Exception:
+            continue
+    if not idinfo:
         raise HTTPException(status_code=401, detail="Google tokeni dogrulanamadi")
 
     if not idinfo.get("email_verified", False):
