@@ -358,6 +358,21 @@ export default function AdminOrders({ unpaidView = false }) {
     }
   };
 
+  // İzi temizle + yeniden dene: başarısız fatura denemesinin izini (hata/kilit) siler ve
+  // hemen yeniden Doğan'a gönderir. Kesilmemiş siparişlerde (invoice_issued=false) "Fatura
+  // Sıfırla" butonu görünmediği için, hata banner'ından tek tıkla temiz-sayfa + yeniden gönderim
+  // sağlar. Not: başarısız denemede gerçek fatura/numara oluşmaz; silinen yalnız iz kaydıdır.
+  const handleClearAndRetryInvoice = async (orderId) => {
+    if (invoicingId) return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API}/orders/${orderId}/reset-invoice`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch (e) { /* iz yoksa sorun değil — yine de yeniden göndermeyi dene */ }
+    await handleGenerateInvoice(orderId);   // taze gönderim (hata/başarı toast'ı burada gösterilir)
+  };
+
   const [deletingId, setDeletingId] = useState("");
   const handleDeleteOrder = async (orderId) => {
     const label = selectedOrder?.order_number ? `\n\nSipariş: ${selectedOrder.order_number}` : "";
@@ -2001,6 +2016,17 @@ export default function AdminOrders({ unpaidView = false }) {
                   {selectedOrder.invoice_last_error_at && (
                     <span className="text-xs text-red-500"> ({formatDate(selectedOrder.invoice_last_error_at)})</span>
                   )}
+                  <div className="mt-2">
+                    <button
+                      onClick={() => handleClearAndRetryInvoice(selectedOrder.id)}
+                      disabled={invoicingId === selectedOrder.id}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700 disabled:opacity-50"
+                      title="Başarısız denemenin izini siler ve yeniden Doğan'a gönderir"
+                    >
+                      <FileText size={14} />
+                      {invoicingId === selectedOrder.id ? "Deneniyor..." : "İzi temizle ve yeniden dene"}
+                    </button>
+                  </div>
                 </div>
               )}
 

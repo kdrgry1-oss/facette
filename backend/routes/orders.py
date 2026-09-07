@@ -3715,9 +3715,13 @@ async def reset_invoice_for_order(order_id: str, current_user: dict = Depends(re
              "invoice_provider": "", "invoice_provider_response": "",
              "invoice_intl_txn_id": "", "invoice_dogan_id": "", "invoice_pdf_url": "",
              "invoice_issued_at": "", "invoice_issued_by": "",
+             # Başarısız denemelerin izleri de temizlensin (hata + olası takılı kilit) →
+             # tam temiz sayfa, yeniden 'Fatura Kes' engelsiz çalışsın.
+             "invoice_last_error": "", "invoice_last_error_at": "",
+             "invoice_in_progress": "", "invoice_in_progress_at": "",
          }},
     )
-    return {"success": True, "message": f"Fatura kaydı sıfırlandı ({prev or 'kayıt'} silindi), yeniden kesebilirsiniz"}
+    return {"success": True, "message": f"Fatura kaydı sıfırlandı ({prev or 'kayıt/deneme izi'} silindi), yeniden kesebilirsiniz"}
 
 
 # NOT: 2-segmentli yol (/diagnose/invoice) — tek-segment `GET /{order_id}` (yukarıda kayıtlı)
@@ -3838,7 +3842,7 @@ def _dogan_error_detail(kind: str, message) -> str:
         return (f"Doğan {kind} sunucusu şu anda yanıt vermiyor (geçici — 'TR7 No Available Server' / "
                 f"503). Bu bir Doğan altyapı kesintisidir, siparişinizde/ayarınızda sorun yok; sistem "
                 f"otomatik birkaç kez denedi. Lütfen birkaç dakika sonra tekrar 'Fatura Kes' deneyin. "
-                f"Sürerse Doğan'a canlı e-{kind} servisinizin (ve sunucu IP izninin) aktif olup "
+                f"Sürerse Doğan'a canlı {kind} servisinizin (ve sunucu IP izninin) aktif olup "
                 f"olmadığını sorun. [ham: {_msg[:180]}]")
     return f"Doğan {kind} hatası: {_msg}"
 
