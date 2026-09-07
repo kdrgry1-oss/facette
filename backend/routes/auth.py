@@ -68,7 +68,7 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_FACETTE_CLIENT_ID = "681857904365-4pnp7jm4q6vsdqgtsrjte4e1ve2outei.apps.googleusercontent.com"
 
 
-async def _google_user_from_credential(credential: str) -> dict:
+async def _google_user_from_credential(credential: str, expected_nonce: str = "") -> dict:
     """Google GIS ID tokenini doğrula ve yerel kullanıcıyı bul/oluştur."""
     try:
         from google.oauth2 import id_token as google_id_token
@@ -91,6 +91,10 @@ async def _google_user_from_credential(credential: str) -> dict:
             continue
     if not idinfo:
         raise HTTPException(status_code=401, detail="Google tokeni dogrulanamadi")
+    if expected_nonce:
+        token_nonce = safe_str(idinfo.get("nonce", ""), 512)
+        if not token_nonce or not hmac.compare_digest(token_nonce, expected_nonce):
+            raise HTTPException(status_code=401, detail="Google giris guvenlik kodu dogrulanamadi")
 
     if not idinfo.get("email_verified", False):
         raise HTTPException(status_code=400, detail="Google e-postasi dogrulanmamis")
@@ -1070,11 +1074,20 @@ async def google_redirect_callback(request: Request):
     credential = safe_str((form.get("credential") or [""])[0], 4096)
     form_csrf = safe_str((form.get("g_csrf_token") or [""])[0], 512)
     cookie_csrf = safe_str(request.cookies.get("g_csrf_token", ""), 512)
-    if not form_csrf or not cookie_csrf or not hmac.compare_digest(form_csrf, cookie_csrf):
+    csrf_valid = bool(
+        form_csrf and cookie_csrf and hmac.compare_digest(form_csrf, cookie_csrf)
+    )
+    nonce_cookie = safe_str(request.cookies.get("facette_google_nonce", ""), 512)
+    # GIS'in g_csrf_token çerezi farklı alt alan adına bazı tarayıcılarda taşınmıyor.
+    # Bu durumda Google'ın imzaladığı ID token içindeki nonce ile SameSite=None
+    # çerezimizi eşleştirerek login-CSRF korumasını sürdürürüz.
+    if not csrf_valid and not nonce_cookie:
         return RedirectResponse(f"{site_url}/giris?google_error=csrf", status_code=303)
 
     try:
-        user = await _google_user_from_credential(credential)
+        user = await _google_user_from_credential(
+            credential, expected_nonce=nonce_cookie
+        )
     except HTTPException as exc:
         code = "inactive" if exc.status_code == 403 else "verification"
         return RedirectResponse(f"{site_url}/giris?google_error={code}", status_code=303)
@@ -1089,9 +1102,14 @@ async def google_redirect_callback(request: Request):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "expires_at": now_ts + 120,
     })
-    return RedirectResponse(
+    response = RedirectResponse(
         f"{site_url}/giris?{urlencode({'google_code': raw_code})}", status_code=303
     )
+    response.delete_cookie(
+        "facette_google_nonce", path="/api/auth/google/callback",
+        domain="facette.com.tr", secure=True, httponly=False, samesite="none",
+    )
+    return response
 
 
 @router.post("/google/exchange")

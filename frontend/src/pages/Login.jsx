@@ -159,10 +159,18 @@ export default function Login() {
     if (!GOOGLE_CLIENT_ID) return;
     const init = () => {
       if (!window.google?.accounts?.id) return;
+      let googleNonce = "";
+      try {
+        googleNonce = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, "");
+        if (window.location.hostname.endsWith("facette.com.tr")) {
+          document.cookie = `facette_google_nonce=${googleNonce}; Domain=facette.com.tr; Path=/api/auth/google/callback; Max-Age=600; SameSite=None; Secure`;
+        }
+      } catch { /* nonce yoksa backend Google'ın g_csrf_token kontrolünü kullanır */ }
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         ux_mode: "redirect",
         login_uri: GOOGLE_LOGIN_URI,
+        nonce: googleNonce || undefined,
         state_cookie_domain: window.location.hostname.endsWith("facette.com.tr") ? "facette.com.tr" : undefined,
         button_auto_select: false,
         auto_select: false,
