@@ -22,6 +22,7 @@ spec.loader.exec_module(report_dedup)
 canonical_order_stages = report_dedup.canonical_order_stages
 effective_order_date_match = report_dedup.effective_order_date_match
 split_confirmed_return = report_dedup.split_confirmed_return
+accepted_claim_items = report_dedup.accepted_claim_items
 
 
 def test_effective_date_prefers_marketplace_and_falls_back_only_when_empty():
@@ -60,6 +61,64 @@ def test_confirmed_return_is_removed_from_net_but_cancel_is_not_in_denominator()
 
 def test_confirmed_return_cannot_exceed_sold_quantity():
     assert split_confirmed_return(2, 300.0, 9) == (0, 0.0, 2, 300.0)
+
+
+def test_mixed_trendyol_claim_counts_only_accepted_child_items():
+    claim = {
+        "claim_id": "claim-1",
+        "claim_status": "Created",
+        "items": [{"barcode": "legacy-would-be-wrong", "quantity": 3}],
+        "raw_data": {"items": [{
+            "orderLine": {"barcode": "8680001"},
+            "claimItems": [
+                {"id": "a", "claimItemStatus": {"name": "Accepted"}},
+                {"id": "b", "claimItemStatus": {"name": "Created"}},
+                {"id": "c", "claimItemStatus": {"name": "Rejected"}},
+            ],
+        }]},
+    }
+    assert accepted_claim_items(claim) == [
+        {"key": "claim-1:a", "barcode": "8680001", "quantity": 1,
+         "amount": 0.0, "status": "Accepted"}
+    ]
+
+
+def test_accepted_claim_item_ids_are_deduplicated():
+    claim = {
+        "claim_id": "claim-2",
+        "raw_data": {"items": [{
+            "orderLine": {"barcode": "8680002"},
+            "claimItems": [
+                {"id": "same", "claimItemStatus": {"name": "Accepted"}},
+                {"id": "same", "claimItemStatus": {"name": "Accepted"}},
+            ],
+        }]},
+    }
+    assert len(accepted_claim_items(claim)) == 1
+
+
+def test_legacy_accepted_claim_uses_normalized_quantity_without_raw_data():
+    claim = {
+        "claim_id": "legacy-1",
+        "claim_status": "Accepted",
+        "items": [{"claim_item_id": "x", "barcode": "8680003", "quantity": 2}],
+    }
+    assert accepted_claim_items(claim) == [
+        {"key": "legacy-1:x", "barcode": "8680003", "quantity": 2,
+         "amount": 0.0, "status": "Accepted"}
+    ]
+
+
+def test_accepted_child_uses_its_own_normalized_net_price():
+    claim = {
+        "claim_id": "priced",
+        "items": [{"claim_item_id": "accepted", "barcode": "868", "price": 799.5}],
+        "raw_data": {"items": [{
+            "orderLine": {"barcode": "868", "price": 999},
+            "claimItems": [{"id": "accepted", "claimItemStatus": {"name": "Accepted"}}],
+        }]},
+    }
+    assert accepted_claim_items(claim)[0]["amount"] == 799.5
 
 
 def test_trendyol_reconciliation_can_request_created_date(monkeypatch):

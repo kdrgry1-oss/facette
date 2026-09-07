@@ -549,8 +549,10 @@ async def return_rate(
                 "product_id": str(r.get("product_id") or ""),
                 "name": r.get("product_name") or "—",
                 "sold": sold,
+                "gross_sold": int(r.get("gross_sold") or sold),
                 "returned": ret,
                 "return_rate_pct": round(float(rate), 2),
+                "trendyol_return_rate_pct": r.get("trendyol_return_rate_pct"),
                 "severity": "critical" if rate >= 40 else ("high" if rate >= 30 else "warning"),
             })
     items.sort(key=lambda x: -x["return_rate_pct"])

@@ -17,7 +17,8 @@ from typing import Optional
 from .deps import db, require_admin, tr_range_to_utc
 from .report_dedup import (
     dup_nor, merge_match, load_dup_dep, canonical_order_stages,
-    effective_order_date_match, split_confirmed_return,
+    effective_order_date_match, split_confirmed_return, accepted_claim_items,
+    claim_items_with_status,
 )
 
 
@@ -566,31 +567,27 @@ async def _split_maps(order_numbers: list, order_ids: list) -> tuple:
         d["amount"] += max(0.0, float(amount or 0))
         d["qty"] += max(0, int(qty or 0))
 
-    # ① Pazaryeri (Trendyol/Hepsiburada) iade talepleri — refund_amount kalem NET
-    #    fiyatlarının toplamıdır (integrations_trendyol.py:3866), yani tam da iade
-    #    edilen ürünlerin parası.
+    # ① Pazaryeri iadeleri — KARIŞIK statülü claim'lerde genel claim_status yerine
+    #    her claimItem'in kendi statüsünü kullan. Aksi halde bir Accepted kalem,
+    #    kardeşi Created olduğu için geçmiş raporların tamamından kayboluyordu.
     for i in range(0, len(order_numbers), 5000):
         chunk = order_numbers[i:i + 5000]
+        _seen_claim_items: set[str] = set()
         async for c in db.trendyol_claims.find(
                 {"order_number": {"$in": chunk}, "claim_type": {"$ne": "CANCEL"}},
-                {"_id": 0, "order_number": 1, "claim_status": 1,
-                 "refund_amount": 1, "items": 1}):
-            st = str(c.get("claim_status") or "")
+                {"_id": 0, "claim_id": 1, "order_number": 1, "claim_status": 1,
+                 "refund_amount": 1, "items": 1, "raw_data.items": 1}):
             onum = str(c.get("order_number") or "")
             if not onum:
                 continue
-            qty = sum(max(1, int((it or {}).get("quantity") or 1))
-                      for it in (c.get("items") or [])) or 1
-            amt = c.get("refund_amount")
-            try:
-                amt = float(amt or 0)
-            except Exception:
-                amt = 0.0
-            if st == "Accepted":
-                _acc(closed, onum, amt, qty)
-            elif st in _OPEN_CLAIM_STATUSES:
-                _acc(open_, onum, amt, qty)
-            # Rejected/Cancelled/Unresolved → iade GERÇEKLEŞMEDİ, satış geçerli.
+            for bucket, statuses in (
+                    (closed, {"Accepted"}), (open_, set(_OPEN_CLAIM_STATUSES))):
+                for item in claim_items_with_status(c, statuses):
+                    if item["key"] in _seen_claim_items:
+                        continue
+                    _seen_claim_items.add(item["key"])
+                    _acc(bucket, onum, item.get("amount") or 0, item.get("quantity") or 0)
+            # Rejected/Cancelled/Unresolved kalemler gerçekleşmiş iadeye girmez.
 
     # ② Site iadeleri — customer_returns kalemleri (onaylı kalemler öncelikli).
     #    Site siparişlerinde statü zaten iade grubuna düşüyor; buradan yalnız KISMİ
@@ -821,13 +818,19 @@ async def _returned_barcode_qty(order_numbers: list) -> dict:
 
     for i in range(0, len(order_numbers), 5000):
         chunk = order_numbers[i:i + 5000]
+        # Claim'in genel statüsü kullanılamaz: aynı claim içinde bir kalem Accepted,
+        # diğeri Created/Rejected olabilir. Trendyol raporuyla eşleşmek için ham
+        # claimItems içindeki HER kalemin kendi statüsünü say.
+        _seen_claim_items: set[str] = set()
         async for c in db.trendyol_claims.find(
-                {"order_number": {"$in": chunk}, "claim_status": "Accepted",
-                 "claim_type": {"$ne": "CANCEL"}},
-                {"_id": 0, "order_number": 1, "items": 1}):
-            for it in (c.get("items") or []):
-                _put(c.get("order_number"), (it or {}).get("barcode"),
-                     max(1, int((it or {}).get("quantity") or 1)))
+                {"order_number": {"$in": chunk}, "claim_type": {"$ne": "CANCEL"}},
+                {"_id": 0, "claim_id": 1, "order_number": 1, "claim_status": 1,
+                 "items": 1, "raw_data.items": 1}):
+            for it in accepted_claim_items(c):
+                if it["key"] in _seen_claim_items:
+                    continue
+                _seen_claim_items.add(it["key"])
+                _put(c.get("order_number"), it.get("barcode"), int(it.get("quantity") or 0))
         async for r in db.customer_returns.find(
                 {"order_number": {"$in": chunk}},
                 {"_id": 0, "order_number": 1, "status": 1, "approval": 1,
@@ -908,9 +911,11 @@ async def products_export_xlsx(
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Ürün Raporu"
-    ws.append(["Ürün", "Sezon", "Satış Adedi", "Ciro (TL)", "Sipariş", "Güncel Stok",
-               "Kapsama (Hafta)", "RPT Durumu", "En Çok Satan Beden", "En Çok Satan Platform", "Haftalık Hız",
-               "İptal Adet", "İade Adet", "İade %", "Platform İptal/İade Detay"])
+    ws.append(["Ürün", "Sezon", "Brüt Satış Adedi", "İptal Adet", "İade Adet",
+               "Net Satış Adedi", "Brüt Ciro (TL)", "İndirim (TL)", "Net Ciro (TL)",
+               "İade % (Trendyol: İade/Brüt)", "İade % (İptal Hariç)", "Sipariş",
+               "Güncel Stok", "Kapsama (Hafta)", "RPT Durumu", "En Çok Satan Beden",
+               "En Çok Satan Platform", "Haftalık Hız", "Platform İptal/İade Detay"])
     # Satış hızı: renkli hücre (yeşil/sarı/kırmızı) + etiket — panelle birebir aynı kodlama
     from openpyxl.styles import PatternFill
     _VEL_FILL = {"green": PatternFill("solid", fgColor="C6EFCE"),
@@ -931,23 +936,24 @@ async def products_export_xlsx(
             _rpt = "RPT AÇ" if _cover <= 4 else ("Aşırı Stok" if _cover >= 26 else "Normal")
         else:
             _rpt = "Satışsız / izlenmiyor"
-        _rq = int(r.get("return_qty") or 0)
-        _tq = int(r.get("qty") or 0) + _rq
-        _rpct = round(100 * _rq / _tq, 1) if _tq > 0 else ""
-        ws.append([r.get("name"), r.get("season") or "", r.get("qty"), r.get("revenue"),
-                   r.get("orders"), _stok, _cover, _rpt, r.get("best_size"),
-                   r.get("top_platform"),
-                   f"{_VEL_LABEL.get(_vcode, '')} ({_vel.get('weekly_rate', 0)}/hafta)",
-                   r.get("cancel_qty", 0), _rq, _rpct, _crd])
-        # Satış hızı rengi Haftalık Hız sütunundadır — RPT sütunu eklenince 10 → 11'e kaydı.
+        ws.append([
+            r.get("name"), r.get("season") or "", r.get("gross_qty", 0),
+            r.get("cancel_qty", 0), r.get("return_qty", 0), r.get("qty", 0),
+            r.get("gross_revenue", 0), r.get("discount_amount", 0), r.get("revenue", 0),
+            r.get("trendyol_return_rate_pct", 0), r.get("return_rate_excluding_cancels_pct", 0),
+            r.get("orders"), _stok, _cover, _rpt, r.get("best_size"), r.get("top_platform"),
+            f"{_VEL_LABEL.get(_vcode, '')} ({_vel.get('weekly_rate', 0)}/hafta)", _crd,
+        ])
+        # Satış hızı rengi Haftalık Hız sütunundadır.
         _fill = _VEL_FILL.get(_vcode)
         if _fill:
-            ws.cell(row=ws.max_row, column=11).fill = _fill
+            ws.cell(row=ws.max_row, column=18).fill = _fill
         # RPT AÇ (kritik) hücresini kırmızı, Aşırı Stok'u sarı vurgula (Excel'de göze çarpsın).
         _rpt_fill = _VEL_FILL.get("red") if _rpt == "RPT AÇ" else (_VEL_FILL.get("yellow") if _rpt == "Aşırı Stok" else None)
         if _rpt_fill:
-            ws.cell(row=ws.max_row, column=8).fill = _rpt_fill
-    for col, w in zip("ABCDEFGHIJKLMNO", [42, 10, 12, 14, 10, 12, 14, 16, 16, 18, 14, 10, 10, 8, 40]):
+            ws.cell(row=ws.max_row, column=15).fill = _rpt_fill
+    for col, w in zip("ABCDEFGHIJKLMNOPQRS",
+                      [42, 10, 15, 10, 10, 15, 15, 14, 15, 18, 18, 10, 12, 14, 16, 16, 18, 18, 40]):
         ws.column_dimensions[col].width = w
     buf = _BytesIO()
     # DENETİM (injection F8): Excel/CSV formül enjeksiyonu — =+-@ ile başlayan hücreleri kaçır
@@ -996,12 +1002,23 @@ async def top_products(
             "_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
             "_pid": {"$toString": {"$ifNull": ["$items.product_id", ""]}},
             "_sz": {"$toString": {"$ifNull": ["$items.size", ""]}},
-            # Kalem brüt = price×qty; net = brüt − sipariş indiriminin ciro payı (O1).
-            "_gross": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]},
+            # Pazaryerinde unit_price=lineGrossAmount, price=indirimli satır fiyatıdır.
+            # Site siparişlerinde unit_price yoksa price brüt baz olarak kullanılır.
+            "_gross": {"$multiply": [
+                {"$ifNull": ["$items.unit_price", {"$ifNull": ["$items.price", 0]}]},
+                {"$ifNull": ["$items.quantity", 1]}]},
+            "_line_net": {"$multiply": [
+                {"$ifNull": ["$items.price", {"$ifNull": ["$items.unit_price", 0]}]},
+                {"$ifNull": ["$items.quantity", 1]}]},
         }},
-        {"$addFields": {"_net": {"$cond": [{"$gt": ["$_sub", 0]},
-            {"$multiply": ["$_gross", {"$divide": [{"$max": [0, {"$subtract": ["$_sub", "$_disc"]}]}, "$_sub"]}]},
-            "$_gross"]}}},
+        {"$addFields": {"_net": {"$cond": [
+            {"$in": ["$_plat", _MARKETPLACES]},
+            "$_line_net",  # Pazaryeri price zaten indirimli: indirimi ikinci kez düşme.
+            {"$cond": [{"$gt": ["$_sub", 0]},
+                {"$multiply": ["$_line_net", {"$divide": [
+                    {"$max": [0, {"$subtract": ["$_sub", "$_disc"]}]}, "$_sub"]}]},
+                "$_line_net"]}
+        ]}}},
         # Kalem anahtarı: barkod > product_id > ad. Beden ve platform gruplamaya dahil edilir
         # ki EN ÇOK SATAN BEDEN + platform dağılımı çıkarılabilsin (parent birleştirme Python'da).
         {"$addFields": {"_key": {"$switch": {"branches": [
@@ -1015,6 +1032,7 @@ async def top_products(
             "barcode": {"$first": "$_bc"},
             "pid": {"$first": "$_pid"},
             "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            "gross_revenue": {"$sum": "$_gross"},
             # DENETİM O1: Ciro (Net) — sipariş indirimi düşülmüş kalem tutarı (_net).
             "revenue": {"$sum": "$_net"},
             # DENETİM O10: "Sipariş" = ürünün DISTINCT sipariş no'su. Eskiden $sum:1 idi →
@@ -1080,7 +1098,8 @@ async def top_products(
             m = merged[gkey] = {
                 "product_id": pm.get("id") or r.get("pid"), "name": name,
                 "_matched": bool(pm),  # katalogda hâlâ var olan bir ürüne bağlandı mı?
-                "qty": 0, "revenue": 0.0, "orders": 0, "_onums": set(),  # O10: distinct sipariş no
+                "qty": 0, "revenue": 0.0, "gross_revenue": 0.0,
+                "orders": 0, "_onums": set(),  # O10: distinct sipariş no
                 "current_stock": pm.get("stock", None), "_sizes": {}, "_plats": {},
                 "stock_by_size": pm.get("stock_by_size") or {},
                 # Koleksiyon: stok kodu ön ekinden (fcfw/fcss) — filtre değerleri tek tip (FcFw/FCss)
@@ -1093,6 +1112,7 @@ async def top_products(
             }
         _q_gross = int(r["qty"])
         _rev_gross = float(r["revenue"])
+        _catalog_gross = float(r.get("gross_revenue") or _rev_gross)
         _on = str(r.get("_id", {}).get("on") or "")
         _bc = str(r.get("barcode") or "").strip()
         _claim_q = 0
@@ -1100,11 +1120,16 @@ async def top_products(
         if _rb and _bc:
             _claim_q = min(_q_gross, int(_rb.get(_bc, 0)))
             _rb[_bc] = int(_rb.get(_bc, 0)) - _claim_q
-        _q, _rev, _claim_q, _ = split_confirmed_return(_q_gross, _rev_gross, _claim_q)
+        _q, _rev, _claim_q, _claim_rev = split_confirmed_return(
+            _q_gross, _rev_gross, _claim_q)
         if _claim_q > 0:
             _cd = claim_cr_map.setdefault(gkey, {"cancel": 0, "return": 0,
+                                                  "gross_revenue": 0.0,
+                                                  "cancel_revenue": 0.0,
+                                                  "return_revenue": 0.0,
                                                   "by_plat": {}, "by_size": {}})
             _cd["return"] += _claim_q
+            _cd["return_revenue"] += _claim_rev
             _cpl = (r["_id"].get("plat") or "site").strip().lower() or "site"
             _cp = _cd["by_plat"].setdefault(_cpl, {"cancel": 0, "return": 0})
             _cp["return"] += _claim_q
@@ -1113,6 +1138,9 @@ async def top_products(
             _cs["return"] += _claim_q
         m["qty"] += _q
         m["revenue"] += _rev
+        # Aktif siparişte onaylı iade claim'i olsa da brüt satış ilk gerçekleşen
+        # satışın tamamıdır; Trendyol Brüt Ciro tanımıyla aynı kalır.
+        m["gross_revenue"] += _catalog_gross
         # DENETİM O10: sipariş sayısı DISTINCT order_number üzerinden — grup satırı sayımı değil.
         for _onv in (r.get("onums") or []):
             if _onv and _q > 0:
@@ -1179,7 +1207,8 @@ async def top_products(
             _sbs0[_vs] = _sbs0.get(_vs, 0) + int(v.get("stock") or 0)
         merged[f"zero:{p.get('id')}"] = {
             "product_id": str(p.get("id")), "name": p.get("name") or "",
-            "qty": 0, "revenue": 0.0, "orders": 0, "current_stock": stock,
+            "qty": 0, "revenue": 0.0, "gross_revenue": 0.0,
+            "orders": 0, "current_stock": stock,
             "stock_by_size": _sbs0,
             "_sizes": {}, "_plats": {},
             "collection": _collection_from_code(p.get("stock_code")) or (p.get("collection") or "").strip(),
@@ -1211,7 +1240,10 @@ async def top_products(
                             "kind": "$_kind", "status": "$status", "plat": "$_plat"},
                     "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
                     "rev": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]},
-                                                   {"$ifNull": ["$items.quantity", 1]}]}}}},
+                                                   {"$ifNull": ["$items.quantity", 1]}]}},
+                    "gross_rev": {"$sum": {"$multiply": [
+                        {"$ifNull": ["$items.unit_price", {"$ifNull": ["$items.price", 0]}]},
+                        {"$ifNull": ["$items.quantity", 1]}]}}}},
     ]
     import unicodedata as _ud3
     _cr_rows = [r async for r in db.orders.aggregate(_cr_pipe)]
@@ -1251,22 +1283,27 @@ async def top_products(
         gk = pm.get("id") or (i.get("pid") or None) or f"nm:{_ud3.normalize('NFC', _cname).strip().lower()}"
         qty = int(r["qty"])
         rev = float(r.get("rev") or 0)
-        keep_q, keep_r = 0, 0.0
+        gross_rev = float(r.get("gross_rev") or rev)
+        keep_q, keep_r, keep_gross = 0, 0.0, 0.0
         if i["kind"] == "return":
             _rb = _ret_bc.get(i.get("on") or "")
             if _rb:  # kalem bilgisi VAR → yalnız onaylı/adetli kalemi böl.
                 _bc = str(i.get("bc") or "").strip()  # DENETİM O7: barkod anahtarı iki tarafta da strip'li
                 _allowed = int(_rb.get(_bc, 0))
                 keep_q, keep_r, qty, rev = split_confirmed_return(qty, rev, _allowed)
+                _, keep_gross, _, gross_rev = split_confirmed_return(
+                    keep_q + qty, gross_rev, qty)
                 _rb[_bc] = _allowed - qty              # aynı barkod başka satırda tekrar sayılmasın
             elif i.get("status") not in ("returned", "refunded"):
                 # Açık talebi veya kalemi bilinmeyen kısmi iadeyi tam iade varsayma.
-                keep_q, keep_r = qty, rev
-                qty, rev = 0, 0.0
+                keep_q, keep_r, keep_gross = qty, rev, gross_rev
+                qty, rev, gross_rev = 0, 0.0, 0.0
         if keep_q > 0:
-            k = keep_map.setdefault(gk, {"qty": 0, "revenue": 0.0, "sizes": {}, "plats": {}})
+            k = keep_map.setdefault(gk, {"qty": 0, "revenue": 0.0, "gross_revenue": 0.0,
+                                         "sizes": {}, "plats": {}})
             k["qty"] += keep_q
             k["revenue"] += keep_r
+            k["gross_revenue"] += keep_gross
             _ksz = _norm_size(i.get("sz"))
             k["sizes"][_ksz] = k["sizes"].get(_ksz, 0) + keep_q
             _kpl = (i.get("plat") or "site")
@@ -1276,8 +1313,12 @@ async def top_products(
             k["plats"][_kpl] = _kpv
         if qty <= 0:
             continue
-        d = cr_map.setdefault(gk, {"cancel": 0, "return": 0, "by_plat": {}, "by_size": {}})
+        d = cr_map.setdefault(gk, {"cancel": 0, "return": 0, "gross_revenue": 0.0,
+                                   "cancel_revenue": 0.0, "return_revenue": 0.0,
+                                   "by_plat": {}, "by_size": {}})
         d[i["kind"]] += qty
+        d["gross_revenue"] += gross_rev
+        d[f"{i['kind']}_revenue"] += rev
         bp = d["by_plat"].setdefault((i.get("plat") or "site"), {"cancel": 0, "return": 0})
         bp[i["kind"]] += qty
         bs = d["by_size"].setdefault(_norm_size(i.get("sz")), {"cancel": 0, "return": 0})
@@ -1285,8 +1326,11 @@ async def top_products(
 
     # Statüsü aktif kalmış fakat claim/return kaynağında onaylı iadesi bulunan siparişler.
     for _gk, _src in claim_cr_map.items():
-        _dst = cr_map.setdefault(_gk, {"cancel": 0, "return": 0, "by_plat": {}, "by_size": {}})
+        _dst = cr_map.setdefault(_gk, {"cancel": 0, "return": 0, "gross_revenue": 0.0,
+                                       "cancel_revenue": 0.0, "return_revenue": 0.0,
+                                       "by_plat": {}, "by_size": {}})
         _dst["return"] += _src["return"]
+        _dst["return_revenue"] += float(_src.get("return_revenue") or 0)
         for _pk, _pv in _src["by_plat"].items():
             _d = _dst["by_plat"].setdefault(_pk, {"cancel": 0, "return": 0})
             _d["return"] += _pv["return"]
@@ -1309,6 +1353,7 @@ async def top_products(
         if _kp:
             m["qty"] = int(m.get("qty") or 0) + int(_kp["qty"])
             m["revenue"] = float(m.get("revenue") or 0) + float(_kp["revenue"])
+            m["gross_revenue"] = float(m.get("gross_revenue") or 0) + float(_kp.get("gross_revenue") or 0)
             _sd = dict(_sizes)
             for _sk, _sv in _kp["sizes"].items():
                 _sd[_sk] = _sd.get(_sk, 0) + _sv
@@ -1318,9 +1363,23 @@ async def top_products(
                 _cur = _pd.get(_pk) or {"qty": 0, "revenue": 0.0}
                 _pd[_pk] = {"qty": _cur["qty"] + _pv["qty"], "revenue": _cur["revenue"] + _pv["revenue"]}
             _plats = sorted(_pd.items(), key=lambda x: -x[1]["qty"])
+        _gross_revenue = float(m.get("gross_revenue") or 0) + float(_cr.get("gross_revenue") or 0)
+        _all_net_before_returns = (float(m.get("revenue") or 0)
+                                   + float(_cr.get("cancel_revenue") or 0)
+                                   + float(_cr.get("return_revenue") or 0))
+        _gross_qty = int(m.get("qty") or 0) + int(_cr.get("cancel", 0)) + int(_cr.get("return", 0))
         out.append({
             **m,
             "revenue": round(m["revenue"], 2),
+            "gross_revenue": round(_gross_revenue, 2),
+            "discount_amount": round(max(0.0, _gross_revenue - _all_net_before_returns), 2),
+            "gross_qty": _gross_qty,
+            "trendyol_return_rate_pct": round(100 * int(_cr.get("return", 0)) / _gross_qty, 2)
+                                         if _gross_qty else 0.0,
+            "return_rate_excluding_cancels_pct": round(
+                100 * int(_cr.get("return", 0)) /
+                (int(m.get("qty") or 0) + int(_cr.get("return", 0))), 2)
+                if (int(m.get("qty") or 0) + int(_cr.get("return", 0))) else 0.0,
             "best_size": _sizes[0][0] if _sizes else "—",
             "size_breakdown": [{"size": k, "qty": v} for k, v in _sizes],
             "top_platform": _plats[0][0] if _plats else "site",
@@ -1414,12 +1473,40 @@ async def profitability(
     _CH_ALIAS = {"facette": "site", "": "site", "web": "site", "admin_manual": "manual", "admin": "manual"}
     from collections import defaultdict as _dd
 
-    # Ana kırılım: (kategori, kanal) → ciro, maliyet, adet, sipariş. Maliyet: purchase_price köprüsü.
+    # Ana kırılım: (kategori, kanal) → BRÜT ciro, NET ciro, maliyet ve adet.
+    # Pazaryeri kalemlerinde unit_price brüt, price kampanya/indirim sonrası NET birimdir.
+    # Site siparişlerinde order-level kupon/havale indirimi kalemlere ciro payıyla dağıtılır.
+    # Böylece aynı indirim kârdan ikinci kez düşülmez ve kategori toplamı ürün raporuyla eşleşir.
     pipeline = [
         *_sales_stages(s, e, source),
-        {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
+        {"$addFields": {
+            "_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}},
+            "_sub": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                     "in": {"$add": ["$$value", {"$multiply": [
+                         {"$ifNull": ["$$this.quantity", 1]},
+                         {"$ifNull": ["$$this.price", {"$ifNull": ["$$this.unit_price", 0]}]}]}]}}},
+            "_disc": {"$add": [
+                {"$ifNull": ["$discount", {"$ifNull": ["$discount_amount", 0]}]},
+                {"$ifNull": ["$payment_discount", 0]}]},
+        }},
         {"$unwind": "$items"},
-        {"$addFields": {"_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}}}},
+        {"$addFields": {
+            "_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
+            "_line_gross": {"$multiply": [
+                {"$ifNull": ["$items.unit_price", {"$ifNull": ["$items.price", 0]}]},
+                {"$ifNull": ["$items.quantity", 1]}]},
+            "_line_paid": {"$multiply": [
+                {"$ifNull": ["$items.price", {"$ifNull": ["$items.unit_price", 0]}]},
+                {"$ifNull": ["$items.quantity", 1]}]},
+        }},
+        {"$addFields": {"_line_net": {"$cond": [
+            {"$in": ["$_ch", _MARKETPLACES]},
+            "$_line_paid",
+            {"$cond": [{"$gt": ["$_sub", 0]},
+                {"$multiply": ["$_line_paid", {"$divide": [
+                    {"$max": [0, {"$subtract": ["$_sub", "$_disc"]}]}, "$_sub"]}]},
+                "$_line_paid"]}
+        ]}}},
         {"$lookup": {
             "from": "products",
             "let": {"pid": "$items.product_id", "bc": "$_bc"},
@@ -1445,33 +1532,23 @@ async def profitability(
                         {"$ifNull": ["$items.category_name", {"$ifNull": ["$items.category", "(Kategorisiz)"]}]}]},
                     "ch": "$_ch"},
             "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
-            "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
+            "gross_revenue": {"$sum": "$_line_gross"},
+            "revenue": {"$sum": "$_line_net"},
             "cogs": {"$sum": {"$multiply": [{"$ifNull": ["$_unit_cost", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
             "revenue_nocost": {"$sum": {"$cond": [{"$gt": [{"$ifNull": ["$_unit_cost", 0]}, 0]}, 0,
-                                {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}]}},
+                                "$_line_net"]}},
         }},
     ]
-    # Kanal başına toplam kargo + İNDİRİM (ciro payına göre kategorilere dağıtılır).
-    # İndirim: order.discount = promo motorunun kupon+otomatik kampanya toplamı; kalem
-    # fiyatındaki (sale_price) indirim ZATEN items.price'ta olduğundan bu AYRI/EK indirimdir.
-    # Denetim bulgusu: eskiden kâr hesabından hiç düşülmüyordu → kâr indirim kadar şişiyordu.
+    # Kanal başına toplam kargo (net ciro payına göre kategorilere dağıtılır).
     cargo_by_ch = _dd(float)
     async for r in db.orders.aggregate([
         *_sales_stages(s, e, source),
         {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
         {"$group": {"_id": "$_ch", "shipping": {"$sum": {"$ifNull": ["$shipping_cost", 0]}},
-                    # İndirim = kupon/kampanya (discount) + havale/EFT ödeme indirimi (payment_discount).
-                    # Eskiden yalnız discount toplanıyordu → havale siparişlerinde faaliyet kârı ve
-                    # ödenecek-KDV matrahı, havale indirimi kadar ŞİŞİYORDU (net = subtotal−discount−payment_discount).
-                    "discount": {"$sum": {"$add": [
-                        {"$ifNull": ["$discount", {"$ifNull": ["$discount_amount", 0]}]},
-                        {"$ifNull": ["$payment_discount", 0]},
-                    ]}},
                     "orders": {"$sum": 1}}},
     ]):
         cargo_by_ch[_CH_ALIAS.get((r["_id"] or "site"), r["_id"] or "site")] = {
-            "shipping": float(r["shipping"] or 0), "discount": float(r["discount"] or 0),
-            "orders": int(r["orders"])}
+            "shipping": float(r["shipping"] or 0), "orders": int(r["orders"])}
 
     # Kategori-kanal satırlarını topla
     rows = []
@@ -1479,11 +1556,14 @@ async def profitability(
     async for r in db.orders.aggregate(pipeline):
         ch = _CH_ALIAS.get((r["_id"].get("ch") or "site"), r["_id"].get("ch") or "site")
         rev = float(r["revenue"] or 0)
+        gross_rev = float(r.get("gross_revenue") or rev)
         cogs = float(r["cogs"] or 0)
         # Maliyeti bilinmeyen kalemler için oranla tahmin ekle
         cogs += float(r.get("revenue_nocost") or 0) * float(cfg["cog_fallback_ratio"])
         rows.append({"category": r["_id"].get("cat") or "(Kategorisiz)", "channel": ch,
-                     "qty": int(r["qty"]), "revenue": rev, "cogs": round(cogs, 2)})
+                     "qty": int(r["qty"]), "gross_revenue": gross_rev,
+                     "revenue": rev, "discount": max(0.0, gross_rev - rev),
+                     "cogs": round(cogs, 2)})
         rev_by_ch[ch] += rev
     total_rev = sum(rev_by_ch.values()) or 1.0
 
@@ -1500,40 +1580,35 @@ async def profitability(
         _ch_share = (rev / rev_by_ch[ch]) if rev_by_ch.get(ch) else 0.0
         ch_cargo = (cargo_by_ch.get(ch) or {}).get("shipping", 0.0)
         cargo = ch_cargo * _ch_share
-        # İndirim (kupon+kampanya): kanal toplam indirimini ciro payına göre dağıtıp DÜŞ.
-        ch_disc = (cargo_by_ch.get(ch) or {}).get("discount", 0.0)
-        discount_alloc = ch_disc * _ch_share
         # Reklam: AYLIK bütçe girildiyse tarih aralığına orantıla (aylık × gün/30), yoksa dönem toplamı.
         _monthly = float((cfg.get("ad_spend_monthly") or {}).get(ch, 0.0))
         ad_total = round(_monthly * _days_range / 30.0, 2) if _monthly > 0 else float(cfg["ad_spend"].get(ch, 0.0))
         ad_alloc = ad_total * (rev / rev_by_ch[ch]) if rev_by_ch.get(ch) else 0.0
-        operating = rev - discount_alloc - cogs - commission - service_fee - cargo - ad_alloc
+        # rev zaten indirim sonrası NET ürün cirosudur; indirimi burada tekrar düşme.
+        operating = rev - cogs - commission - service_fee - cargo - ad_alloc
         # KDV (net ödenecek — katma değer üzerinden): (net ciro - maliyet) içindeki KDV.
-        # Net ciro = brüt ciro - indirim (matrah indirim düşülmüş tutar üzerinden hesaplanır).
-        vat_payable = max(0.0, (rev - discount_alloc - cogs)) * vat / (100.0 + vat)
+        vat_payable = max(0.0, (rev - cogs)) * vat / (100.0 + vat)
         pre_tax = operating - vat_payable
         corporate_tax = max(0.0, pre_tax) * corp / 100.0
         net = pre_tax - corporate_tax
         out.append({
             "category": row["category"], "channel": ch, "qty": row["qty"],
-            "revenue": round(rev, 2), "discount": round(discount_alloc, 2), "cogs": round(cogs, 2),
+            "gross_revenue": round(row["gross_revenue"], 2),
+            "revenue": round(rev, 2), "discount": round(row["discount"], 2), "cogs": round(cogs, 2),
             "commission": round(commission, 2), "service_fee": round(service_fee, 2),
             "cargo": round(cargo, 2), "ad_spend": round(ad_alloc, 2),
             "vat_payable": round(vat_payable, 2), "corporate_tax": round(corporate_tax, 2),
             "net_profit": round(net, 2),
-            # DENETİM O3: marj NET ciroya (rev − indirim payı) bölünür, brüt ciroya değil.
-            "margin_pct": round(net / (rev - discount_alloc) * 100.0, 1) if (rev - discount_alloc) else 0.0,
+            "margin_pct": round(net / rev * 100.0, 1) if rev else 0.0,
         })
     out.sort(key=lambda x: -x["net_profit"])
     # Toplamlar
     def _sum(k):
         return round(sum(x[k] for x in out), 2)
-    totals = {k: _sum(k) for k in ("revenue", "discount", "cogs", "commission", "service_fee", "cargo",
+    totals = {k: _sum(k) for k in ("gross_revenue", "revenue", "discount", "cogs", "commission", "service_fee", "cargo",
                                     "ad_spend", "vat_payable", "corporate_tax", "net_profit")}
     totals["qty"] = sum(x["qty"] for x in out)
-    # DENETİM O3: toplam marj da NET ciroya (toplam ciro − toplam indirim) bölünür.
-    _net_rev_total = totals["revenue"] - totals["discount"]
-    totals["margin_pct"] = round(totals["net_profit"] / _net_rev_total * 100.0, 1) if _net_rev_total else 0.0
+    totals["margin_pct"] = round(totals["net_profit"] / totals["revenue"] * 100.0, 1) if totals["revenue"] else 0.0
     return {"items": out, "totals": totals, "config": cfg}
 
 
@@ -1553,6 +1628,7 @@ async def category_report(
         # DENETİM O1: "Ciro (Net)" sipariş-düzeyi indirimi (kupon + havale/EFT) DÜŞMELİ.
         # _sub = sipariş kalem toplamı, _disc = kupon(+discount_amount) + payment_discount.
         {"$addFields": {
+            "_plat": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}},
             "_sub": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
                      "in": {"$add": ["$$value", {"$multiply": [
                          {"$ifNull": ["$$this.quantity", 1]},
@@ -1562,11 +1638,17 @@ async def category_report(
                 {"$ifNull": ["$payment_discount", 0]}]}}},
         {"$unwind": "$items"},
         {"$addFields": {"_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
-                        # Kalem brüt = price×qty; net = brüt − sipariş indiriminin ciro payı.
-                        "_gross": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}}},
-        {"$addFields": {"_net": {"$cond": [{"$gt": ["$_sub", 0]},
-            {"$multiply": ["$_gross", {"$divide": [{"$max": [0, {"$subtract": ["$_sub", "$_disc"]}]}, "$_sub"]}]},
-            "$_gross"]}}},
+                        "_line_net": {"$multiply": [
+                            {"$ifNull": ["$items.price", {"$ifNull": ["$items.unit_price", 0]}]},
+                            {"$ifNull": ["$items.quantity", 1]}]}}},
+        {"$addFields": {"_net": {"$cond": [
+            {"$in": ["$_plat", _MARKETPLACES]},
+            "$_line_net",
+            {"$cond": [{"$gt": ["$_sub", 0]},
+                {"$multiply": ["$_line_net", {"$divide": [
+                    {"$max": [0, {"$subtract": ["$_sub", "$_disc"]}]}, "$_sub"]}]},
+                "$_line_net"]}
+        ]}}},
         {"$lookup": {
             "from": "products",
             "let": {"pid": "$items.product_id", "bc": "$_bc"},
@@ -1791,7 +1873,7 @@ async def cancel_return_products(
                 _rb[_bc] = _allowed - _rq
                 _t = _t * (_rq / _q) if _q else 0.0
                 _q = _rq
-            elif i.get("status") not in ("returned", "refunded"):
+            elif r["_id"].get("status") not in ("returned", "refunded"):
                 # Talep/açık/kısmi durumunda kalem kanıtı yoksa tüm siparişi iade
                 # varsaymak oranı şişirir. Yalnız kesin tam-iade statüsü fallback'tir.
                 _q = 0
@@ -1845,9 +1927,18 @@ async def cancel_return_by_source(
     _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu", "n11": "n11", "amazon": "Amazon"}
     by_ch: dict = {}
     for o in orders:
-        plat = str(o.get("platform") or o.get("marketplace") or "").strip().lower()
-        key = plat if plat in _MARKETPLACES else "site"
+        # Alanlardan herhangi biri bilinen pazaryeriyse onu seç; aksi halde Facette/web/
+        # boş değerlerin tamamı Site'dır. ``platform or marketplace`` kullanmak, örn.
+        # platform="facette" + marketplace="trendyol" eski kaydını yanlışlıkla Site'a atardı.
+        platform = str(o.get("platform") or "").strip().lower()
+        marketplace = str(o.get("marketplace") or "").strip().lower()
+        key = platform if platform in _MARKETPLACES else (
+            marketplace if marketplace in _MARKETPLACES else "site")
         by_ch.setdefault(key, []).append(o)
+
+    # Site satırı tarih aralığında sıfır olsa da kaybolmasın. Böylece "Dün" / "Son 7 Gün"
+    # geçişinde tablo yalnız Trendyol varmış izlenimi vermez; gerçek sıfır açıkça görünür.
+    by_ch.setdefault("site", [])
 
     items = []
     for key, rows in by_ch.items():
@@ -1976,13 +2067,20 @@ async def returns_by_product(
         returned = int(r.get("return_qty") or 0)
         if returned <= 0:
             continue
-        gross_sold = int(r.get("qty") or 0) + returned
+        sold_excluding_cancels = int(r.get("qty") or 0) + returned
+        gross_sold = int(r.get("gross_qty") or (sold_excluding_cancels + int(r.get("cancel_qty") or 0)))
         out.append({
             "product_id": r.get("product_id"),
             "product_name": r.get("name") or "—",
             "returned": returned,
-            "sold": gross_sold,
-            "return_rate_pct": round(returned / gross_sold * 100, 1) if gross_sold else None,
+            "sold": sold_excluding_cancels,
+            "gross_sold": gross_sold,
+            # Kullanıcının operasyonel oranı: iptaller hariç.
+            "return_rate_pct": round(returned / sold_excluding_cancels * 100, 1)
+                               if sold_excluding_cancels else None,
+            # Trendyol İş Analizi karşılaştırma oranı: İade / Brüt Satış.
+            "trendyol_return_rate_pct": round(returned / gross_sold * 100, 1)
+                                        if gross_sold else None,
         })
     out.sort(key=lambda r: (-r["returned"], -(r["return_rate_pct"] or 0)))
     return {"items": out[:limit], "range_days": data.get("range_days")}

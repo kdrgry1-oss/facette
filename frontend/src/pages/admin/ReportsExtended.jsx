@@ -469,7 +469,8 @@ function ReturnRateAlerts() {
         ⚠️ {data.total ?? 0} ürün iade oranı eşiği aşıyor. Bu ürünleri inceleyin — beden/kalite/açıklama sorunu olabilir.
         <div className="mt-1.5 text-xs text-emerald-800">
           <b>Kesin kalem hesabı:</b> İade % = İade / (Net Satış + İade). İptaller hem paydan
-          hem paydadan hariçtir; yalnız onaylı site iadeleri ve Accepted Trendyol iade kalemleri sayılır.
+          hem paydadan hariçtir. Trendyol karşılaştırması ayrıca İade / Brüt Satış olarak gösterilir;
+          yalnız onaylı site iadeleri ve Accepted Trendyol iade kalemleri sayılır.
         </div>
       </div>
       <Table rows={data.items} testid="returns-table"
@@ -478,7 +479,10 @@ function ReturnRateAlerts() {
           { k: "sold", l: "Satış", num: true },
           { k: "returned", l: "İade", num: true },
           { k: "return_rate_pct", l: "Oran %", num: true, render: (r) => (
-              <span className={`px-2 py-0.5 rounded text-xs font-medium ${r.severity==="critical"?"bg-red-100 text-red-800":r.severity==="high"?"bg-orange-100 text-orange-800":"bg-amber-100 text-amber-800"}`}>{r.return_rate_pct}%</span>
+              <div className="text-right">
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${r.severity==="critical"?"bg-red-100 text-red-800":r.severity==="high"?"bg-orange-100 text-orange-800":"bg-amber-100 text-amber-800"}`}>{r.return_rate_pct}%</span>
+                <div className="text-[10px] text-indigo-600 mt-1">TY %{r.trendyol_return_rate_pct ?? 0}</div>
+              </div>
             ) },
         ]} />
     </div>

@@ -96,7 +96,7 @@ export default function ProfitabilityAnalysis() {
       </div>
 
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
-        <span className="font-semibold">Bu raporda:</span> Her kategori/pazaryeri için <b>Ciro − Ürün Maliyeti (COGS) − Pazaryeri Komisyonu − Kargo − Hizmet Bedeli − Reklam Gideri − Ödenecek KDV − Kurumlar Vergisi = NET KÂR</b> ve marj %. Komisyon/reklam/vergi oranları <b>Gider Ayarları</b>'ndan yönetilir (reklam giderini kanal bazında girin, ciroya göre dağıtılır). Maliyet, ürünlerin <b>alış fiyatından</b> gelir; girilmemişse satış fiyatının %'siyle tahmin edilir (ayarlanabilir). Negatif/düşük marjlı kategorileri buradan görüp fiyat/komisyon/maliyet aksiyonu alın.
+        <span className="font-semibold">Bu raporda:</span> Her kategori/pazaryeri için <b>Net Ciro − Ürün Maliyeti (COGS) − Pazaryeri Komisyonu − Kargo − Hizmet Bedeli − Reklam Gideri − Ödenecek KDV − Kurumlar Vergisi = NET KÂR</b> ve marj %. Net ciro, ürün/kampanya/kupon/havale indirimleri bir kez düşülmüş tutardır. Komisyon/reklam/vergi oranları <b>Gider Ayarları</b>'ndan yönetilir. Maliyet, ürünlerin <b>alış fiyatından</b> gelir; girilmemişse satış fiyatının %'siyle tahmin edilir (ayarlanabilir).
       </div>
 
       {/* Gider ayarları editörü */}
@@ -137,7 +137,7 @@ export default function ProfitabilityAnalysis() {
 
       {/* Özet kutuları */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="bg-gradient-to-br from-slate-900 to-slate-700 text-white rounded-xl p-5"><div className="text-[11px] uppercase opacity-80">Ciro</div><div className="text-2xl font-bold mt-1">{tl(t.revenue)}</div></div>
+        <div className="bg-gradient-to-br from-slate-900 to-slate-700 text-white rounded-xl p-5"><div className="text-[11px] uppercase opacity-80">Net Ciro</div><div className="text-2xl font-bold mt-1">{tl(t.revenue)}</div><div className="text-[10px] opacity-70 mt-1">Brüt {tl(t.gross_revenue)} · İndirim {tl(t.discount)}</div></div>
         <div className="bg-gradient-to-br from-rose-600 to-rose-500 text-white rounded-xl p-5"><div className="text-[11px] uppercase opacity-80">Toplam Gider</div><div className="text-2xl font-bold mt-1">{tl((t.revenue || 0) - (t.net_profit || 0))}</div></div>
         <div className="bg-gradient-to-br from-emerald-600 to-emerald-500 text-white rounded-xl p-5"><div className="text-[11px] uppercase opacity-80">Net Kâr</div><div className="text-2xl font-bold mt-1">{tl(t.net_profit)}</div></div>
         <div className="bg-gradient-to-br from-blue-600 to-blue-500 text-white rounded-xl p-5"><div className="text-[11px] uppercase opacity-80">Net Marj</div><div className="text-2xl font-bold mt-1">%{t.margin_pct ?? 0}</div></div>
@@ -151,7 +151,7 @@ export default function ProfitabilityAnalysis() {
             <thead className="bg-gray-50 uppercase text-gray-500">
               <tr>
                 <th className="text-left p-2.5">Kategori</th><th className="text-left p-2.5">Kanal</th>
-                <th className="text-right p-2.5">Adet</th><th className="text-right p-2.5">Ciro</th>
+                <th className="text-right p-2.5">Adet</th><th className="text-right p-2.5">Net Ciro</th>
                 <th className="text-right p-2.5">COGS</th><th className="text-right p-2.5">Komisyon</th>
                 <th className="text-right p-2.5">Kargo</th><th className="text-right p-2.5">Reklam</th>
                 <th className="text-right p-2.5">Hizmet</th><th className="text-right p-2.5">KDV</th>

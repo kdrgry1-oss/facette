@@ -158,6 +158,89 @@ def split_confirmed_return(quantity: int, amount: float, returned: int) -> tuple
     return kept, kept_amount, ret, float(amount or 0) - kept_amount
 
 
+def claim_items_with_status(claim: dict, statuses: set[str]) -> list[dict]:
+    """Return marketplace claim units whose child status is in ``statuses``.
+
+    Trendyol claims may contain a mixture of Accepted, Created and Rejected
+    ``claimItems``.  The claim-level status deliberately represents the most
+    actionable child status, so it is not a safe source for historical return
+    quantities.  Reports must inspect every raw claim item instead.
+
+    Each Trendyol ``claimItem`` is one returned unit.  Legacy/manual rows do not
+    always have raw data; for those, normalized items are used only when the
+    stored claim itself is accepted.  Returned rows include a stable key so a
+    repeated claim item cannot inflate totals.
+    """
+    raw_items = ((claim or {}).get("raw_data") or {}).get("items") or []
+    matched: list[dict] = []
+    seen: set[str] = set()
+    claim_id = str((claim or {}).get("claim_id") or "").strip()
+    normalized_by_id = {
+        str((item or {}).get("claim_item_id") or "").strip(): (item or {})
+        for item in ((claim or {}).get("items") or [])
+        if str((item or {}).get("claim_item_id") or "").strip()
+    }
+
+    if raw_items:
+        for line_index, raw_line in enumerate(raw_items):
+            raw_line = raw_line or {}
+            order_line = raw_line.get("orderLine") or {}
+            barcode = str(order_line.get("barcode") or "").strip()
+            if not barcode:
+                continue
+            for item_index, claim_item in enumerate(raw_line.get("claimItems") or []):
+                claim_item = claim_item or {}
+                status = str(((claim_item.get("claimItemStatus") or {}).get("name") or "")).strip()
+                if status not in statuses:
+                    continue
+                item_id = str(claim_item.get("id") or "").strip()
+                key = f"{claim_id}:{item_id}" if item_id else f"{claim_id}:raw:{line_index}:{item_index}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                normalized = normalized_by_id.get(item_id) or {}
+                try:
+                    amount = float(normalized.get("price") or normalized.get("unit_price")
+                                   or order_line.get("price") or 0)
+                except Exception:
+                    amount = 0.0
+                matched.append({"key": key, "barcode": barcode, "quantity": 1,
+                                "amount": max(0.0, amount), "status": status})
+        return matched
+
+    stored_status = str((claim or {}).get("claim_status") or "").strip()
+    if stored_status not in statuses:
+        return matched
+    for item_index, item in enumerate((claim or {}).get("items") or []):
+        item = item or {}
+        barcode = str(item.get("barcode") or "").strip()
+        if not barcode:
+            continue
+        item_id = str(item.get("claim_item_id") or "").strip()
+        key = f"{claim_id}:{item_id}" if item_id else f"{claim_id}:legacy:{item_index}"
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            unit_amount = float(item.get("price") or item.get("unit_price") or 0)
+        except Exception:
+            unit_amount = 0.0
+        quantity = max(1, int(item.get("quantity") or 1))
+        matched.append({
+            "key": key,
+            "barcode": barcode,
+            "quantity": quantity,
+            "amount": max(0.0, unit_amount) * quantity,
+            "status": stored_status,
+        })
+    return matched
+
+
+def accepted_claim_items(claim: dict) -> list[dict]:
+    """Return accepted marketplace claim units, item by item."""
+    return claim_items_with_status(claim, {"Accepted"})
+
+
 async def load_dup_dep():
     """Router bağımlılığı — handler'dan ÖNCE cache'i tazeler (salt-okuma)."""
     try:

@@ -504,8 +504,9 @@ export function ProductsReport() {
         ...p,
         _cover: (p.current_stock != null && wr > 0) ? p.current_stock / wr : null,
         _mom: (prev != null && (wr > 0 || prev > 0)) ? wr - prev : null,
-        _retpct: totQ > 0 ? (100 * (p.return_qty || 0)) / totQ : 0,
-        _gross: (p.qty || 0) + (p.cancel_qty || 0) + (p.return_qty || 0),
+        _retpct: p.return_rate_excluding_cancels_pct ?? (totQ > 0 ? (100 * (p.return_qty || 0)) / totQ : 0),
+        _tyretpct: p.trendyol_return_rate_pct ?? ((p.gross_qty || 0) > 0 ? (100 * (p.return_qty || 0)) / p.gross_qty : 0),
+        _gross: p.gross_qty ?? ((p.qty || 0) + (p.cancel_qty || 0) + (p.return_qty || 0)),
       };
     });
     if (f) r = r.filter(p => (p.name || "").toLocaleLowerCase("tr").includes(f));
@@ -526,6 +527,7 @@ export function ProductsReport() {
                return_qty: rq,
                _gross: nq + cq + rq,
                _retpct: totQ > 0 ? (100 * rq) / totQ : 0,
+               _tyretpct: (nq + cq + rq) > 0 ? (100 * rq) / (nq + cq + rq) : 0,
                platform_breakdown: [{ platform: platFilter, qty: nq, revenue: pb.revenue || 0 }],
                top_platform: platFilter,
                _platScoped: true,
@@ -742,8 +744,9 @@ export function ProductsReport() {
                     {p.return_qty || 0}
                   </td>
                   <td className={`p-3 text-right tabular-nums text-xs ${p._retpct >= 15 ? "text-red-600 font-bold" : p._retpct >= 8 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
-                    title={`İade % = İade / (Net Satış + İade) — iptal hariç (${p.return_qty || 0}/${(p.qty || 0) + (p.return_qty || 0)})${p._retpct >= 15 ? " — %15+ iade: bu ürün muhtemelen zarar ettiriyor (kalıp/beden denetimi önerilir)" : ""}`}>
-                    {p._retpct > 0 ? `%${p._retpct.toFixed(1)}` : ""}
+                    title={`İptal hariç: İade / (Net + İade) = ${p.return_qty || 0}/${(p.qty || 0) + (p.return_qty || 0)}. Trendyol: İade / Brüt = ${p.return_qty || 0}/${p._gross || 0}.`}>
+                    <div>{p._retpct > 0 ? `%${p._retpct.toFixed(1)}` : ""} <span className="text-[9px] font-normal text-gray-400">iptal hariç</span></div>
+                    <div className="text-[10px] font-normal text-indigo-600">TY %{p._tyretpct.toFixed(1)}</div>
                   </td>
                   <td className="p-3 text-right">{p.qty}</td>
                   <td className="p-3 text-right font-semibold">₺{(p.revenue || 0).toLocaleString("tr-TR")}</td>
