@@ -5,15 +5,19 @@ import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tool
 import { TrendingUp, Package, Users, Truck, CreditCard, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import ReportScopeBadge from "../../components/ReportScopeBadge";
+import {
+  REPORT_MIN_DATE, clampReportDate, defaultReportRange, filterReportChannels,
+  productExportParams, reportPresetRange, splitReportRange,
+} from "../../lib/reportFilters";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
 const COLORS = ["#3b82f6", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#ef4444", "#0ea5e9", "#22c55e"];
 
 function useDateRange() {
-  const today = new Date();
-  const [from, setFrom] = useState(_ymd(new Date(today.getTime() - 29 * 864e5)));
-  const [to, setTo] = useState(_ymd(today));
+  const initial = defaultReportRange();
+  const [from, setFrom] = useState(initial.from);
+  const [to, setTo] = useState(initial.to);
   return { from, setFrom, to, setTo };
 }
 
@@ -27,9 +31,6 @@ const DATE_PRESETS = [
   { key: "90", label: "Son 90 Gün", days: 90 },
   { key: "365", label: "Son 1 Yıl", days: 365 },
 ];
-// Yerel tarih → YYYY-MM-DD (toISOString UTC kayması olmadan; TR'de ayın 1'i bir gün geri kaymasın).
-const _ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
 function DateBar({ from, setFrom, to, setTo, onRefresh }) {
   // Ön-ayar tıklanınca tarihleri güncelle ve tarih STATE'i işlendikten SONRA (ref ile en güncel
   // load'ı) otomatik uygula — böylece bayat kapanış (stale closure) sorunu olmadan tek tıkla çalışır.
@@ -53,18 +54,7 @@ function DateBar({ from, setFrom, to, setTo, onRefresh }) {
   }, [from, to, tick]);
 
   const applyPreset = (p) => {
-    const t = new Date();
-    let fromStr, toStr;
-    if (p.key === "yesterday") {
-      const y = new Date(t.getTime() - 864e5);
-      fromStr = toStr = _ymd(y);
-    } else if (p.key === "thismonth") {
-      fromStr = _ymd(new Date(t.getFullYear(), t.getMonth(), 1));
-      toStr = _ymd(t);
-    } else {
-      toStr = _ymd(t);
-      fromStr = p.days <= 1 ? toStr : _ymd(new Date(t.getTime() - (p.days - 1) * 864e5));
-    }
+    const { from: fromStr, to: toStr } = reportPresetRange(p.key);
     pendingLabelRef.current = p.label;
     setFrom(fromStr); setTo(toStr); setActivePreset(p.key); setTick((x) => x + 1);
   };
@@ -83,9 +73,9 @@ function DateBar({ from, setFrom, to, setTo, onRefresh }) {
         ))}
       </div>
       <div className="flex items-center gap-2 bg-white p-2 border rounded-lg">
-        <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setActivePreset(""); }} className="text-sm px-2 py-1 border-0" />
+        <input type="date" min={REPORT_MIN_DATE} value={from} onChange={(e) => { setFrom(clampReportDate(e.target.value)); setActivePreset(""); }} className="text-sm px-2 py-1 border-0" />
         <span className="text-gray-400">→</span>
-        <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setActivePreset(""); }} className="text-sm px-2 py-1 border-0" />
+        <input type="date" min={REPORT_MIN_DATE} value={to} onChange={(e) => { setTo(clampReportDate(e.target.value)); setActivePreset(""); }} className="text-sm px-2 py-1 border-0" />
         <button onClick={() => {
             // Bildirim veri yenilendiğinde çıksın (tıklama anında değil).
             Promise.resolve(onRefresh && onRefresh())
@@ -127,7 +117,7 @@ export function SalesReport() {
     axios.get(`${API}/admin/reports/sales-by-weekday`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
       .then((r) => setWeekdayData(r.data)).catch(() => {});
     axios.get(`${API}/admin/reports/cancel-return-by-source`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
-      .then((r) => setCancelRet(r.data.items || [])).catch(() => {});
+      .then((r) => setCancelRet(filterReportChannels(r.data.items || [], source))).catch(() => {});
     // İl/İlçe & Kanal (eski ayrı sekme buraya taşındı — kullanıcı isteği)
     axios.get(`${API}/admin/reports/by-location`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group: "city", source, limit: 100 } })
       .then((r) => setLocData(r.data.rows || [])).catch(() => {});
@@ -437,17 +427,36 @@ export function ProductsReport() {
   const toggleExpand = (k) => setExpanded(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const reconcileTrendyol = async () => {
-    const dayCount = Math.floor((new Date(to) - new Date(from)) / 864e5) + 1;
-    if (dayCount > 62) {
-      toast.error("Trendyol mutabakatı en fazla 62 günlük aralıkta çalışır.");
-      return;
-    }
     setReconLoading(true);
     try {
-      const r = await axios.get(`${API}/integrations/trendyol/reconcile`, {
-        headers: authHeaders(), params: { start_date: from, end_date: to, apply: false, list_limit: 20 },
+      // Backend tek istekte uzun aralığı bilinçli olarak sınırlar. 5 Haziran'dan
+      // bugüne mutabakatı 31 günlük, boşluksuz parçalara bölüp salt-okunur sonuçları
+      // birleştir; hiçbir sipariş/statü/stok kaydı değiştirilmez.
+      const parts = [];
+      for (const chunk of splitReportRange(from, to, 31)) {
+        const response = await axios.get(`${API}/integrations/trendyol/reconcile`, {
+          headers: authHeaders(), params: {
+            start_date: chunk.from, end_date: chunk.to, apply: false, list_limit: 20,
+          },
+        });
+        parts.push(response.data);
+      }
+      const sum = (pick) => parts.reduce((total, part) => total + Number(pick(part) || 0), 0);
+      const collect = (key) => parts.flatMap((part) => part?.[key]?.items || []).slice(0, 20);
+      const tyAmount = sum((p) => p.trendyol?.amount);
+      const amountDiff = sum((p) => p.diff?.amount);
+      setRecon({
+        range: { start: from, end: to },
+        trendyol: { orders: sum((p) => p.trendyol?.orders), units: sum((p) => p.trendyol?.units), amount: tyAmount },
+        panel: { orders: sum((p) => p.panel?.orders), units: sum((p) => p.panel?.units), amount: sum((p) => p.panel?.amount), docs: sum((p) => p.panel?.docs) },
+        diff: { orders: sum((p) => p.diff?.orders), units: sum((p) => p.diff?.units), amount: amountDiff,
+          amount_pct: tyAmount ? 100 * amountDiff / tyAmount : 0 },
+        duplicates: { extra_docs: sum((p) => p.duplicates?.extra_docs), order_numbers: parts.flatMap((p) => p.duplicates?.order_numbers || []).slice(0, 20) },
+        missing_in_panel: { count: sum((p) => p.missing_in_panel?.count), active_count: sum((p) => p.missing_in_panel?.active_count), cancelled_count: sum((p) => p.missing_in_panel?.cancelled_count), items: collect("missing_in_panel") },
+        extra_in_panel: { count: sum((p) => p.extra_in_panel?.count), items: collect("extra_in_panel") },
+        cancel_mismatch: { count: sum((p) => p.cancel_mismatch?.count), items: collect("cancel_mismatch") },
+        partial_cancel: { count: sum((p) => p.partial_cancel?.count), items: collect("partial_cancel") },
       });
-      setRecon(r.data);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Trendyol mutabakatı alınamadı");
     } finally {
@@ -457,17 +466,17 @@ export function ProductsReport() {
 
   const load = async () => {
     const [t, c] = await Promise.all([
-      axios.get(`${API}/admin/reports/products/top`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", limit: 2000 } }),
-      axios.get(`${API}/admin/reports/categories`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } }),
+      axios.get(`${API}/admin/reports/products/top`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source: platFilter || "all", limit: 2000 } }),
+      axios.get(`${API}/admin/reports/categories`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source: platFilter || "all" } }),
     ]);
     setTop(t.data.items || []);
     setCats(c.data.items || []);
     // İade & İptal raporu (ürün bazlı — platform/tarih/ada göre filtrelenebilir)
-    axios.get(`${API}/admin/reports/cancel-return-products`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
+    axios.get(`${API}/admin/reports/cancel-return-products`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source: platFilter || "all" } })
       .then((r) => setCrRows(r.data.items || [])).catch(() => {});
     // İVME: seçili aralıktaki hız, 90 günlük tabana kıyaslanır (yükselen/sönen ürün tespiti)
-    const d90 = _ymd(new Date(new Date(`${to}T12:00:00`).getTime() - 89 * 864e5));
-    axios.get(`${API}/admin/reports/products/top`, { headers: authHeaders(), params: { start_date: d90, end_date: to + "T23:59:59", limit: 2000 } })
+    const d90 = reportPresetRange("90", new Date(`${to}T12:00:00`)).from;
+    axios.get(`${API}/admin/reports/products/top`, { headers: authHeaders(), params: { start_date: d90, end_date: to + "T23:59:59", source: platFilter || "all", limit: 2000 } })
       .then((r) => {
         const m = {};
         (r.data.items || []).forEach(p => { if (p.product_id) m[p.product_id] = (p.velocity || {}).weekly_rate ?? 0; });
@@ -477,7 +486,7 @@ export function ProductsReport() {
   const [crRows, setCrRows] = useState([]);
   const [crQ, setCrQ] = useState("");
   const [crPlat, setCrPlat] = useState("");
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [platFilter]);
 
   const platLabel = (p) => ({ site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu" }[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—"));
   // Sezon ürün kartındaki 'Sezon' özniteliğinden gelir (backend normalize eder); yoksa boş.
@@ -485,7 +494,11 @@ export function ProductsReport() {
   // Kapsama ilk tıkta KÜÇÜKTEN büyüğe: RPT durumu acil olanlar (az haftası kalanlar) üstte.
   const toggleSort = (k) => { if (sortKey === k) setSortDir(d => d === "desc" ? "asc" : "desc"); else { setSortKey(k); setSortDir(k === "name" || k === "best_size" || k === "_cover" ? "asc" : "desc"); } };
   // Filtre seçenekleri (veriden)
-  const platOptions = Array.from(new Set(top.flatMap(p => (p.platform_breakdown || []).map(x => x.platform)))).sort();
+  const platOptions = Array.from(new Set([
+    "site", "trendyol", "hepsiburada", "temu",
+    ...top.flatMap(p => (p.platform_breakdown || []).map(x => x.platform)),
+    ...top.flatMap(p => (p.cancel_return_by_platform || []).map(x => x.platform)),
+  ])).sort();
   const sizeOptions = Array.from(new Set(top.flatMap(p => (p.size_breakdown || []).map(x => x.size)))).filter(s => s && s !== "—").sort((a, b) => a.localeCompare(b, "tr", { numeric: true }));
   const velMeta = { green: { label: "Hızlı", cls: "bg-green-100 text-green-700 border-green-200" }, yellow: { label: "Orta", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" }, red: { label: "Yavaş", cls: "bg-red-100 text-red-700 border-red-200" } };
   const rows = (() => {
@@ -555,12 +568,10 @@ export function ProductsReport() {
   })();
   const exportXlsx = async () => {
     try {
-      const params = new URLSearchParams({ start_date: from, end_date: `${to}T23:59:59` });
-      if (platFilter) params.set("source", platFilter);
-      if (q) params.set("q", q);
-      if (sizeFilter) params.set("size", sizeFilter);
-      if (collFilter) params.set("season", collFilter);
-      if (velFilter) params.set("velocity", velFilter);
+      const params = productExportParams({
+        from, to, platform: platFilter, size: sizeFilter, season: collFilter,
+        velocity: velFilter, query: q, sortKey, sortDir,
+      });
       const r = await fetch(`${API}/admin/reports/products/export-xlsx?${params}`, { headers: authHeaders() });
       if (!r.ok) throw new Error(`Excel API ${r.status}`);
       const b = await r.blob();
@@ -703,7 +714,7 @@ export function ProductsReport() {
                 <SortTh k="_gross" right>Toplam Satış</SortTh>
                 <SortTh k="cancel_qty" right>İptal</SortTh>
                 <SortTh k="return_qty" right>İade</SortTh>
-                <SortTh k="_retpct" right>İade %</SortTh>
+                <SortTh k="_tyretpct" right>İade % (Trendyol)</SortTh>
                 <SortTh k="qty" right>Net Satış</SortTh>
                 <SortTh k="revenue" right>Ciro (Net)</SortTh>
                 <SortTh k="current_stock" right>Güncel Stok</SortTh>
@@ -750,10 +761,10 @@ export function ProductsReport() {
                     title={(p.cancel_return_by_platform || []).map(x => `${platLabel(x.platform)}: iade ${x.return}`).join(", ")}>
                     {p.return_qty || 0}
                   </td>
-                  <td className={`p-3 text-right tabular-nums text-xs ${p._retpct >= 15 ? "text-red-600 font-bold" : p._retpct >= 8 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
-                    title={`İptal hariç: İade / (Net + İade) = ${p.return_qty || 0}/${(p.qty || 0) + (p.return_qty || 0)}. Trendyol: İade / Brüt = ${p.return_qty || 0}/${p._gross || 0}.`}>
-                    <div>{p._retpct > 0 ? `%${p._retpct.toFixed(1)}` : ""} <span className="text-[9px] font-normal text-gray-400">iptal hariç</span></div>
-                    <div className="text-[10px] font-normal text-indigo-600">TY %{p._tyretpct.toFixed(1)}</div>
+                  <td className={`p-3 text-right tabular-nums text-xs ${p._tyretpct >= 15 ? "text-red-600 font-bold" : p._tyretpct >= 8 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
+                    title={`Trendyol formülü: İade / Brüt Satış = ${p.return_qty || 0}/${p._gross || 0}. İptal adedi iade sayısına eklenmez.`}>
+                    <div>%{p._tyretpct.toFixed(1)}</div>
+                    <div className="text-[9px] font-normal text-gray-400">iade / brüt satış</div>
                   </td>
                   <td className="p-3 text-right">{p.qty}</td>
                   <td className="p-3 text-right font-semibold">₺{(p.revenue || 0).toLocaleString("tr-TR")}</td>

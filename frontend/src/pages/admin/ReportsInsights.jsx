@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { MapPin, Radio, PackageX, TrendingUp, Clock, CreditCard, Ticket, UserPlus } from "lucide-react";
 import ReportScopeBadge from "../../components/ReportScopeBadge";
+import { REPORT_MIN_DATE, clampReportDate, defaultReportRange, reportPresetRange } from "../../lib/reportFilters";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
@@ -19,16 +20,11 @@ const CHANNEL_LABELS = {
   email: "E-posta", sms: "SMS", direct: "Doğrudan / Site",
 };
 
-function todayISO(offsetDays = 0) {
-  // Not: sabit bir referans yok; tarayıcı tarihini kullanır (admin aracı).
-  const d = new Date(Date.now() - offsetDays * 86400000);
-  return d.toISOString().slice(0, 10);
-}
-
 export default function ReportsInsights() {
+  const initial = defaultReportRange();
   const [tab, setTab] = useState("location");
-  const [start, setStart] = useState(todayISO(30));
-  const [end, setEnd] = useState(todayISO(0));
+  const [start, setStart] = useState(initial.from);
+  const [end, setEnd] = useState(initial.to);
   const [source, setSource] = useState("all");
   const [locGroup, setLocGroup] = useState("city");
   const [days, setDays] = useState(90);
@@ -44,7 +40,7 @@ export default function ReportsInsights() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const q = `start_date=${start}T00:00:00Z&end_date=${end}T23:59:59Z`;
+    const q = `start_date=${start}&end_date=${end}`;
     try {
       if (tab === "location") setLoc((await axios.get(`${API}/admin/reports/by-location?${q}&group=${locGroup}&source=${source}&limit=200`, auth())).data);
       else if (tab === "source") setSrc((await axios.get(`${API}/admin/reports/by-source?${q}`, auth())).data);
@@ -60,14 +56,7 @@ export default function ReportsInsights() {
   useEffect(() => { load(); }, [load]);
 
   const setDatePreset = (kind) => {
-    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const tn = new Date();
-    let s, e;
-    if (kind === "today") { s = e = ymd(tn); }
-    else if (kind === "yesterday") { const y = new Date(tn.getTime() - 864e5); s = e = ymd(y); }
-    else if (kind === "7") { s = ymd(new Date(tn.getTime() - 6 * 864e5)); e = ymd(tn); }
-    else if (kind === "30") { s = ymd(new Date(tn.getTime() - 29 * 864e5)); e = ymd(tn); }
-    else if (kind === "month") { s = ymd(new Date(tn.getFullYear(), tn.getMonth(), 1)); e = ymd(tn); }
+    const { from: s, to: e } = reportPresetRange(kind);
     setStart(s); setEnd(e);
   };
 
@@ -110,11 +99,11 @@ export default function ReportsInsights() {
           <>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Başlangıç</label>
-              <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
+              <input type="date" min={REPORT_MIN_DATE} value={start} onChange={(e) => setStart(clampReportDate(e.target.value))} className="border rounded px-2 py-1.5 text-sm" />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Bitiş</label>
-              <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
+              <input type="date" min={REPORT_MIN_DATE} value={end} onChange={(e) => setEnd(clampReportDate(e.target.value))} className="border rounded px-2 py-1.5 text-sm" />
             </div>
             <div className="flex flex-wrap gap-1 items-center">
               {[["today","Bugün"],["yesterday","Dün"],["7","Son 7"],["30","Son 30"],["month","Bu Ay"]].map(([k,l]) => (

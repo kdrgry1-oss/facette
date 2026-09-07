@@ -23,6 +23,10 @@ canonical_order_stages = report_dedup.canonical_order_stages
 effective_order_date_match = report_dedup.effective_order_date_match
 split_confirmed_return = report_dedup.split_confirmed_return
 accepted_claim_items = report_dedup.accepted_claim_items
+product_quantity_metrics = report_dedup.product_quantity_metrics
+kept_gross_revenue = report_dedup.kept_gross_revenue
+reconciled_platform_breakdown = report_dedup.reconciled_platform_breakdown
+payment_report_group_key = report_dedup.payment_report_group_key
 
 
 def test_effective_date_prefers_marketplace_and_falls_back_only_when_empty():
@@ -61,6 +65,51 @@ def test_confirmed_return_is_removed_from_net_but_cancel_is_not_in_denominator()
 
 def test_confirmed_return_cannot_exceed_sold_quantity():
     assert split_confirmed_return(2, 300.0, 9) == (0, 0.0, 2, 300.0)
+
+
+def test_product_quantity_metrics_separates_trendyol_and_operational_rates():
+    metrics = product_quantity_metrics(net=2, cancelled=2, returned=4)
+    assert metrics == {
+        "gross_qty": 8,
+        "trendyol_return_rate_pct": 50.0,
+        "return_rate_excluding_cancels_pct": 66.67,
+    }
+
+
+def test_product_quantity_metrics_are_non_negative_and_zero_safe():
+    assert product_quantity_metrics(-1, 0, 0) == {
+        "gross_qty": 0,
+        "trendyol_return_rate_pct": 0.0,
+        "return_rate_excluding_cancels_pct": 0.0,
+    }
+
+
+def test_kept_gross_revenue_applies_discount_once():
+    # Brüt 1000, indirim 200; kalan net satış 400 ise kalan brüt 500'dür.
+    assert kept_gross_revenue(400, 1000, 200) == 500
+    assert kept_gross_revenue(400, 0, 0) == 400
+
+
+def test_profitability_platform_parts_equal_canonical_product_totals():
+    rows = reconciled_platform_breakdown({
+        "qty": 3, "revenue": 100.01,
+        "platform_breakdown": [
+            {"platform": "site", "qty": 1, "revenue": 33.33},
+            {"platform": "trendyol", "qty": 2, "revenue": 66.67},
+        ],
+    })
+    assert sum(row["qty"] for row in rows) == 3
+    assert round(sum(row["revenue"] for row in rows), 2) == 100.01
+
+
+def test_payment_report_group_keeps_marketplace_over_default_payment_method():
+    assert payment_report_group_key({
+        "platform": "facette", "marketplace": "Trendyol",
+        "payment_method": "marketplace",
+    }) == "trendyol"
+    assert payment_report_group_key({
+        "platform": "facette", "payment_method": "bank_transfer",
+    }) == "bank_transfer"
 
 
 def test_mixed_trendyol_claim_counts_only_accepted_child_items():

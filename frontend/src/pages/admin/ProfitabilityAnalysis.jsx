@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { TrendingUp, Settings, RefreshCw } from "lucide-react";
+import { REPORT_MIN_DATE, clampReportDate, defaultReportRange, reportPresetRange } from "../../lib/reportFilters";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -10,11 +11,9 @@ const PLAT = { site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", t
 const plat = (p) => PLAT[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—");
 
 export default function ProfitabilityAnalysis() {
-  const today = new Date();
-  // Bugün dahil tam 30 takvim günü: bugün - 29 gün.
-  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  const [from, setFrom] = useState(ymd(new Date(today.getTime() - 29 * 864e5)));
-  const [to, setTo] = useState(ymd(today));
+  const initial = defaultReportRange();
+  const [from, setFrom] = useState(initial.from);
+  const [to, setTo] = useState(initial.to);
   const [source, setSource] = useState("all");
   const [data, setData] = useState(null);
   const [cfg, setCfg] = useState(null);
@@ -35,13 +34,7 @@ export default function ProfitabilityAnalysis() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [source]);
 
   const setDatePreset = (kind) => {
-    const tn = new Date();
-    let f, tt;
-    if (kind === "today") { f = tt = ymd(tn); }
-    else if (kind === "yesterday") { const y = new Date(tn.getTime() - 864e5); f = tt = ymd(y); }
-    else if (kind === "7") { f = ymd(new Date(tn.getTime() - 6 * 864e5)); tt = ymd(tn); }
-    else if (kind === "30") { f = ymd(new Date(tn.getTime() - 29 * 864e5)); tt = ymd(tn); }
-    else if (kind === "month") { f = ymd(new Date(tn.getFullYear(), tn.getMonth(), 1)); tt = ymd(tn); }
+    const { from: f, to: tt } = reportPresetRange(kind);
     setFrom(f); setTo(tt); load(f, tt);
   };
 
@@ -82,9 +75,9 @@ export default function ProfitabilityAnalysis() {
             <option value="hepsiburada">Hepsiburada</option>
             <option value="temu">Temu</option>
           </select>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="text-sm px-2 py-1.5 border rounded" />
+          <input type="date" min={REPORT_MIN_DATE} value={from} onChange={(e) => setFrom(clampReportDate(e.target.value))} className="text-sm px-2 py-1.5 border rounded" />
           <span className="text-gray-400">→</span>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="text-sm px-2 py-1.5 border rounded" />
+          <input type="date" min={REPORT_MIN_DATE} value={to} onChange={(e) => setTo(clampReportDate(e.target.value))} className="text-sm px-2 py-1.5 border rounded" />
           <button onClick={() => load()} className="px-3 py-1.5 bg-black text-white text-xs rounded inline-flex items-center gap-1"><RefreshCw size={12} /> Uygula</button>
           <button onClick={() => setShowCfg(v => !v)} className="px-3 py-1.5 border rounded text-xs inline-flex items-center gap-1"><Settings size={12} /> Gider Ayarları</button>
         </div>

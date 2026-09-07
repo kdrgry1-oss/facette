@@ -23,7 +23,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 
-from .deps import db, require_admin, generate_id
+from .deps import db, require_admin, generate_id, tr_range_to_utc
 from .report_dedup import (
     canonical_order_stages,
     effective_order_date_match,
@@ -46,6 +46,13 @@ def _now() -> datetime:
 
 def _days_ago(days: int) -> str:
     return (_now() - timedelta(days=days)).isoformat()
+
+
+def _calendar_window(days: int) -> tuple[str, str]:
+    """Son N Türkiye takvim gününü, bugün dahil, ortak UTC sınırlarıyla döndür."""
+    today_tr = (_now() + timedelta(hours=3)).date()
+    start_day = today_tr - timedelta(days=max(1, days) - 1)
+    return tr_range_to_utc(start_day.isoformat(), today_tr.isoformat())
 
 
 def _intval(v) -> int:
@@ -84,8 +91,9 @@ _UNPAID_CANCEL = [
 ]
 def _canonical_order_window(days: int, excluded: list[str]) -> list:
     """One date/order population shared by every v2 order-backed report."""
+    start, end = _calendar_window(days)
     return [
-        {"$match": merge_match(effective_order_date_match(_days_ago(days), _now().isoformat()))},
+        {"$match": merge_match(effective_order_date_match(start, end))},
         *canonical_order_stages(),
         {"$match": {"status": {"$nin": excluded}}},
     ]
@@ -114,13 +122,21 @@ async def _product_cost_lookup(product_ids: Optional[List[str]] = None) -> dict:
     q: dict = {}
     if product_ids:
         q["id"] = {"$in": product_ids}
-    async for p in db.products.find(q, {"_id": 0, "id": 1, "cost_price": 1, "purchase_price": 1}):
+    async for p in db.products.find(q, {"_id": 0, "id": 1, "cost_price": 1,
+                                        "purchase_price": 1, "barcode": 1,
+                                        "variants.barcode": 1, "variants.urun_id": 1}):
         pid = str(p.get("id"))
-        if out.get(pid, 0) > 0:
-            continue
-        c = float(p.get("purchase_price") or 0) or float(p.get("cost_price") or 0)
+        c = (float(out.get(pid) or 0)
+             or float(p.get("purchase_price") or 0)
+             or float(p.get("cost_price") or 0))
         if c > 0:
             out[pid] = c
+            aliases = [p.get("barcode")]
+            for variant in p.get("variants") or []:
+                aliases.extend([variant.get("barcode"), variant.get("urun_id")])
+            for alias in aliases:
+                if alias not in (None, ""):
+                    out.setdefault(str(alias).strip(), c)
     return out
 
 
@@ -538,32 +554,34 @@ async def return_rate(
     """Belirli periyotta kesin kalem-bazlı iade oranı eşiğini aşan ürünleri listeler.
 
     Kaynak, v1 ürün-iade raporuyla aynıdır: onaylı site iadeleri ve Accepted Trendyol
-    claim kalemleri. Payda iptaller hariç brüt satış, pay yalnız iade edilen adettir.
+    claim kalemleri. Ana oran Trendyol ile aynı şekilde İade / Brüt Satış'tır;
+    iptaller iade adedine eklenmez ancak brüt satış paydasında kalır.
     """
     from .reports import returns_by_product
-    now = _now()
+    today_tr = (_now() + timedelta(hours=3)).date()
+    start_day = today_tr - timedelta(days=days - 1)
     exact = await returns_by_product(
-        start_date=(now - timedelta(days=days - 1)).date().isoformat(),
-        end_date=now.date().isoformat(), limit=500,
+        start_date=start_day.isoformat(), end_date=today_tr.isoformat(), limit=500,
         current_user={},
     )
     items = []
     for r in exact.get("items", []):
         sold = int(r.get("sold") or 0)
+        gross_sold = int(r.get("gross_sold") or sold)
         ret = int(r.get("returned") or 0)
-        rate = r.get("return_rate_pct")
-        if sold >= min_orders and rate is not None and float(rate) >= threshold:
+        rate = r.get("trendyol_return_rate_pct")
+        if gross_sold >= min_orders and rate is not None and float(rate) >= threshold:
             items.append({
                 "product_id": str(r.get("product_id") or ""),
                 "name": r.get("product_name") or "—",
                 "sold": sold,
-                "gross_sold": int(r.get("gross_sold") or sold),
+                "gross_sold": gross_sold,
                 "returned": ret,
-                "return_rate_pct": round(float(rate), 2),
-                "trendyol_return_rate_pct": r.get("trendyol_return_rate_pct"),
+                "return_rate_pct": r.get("return_rate_pct"),
+                "trendyol_return_rate_pct": round(float(rate), 2),
                 "severity": "critical" if rate >= 40 else ("high" if rate >= 30 else "warning"),
             })
-    items.sort(key=lambda x: -x["return_rate_pct"])
+    items.sort(key=lambda x: -x["trendyol_return_rate_pct"])
     return {"threshold": threshold, "days": days, "total": len(items), "items": items}
 
 
@@ -594,12 +612,13 @@ async def profit_by_channel(
 
     cost_map = await _product_cost_lookup()  # manuel > cost_price > purchase_price
 
+    from .reports import _channel_expr
     pipeline = [
         *_canonical_order_window(days, _EXCLUDED),
         {"$project": {
             # Y16: Kanal `platform` alanında tutulur (marketplace/source değil). Ayrıca 2-arg
             # $ifNull kullanılır (3-arg Mongo 5.0 gerektiriyordu, eski sürümde patlıyordu).
-            "channel": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]},
+            "channel": _channel_expr(),
             "status": 1, "items": 1, "total": 1, "shipping_cost": 1,
         }},
     ]
@@ -621,9 +640,10 @@ async def profit_by_channel(
         # Maliyet: items üzerinden cost_map ile çarpım
         for it in (o.get("items") or []):
             pid = str(it.get("product_id") or "")
+            barcode = str(it.get("barcode") or "").strip()
             qty = int(it.get("quantity") or 1)
             price = float(it.get("price") or 0)
-            cost = cost_map.get(pid)
+            cost = cost_map.get(pid) or cost_map.get(barcode)
             # D4 DENETİM FIX: maliyet 0 VEYA eksikse (None) fiyatın %50'si fallback — aksi halde
             # maliyeti 0 olan ürün ~%100 sahte marj gösteriyordu.
             if not cost:

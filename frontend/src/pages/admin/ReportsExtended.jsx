@@ -17,6 +17,7 @@ import {
   Save, Search, Box, Activity, Zap, Factory, CalendarClock,
 } from "lucide-react";
 import ReportScopeBadge from "../../components/ReportScopeBadge";
+import { REPORT_MIN_DATE, defaultReportRange, reportCoverageDays } from "../../lib/reportFilters";
 
 // Her sekmenin iptal/iade kapsama türü (rozet için)
 const _TAB_SCOPE = {
@@ -32,6 +33,8 @@ const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("
 const fmtMoney = (v) => "₺" + (Number(v || 0)).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtPct = (v) => (v == null ? "—" : `${Number(v).toFixed(1)}%`);
 const fmtNum = (v) => Number(v || 0).toLocaleString("tr-TR");
+const COVERAGE_DAYS = reportCoverageDays();
+const COVERAGE_LABEL = `${REPORT_MIN_DATE.split("-").reverse().join(".")} → ${defaultReportRange().to.split("-").reverse().join(".")}`;
 
 const TABS = [
   { key: "stock", label: "Stok Değer", icon: Box },
@@ -56,6 +59,7 @@ export default function ReportsExtended() {
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
         <span className="font-semibold">Bu raporda:</span> Kârlılık ve stok verimliliğini yönetirsiniz — <b>Stok Değer</b> (alış/satış değeri ve potansiyel kâr marjı), <b>Üretim Önerisi</b> (satış hızına göre tükenecek ürünler ve önerilen üretim adedi), <b>Hızlı/Yavaş Satan</b> ürünler, <b>İade Oranı</b> uyarısı, kanal bazlı <b>Brüt Marj</b> ve ürün <b>Maliyet Girişi</b>. "Yavaş Satan / Ölü Stok" ile uzun süredir satmayıp paranızı bağlayan ürünleri fark eder, "Brüt Marj" ve "Maliyet Girişi" ile hangi kanalın daha fazla marj bıraktığını görüp kararlar alırsınız.
       </div>
+      <div className="text-xs text-gray-500">Varsayılan satış dönemi: <b>{COVERAGE_LABEL}</b> ({COVERAGE_DAYS} gün). Sekmelerden daha dar dönem seçebilirsiniz.</div>
 
       <div className="border-b border-gray-200 flex gap-1 overflow-x-auto">
         {TABS.map((t) => {
@@ -181,7 +185,7 @@ function StockValuation() {
 
 // ──────────────────────────────────────────────────────────────────────────────
 function StockoutForecast() {
-  const [velocityDays, setVelocityDays] = useState(30);
+  const [velocityDays, setVelocityDays] = useState(Math.min(180, COVERAGE_DAYS));
   const [horizonDays, setHorizonDays] = useState(60);
   const [coverDays, setCoverDays] = useState(60);
   const [data, setData] = useState({ items: [], summary: {} });
@@ -215,6 +219,7 @@ function StockoutForecast() {
       <div className="flex items-center gap-3 flex-wrap">
         <label className="text-sm text-gray-600 flex items-center gap-1">Geçmiş veri (gün):
           <select value={velocityDays} onChange={(e)=>setVelocityDays(+e.target.value)} className="border rounded px-2 py-1 text-sm">
+            <option value={Math.min(180, COVERAGE_DAYS)}>5 Haz 2026 → Bugün</option>
             <option value={14}>14</option><option value={30}>30</option><option value={60}>60</option><option value={90}>90</option>
           </select>
         </label>
@@ -352,7 +357,7 @@ function StockoutForecast() {
 
 // ──────────────────────────────────────────────────────────────────────────────
 function FastMovers() {
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(COVERAGE_DAYS);
   const [data, setData] = useState({ items: [] });
   const [loading, setLoading] = useState(false);
   const load = async () => {
@@ -369,6 +374,7 @@ function FastMovers() {
       <div className="flex items-center gap-2">
         <label className="text-sm text-gray-600">Periyot:</label>
         <select value={days} onChange={(e) => setDays(+e.target.value)} className="border rounded px-2 py-1 text-sm" data-testid="fast-days-select">
+          <option value={COVERAGE_DAYS}>5 Haz 2026 → Bugün</option>
           <option value={7}>Son 7 gün</option>
           <option value={30}>Son 30 gün</option>
           <option value={60}>Son 60 gün</option>
@@ -390,7 +396,7 @@ function FastMovers() {
 }
 
 function SlowMovers() {
-  const [days, setDays] = useState(60);
+  const [days, setDays] = useState(COVERAGE_DAYS);
   const [data, setData] = useState({ items: [] });
   const [dead, setDead] = useState({ items: [] });
   const [loading, setLoading] = useState(false);
@@ -399,7 +405,7 @@ function SlowMovers() {
     try {
       const [a, b] = await Promise.all([
         axios.get(`${API}/admin/reports2/slow-movers?days=${days}&min_stock=1&limit=200`, auth()),
-        axios.get(`${API}/admin/reports2/dead-stock?days=90`, auth()),
+        axios.get(`${API}/admin/reports2/dead-stock?days=${days}`, auth()),
       ]);
       setData(a.data); setDead(b.data);
     } catch (e) { toast.error("Yüklenemedi"); } finally { setLoading(false); }
@@ -411,6 +417,7 @@ function SlowMovers() {
       <div className="flex items-center gap-2">
         <label className="text-sm text-gray-600">Yavaş Satan Eşik (gün):</label>
         <select value={days} onChange={(e) => setDays(+e.target.value)} className="border rounded px-2 py-1 text-sm">
+          <option value={COVERAGE_DAYS}>5 Haz 2026 → Bugün</option>
           <option value={30}>30</option><option value={60}>60</option><option value={90}>90</option>
         </select>
         <span className="text-xs text-gray-500">Günlük velocity &lt; 0.1 olanlar</span>
@@ -426,7 +433,7 @@ function SlowMovers() {
           ]} />
       </div>
       <div>
-        <h3 className="font-medium text-sm mb-2">Ölü Stok — 90 gündür hiç satılmamış ({dead.total || 0} ürün)</h3>
+        <h3 className="font-medium text-sm mb-2">Ölü Stok — {days} gündür hiç satılmamış ({dead.total || 0} ürün)</h3>
         <Table rows={dead.items}
           cols={[
             { k: "name", l: "Ürün" }, { k: "stock_code", l: "SKU" },
@@ -439,7 +446,7 @@ function SlowMovers() {
 
 function ReturnRateAlerts() {
   const [threshold, setThreshold] = useState(20);
-  const [days, setDays] = useState(90);
+  const [days, setDays] = useState(COVERAGE_DAYS);
   const [minOrders, setMinOrders] = useState(5);
   const [data, setData] = useState({ items: [] });
   const [loading, setLoading] = useState(false);
@@ -459,6 +466,7 @@ function ReturnRateAlerts() {
           <input type="number" min={1} max={100} value={threshold} onChange={(e)=>setThreshold(+e.target.value)} className="border rounded px-2 py-1 text-sm w-20" data-testid="ret-threshold" />%</label>
         <label className="text-sm text-gray-600 flex items-center gap-1">Periyot:
           <select value={days} onChange={(e)=>setDays(+e.target.value)} className="border rounded px-2 py-1 text-sm">
+            <option value={COVERAGE_DAYS}>5 Haz 2026 → Bugün</option>
             <option value={30}>30g</option><option value={60}>60g</option><option value={90}>90g</option><option value={180}>180g</option>
           </select></label>
         <label className="text-sm text-gray-600 flex items-center gap-1">Min Satılan Adet:
@@ -468,9 +476,8 @@ function ReturnRateAlerts() {
       <div className="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm">
         ⚠️ {data.total ?? 0} ürün iade oranı eşiği aşıyor. Bu ürünleri inceleyin — beden/kalite/açıklama sorunu olabilir.
         <div className="mt-1.5 text-xs text-emerald-800">
-          <b>Kesin kalem hesabı:</b> İade % = İade / (Net Satış + İade). İptaller hem paydan
-          hem paydadan hariçtir. Trendyol karşılaştırması ayrıca İade / Brüt Satış olarak gösterilir;
-          yalnız onaylı site iadeleri ve Accepted Trendyol iade kalemleri sayılır.
+          <b>Ana oran (Trendyol formülü):</b> İade % = İade / Brüt Satış. İptaller iade
+          adedine eklenmez; yalnız onaylı site iadeleri ve Accepted Trendyol iade kalemleri sayılır.
         </div>
       </div>
       <Table rows={data.items} testid="returns-table"
@@ -478,10 +485,10 @@ function ReturnRateAlerts() {
           { k: "name", l: "Ürün" },
           { k: "sold", l: "Satış", num: true },
           { k: "returned", l: "İade", num: true },
-          { k: "return_rate_pct", l: "Oran %", num: true, render: (r) => (
+          { k: "trendyol_return_rate_pct", l: "İade % (Trendyol)", num: true, render: (r) => (
               <div className="text-right">
-                <span className={`px-2 py-0.5 rounded text-xs font-medium ${r.severity==="critical"?"bg-red-100 text-red-800":r.severity==="high"?"bg-orange-100 text-orange-800":"bg-amber-100 text-amber-800"}`}>{r.return_rate_pct}%</span>
-                <div className="text-[10px] text-indigo-600 mt-1">TY %{r.trendyol_return_rate_pct ?? 0}</div>
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${r.severity==="critical"?"bg-red-100 text-red-800":r.severity==="high"?"bg-orange-100 text-orange-800":"bg-amber-100 text-amber-800"}`}>%{r.trendyol_return_rate_pct ?? 0}</span>
+                <div className="text-[10px] text-gray-500 mt-1">İade / brüt satış</div>
               </div>
             ) },
         ]} />
@@ -490,7 +497,7 @@ function ReturnRateAlerts() {
 }
 
 function ProfitByChannel() {
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(COVERAGE_DAYS);
   const [data, setData] = useState({ items: [], totals: {} });
   const [loading, setLoading] = useState(false);
   const load = async () => {
@@ -508,6 +515,7 @@ function ProfitByChannel() {
       <div className="flex items-center gap-2">
         <label className="text-sm text-gray-600">Periyot:</label>
         <select value={days} onChange={(e) => setDays(+e.target.value)} className="border rounded px-2 py-1 text-sm">
+          <option value={COVERAGE_DAYS}>5 Haz 2026 → Bugün</option>
           <option value={7}>Son 7 gün</option><option value={30}>Son 30 gün</option><option value={90}>Son 90 gün</option>
         </select>
         <button onClick={load} className="ml-auto text-sm text-blue-700 hover:underline flex items-center gap-1"><RefreshCw className={`w-3.5 h-3.5 ${loading?"animate-spin":""}`}/>Yenile</button>

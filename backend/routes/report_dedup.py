@@ -158,6 +158,71 @@ def split_confirmed_return(quantity: int, amount: float, returned: int) -> tuple
     return kept, kept_amount, ret, float(amount or 0) - kept_amount
 
 
+def product_quantity_metrics(net: int, cancelled: int, returned: int) -> dict:
+    """Kanonik ürün adetleri ve iki açıkça adlandırılmış iade oranı.
+
+    Trendyol İş Analizi: iade / (net + iptal + iade).
+    Operasyonel oran: iade / (net + iade), yani iptaller paydaya girmez.
+    """
+    net = max(0, int(net or 0))
+    cancelled = max(0, int(cancelled or 0))
+    returned = max(0, int(returned or 0))
+    gross = net + cancelled + returned
+    sold_excluding_cancels = net + returned
+    return {
+        "gross_qty": gross,
+        "trendyol_return_rate_pct": round(100 * returned / gross, 2) if gross else 0.0,
+        "return_rate_excluding_cancels_pct": (
+            round(100 * returned / sold_excluding_cancels, 2)
+            if sold_excluding_cancels else 0.0
+        ),
+    }
+
+
+def kept_gross_revenue(net_revenue: float, gross_revenue: float,
+                       discount_amount: float) -> float:
+    """Net kalan satışın indirim-öncesi karşılığını aynı ürün indirim oranıyla bul."""
+    net_revenue = max(0.0, float(net_revenue or 0))
+    gross_revenue = max(0.0, float(gross_revenue or 0))
+    paid_before_returns = max(0.0, gross_revenue - float(discount_amount or 0))
+    if gross_revenue <= 0 or paid_before_returns <= 0:
+        return net_revenue
+    return net_revenue * gross_revenue / paid_before_returns
+
+
+def reconciled_platform_breakdown(product: dict) -> list[dict]:
+    """Platform kırılımını ürünün kanonik net adet/ciro toplamına kuruşu kuruşuna eşitle."""
+    qty = max(0, int((product or {}).get("qty") or 0))
+    revenue = float((product or {}).get("revenue") or 0)
+    rows = [dict(row) for row in ((product or {}).get("platform_breakdown") or [])]
+    if not rows:
+        rows = [{"platform": (product or {}).get("top_platform") or "site",
+                 "qty": qty, "revenue": revenue}]
+    rows[0]["revenue"] = float(rows[0].get("revenue") or 0) + (
+        revenue - sum(float(row.get("revenue") or 0) for row in rows))
+    rows[0]["qty"] = int(rows[0].get("qty") or 0) + (
+        qty - sum(int(row.get("qty") or 0) for row in rows))
+    return rows
+
+
+def payment_report_group_key(order: dict) -> str:
+    """Return the payment-report bucket without losing marketplace identity.
+
+    Marketplace orders are reported under their marketplace, regardless of a
+    legacy/default ``payment_method`` value.  Site orders retain their actual
+    payment method.  Some legacy imports put the marketplace only in the
+    ``marketplace`` field, so both fields must be inspected.
+    """
+    marketplaces = {"trendyol", "hepsiburada", "temu", "n11", "amazon"}
+    platform = str((order or {}).get("platform") or "").strip().lower()
+    marketplace = str((order or {}).get("marketplace") or "").strip().lower()
+    if platform in marketplaces:
+        return platform
+    if marketplace in marketplaces:
+        return marketplace
+    return str((order or {}).get("payment_method") or "—").strip().lower() or "—"
+
+
 def claim_items_with_status(claim: dict, statuses: set[str]) -> list[dict]:
     """Return marketplace claim units whose child status is in ``statuses``.
 
