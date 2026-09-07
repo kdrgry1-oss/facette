@@ -600,7 +600,14 @@ export default function Checkout() {
 
   // Kodu HARF-DUYARSIZ + TÜRKÇE-I DUYARSIZ tek forma indir (İ/ı → I). Böylece 'HOSGELDİN',
   // 'hosgeldin', 'hosgeldın' hepsi kayıtlı 'HOSGELDIN' ile eşleşir (kullanıcı isteği).
-  const foldCode = (s) => (s || "").trim().replace(/İ/g, "I").replace(/ı/g, "I").toUpperCase();
+  const foldCode = (s) => {
+    const folded = (s || "").trim()
+      .replace(/[İı]/g, "I").replace(/[Şş]/g, "S").replace(/[Ğğ]/g, "G")
+      .replace(/[Üü]/g, "U").replace(/[Öö]/g, "O").replace(/[Çç]/g, "C")
+      .toUpperCase();
+    const compact = folded.replace(/[\s_-]+/g, "");
+    return ["HOSGELDIN", "HOSGELDIN10"].includes(compact) ? "HOSGELDIN10" : folded;
+  };
 
   const applyCode = async (rawCode, _fromGift = false) => {
     const code = foldCode(rawCode);

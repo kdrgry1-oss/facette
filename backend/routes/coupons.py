@@ -712,7 +712,7 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
 
 @public_router.post("/apply")
 async def apply_coupon(payload: dict, current_user: dict = Depends(get_current_user)):
-    code = (payload.get("code") or "").strip().upper()
+    code = fold_code(payload.get("code") or "")
     if not code:
         return {"valid": False, "reason": "Kupon kodu boş", "discount": 0}
     c = await db.coupons.find_one({"code": code}, {"_id": 0})
@@ -923,7 +923,14 @@ def fold_code(s) -> str:
     """Kupon kodunu HARF-DUYARSIZ + TÜRKÇE-I DUYARSIZ tek forma indirger.
     Kullanıcı 'HOSGELDİN' (noktalı İ), 'hosgeldin', 'hosgeldın' (noktasız ı) yazsa da
     hepsi kayıtlı 'HOSGELDIN' ile eşleşsin (kullanıcı isteği). İ/ı → ASCII I, sonra upper."""
-    return (s or "").strip().replace("İ", "I").replace("ı", "I").upper()
+    folded = (s or "").strip().translate(str.maketrans({
+        "İ": "I", "ı": "I", "Ş": "S", "ş": "S", "Ğ": "G", "ğ": "G",
+        "Ü": "U", "ü": "U", "Ö": "O", "ö": "O", "Ç": "C", "ç": "C",
+    })).upper()
+    compact = re.sub(r"[\s_\-]+", "", folded)
+    if compact in {"HOSGELDIN", "HOSGELDIN10"}:
+        return "HOSGELDIN10"
+    return folded
 
 
 async def evaluate_cart_promotions(cart_total: float, items: list,
