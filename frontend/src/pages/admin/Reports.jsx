@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import ReportScopeBadge from "../../components/ReportScopeBadge";
 import {
   REPORT_MIN_DATE, clampReportDate, defaultReportRange, filterReportChannels,
-  productExportParams, reportPresetRange, splitReportRange,
+  productExportParams, productReportScope, reportPresetRange, splitReportRange,
 } from "../../lib/reportFilters";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -533,41 +533,35 @@ export function ProductsReport() {
     let r = top.map(p => {
       const wr = (p.velocity || {}).weekly_rate ?? 0;
       const prev = top90Map[p.product_id];
-      // Y2 audit-fix: İade % paydası = Net Satış + İade (iptal HARİÇ). İptal edilen
-      // adetler hiç satılmadığı için paydaya girmez — aksi halde oran suni düşer ve
-      // ≥%15 kırmızı uyarısı gizlenirdi. Excel export'u da net+iade kullanır; ekran
-      // artık onunla hizalı. Örn: 10 net + 5 iptal + 2 iade → 2/(10+2)=%16.7 (kırmızı),
-      // eskiden 2/(10+5+2)=%11.8 idi.
-      const totQ = (p.qty || 0) + (p.return_qty || 0);
+      const scope = productReportScope(p);
       return {
         ...p,
+        qty: scope.netQty,
+        revenue: scope.revenue,
+        cancel_qty: scope.cancelQty,
+        return_qty: scope.returnQty,
         _cover: (p.current_stock != null && wr > 0) ? p.current_stock / wr : null,
         _mom: (prev != null && (wr > 0 || prev > 0)) ? wr - prev : null,
-        _retpct: p.return_rate_excluding_cancels_pct ?? (totQ > 0 ? (100 * (p.return_qty || 0)) / totQ : 0),
-        _tyretpct: p.trendyol_return_rate_pct ?? ((p.gross_qty || 0) > 0 ? (100 * (p.return_qty || 0)) / p.gross_qty : 0),
-        _gross: p.gross_qty ?? ((p.qty || 0) + (p.cancel_qty || 0) + (p.return_qty || 0)),
+        _scopeReturnPct: scope.returnRatePct,
+        _gross: scope.grossQty,
       };
     });
     if (f) r = r.filter(p => (p.name || "").toLocaleLowerCase("tr").includes(f));
     // Platform filtresi: satırı YALNIZ o platforma DARALT (adet/ciro/iptal/iade + Platform sütunu
     // o platforma göre). Stok/kapsama/hız TOPLAM kalır (stok platformlar arası ortaktır).
     if (platFilter) {
-      r = r.filter(p => (p.platform_breakdown || []).some(x => x.platform === platFilter))
+      r = r.filter(p => productReportScope(p, platFilter).hasPlatformData)
            .map(p => {
-             const pb = (p.platform_breakdown || []).find(x => x.platform === platFilter) || { qty: 0, revenue: 0 };
-             const cr = (p.cancel_return_by_platform || []).find(x => x.platform === platFilter) || { cancel: 0, return: 0 };
-             const nq = pb.qty || 0, rq = cr.return || 0, cq = cr.cancel || 0;
-             const totQ = nq + rq;
+             const scope = productReportScope(p, platFilter);
              return {
                ...p,
-               qty: nq,
-               revenue: pb.revenue || 0,
-               cancel_qty: cq,
-               return_qty: rq,
-               _gross: nq + cq + rq,
-               _retpct: totQ > 0 ? (100 * rq) / totQ : 0,
-               _tyretpct: (nq + cq + rq) > 0 ? (100 * rq) / (nq + cq + rq) : 0,
-               platform_breakdown: [{ platform: platFilter, qty: nq, revenue: pb.revenue || 0 }],
+               qty: scope.netQty,
+               revenue: scope.revenue,
+               cancel_qty: scope.cancelQty,
+               return_qty: scope.returnQty,
+               _gross: scope.grossQty,
+               _scopeReturnPct: scope.returnRatePct,
+               platform_breakdown: [{ platform: platFilter, qty: scope.netQty, revenue: scope.revenue }],
                top_platform: platFilter,
                _platScoped: true,
              };
@@ -740,7 +734,7 @@ export function ProductsReport() {
                 <SortTh k="_gross" right>Toplam Satış</SortTh>
                 <SortTh k="cancel_qty" right>İptal Ürün Adedi</SortTh>
                 <SortTh k="return_qty" right>İade Ürün Adedi</SortTh>
-                <SortTh k="_tyretpct" right>İade % (Trendyol)</SortTh>
+                <SortTh k="_scopeReturnPct" right>{platFilter ? `${platLabel(platFilter)} İade %` : "Tüm Platformlar İade %"}</SortTh>
                 <SortTh k="qty" right>Net Satış</SortTh>
                 <SortTh k="revenue" right>Ciro (Net)</SortTh>
                 <SortTh k="current_stock" right>Güncel Stok</SortTh>
@@ -757,8 +751,16 @@ export function ProductsReport() {
                 return (
                 <Fragment key={key}>
                 <tr className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => toggleExpand(key)}>
-                  <td className="p-3 font-medium max-w-xs truncate" title={p.name}>
-                    <span className="inline-block w-3 text-gray-400 mr-1">{isOpen ? "▾" : "▸"}</span>{p.name}
+                  <td className="p-3 font-medium max-w-xs" title={p.name}>
+                    <div className="flex items-center gap-1 min-w-0">
+                      <span className="inline-block w-3 shrink-0 text-gray-400">{isOpen ? "▾" : "▸"}</span>
+                      <span className="truncate">{p.name}</span>
+                      {p.catalog_match === false && (
+                        <span className="shrink-0 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-300" title="Sipariş kalemi aktif ürün kataloğundaki bir ürün veya varyantla eşleştirilemedi">
+                          Katalog eşleşmedi
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="p-3 text-xs whitespace-nowrap">{p.season || ""}</td>
                   <td className="p-3">
@@ -787,10 +789,10 @@ export function ProductsReport() {
                     title={(p.cancel_return_by_platform || []).map(x => `${platLabel(x.platform)}: iade ${x.return}`).join(", ")}>
                     {p.return_qty || 0}
                   </td>
-                  <td className={`p-3 text-right tabular-nums text-xs ${p._tyretpct >= 15 ? "text-red-600 font-bold" : p._tyretpct >= 8 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
-                    title={`Trendyol formülü: İade / Brüt Satış = ${p.return_qty || 0}/${p._gross || 0}. İptal adedi iade sayısına eklenmez.`}>
-                    <div>%{p._tyretpct.toFixed(1)}</div>
-                    <div className="text-[9px] font-normal text-gray-400">iade / brüt satış</div>
+                  <td className={`p-3 text-right tabular-nums text-xs ${p._scopeReturnPct >= 15 ? "text-red-600 font-bold" : p._scopeReturnPct >= 8 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
+                    title={`${platFilter ? platLabel(platFilter) : "Tüm platformlar"}: İade Ürün Adedi / Toplam Satış Ürün Adedi = ${p.return_qty || 0}/${p._gross || 0}. İptal yalnız toplam adette yer alır; iade adedine eklenmez.`}>
+                    <div>%{p._scopeReturnPct.toFixed(1)}</div>
+                    <div className="text-[9px] font-normal text-gray-400">iade ürün / toplam ürün</div>
                   </td>
                   <td className="p-3 text-right">{p.qty}</td>
                   <td className="p-3 text-right font-semibold">₺{(p.revenue || 0).toLocaleString("tr-TR")}</td>

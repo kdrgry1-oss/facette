@@ -244,6 +244,43 @@ def reconciled_platform_breakdown(product: dict) -> list[dict]:
     return rows
 
 
+def product_platform_metrics(net_rows: list[dict], event_rows: list[dict]) -> list[dict]:
+    """Build scope-safe product metrics for each marketplace/channel.
+
+    ``net_rows`` contains kept sales, while ``event_rows`` contains cancelled and
+    returned units/amounts. Keeping both in one row prevents a Trendyol rate from
+    accidentally using the all-channel denominator.
+    """
+    platforms: dict[str, dict] = {}
+    for row in net_rows or []:
+        key = str(row.get("platform") or "site").strip().lower() or "site"
+        dst = platforms.setdefault(key, {"platform": key, "net_qty": 0, "net_revenue": 0.0,
+                                         "cancel_qty": 0, "cancel_total": 0.0,
+                                         "return_qty": 0, "return_total": 0.0})
+        dst["net_qty"] += max(0, int(row.get("qty") or 0))
+        dst["net_revenue"] += max(0.0, float(row.get("revenue") or 0))
+    for row in event_rows or []:
+        key = str(row.get("platform") or "site").strip().lower() or "site"
+        dst = platforms.setdefault(key, {"platform": key, "net_qty": 0, "net_revenue": 0.0,
+                                         "cancel_qty": 0, "cancel_total": 0.0,
+                                         "return_qty": 0, "return_total": 0.0})
+        dst["cancel_qty"] += max(0, int(row.get("cancel") or row.get("cancel_qty") or 0))
+        dst["cancel_total"] += max(0.0, float(row.get("cancel_total") or 0))
+        dst["return_qty"] += max(0, int(row.get("return") or row.get("return_qty") or 0))
+        dst["return_total"] += max(0.0, float(row.get("return_total") or 0))
+    result = []
+    for dst in platforms.values():
+        metrics = product_quantity_metrics(
+            dst["net_qty"], dst["cancel_qty"], dst["return_qty"])
+        dst.update(metrics)
+        dst["gross_revenue"] = round(
+            dst["net_revenue"] + dst["cancel_total"] + dst["return_total"], 2)
+        for key in ("net_revenue", "cancel_total", "return_total"):
+            dst[key] = round(dst[key], 2)
+        result.append(dst)
+    return sorted(result, key=lambda row: (-row["net_revenue"], row["platform"]))
+
+
 def payment_report_group_key(order: dict) -> str:
     """Return the payment-report bucket without losing marketplace identity.
 

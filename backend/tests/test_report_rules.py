@@ -26,6 +26,7 @@ accepted_claim_items = report_dedup.accepted_claim_items
 product_quantity_metrics = report_dedup.product_quantity_metrics
 kept_gross_revenue = report_dedup.kept_gross_revenue
 reconciled_platform_breakdown = report_dedup.reconciled_platform_breakdown
+product_platform_metrics = report_dedup.product_platform_metrics
 payment_report_group_key = report_dedup.payment_report_group_key
 allocate_order_total = report_dedup.allocate_order_total
 
@@ -167,6 +168,32 @@ def test_profitability_platform_parts_equal_canonical_product_totals():
     })
     assert sum(row["qty"] for row in rows) == 3
     assert round(sum(row["revenue"] for row in rows), 2) == 100.01
+
+
+def test_product_platform_metrics_keep_all_and_trendyol_scopes_separate():
+    rows = product_platform_metrics(
+        [
+            {"platform": "trendyol", "qty": 2, "revenue": 200},
+            {"platform": "site", "qty": 7, "revenue": 700},
+        ],
+        [
+            {"platform": "trendyol", "cancel": 2, "return": 4,
+             "cancel_total": 150, "return_total": 400},
+            {"platform": "site", "cancel": 1, "return": 0,
+             "cancel_total": 100, "return_total": 0},
+        ],
+    )
+    by_platform = {row["platform"]: row for row in rows}
+    trendyol = by_platform["trendyol"]
+    assert trendyol["gross_qty"] == 8
+    assert trendyol["trendyol_return_rate_pct"] == 50.0
+    assert trendyol["net_revenue"] == 200.0
+    assert trendyol["gross_revenue"] == 750.0
+    assert trendyol["net_qty"] + trendyol["cancel_qty"] + trendyol["return_qty"] == trendyol["gross_qty"]
+    assert sum(row["gross_qty"] for row in rows) == 16
+    assert sum(row["net_qty"] for row in rows) == 9
+    assert sum(row["cancel_qty"] for row in rows) == 3
+    assert sum(row["return_qty"] for row in rows) == 4
 
 
 def test_payment_report_group_keeps_marketplace_over_default_payment_method():

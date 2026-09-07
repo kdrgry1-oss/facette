@@ -62,6 +62,67 @@ export function filterReportChannels(items, source) {
   });
 }
 
+const _number = (value) => Number(value || 0);
+const _platformKey = (value) => String(value || "").trim().toLocaleLowerCase("tr");
+
+/**
+ * Ürün raporundaki görünür Net/İptal/İade/Toplam ve iade yüzdesini tek kapsamdan üretir.
+ * Yeni API `platform_metrics` gönderiyorsa onu esas alır; eski cevaplarda mevcut
+ * platform_breakdown + cancel_return_by_platform alanlarına geriye uyumludur.
+ */
+export function productReportScope(product = {}, platform = "") {
+  const wanted = _platformKey(platform);
+  const rawMetrics = Array.isArray(product.platform_metrics)
+    ? product.platform_metrics
+    : Object.entries(product.platform_metrics || {}).map(([key, value]) => ({ platform: key, ...(value || {}) }));
+  const metrics = rawMetrics.map((row) => ({
+    platform: _platformKey(row.platform || row.source || row.channel),
+    netQty: _number(row.net_qty ?? row.net_units ?? row.qty),
+    cancelQty: _number(row.cancel_qty ?? row.cancel_units ?? row.cancel),
+    returnQty: _number(row.return_qty ?? row.return_units ?? row.returned ?? row.return),
+    revenue: _number(row.net_revenue ?? row.revenue),
+  })).filter((row) => row.platform);
+
+  let selected = wanted ? metrics.filter((row) => row.platform === wanted) : metrics;
+  let hasPlatformData = selected.length > 0;
+
+  if (!hasPlatformData && wanted) {
+    const sales = (product.platform_breakdown || []).find((row) => _platformKey(row.platform) === wanted);
+    const cr = (product.cancel_return_by_platform || []).find((row) => _platformKey(row.platform) === wanted);
+    hasPlatformData = Boolean(sales || cr);
+    selected = hasPlatformData ? [{
+      platform: wanted,
+      netQty: _number(sales?.qty),
+      cancelQty: _number(cr?.cancel),
+      returnQty: _number(cr?.return),
+      revenue: _number(sales?.revenue),
+    }] : [];
+  }
+
+  const totals = selected.reduce((sum, row) => ({
+    netQty: sum.netQty + row.netQty,
+    cancelQty: sum.cancelQty + row.cancelQty,
+    returnQty: sum.returnQty + row.returnQty,
+    revenue: sum.revenue + row.revenue,
+  }), { netQty: 0, cancelQty: 0, returnQty: 0, revenue: 0 });
+
+  if (!wanted && metrics.length === 0) {
+    totals.netQty = _number(product.qty);
+    totals.cancelQty = _number(product.cancel_qty);
+    totals.returnQty = _number(product.return_qty);
+    totals.revenue = _number(product.revenue);
+    hasPlatformData = true;
+  }
+
+  const grossQty = totals.netQty + totals.cancelQty + totals.returnQty;
+  return {
+    ...totals,
+    grossQty,
+    returnRatePct: grossQty > 0 ? (100 * totals.returnQty) / grossQty : 0,
+    hasPlatformData,
+  };
+}
+
 export function productExportParams({ from, to, platform, size, season, velocity, query, sortKey, sortDir }) {
   const params = new URLSearchParams({
     start_date: clampReportDate(from),

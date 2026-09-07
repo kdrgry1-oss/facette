@@ -20,7 +20,7 @@ from .report_dedup import (
     effective_order_date_match, split_confirmed_return, accepted_claim_items,
     claim_items_with_status, product_quantity_metrics, kept_gross_revenue,
     reconciled_platform_breakdown,
-    payment_report_group_key, partial_cancel_net_values,
+    payment_report_group_key, partial_cancel_net_values, product_platform_metrics,
 )
 
 
@@ -955,9 +955,15 @@ async def products_export_xlsx(
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Ürün Raporu"
+    _source_key = str(source or "all").strip().lower()
+    _scope_label = {
+        "all": "Tüm Platformlar", "": "Tüm Platformlar", "site": "Site",
+        "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu",
+        "n11": "n11", "amazon": "Amazon",
+    }.get(_source_key, _source_key.title())
     ws.append(["Ürün", "Sezon", "Brüt Satış Adedi", "İptal Adet", "İade Adet",
                "Net Satış Adedi", "Brüt Ciro (TL)", "İndirim (TL)", "Net Ciro (TL)",
-               "İade % (Trendyol: İade/Brüt)", "İade % (İptal Hariç)", "Sipariş",
+               f"İade % ({_scope_label}: İade/Brüt)", "İade % (İptal Hariç)", "Sipariş",
                "Güncel Stok", "Kapsama (Hafta)", "RPT Durumu", "En Çok Satan Beden",
                "En Çok Satan Platform", "Haftalık Hız", "Platform İptal/İade Detay"])
     # Satış hızı: renkli hücre (yeşil/sarı/kırmızı) + etiket — panelle birebir aynı kodlama
@@ -976,13 +982,20 @@ async def products_export_xlsx(
         export_rows = [r for r in export_rows if r.get("season") == season]
     if velocity:
         export_rows = [r for r in export_rows if (r.get("velocity") or {}).get("code") == velocity]
+    # API bu çağrıda zaten seçili source'a daraltılmıştır. Ekrandaki oran ve Excel
+    # aynı görünür pay/paydayı kullanır: iade / (net + iptal + iade).
+    for row in export_rows:
+        gross = int(row.get("gross_qty") or 0)
+        row["_scope_return_pct"] = (
+            round(int(row.get("return_qty") or 0) / gross * 100, 2) if gross else 0.0)
     # Paneldeki sıralamayı Excel'e de taşı. İstemciden gelen alanı yalnız izinli
     # anahtarlara eşleştir; bilinmeyen değerlerde mevcut kanonik sıra korunur.
     _sort_fields = {
         "name": "name", "revenue": "revenue", "qty": "qty", "_gross": "gross_qty",
         "cancel_qty": "cancel_qty", "return_qty": "return_qty",
         "_retpct": "return_rate_excluding_cancels_pct",
-        "_tyretpct": "trendyol_return_rate_pct", "current_stock": "current_stock",
+        "_tyretpct": "trendyol_return_rate_pct",
+        "_scopeReturnPct": "_scope_return_pct", "current_stock": "current_stock",
         "best_size": "best_size", "top_platform": "top_platform", "season": "season",
     }
     _field = _sort_fields.get(sort_by or "")
@@ -1016,7 +1029,7 @@ async def products_export_xlsx(
             r.get("name"), r.get("season") or "", r.get("gross_qty", 0),
             r.get("cancel_qty", 0), r.get("return_qty", 0), r.get("qty", 0),
             r.get("gross_revenue", 0), r.get("discount_amount", 0), r.get("revenue", 0),
-            r.get("trendyol_return_rate_pct", 0), r.get("return_rate_excluding_cancels_pct", 0),
+            r.get("_scope_return_pct", 0), r.get("return_rate_excluding_cancels_pct", 0),
             r.get("orders"), _stok, _cover, _rpt, r.get("best_size"), r.get("top_platform"),
             f"{_VEL_LABEL.get(_vcode, '')} ({_vel.get('weekly_rate', 0)}/hafta)", _crd,
         ])
@@ -1233,8 +1246,10 @@ async def top_products(
             _cd["cancel_revenue"] += _pc_rev
             _cd["gross_revenue"] += _pc_rev
             _cpl = (r["_id"].get("plat") or "site").strip().lower() or "site"
-            _cp = _cd["by_plat"].setdefault(_cpl, {"cancel": 0, "return": 0})
+            _cp = _cd["by_plat"].setdefault(
+                _cpl, {"cancel": 0, "return": 0, "cancel_total": 0.0, "return_total": 0.0})
             _cp["cancel"] += _pc_q
+            _cp["cancel_total"] += _pc_rev
             _csz = _norm_size(r["_id"].get("sz"))
             _cs = _cd["by_size"].setdefault(_csz, {"cancel": 0, "return": 0})
             _cs["cancel"] += _pc_q
@@ -1247,8 +1262,10 @@ async def top_products(
             _cd["return"] += _claim_q
             _cd["return_revenue"] += _claim_rev
             _cpl = (r["_id"].get("plat") or "site").strip().lower() or "site"
-            _cp = _cd["by_plat"].setdefault(_cpl, {"cancel": 0, "return": 0})
+            _cp = _cd["by_plat"].setdefault(
+                _cpl, {"cancel": 0, "return": 0, "cancel_total": 0.0, "return_total": 0.0})
             _cp["return"] += _claim_q
+            _cp["return_total"] += _claim_rev
             _csz = _norm_size(r["_id"].get("sz"))
             _cs = _cd["by_size"].setdefault(_csz, {"cancel": 0, "return": 0})
             _cs["return"] += _claim_q
@@ -1269,9 +1286,11 @@ async def top_products(
         _pv["qty"] += _q
         _pv["revenue"] += _rev
         m["_plats"][_pl] = _pv
-    # Kullanıcı isteği: kataloğdan SİLİNMİŞ ya da hiçbir ürün kartına eşleşmeyen
-    # kalemlerin satırları ürün raporunda GÖSTERİLMEZ (yalnız mevcut kartlar listelenir).
-    merged = {k: m for k, m in merged.items() if m.pop("_matched", False)}
+    # Satış kalemini katalogla eşleştirememek finansal hareketi yok etmemelidir.
+    # Eşleşmeyen/eski kartlar stok bilgisi olmadan görünür ve UI tarafından açıkça
+    # işaretlenebilir; böylece ürün toplamı ana satış toplamından sessizce eksilmez.
+    for m in merged.values():
+        m["catalog_match"] = bool(m.pop("_matched", False))
     # D4 — Satış hızı (velocity) renk kodu. Seçili tarih aralığının hafta sayısına göre
     # HAFTALIK ortalama satış hesaplanır: yeşil ≥5/hafta, sarı 1-4/hafta, kırmızı <1/hafta (~ayda 0-2).
     try:
@@ -1324,6 +1343,7 @@ async def top_products(
             _sbs0[_vs] = _sbs0.get(_vs, 0) + int(v.get("stock") or 0)
         merged[f"zero:{p.get('id')}"] = {
             "product_id": str(p.get("id")), "name": p.get("name") or "",
+            "catalog_match": True,
             "qty": 0, "revenue": 0.0, "gross_revenue": 0.0,
             "orders": 0, "current_stock": stock,
             "stock_by_size": _sbs0,
@@ -1465,8 +1485,11 @@ async def top_products(
         d[i["kind"]] += qty
         d["gross_revenue"] += gross_rev
         d[f"{i['kind']}_revenue"] += rev
-        bp = d["by_plat"].setdefault((i.get("plat") or "site"), {"cancel": 0, "return": 0})
+        bp = d["by_plat"].setdefault(
+            (i.get("plat") or "site"),
+            {"cancel": 0, "return": 0, "cancel_total": 0.0, "return_total": 0.0})
         bp[i["kind"]] += qty
+        bp[f"{i['kind']}_total"] += rev
         bs = d["by_size"].setdefault(_norm_size(i.get("sz")), {"cancel": 0, "return": 0})
         bs[i["kind"]] += qty
 
@@ -1481,9 +1504,12 @@ async def top_products(
         _dst["cancel_revenue"] += float(_src.get("cancel_revenue") or 0)
         _dst["return_revenue"] += float(_src.get("return_revenue") or 0)
         for _pk, _pv in _src["by_plat"].items():
-            _d = _dst["by_plat"].setdefault(_pk, {"cancel": 0, "return": 0})
+            _d = _dst["by_plat"].setdefault(
+                _pk, {"cancel": 0, "return": 0, "cancel_total": 0.0, "return_total": 0.0})
             _d["cancel"] += _pv["cancel"]
             _d["return"] += _pv["return"]
+            _d["cancel_total"] += float(_pv.get("cancel_total") or 0)
+            _d["return_total"] += float(_pv.get("return_total") or 0)
         for _sk, _sv in _src["by_size"].items():
             _d = _dst["by_size"].setdefault(_sk, {"cancel": 0, "return": 0})
             _d["cancel"] += _sv["cancel"]
@@ -1520,24 +1546,39 @@ async def top_products(
                                    + float(_cr.get("return_revenue") or 0))
         _quantity_metrics = product_quantity_metrics(
             int(m.get("qty") or 0), int(_cr.get("cancel", 0)), int(_cr.get("return", 0)))
+        _platform_metrics = product_platform_metrics(
+            [{"platform": k, "qty": v["qty"], "revenue": v["revenue"]} for k, v in _plats],
+            [{"platform": k, **v} for k, v in (_cr.get("by_plat") or {}).items()],
+        )
+        _trendyol_metrics = next(
+            (row for row in _platform_metrics if row["platform"] == "trendyol"), None)
         out.append({
             **m,
             "revenue": round(m["revenue"], 2),
             "gross_revenue": round(_gross_revenue, 2),
             "discount_amount": round(max(0.0, _gross_revenue - _all_net_before_returns), 2),
             **_quantity_metrics,
+            # Adı Trendyol olan oran yalnız Trendyol pay/paydasından hesaplanır.
+            # Tüm-kanal operasyonel oran yukarıdaki return_rate_excluding_cancels_pct'dir.
+            "trendyol_return_rate_pct": (
+                _trendyol_metrics["trendyol_return_rate_pct"] if _trendyol_metrics else 0.0),
+            "trendyol_gross_qty": int(_trendyol_metrics["gross_qty"] if _trendyol_metrics else 0),
+            "trendyol_return_qty": int(_trendyol_metrics["return_qty"] if _trendyol_metrics else 0),
             "best_size": _sizes[0][0] if _sizes else "—",
             "size_breakdown": [{"size": k, "qty": v} for k, v in _sizes],
             "top_platform": _plats[0][0] if _plats else "site",
             "platform_breakdown": [{"platform": k, "qty": v["qty"], "revenue": round(v["revenue"], 2)}
                                    for k, v in _plats],
+            "platform_metrics": _platform_metrics,
             "velocity": _velocity(int(m["qty"])),
             "cancel_qty": int(_cr.get("cancel", 0)),
             "return_qty": int(_cr.get("return", 0)),
             "cancel_total": round(float(_cr.get("cancel_revenue") or 0), 2),
             "return_total": round(float(_cr.get("return_revenue") or 0), 2),
             "cancel_return_by_platform": [
-                {"platform": k, "cancel": v["cancel"], "return": v["return"]}
+                {"platform": k, "cancel": v["cancel"], "return": v["return"],
+                 "cancel_total": round(float(v.get("cancel_total") or 0), 2),
+                 "return_total": round(float(v.get("return_total") or 0), 2)}
                 for k, v in sorted((_cr.get("by_plat") or {}).items())],
             # Beden bazlı iptal/iade — açılır satırdaki Toplam/İptal/İade/Net kırılımı için
             "cancel_return_by_size": [
