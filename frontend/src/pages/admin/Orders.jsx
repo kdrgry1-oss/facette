@@ -324,7 +324,16 @@ export default function AdminOrders({ unpaidView = false }) {
         toast.error(res.data.message || "Fatura oluşturulamadı");
       }
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Fatura oluşturulamadı");
+      // Backend iş-hatalarını 400 + {detail} olarak döndürür (Doğan mesajı burada). Yine de
+      // detail boşsa (ör. ağ/gateway hatası) gerçek durum kodunu/mesajı göster — sessiz
+      // "Fatura oluşturulamadı" teşhisi imkânsız kılıyordu.
+      const _d = err.response?.data?.detail;
+      const _msg = _d
+        ? _d
+        : err.response
+          ? `Fatura oluşturulamadı (HTTP ${err.response.status})`
+          : `Sunucuya ulaşılamadı: ${err.message || 'ağ hatası'}`;
+      toast.error(_msg, { duration: 8000 });
     } finally {
       setInvoicingId(null);
     }

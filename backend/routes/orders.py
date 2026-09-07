@@ -8,7 +8,7 @@ import time
 import uuid
 import re
 
-from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc, verify_admin_token, limiter
+from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc, verify_admin_token, limiter, safe_str
 from .attribution import resolve_attribution_for_order
 from pymongo import ReturnDocument
 
@@ -3720,6 +3720,91 @@ async def reset_invoice_for_order(order_id: str, current_user: dict = Depends(re
     return {"success": True, "message": f"Fatura kaydı sıfırlandı ({prev or 'kayıt'} silindi), yeniden kesebilirsiniz"}
 
 
+# NOT: 2-segmentli yol (/diagnose/invoice) — tek-segment `GET /{order_id}` (yukarıda kayıtlı)
+# statik tek-segment yolu yutacağından burada 2 segment kullanılır; hiçbir literal 2-seg rota
+# ("/{order_id}/journey" vb.) "diagnose/invoice" ile eşleşmez → gölgeleme yok.
+@router.get("/diagnose/invoice")
+async def invoice_diagnose(q: str, current_user: dict = Depends(require_permission("orders.invoice"))):
+    """TAHRİBATSIZ teşhis: bir siparişe faturanın neden kesilmediğini, Doğan'a YENİDEN
+    göndermeden söyler. `q` = sipariş no (W11663), pazaryeri paket no (Trendyol/HB) veya iç id.
+    Siparişte saklı `invoice_last_error` (son Doğan reddi) + tüm ön-engelleri (onay/ödeme/
+    entegratör/VKN/kilit) tek yanıtta döndürür."""
+    q = safe_str(q, 80)
+    if not q:
+        raise HTTPException(status_code=400, detail="q (sipariş/paket no) gerekli")
+    _qre = {"$regex": f"^{re.escape(q)}$", "$options": "i"}
+    order = await db.orders.find_one(
+        {"$or": [
+            {"id": q}, {"order_number": _qre}, {"trendyol_package_id": _qre},
+            {"package_number": _qre}, {"shipment_package_id": _qre},
+            {"marketplace_order_id": _qre}, {"hepsiburada_order_number": _qre},
+        ]},
+        {"_id": 0},
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Sipariş bulunamadı: {q}")
+
+    # Aktif e-fatura entegratörü durumu
+    dogan_settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+    dogan_active = bool(dogan_settings.get("enabled") and dogan_settings.get("username"))
+    integrator_ok = dogan_active
+    if not dogan_active:
+        cfg = await db.providers_config.find_one({"kind": "einvoice"}, {"_id": 0}) or {}
+        integrator_ok = bool(cfg.get("active_provider") and (cfg.get("providers") or {}).get(cfg.get("active_provider")))
+
+    # VKN/TCKN varlığı
+    _bill = dict(order.get("billing_address") or {})
+    _binfo = order.get("billing_info") or {}
+    _vkn = (_bill.get("tax_number") or _bill.get("tax_no") or _bill.get("vkn")
+            or _binfo.get("tax_number") or str(order.get("trendyol_identity_number") or "")).strip().replace(" ", "")
+
+    # Engelleri sırayla değerlendir → ilk bloklayan sebebi "blocker" olarak döndür
+    blocker = None
+    st = (order.get("status") or "")
+    if order.get("invoice_issued"):
+        blocker = None  # zaten kesilmiş
+    elif st in _PRE_CONFIRM_STATUSES:
+        blocker = f"Sipariş ONAYLANMAMIŞ (durum: '{st}'). Önce 'Onaylandı'ya alın."
+    elif _havale_invoice_block(order):
+        blocker = _havale_invoice_block(order)
+    elif not integrator_ok and not dogan_active:
+        blocker = "Aktif e-fatura entegratörü yok. Ayarlar > E-Dönüşüm'den Doğan'ı 'Aktif' yapın."
+    elif dogan_active and not integrator_ok:
+        blocker = "Doğan pasif ve Doğan-dışı entegratör gerçek gönderim yapmıyor (400)."
+
+    # Kilit yaşı (çakışma teşhisi)
+    _lock = order.get("invoice_in_progress")
+    _lock_at = order.get("invoice_in_progress_at")
+
+    return {
+        "found": True,
+        "order_id": order.get("id"),
+        "order_number": order.get("order_number"),
+        "platform": order.get("platform") or order.get("marketplace") or "site",
+        "status": st,
+        "payment_method": order.get("payment_method"),
+        "payment_status": order.get("payment_status"),
+        "invoice_issued": bool(order.get("invoice_issued")),
+        "invoice_number": order.get("invoice_number") or "",
+        "invoice_in_progress": bool(_lock),
+        "invoice_in_progress_at": _lock_at,
+        "has_vkn_tckn": bool(_vkn and len(_vkn) in (10, 11)),
+        "vkn_tckn_len": len(_vkn),
+        "dogan_active": dogan_active,
+        "dogan_is_test": bool(dogan_settings.get("is_test", True)),
+        "integrator_ok": integrator_ok,
+        # EN ÖNEMLİSİ: son gerçek Doğan reddi (varsa) — asıl sebep genellikle burada
+        "invoice_last_error": order.get("invoice_last_error") or "",
+        "invoice_last_error_at": order.get("invoice_last_error_at") or "",
+        "blocker": blocker,
+        "verdict": ("Fatura zaten kesilmiş." if order.get("invoice_issued")
+                    else blocker or
+                    (f"Ön-engel yok. Son Doğan hatası: {order.get('invoice_last_error')}"
+                     if order.get("invoice_last_error")
+                     else "Ön-engel yok, kayıtlı hata yok — 'Fatura Kes'e basınca gelen gerçek mesajı (artık 400+detail) iletin.")),
+    }
+
+
 # Havale/EFT siparişlerinde fatura, ödeme (havale) onaylanmadan KESİLMEZ.
 _HAVALE_PMS = ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale", "havale/eft")
 _SETTLED_PAY = ("paid", "completed", "success", "succeeded", "captured")
@@ -3887,8 +3972,11 @@ async def create_invoice_for_order(
         # ATLANIR → dogan_result None kalır AMA en sonda invoice_issued=True yazılıp SIRA NUMARASI
         # YAKILIYORDU (fatura gerçekte GÖNDERİLMEDEN 'faturalandı' görünüyordu). Bu yüzden Doğan-dışı
         # sağlayıcı canlıya alınana kadar burada reddedilir — numara boşa yakılmaz.
+        # 501 DEĞİL: 5xx'i ara katman (Cloudflare/Railway) jenerik hata sayfasıyla değiştirip
+        # bu yönlendirme mesajını siler → kullanıcı yalnız "Fatura oluşturulamadı" görür. Yapılandırma
+        # hatası 400 ile döndürülür ki mesaj gövdesiyle ekrana ulaşsın.
         raise HTTPException(
-            status_code=501,
+            status_code=400,
             detail=(f"Seçili e-fatura entegratörü ('{active}') için gerçek gönderim henüz "
                     "implemente değil. Lütfen Ayarlar > E-Dönüşüm ekranından Doğan e-Dönüşüm'ü "
                     "etkinleştirin (kullanıcı adı/şifre girip 'Aktif' yapın)."),
@@ -4363,8 +4451,13 @@ async def create_invoice_for_order(
                 "invoice_last_error": f"e-Arşiv: {dogan_result.get('message')}",
                 "invoice_last_error_at": datetime.now(timezone.utc).isoformat(),
             }})
+            # NOT 502: bir "gateway" durum kodu; Cloudflare/Railway ara katmanı 5xx görünce
+            # KENDİ jenerik hata sayfasını koyup JSON gövdeyi (gerçek Doğan mesajını) SİLER →
+            # frontend'e `detail` ulaşmaz, kullanıcı yalnız "Fatura oluşturulamadı" görür. Bu bir
+            # İŞ hatası (Doğan faturayı reddetti; alıcı/VKN/adres/kontör vb.) → 400 ile döndür:
+            # 4xx gövdesiyle birlikte ara katmandan GEÇER, kullanıcı gerçek sebebi okur.
             raise HTTPException(
-                status_code=502,
+                status_code=400,
                 detail=f"Doğan e-Arşiv hatası: {dogan_result.get('message')}"
             )
 
@@ -4629,8 +4722,10 @@ async def create_invoice_for_order(
                 "invoice_last_error": f"e-Fatura: {dogan_result.get('message')}",
                 "invoice_last_error_at": datetime.now(timezone.utc).isoformat(),
             }})
+            # 502 DEĞİL (bkz. e-Arşiv notu): 5xx'i ara katman jenerik gateway sayfasıyla
+            # değiştirip gerçek mesajı sildiği için iş-hatası 400 ile döndürülür → mesaj ekrana ulaşır.
             raise HTTPException(
-                status_code=502,
+                status_code=400,
                 detail=f"Doğan e-Fatura hatası: {dogan_result.get('message')}"
             )
 
