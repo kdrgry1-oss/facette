@@ -1698,43 +1698,43 @@ export default function AdminOrders({ unpaidView = false }) {
                   <span className="text-red-500">— müşteri kargoya verilmeden önce bir/birkaç kalemi iptal etti. Kalan kalemleri kontrol edin.</span>
                 </div>
               )}
-              {/* Manuel fatura yükleme — Doğan otomatik kesemezse dışarıda kesilen faturayı ekle */}
-              <div className="p-3 border rounded bg-slate-50 text-sm">
-                <div className="font-medium mb-1 flex items-center gap-1">
-                  <FileText size={15} /> Faturayı Manuel Yükle
-                  {selectedOrder.invoice_manual && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">manuel fatura yüklü</span>
-                  )}
+              {/* Manuel fatura yükleme — YALNIZ fatura kesilMEMİŞ siparişlerde görünür;
+                  fatura kesilince (otomatik ya da manuel) bu alan kaybolur. */}
+              {!(selectedOrder.invoice_issued || selectedOrder.invoice_number || selectedOrder.invoice?.invoice_number) && (
+                <div className="p-3 border rounded bg-slate-50 text-sm">
+                  <div className="font-medium mb-1 flex items-center gap-1">
+                    <FileText size={15} /> Faturayı Manuel Yükle
+                  </div>
+                  <p className="text-[11px] text-gray-500 mb-2">
+                    Doğan otomatik kesilemezse (ör. geçici kesinti), dışarıda kestiğiniz faturayı
+                    (PDF veya görsel) buraya yükleyin. Sipariş "faturalandı" işaretlenir ve dosya
+                    sipariş içinde görünür.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                    <input
+                      type="text"
+                      value={manualInvNo}
+                      onChange={(e) => setManualInvNo(e.target.value)}
+                      placeholder="Fatura No (opsiyonel)"
+                      className="border rounded px-2 py-1.5 text-sm flex-1"
+                    />
+                    <input
+                      type="file"
+                      accept="application/pdf,image/*"
+                      onChange={(e) => setManualInvFile(e.target.files?.[0] || null)}
+                      className="text-xs flex-1"
+                    />
+                    <button
+                      onClick={() => handleUploadManualInvoice(selectedOrder.id)}
+                      disabled={!manualInvFile || uploadingInv}
+                      className="flex items-center justify-center gap-1 px-4 py-1.5 bg-slate-800 text-white text-sm rounded hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <FileText size={15} />
+                      {uploadingInv ? "Yükleniyor..." : "Yükle"}
+                    </button>
+                  </div>
                 </div>
-                <p className="text-[11px] text-gray-500 mb-2">
-                  Doğan otomatik kesilemezse (ör. geçici kesinti), dışarıda kestiğiniz faturayı
-                  (PDF veya görsel) buraya yükleyin. Sipariş "faturalandı" işaretlenir ve dosya
-                  sipariş içinde görünür. {selectedOrder.invoice_issued && "Not: Bu sipariş zaten faturalı — yükleme mevcut kaydı değiştirir."}
-                </p>
-                <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-                  <input
-                    type="text"
-                    value={manualInvNo}
-                    onChange={(e) => setManualInvNo(e.target.value)}
-                    placeholder="Fatura No (opsiyonel)"
-                    className="border rounded px-2 py-1.5 text-sm flex-1"
-                  />
-                  <input
-                    type="file"
-                    accept="application/pdf,image/*"
-                    onChange={(e) => setManualInvFile(e.target.files?.[0] || null)}
-                    className="text-xs flex-1"
-                  />
-                  <button
-                    onClick={() => handleUploadManualInvoice(selectedOrder.id)}
-                    disabled={!manualInvFile || uploadingInv}
-                    className="flex items-center justify-center gap-1 px-4 py-1.5 bg-slate-800 text-white text-sm rounded hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <FileText size={15} />
-                    {uploadingInv ? "Yükleniyor..." : "Yükle"}
-                  </button>
-                </div>
-              </div>
+              )}
 
               {/* Action Buttons */}
               <div className="flex gap-2 flex-wrap">
