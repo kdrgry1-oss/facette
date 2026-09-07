@@ -7,7 +7,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
 const tl = (v) => `₺${(Number(v) || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`;
 
-const PLAT = { site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu", manual: "Manuel" };
+const PLAT = { site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu", n11: "n11", amazon: "Amazon", manual: "Manuel" };
 const plat = (p) => PLAT[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—");
 
 export default function ProfitabilityAnalysis() {
@@ -74,6 +74,8 @@ export default function ProfitabilityAnalysis() {
             <option value="trendyol">Trendyol</option>
             <option value="hepsiburada">Hepsiburada</option>
             <option value="temu">Temu</option>
+            <option value="n11">n11</option>
+            <option value="amazon">Amazon</option>
           </select>
           <input type="date" min={REPORT_MIN_DATE} value={from} onChange={(e) => setFrom(clampReportDate(e.target.value))} className="text-sm px-2 py-1.5 border rounded" />
           <span className="text-gray-400">→</span>
@@ -99,16 +101,16 @@ export default function ProfitabilityAnalysis() {
           <div className="grid md:grid-cols-3 gap-6">
             <div className="space-y-2">
               <div className="text-xs font-bold uppercase text-gray-400">Komisyon %</div>
-              {["trendyol", "hepsiburada", "temu", "site"].map(ch => chField("commission_pct", ch, plat(ch)))}
+              {["trendyol", "hepsiburada", "temu", "n11", "amazon", "site"].map(ch => chField("commission_pct", ch, plat(ch)))}
             </div>
             <div className="space-y-2">
               <div className="text-xs font-bold uppercase text-gray-400">Aylık Reklam Bütçesi (TL)</div>
               <div className="text-[10px] text-gray-400 -mt-1">Trendyol reklam verisi API'de olmadığından: aylık gir, rapor seçili tarih aralığına otomatik orantılar.</div>
-              {["trendyol", "hepsiburada", "site"].map(ch => chField("ad_spend_monthly", ch, plat(ch)))}
+              {["trendyol", "hepsiburada", "temu", "n11", "amazon", "site"].map(ch => chField("ad_spend_monthly", ch, plat(ch)))}
             </div>
             <div className="space-y-2">
               <div className="text-xs font-bold uppercase text-gray-400">Hizmet Bedeli %</div>
-              {["trendyol", "hepsiburada", "site"].map(ch => chField("service_fee_pct", ch, plat(ch)))}
+              {["trendyol", "hepsiburada", "temu", "n11", "amazon", "site"].map(ch => chField("service_fee_pct", ch, plat(ch)))}
             </div>
           </div>
           <div className="grid md:grid-cols-3 gap-6 pt-2 border-t">

@@ -34,6 +34,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from .deps import db, require_admin, generate_id
+from .marketplace_order_mapping import temu_order_fields
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/temu", tags=["Integrations-Temu"])
@@ -531,34 +532,74 @@ async def temu_webhook(request: Request):
 
     # Sipariş webhook'u → ana orders koleksiyonuna düş
     if event in ("order.created", "order.updated"):
-        oid = data.get("order_id")
+        _payload = data.get("order") or data.get("payload") or data
+        _payload = _payload if isinstance(_payload, dict) else data
+        oid = (_payload.get("order_id") or _payload.get("orderId")
+               or data.get("order_id") or data.get("orderId"))
         if oid:
             # O5: Pipeline kanalı `platform` alanında tutar (marketplace değil) ve durumlar
             # dahili katalogla eşlenmeli — aksi halde Temu siparişleri platform filtrelerinde
             # görünmez ve tanınmayan ham durum stringi taşırdı.
-            _raw_status = str(data.get("status") or "").lower().strip()
-            _status_map = {
-                "pending": "pending", "created": "pending", "unpaid": "awaiting_payment",
-                "paid": "confirmed", "confirmed": "confirmed", "processing": "confirmed",
-                "shipped": "shipped", "in_transit": "shipped", "delivered": "delivered",
-                "completed": "delivered", "cancelled": "cancelled", "canceled": "cancelled",
-                "refunded": "refunded", "returned": "returned",
-            }
-            _internal = _status_map.get(_raw_status, "pending")
+            _mapped = temu_order_fields(_payload)
             # RC6 DENETİM FIX: upsert eskiden created_at/id/order_number YAZMIYORDU → Temu
             # siparişleri tarih-aralıklı raporlarda (created_at filtresi) HİÇ görünmüyor,
             # kanal adedi ~0 çıkıyordu. $setOnInsert ile YALNIZ ilk oluşturmada eklenir
-            # (sonraki güncellemeler bu alanları değiştirmez). Sipariş tarihi ham veride
-            # güvenilir/tek-format olmadığından created_at = webhook anı (order.created
-            # oluşturma anına yakın gelir) — mevcut "hiç sayılmıyor" durumundan çok daha doğru.
+            # (sonraki güncellemeler bu alanları değiştirmez). Payload gerçek sipariş tarihi
+            # taşıyorsa marketplace_order_date olarak ayrıca korunur; yoksa veri uydurulmaz.
             _now = datetime.now(timezone.utc).isoformat()
+            _set = {"platform": "temu", "marketplace": "temu",
+                    "marketplace_order_id": oid, "raw_data": data,
+                    "updated_at": _now, **{k: v for k, v in _mapped.items()
+                                              if k != "integration_incomplete"}}
+            _on_insert = {"id": generate_id(), "order_number": str(oid), "created_at": _now,
+                          "integration_incomplete": _mapped["integration_incomplete"]}
+            if not _mapped["integration_incomplete"]:
+                _set["integration_incomplete"] = False
+            _existing = await db.orders.find_one(
+                {"platform": "temu", "marketplace_order_id": oid}, {"_id": 0, "status": 1})
+            if ((_existing or {}).get("status") in
+                    ("cancelled", "return_approved", "returned", "refunded", "partial_refunded")
+                    and _mapped.get("status") not in
+                    ("cancelled", "return_approved", "returned", "refunded", "partial_refunded")):
+                _set.pop("status", None)
             await db.orders.update_one(
                 {"platform": "temu", "marketplace_order_id": oid},
-                {"$set": {"platform": "temu", "marketplace": "temu",
-                          "marketplace_order_id": oid, "raw_data": data,
-                          "status": _internal, "marketplace_status_raw": _raw_status,
-                          "updated_at": _now},
-                 "$setOnInsert": {"id": generate_id(), "order_number": str(oid), "created_at": _now}},
+                {"$set": _set, "$setOnInsert": _on_insert},
                 upsert=True,
             )
+    # İade/refund bildirimleri yalnız mevcut siparişe idempotent alan güncellemesi yapar.
+    # Sipariş bulunmazsa finansal verisi eksik bir order kabuğu üretmez.
+    if event in ("return.approved", "return.completed", "order.returned",
+                 "refund.completed", "order.refunded"):
+        _payload = data.get("return") or data.get("refund") or data.get("payload") or data
+        _payload = _payload if isinstance(_payload, dict) else data
+        oid = (_payload.get("order_id") or _payload.get("orderId")
+               or data.get("order_id") or data.get("orderId"))
+        if oid:
+            _now = datetime.now(timezone.utc).isoformat()
+            _is_refund = event in ("refund.completed", "order.refunded")
+            _status = ("refunded" if _is_refund else
+                       "return_approved" if event == "return.approved" else "returned")
+            _set = {
+                "status": _status,
+                "return_source": "temu_webhook",
+                "updated_at": _now,
+            }
+            amount = _payload.get("refund_amount")
+            if amount is None:
+                amount = _payload.get("refundAmount")
+            if amount not in (None, ""):
+                try:
+                    _set["refund_amount"] = float(amount)
+                except (TypeError, ValueError):
+                    pass
+            if _is_refund:
+                _set["refund_paid_at"] = _now
+            else:
+                _set["returned_at"] = _now
+            _terminal_guard = ({"$ne": "refunded"} if _is_refund else
+                               {"$nin": ["return_approved", "returned", "refunded"]})
+            await db.orders.update_one(
+                {"platform": "temu", "marketplace_order_id": oid,
+                 "status": _terminal_guard}, {"$set": _set})
     return {"status": "received", "event_type": event}

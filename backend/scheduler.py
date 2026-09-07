@@ -715,9 +715,13 @@ async def _run_hepsiburada_auto_orders_pull():
                 number = data["order_number"]
                 existing = await _db.orders.find_one({"order_number": number, "platform": "hepsiburada"})
                 if existing:
+                    _update = dict(data)
+                    if (existing.get("status") in ("cancelled", "returned", "refunded")
+                            and data.get("status") not in ("cancelled", "returned", "refunded")):
+                        _update.pop("status", None)
                     await _db.orders.update_one(
                         {"_id": existing["_id"]},
-                        {"$set": {k: v for k, v in data.items() if k != "status"}})
+                        {"$set": _update})
                     updated += 1
                 else:
                     data["id"] = generate_id()

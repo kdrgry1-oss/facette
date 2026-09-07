@@ -14,13 +14,14 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { TrendingUp, Download } from "lucide-react";
+import { REPORT_MIN_DATE, localYmd, reportCoverageDays } from "../../lib/reportFilters";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function MarketplaceProfit() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(reportCoverageDays());
 
   const token = useMemo(() => localStorage.getItem("token"), []);
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -28,7 +29,11 @@ export default function MarketplaceProfit() {
   const load = async () => {
     setLoading(true);
     try {
-      const r = await axios.get(`${API}/analytics-extra/marketplace-profit?days=${days}`, auth);
+      const fullCoverage = days === reportCoverageDays();
+      const params = fullCoverage
+        ? { start_date: REPORT_MIN_DATE, end_date: localYmd(new Date()) }
+        : { days };
+      const r = await axios.get(`${API}/analytics-extra/marketplace-profit`, { ...auth, params });
       setData(r.data);
     } catch { toast.error("Yüklenemedi"); }
     finally { setLoading(false); }
@@ -63,6 +68,7 @@ export default function MarketplaceProfit() {
           <select value={days} onChange={(e) => setDays(parseInt(e.target.value))}
             className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white"
             data-testid="profit-days">
+            <option value={reportCoverageDays()}>5 Haz 2026 → Bugün</option>
             <option value={7}>Son 7 gün</option>
             <option value={30}>Son 30 gün</option>
             <option value={90}>Son 90 gün</option>
@@ -78,6 +84,11 @@ export default function MarketplaceProfit() {
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900 mb-4">
         <span className="font-semibold">Bu raporda:</span> Her <b>kanal/pazaryeri</b> için (Trendyol, Hepsiburada, Temu, Site…) <b>brüt ciro</b>'dan <b>ürün maliyeti (COGS)</b>, <b>komisyon</b>, <b>kargo maliyeti</b> ve <b>iadeler</b> düşülerek <b>net kâr</b> ve <b>net marj %</b> hesaplanır. Hangi pazaryerinin gerçekte kâr bıraktığını, ürün maliyeti/komisyon/kargonun kârınızı ne kadar erittiğini kıyaslayıp kârı en yükseğe çıkaracak kanallara odaklanabilir, sonuçları Excel'e aktarabilirsiniz.
       </div>
+      {data?.warning?.message && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 text-sm text-amber-900 mb-4" data-testid="marketplace-profit-api-warning">
+          <b>Veri kapsamı uyarısı:</b> {data.warning.message}
+        </div>
+      )}
 
       {data?.totals && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">

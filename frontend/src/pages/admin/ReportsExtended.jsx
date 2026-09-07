@@ -483,8 +483,8 @@ function ReturnRateAlerts() {
       <Table rows={data.items} testid="returns-table"
         cols={[
           { k: "name", l: "Ürün" },
-          { k: "sold", l: "Satış", num: true },
-          { k: "returned", l: "İade", num: true },
+          { k: "sold", l: "İptal Hariç Satış Ürün Adedi", num: true },
+          { k: "returned", l: "İade Ürün Adedi", num: true },
           { k: "trendyol_return_rate_pct", l: "İade % (Trendyol)", num: true, render: (r) => (
               <div className="text-right">
                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${r.severity==="critical"?"bg-red-100 text-red-800":r.severity==="high"?"bg-orange-100 text-orange-800":"bg-amber-100 text-amber-800"}`}>%{r.trendyol_return_rate_pct ?? 0}</span>
@@ -528,6 +528,11 @@ function ProfitByChannel() {
         <KPI label="Brüt Marj" value={fmtMoney(t.gross_margin)} tone={t.gross_margin >= 0 ? "ok" : "danger"} />
         <KPI label="Brüt Marj %" value={fmtPct(t.margin_pct)} tone="ok" />
       </div>
+      {data.warning?.message && (
+        <div className="bg-amber-50 border border-amber-300 rounded p-3 text-sm text-amber-900" data-testid="profit-api-warning">
+          <b>Veri kapsamı uyarısı:</b> {data.warning.message}
+        </div>
+      )}
       <Table rows={data.items} testid="profit-table"
         cols={[
           { k: "channel", l: "Kanal", render: (r) => <span className="font-mono uppercase">{r.channel}</span> },

@@ -258,16 +258,14 @@ async def _spapi_get(path: str, params: dict = None) -> dict:
 # AMAZON_ALLOW_RESTRICTED=1 iken RDT ile çekilir; kapalıyken sipariş kabuğu (PII'siz) düşer.
 
 
+from .marketplace_order_mapping import amazon_internal_status
+
+
 def _amz_status_of(status_raw: str) -> str:
     """Amazon OrderStatus -> Facette operasyonel durumu.
-    Canceled/Unfulfillable=iptal, Shipped=kargoya verildi, diğerleri=onaylandı.
+    Yalnız açık allowlist satış sayılır; bekleyen/bilinmeyen durumlar pending kalır.
     (Amazon Orders API 'Delivered' döndürmez; teslim ayrı izlenir.)"""
-    s = status_raw or ""
-    if s in ("Canceled", "Cancelled", "Unfulfillable"):
-        return "cancelled"
-    if s == "Shipped":
-        return "shipped"
-    return "confirmed"
+    return amazon_internal_status(status_raw)[0]
 
 
 async def _get_restricted_data_token(order_id: str) -> Optional[str]:
@@ -423,6 +421,7 @@ def map_amazon_order(o: dict, items: list) -> dict:
     if buyer_email:
         bill_addr["email"] = buyer_email
     status_raw = o.get("OrderStatus") or ""
+    _status, _payment_status = amazon_internal_status(status_raw)
 
     return {
         "order_number": str(order_id),
@@ -440,8 +439,8 @@ def map_amazon_order(o: dict, items: list) -> dict:
         "discount_amount": 0,
         "total": total_amt,
         "payment_method": "marketplace",
-        "payment_status": "paid",
-        "status": _amz_status_of(status_raw),
+        "payment_status": _payment_status,
+        "status": _status,
         "marketplace_status": status_raw,
         "fulfillment_channel": o.get("FulfillmentChannel", "") or "",  # AFN=FBA(Amazon kargolar) / MFN=satıcı
         "is_prime": bool(o.get("IsPrime")),

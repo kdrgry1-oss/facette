@@ -20,7 +20,7 @@ from .report_dedup import (
     effective_order_date_match, split_confirmed_return, accepted_claim_items,
     claim_items_with_status, product_quantity_metrics, kept_gross_revenue,
     reconciled_platform_breakdown,
-    payment_report_group_key,
+    payment_report_group_key, partial_cancel_net_values,
 )
 
 
@@ -86,7 +86,9 @@ def _source_cond(source: Optional[str]) -> dict:
         return {"$or": [{"platform": "amazon"}, {"marketplace": "amazon"}]}
     if s == "n11":
         return {"$or": [{"platform": "n11"}, {"marketplace": "n11"}]}
-    return {}  # bilinmeyen kaynak → toplu
+    # Yazım hatası/eskimiş istemci değeri hiçbir zaman sessizce "tüm satışlar"a
+    # genişlemesin; finansal raporda bu davranış veri sızıntısı ve yanlış toplamdır.
+    raise HTTPException(status_code=400, detail=f"Geçersiz rapor kaynağı: {source}")
 
 
 def _channel_expr() -> dict:
@@ -174,6 +176,20 @@ def _effective_date_expr() -> dict:
         "$created_at",
         "$marketplace_order_date",
     ]}
+
+
+def _order_datetime_tr(order: dict) -> Optional[datetime]:
+    """Canonical order timestamp converted to Turkey local time for Python grouping."""
+    raw = order.get("marketplace_order_date") or order.get("created_at")
+    if not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone(timedelta(hours=3)))
+    except Exception:
+        return None
 
 
 @router.get("/sales-summary")
@@ -395,16 +411,13 @@ async def sales_by_hour(
     """Saat Analizi (00-24, TR saati): hangi saatlerde satış geliyor — sipariş + ciro.
     Reklam planlaması için zirve saat aralığı da döner."""
     s, e = _iso_range(start_date, end_date)
-    pipeline = [
-        *_sales_stages(s, e, source),
-        {"$addFields": {"_d": {"$dateFromString": {"dateString": _effective_date_expr(), "onError": None}}}},
-        {"$match": {"_d": {"$ne": None}}},
-        {"$group": {"_id": {"$hour": {"date": "$_d", "timezone": "+03:00"}},
-                    "orders": {"$sum": 1},
-                    "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
-        {"$sort": {"_id": 1}},
-    ]
-    by = {int(r["_id"]): r async for r in db.orders.aggregate(pipeline)}
+    orders, closed, open_ = await _canonical_report_context(s, e, source)
+    grouped = {}
+    for order in orders:
+        local = _order_datetime_tr(order)
+        if local:
+            grouped.setdefault(local.hour, []).append(order)
+    by = {key: _bucket_orders(value, closed, open_)["net"] for key, value in grouped.items()}
     rows = [{"hour": h, "label": f"{h:02d}:00",
              "orders": int(by.get(h, {}).get("orders", 0)),
              "revenue": round(float(by.get(h, {}).get("revenue", 0)), 2)} for h in range(24)]
@@ -423,18 +436,15 @@ async def sales_by_weekday(
 ):
     """Gün Analizi: haftanın hangi günü daha çok satıyor (TR saati) — sipariş + ciro."""
     s, e = _iso_range(start_date, end_date)
-    pipeline = [
-        *_sales_stages(s, e, source),
-        {"$addFields": {"_d": {"$dateFromString": {"dateString": _effective_date_expr(), "onError": None}}}},
-        {"$match": {"_d": {"$ne": None}}},
-        {"$group": {"_id": {"$isoDayOfWeek": {"date": "$_d", "timezone": "+03:00"}},
-                    "orders": {"$sum": 1},
-                    "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
-        {"$sort": {"_id": 1}},
-    ]
+    orders, closed, open_ = await _canonical_report_context(s, e, source)
     _DAYS = {1: "Pazartesi", 2: "Salı", 3: "Çarşamba", 4: "Perşembe",
              5: "Cuma", 6: "Cumartesi", 7: "Pazar"}
-    by = {int(r["_id"]): r async for r in db.orders.aggregate(pipeline)}
+    grouped = {}
+    for order in orders:
+        local = _order_datetime_tr(order)
+        if local:
+            grouped.setdefault(local.isoweekday(), []).append(order)
+    by = {key: _bucket_orders(value, closed, open_)["net"] for key, value in grouped.items()}
     rows = [{"day": d, "label": _DAYS[d],
              "orders": int(by.get(d, {}).get("orders", 0)),
              "revenue": round(float(by.get(d, {}).get("revenue", 0)), 2)} for d in range(1, 8)]
@@ -508,29 +518,17 @@ async def sales(
 ):
     s, e = _iso_range(start_date, end_date)
     fmt = {"day": "%Y-%m-%d", "week": "%Y-%V", "month": "%Y-%m"}[group_by]
-    pipeline = [
-        *_sales_stages(s, e, source),
-        {
-            "$group": {
-                # DENETİM HATA-6: timezone verilmeyince günler UTC'ye göre kesiliyordu —
-                # TR gününün ilk 3 saati önceki güne yazılıyordu. TR saatiyle grupla.
-                "_id": {"$dateToString": {"format": fmt, "timezone": "+03:00",
-                                          "date": {"$dateFromString": {"dateString": _effective_date_expr()}}}},
-                "orders": {"$sum": 1},
-                "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
-                # ADET = kalem adetleri toplamı. Eskiden $size (KALEM SAYISI) idi: aynı üründen
-                # 3 adet alan sipariş 1 sayılıyordu → pazaryeri raporlarıyla mutabakatta
-                # sistematik eksik. Trendyol "Brüt Satış Adedi" ile aynı birim.
-                "items": {"$sum": {"$reduce": {
-                    "input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$max": [1, {"$ifNull": ["$$this.quantity", 1]}]}]}}}},
-            }
-        },
-        {"$sort": {"_id": 1}},
-    ]
+    orders, closed, open_ = await _canonical_report_context(s, e, source)
+    grouped = {}
+    for order in orders:
+        local = _order_datetime_tr(order)
+        if local:
+            grouped.setdefault(local.strftime(fmt), []).append(order)
     rows = []
-    async for r in db.orders.aggregate(pipeline):
-        rows.append({"period": r["_id"], "orders": r["orders"], "revenue": round(r["revenue"], 2), "items": r["items"]})
+    for period, period_orders in sorted(grouped.items()):
+        net = _bucket_orders(period_orders, closed, open_)["net"]
+        rows.append({"period": period, "orders": net["orders"],
+                     "revenue": net["revenue"], "items": net["units"]})
 
     total_orders = sum(r["orders"] for r in rows)
     total_revenue = round(sum(r["revenue"] for r in rows), 2)
@@ -729,19 +727,24 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
             pc = float(o.get("partial_cancel_amount") or 0)
         except Exception:
             pc = 0.0
-        pc = min(max(0.0, pc), total)
+        pc = max(0.0, pc)
         if pc > 0:
             try:
                 pc_u = max(1, int(o.get("partial_cancel_units") or 1))
             except Exception:
                 pc_u = 1
-            pc_u = min(pc_u, max(0, units - 1))  # en az 1 adet aktif kalmalı
+            active_scope = str(o.get("partial_cancel_total_scope") or "").lower() == "active"
+            # Active scope'ta items/total zaten kalan pakettir; iptal metriğini ayrıca
+            # göster ama netten ikinci kez düşme. Legacy/full kayıtta eski davranış korunur.
+            if not active_scope:
+                pc = min(pc, total)
+                pc_u = min(pc_u, max(0, units - 1))
             partial_cancels += 1
             cancels["revenue"] += pc
             cancels["orders"] += 1
             cancels["units"] += pc_u
-            total -= pc
-            units -= pc_u
+            total, units = partial_cancel_net_values(
+                total, units, pc, pc_u, o.get("partial_cancel_total_scope"))
 
         c = closed.get(onum)
         if st in _RETURN_STATUSES_BD:
@@ -834,8 +837,11 @@ async def _canonical_report_context(s: str, e: str, source: Optional[str] = None
         {"$project": {
             "_id": 0, "id": 1, "order_number": 1, "status": 1, "total": 1,
             "items.quantity": 1, "partial_cancel_amount": 1,
-            "partial_cancel_units": 1, "platform": 1, "marketplace": 1,
-            "payment_method": 1,
+            "partial_cancel_units": 1, "partial_cancel_total_scope": 1,
+            "platform": 1, "marketplace": 1,
+            "payment_method": 1, "marketplace_order_date": 1, "created_at": 1,
+            "shipping_address.city": 1, "shipping_address.district": 1,
+            "attribution.source": 1, "attribution.channel": 1,
         }},
     ]
     orders = [order async for order in db.orders.aggregate(pipeline)]
@@ -1059,16 +1065,21 @@ async def top_products(
                         "_line_count": {"$size": {"$ifNull": ["$items", []]}},
                         "_partial_cancel_amount": {"$ifNull": ["$partial_cancel_amount", 0]},
                         "_partial_cancel_units": {"$ifNull": ["$partial_cancel_units", 0]},
+                        "_partial_cancel_total_scope": {"$ifNull": ["$partial_cancel_total_scope", ""]},
                         "_sub": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
                                  "in": {"$add": ["$$value", {"$multiply": [
                                      {"$ifNull": ["$$this.quantity", 1]},
                                      {"$ifNull": ["$$this.price", {"$ifNull": ["$$this.unit_price", 0]}]}]}]}}},
                         # Satış raporunun tek parasal gerçeği orders.total'dır. Kısmi
                         # iptal tutarı satış breakdown'ında netten ayrıca düşülür.
-                        "_order_net_total": {"$max": [0, {"$subtract": [
-                            {"$ifNull": ["$total", 0]},
-                            {"$ifNull": ["$partial_cancel_amount", 0]},
-                        ]}]}}},
+                        "_order_net_total": {"$cond": [
+                            {"$eq": [{"$toLower": {"$ifNull": ["$partial_cancel_total_scope", ""]}}, "active"]},
+                            {"$max": [0, {"$ifNull": ["$total", 0]}]},
+                            {"$max": [0, {"$subtract": [
+                                {"$ifNull": ["$total", 0]},
+                                {"$ifNull": ["$partial_cancel_amount", 0]},
+                            ]}]},
+                        ]}}},
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
         {"$addFields": {
             "_nm": {"$ifNull": ["$items.name",
@@ -1345,10 +1356,14 @@ async def top_products(
                         "_order_net_total": {"$cond": [
                             {"$in": ["$status", _CR_CANCEL]},
                             {"$max": [0, {"$ifNull": ["$total", 0]}]},
-                            {"$max": [0, {"$subtract": [
-                                {"$ifNull": ["$total", 0]},
-                                {"$ifNull": ["$partial_cancel_amount", 0]},
-                            ]}]},
+                            {"$cond": [
+                                {"$eq": [{"$toLower": {"$ifNull": ["$partial_cancel_total_scope", ""]}}, "active"]},
+                                {"$max": [0, {"$ifNull": ["$total", 0]}]},
+                                {"$max": [0, {"$subtract": [
+                                    {"$ifNull": ["$total", 0]},
+                                    {"$ifNull": ["$partial_cancel_amount", 0]},
+                                ]}]},
+                            ]},
                         ]}}},
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
         {"$addFields": {"_line_net": {"$multiply": [
@@ -1519,6 +1534,8 @@ async def top_products(
             "velocity": _velocity(int(m["qty"])),
             "cancel_qty": int(_cr.get("cancel", 0)),
             "return_qty": int(_cr.get("return", 0)),
+            "cancel_total": round(float(_cr.get("cancel_revenue") or 0), 2),
+            "return_total": round(float(_cr.get("return_revenue") or 0), 2),
             "cancel_return_by_platform": [
                 {"platform": k, "cancel": v["cancel"], "return": v["return"]}
                 for k, v in sorted((_cr.get("by_plat") or {}).items())],
@@ -1842,19 +1859,21 @@ async def sales_by_platform(
     """Kanal Bazında Satış — yalnız SİTE + PAZARYERLERİ (Instagram/Google gibi trafik
     kaynakları DEĞİL; sipariş platform alanından). İptal/iade hariç."""
     s, e = _iso_range(start_date, end_date)
-    _plat = _channel_expr()
-    pipeline = [
-        *_sales_stages(s, e),
-        {"$group": {"_id": {"$cond": [{"$in": [_plat, ["trendyol", "hepsiburada", "temu", "n11", "amazon"]]}, _plat, "site"]},
-                    "orders": {"$sum": 1},
-                    "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
-        {"$sort": {"revenue": -1}},
-    ]
+    orders, closed, open_ = await _canonical_report_context(s, e)
     _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu", "n11": "n11", "amazon": "Amazon"}
+    grouped = {}
+    for order in orders:
+        platform = str(order.get("platform") or "").strip().lower()
+        marketplace = str(order.get("marketplace") or "").strip().lower()
+        channel = platform if platform in _MARKETPLACES else (
+            marketplace if marketplace in _MARKETPLACES else "site")
+        grouped.setdefault(channel, []).append(order)
     rows = []
-    async for r in db.orders.aggregate(pipeline):
-        rows.append({"channel": _SRC.get(r["_id"], r["_id"]), "orders": r["orders"],
-                     "revenue": round(float(r["revenue"] or 0), 2)})
+    for channel, channel_orders in grouped.items():
+        net = _bucket_orders(channel_orders, closed, open_)["net"]
+        rows.append({"channel": _SRC.get(channel, channel), "orders": net["orders"],
+                     "units": net["units"], "revenue": net["revenue"]})
+    rows.sort(key=lambda row: -row["revenue"])
     return {"rows": rows}
 
 
@@ -1868,6 +1887,46 @@ async def cancel_return_products(
     """Ürün bazlı İADE & İPTAL raporu (Ürün Raporları altındaki alan): tarih aralığında
     iptal/iade edilen siparişlerin kalemleri — ürün adı + platform kırılımıyla.
     Frontend ada göre arar, platforma göre süzer."""
+    # Ürün ana tablosunun aynı kanonik motorunu kullan: böylece terminal işlemlere
+    # ek olarak aktif siparişteki accepted claim ve partial-cancel da burada görünür.
+    canonical = await top_products(
+        limit=5000, start_date=start_date, end_date=end_date,
+        source=source, current_user=current_user,
+    )
+    canonical_rows = {}
+    for product in canonical.get("items", []):
+        cancel_total = float(product.get("cancel_total") or 0)
+        return_total = float(product.get("return_total") or 0)
+        cancel_qty = int(product.get("cancel_qty") or 0)
+        return_qty = int(product.get("return_qty") or 0)
+        for part in product.get("cancel_return_by_platform") or []:
+            cq, rq = int(part.get("cancel") or 0), int(part.get("return") or 0)
+            if cq <= 0 and rq <= 0:
+                continue
+            platform = str(part.get("platform") or "site").lower()
+            if platform == "facette":
+                platform = "site"
+            key = (product.get("name") or "Ürün", platform)
+            dst = canonical_rows.setdefault(key, {
+                "name": key[0], "platform": platform.title() if platform != "n11" else "n11",
+                "cancel_qty": 0, "cancel_total": 0.0,
+                "return_qty": 0, "return_total": 0.0,
+            })
+            dst["cancel_qty"] += cq
+            dst["return_qty"] += rq
+            if cancel_qty:
+                dst["cancel_total"] += cancel_total * cq / cancel_qty
+            if return_qty:
+                dst["return_total"] += return_total * rq / return_qty
+    for row in canonical_rows.values():
+        row["cancel_total"] = round(row["cancel_total"], 2)
+        row["return_total"] = round(row["return_total"], 2)
+    result = sorted(canonical_rows.values(),
+                    key=lambda row: -(row["cancel_qty"] + row["return_qty"]))[:800]
+    return {"items": result, "range_days": canonical.get("range_days")}
+
+    # Legacy implementation retained below temporarily for rollback readability;
+    # unreachable after the canonical return above.
     s, e = _iso_range(start_date, end_date)
     _RETURN_ST = ["return_requested", "return_approved", "return_in_transit",
                   "returned", "refunded", "partial_refunded"]
@@ -2129,6 +2188,7 @@ async def returns_by_product(
             "returned": returned,
             "sold": sold_excluding_cancels,
             "gross_sold": gross_sold,
+            "order_count": int(r.get("orders") or 0),
             # Kullanıcının operasyonel oranı: iptaller hariç.
             "return_rate_pct": round(returned / sold_excluding_cancels * 100, 1)
                                if sold_excluding_cancels else None,
@@ -2333,33 +2393,23 @@ async def sales_by_location(
 ):
     """Satışları İL (city) veya İLÇE (district) bazında gruplar. Tarih + kaynak filtresi."""
     s, e = _iso_range(start_date, end_date)
-    field = "$shipping_address.city" if group == "city" else "$shipping_address.district"
-    gid = {"loc": field}
-    if group == "district":
-        gid["city"] = "$shipping_address.city"
-    pipeline = [
-        *_sales_stages(s, e, source),
-        {"$group": {
-            "_id": gid,
-            "orders": {"$sum": 1},
-            "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
-            # ADET = kalem adetleri toplamı. Eskiden $size (KALEM SAYISI) idi: aynı üründen
-                # 3 adet alan sipariş 1 sayılıyordu → pazaryeri raporlarıyla mutabakatta
-                # sistematik eksik. Trendyol "Brüt Satış Adedi" ile aynı birim.
-                "items": {"$sum": {"$reduce": {
-                    "input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$max": [1, {"$ifNull": ["$$this.quantity", 1]}]}]}}}},
-        }},
-        {"$sort": {"revenue": -1}},
-        {"$limit": limit},
-    ]
+    orders, closed, open_ = await _canonical_report_context(s, e, source)
+    grouped = {}
+    for order in orders:
+        address = order.get("shipping_address") or {}
+        location = str(address.get("city") if group == "city" else address.get("district") or "").strip() or "Bilinmiyor"
+        city = str(address.get("city") or "").strip()
+        grouped.setdefault((location, city if group == "district" else ""), []).append(order)
     rows = []
-    async for r in db.orders.aggregate(pipeline):
-        loc = (r["_id"].get("loc") or "").strip() or "Bilinmiyor"
-        row = {"location": loc, "orders": r["orders"], "revenue": round(r["revenue"], 2), "items": r["items"]}
+    for (location, city), location_orders in grouped.items():
+        net = _bucket_orders(location_orders, closed, open_)["net"]
+        row = {"location": location, "orders": net["orders"],
+               "revenue": net["revenue"], "items": net["units"]}
         if group == "district":
-            row["city"] = (r["_id"].get("city") or "").strip()
+            row["city"] = city
         rows.append(row)
+    rows.sort(key=lambda row: -row["revenue"])
+    rows = rows[:limit]
     return {
         "group": group,
         "rows": rows,
@@ -2420,25 +2470,19 @@ async def sales_by_source(
     """Satışları KANAL bazında gruplar: pazaryerleri (Trendyol/HB/Temu) + site trafiği kaynağı
     (Instagram/Google/Meta/direct) — attribution.source/channel'dan türetilir."""
     s, e = _iso_range(start_date, end_date)
-    pipeline = [
-        *_sales_stages(s, e),
-        {"$group": {
-            "_id": {
-                "platform": {"$ifNull": ["$platform", ""]},
-                "marketplace": {"$ifNull": ["$marketplace", ""]},
-                "src": {"$ifNull": ["$attribution.source", ""]},
-                "channel": {"$ifNull": ["$attribution.channel", ""]},
-            },
-            "orders": {"$sum": 1},
-            "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
-        }},
-    ]
+    orders, closed, open_ = await _canonical_report_context(s, e)
     agg: dict = {}
-    async for r in db.orders.aggregate(pipeline):
-        label = _channel_label(r["_id"])
-        a = agg.setdefault(label, {"orders": 0, "revenue": 0.0})
-        a["orders"] += r["orders"]
-        a["revenue"] += r["revenue"] or 0
+    grouped = {}
+    for order in orders:
+        attr = order.get("attribution") or {}
+        label = _channel_label({"platform": order.get("platform"),
+                                "marketplace": order.get("marketplace"),
+                                "src": attr.get("source"), "channel": attr.get("channel")})
+        grouped.setdefault(label, []).append(order)
+    for label, source_orders in grouped.items():
+        net = _bucket_orders(source_orders, closed, open_)["net"]
+        agg[label] = {"orders": net["orders"], "revenue": net["revenue"],
+                      "units": net["units"]}
     rows = [{"channel": k, "orders": v["orders"], "revenue": round(v["revenue"], 2)} for k, v in agg.items()]
     rows.sort(key=lambda x: -x["revenue"])
     return {
@@ -2522,18 +2566,15 @@ async def sales_by_hour(
 ):
     """Günün SAATLERİNE göre satış dağılımı (TR saati, +03:00). En yoğun saatler."""
     s, e = _iso_range(start_date, end_date)
-    pipeline = [
-        *_sales_stages(s, e, source),
-        {"$group": {
-            "_id": {"$dateToString": {"format": "%H", "date": {"$dateFromString": {"dateString": _effective_date_expr()}}, "timezone": "+03:00"}},
-            "orders": {"$sum": 1},
-            "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
-        }},
-        {"$sort": {"_id": 1}},
-    ]
-    by = {f"{h:02d}": {"orders": 0, "revenue": 0.0} for h in range(24)}
-    async for r in db.orders.aggregate(pipeline):
-        by[r["_id"]] = {"orders": r["orders"], "revenue": round(r["revenue"], 2)}
+    orders, closed, open_ = await _canonical_report_context(s, e, source)
+    grouped = {}
+    for order in orders:
+        local = _order_datetime_tr(order)
+        if local:
+            grouped.setdefault(f"{local.hour:02d}", []).append(order)
+    by = {f"{h:02d}": {"orders": 0, "revenue": 0.0, "units": 0} for h in range(24)}
+    for hour, hour_orders in grouped.items():
+        by[hour] = _bucket_orders(hour_orders, closed, open_)["net"]
     rows = [{"hour": h, "orders": v["orders"], "revenue": v["revenue"]} for h, v in sorted(by.items())]
     return {"rows": rows, "totals": {"orders": sum(x["orders"] for x in rows), "revenue": round(sum(x["revenue"] for x in rows), 2)}}
 
@@ -2553,13 +2594,14 @@ async def sales_by_payment(
 ):
     """Ödeme tipine göre satış (Havale / Kart / Kapıda vb.)."""
     s, e = _iso_range(start_date, end_date)
-    pipeline = [
-        *_sales_stages(s, e, source),
-        {"$group": {"_id": {"$ifNull": ["$payment_method", ""]}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
-    ]
+    orders, closed, open_ = await _canonical_report_context(s, e, source)
     agg = {}
-    async for r in db.orders.aggregate(pipeline):
-        label = _PM_LABELS.get(str(r["_id"]).strip().lower(), (str(r["_id"]).strip() or "Belirtilmemiş"))
+    grouped = {}
+    for order in orders:
+        grouped.setdefault(payment_report_group_key(order), []).append(order)
+    for key, group_orders in grouped.items():
+        r = _bucket_orders(group_orders, closed, open_)["net"]
+        label = _PM_LABELS.get(str(key).strip().lower(), (str(key).strip() or "Belirtilmemiş"))
         a = agg.setdefault(label, {"orders": 0, "revenue": 0.0})
         a["orders"] += r["orders"]; a["revenue"] += r["revenue"] or 0
     rows = [{"method": k, "orders": v["orders"], "revenue": round(v["revenue"], 2)} for k, v in agg.items()]

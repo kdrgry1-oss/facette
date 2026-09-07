@@ -392,11 +392,11 @@ async def _velocity_aggregate(days: int):
     # v1 ürün raporu barkod → varyant → parent ürün çözümünün kanonik sahibidir.
     # Böylece hızlı/yavaş satan, Excel ve ürün raporu aynı adet/sipariş/ciroyu gösterir.
     from .reports import top_products
-    now = _now()
+    today_tr = (_now() + timedelta(hours=3)).date()
     data = await top_products(
         limit=5000,
-        start_date=(now - timedelta(days=days - 1)).date().isoformat(),
-        end_date=now.date().isoformat(),
+        start_date=(today_tr - timedelta(days=days - 1)).isoformat(),
+        end_date=today_tr.isoformat(),
         source=None,
         current_user={},
     )
@@ -570,13 +570,15 @@ async def return_rate(
         gross_sold = int(r.get("gross_sold") or sold)
         ret = int(r.get("returned") or 0)
         rate = r.get("trendyol_return_rate_pct")
-        if gross_sold >= min_orders and rate is not None and float(rate) >= threshold:
+        order_count = int(r.get("order_count") or 0)
+        if order_count >= min_orders and rate is not None and float(rate) >= threshold:
             items.append({
                 "product_id": str(r.get("product_id") or ""),
                 "name": r.get("product_name") or "—",
                 "sold": sold,
                 "gross_sold": gross_sold,
                 "returned": ret,
+                "order_count": order_count,
                 "return_rate_pct": r.get("return_rate_pct"),
                 "trendyol_return_rate_pct": round(float(rate), 2),
                 "severity": "critical" if rate >= 40 else ("high" if rate >= 30 else "warning"),
@@ -683,7 +685,12 @@ async def profit_by_channel(
         totals["margin_pct"] = round(totals["gross_margin"] / totals["revenue"] * 100, 2)
     else:
         totals["margin_pct"] = 0
-    return {"days": days, "items": out, "totals": totals}
+    return {"days": days, "items": out, "totals": totals,
+            "warning": {
+                "code": "legacy_margin_scope",
+                "message": "Bu ekran tahmini brüt marjdır; kısmi iade/iptal mutabakatı için Kârlılık Analizi esas alınmalıdır.",
+                "authoritative_endpoint": "/api/admin/reports/profitability",
+            }}
 
 
 # ---------------------------------------------------------------------------

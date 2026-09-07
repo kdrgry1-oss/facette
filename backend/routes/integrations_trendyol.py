@@ -3068,6 +3068,7 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                                                             or _active_pkg.get("status")),
                                     "trendyol_active_package_id": str(_active_pkg.get("id") or ""),
                                     "partial_cancelled": True,
+                                    "partial_cancel_total_scope": "active",
                                     "updated_at": datetime.now(timezone.utc).isoformat(),
                                 }
                                 if _amap.get("total") is not None:

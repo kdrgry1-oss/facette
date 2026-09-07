@@ -29,6 +29,13 @@ reconciled_platform_breakdown = report_dedup.reconciled_platform_breakdown
 payment_report_group_key = report_dedup.payment_report_group_key
 allocate_order_total = report_dedup.allocate_order_total
 
+mapping_spec = importlib.util.spec_from_file_location(
+    "marketplace_order_mapping", Path(__file__).parents[1] / "routes" / "marketplace_order_mapping.py"
+)
+marketplace_mapping = importlib.util.module_from_spec(mapping_spec)
+mapping_spec.loader.exec_module(marketplace_mapping)
+partial_cancel_net_values = report_dedup.partial_cancel_net_values
+
 
 def test_effective_date_prefers_marketplace_and_falls_back_only_when_empty():
     match = effective_order_date_match("2026-08-01", "2026-08-31")
@@ -68,6 +75,44 @@ def test_confirmed_return_cannot_exceed_sold_quantity():
     assert split_confirmed_return(2, 300.0, 9) == (0, 0.0, 2, 300.0)
 
 
+def test_hepsiburada_flat_raw_items_fall_back_to_normalized_items():
+    claim = {
+        "claim_id": "HB-1", "claim_status": "Accepted",
+        "raw_data": {"items": [{"sku": "HBCV1", "quantity": 2}]},
+        "items": [{"claim_item_id": "line-1", "barcode": "869", "quantity": 2,
+                   "price": 125.0}],
+    }
+    assert accepted_claim_items(claim) == [{
+        "key": "HB-1:line-1", "barcode": "869", "quantity": 2,
+        "amount": 250.0, "status": "Accepted",
+    }]
+
+
+def test_marketplace_status_mappers_are_conservative():
+    assert marketplace_mapping.canonical_hb_order_number("hb4600") == "HB4600"
+    assert marketplace_mapping.hb_internal_status("Cancelled") == ("cancelled", "paid")
+    assert marketplace_mapping.hb_internal_status("Open") == ("confirmed", "paid")
+    assert marketplace_mapping.hb_internal_status("Unpacked") == ("confirmed", "paid")
+    assert marketplace_mapping.hb_internal_status("Packed") == ("confirmed", "paid")
+    assert marketplace_mapping.hb_internal_status("brand-new-state") == ("pending", "pending")
+    assert marketplace_mapping.amazon_internal_status("Unshipped") == ("confirmed", "paid")
+    assert marketplace_mapping.amazon_internal_status("Pending") == ("pending", "pending")
+    assert marketplace_mapping.amazon_internal_status("FutureStatus") == ("pending", "pending")
+
+
+def test_temu_payload_maps_only_present_financial_data():
+    full = marketplace_mapping.temu_order_fields({
+        "status": "paid", "total_amount": "450.25", "order_date": "2026-09-01T10:00:00Z",
+        "items": [{"sku": "SKU1", "name": "Ürün", "qty": 2, "unitPrice": "225.125"}],
+    })
+    assert (full["status"], full["payment_status"], full["total"]) == ("confirmed", "paid", 450.25)
+    assert full["items"][0]["quantity"] == 2
+    assert full["integration_incomplete"] is False
+    partial = marketplace_mapping.temu_order_fields({"status": "processing"})
+    assert partial["integration_incomplete"] is True
+    assert "total" not in partial and "items" not in partial
+
+
 def test_product_quantity_metrics_separates_trendyol_and_operational_rates():
     metrics = product_quantity_metrics(net=2, cancelled=2, returned=4)
     assert metrics == {
@@ -102,6 +147,14 @@ def test_order_total_allocation_puts_rounding_remainder_on_last_line():
     rows = allocate_order_total([1, 1, 1], 100)
     assert rows == [33.33, 33.33, 33.34]
     assert round(sum(rows), 2) == 100
+
+
+def test_active_scope_partial_cancel_is_not_subtracted_twice():
+    assert partial_cancel_net_values(800, 2, 200, 1, "active") == (800, 2)
+
+
+def test_legacy_full_scope_partial_cancel_keeps_historical_subtraction():
+    assert partial_cancel_net_values(1000, 3, 200, 1, "") == (800, 2)
 
 
 def test_profitability_platform_parts_equal_canonical_product_totals():

@@ -169,6 +169,8 @@ export function SalesReport() {
             <option value="trendyol">Trendyol</option>
             <option value="hepsiburada">Hepsiburada</option>
             <option value="temu">Temu</option>
+            <option value="n11">n11</option>
+            <option value="amazon">Amazon</option>
           </select>
           <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
         </div>
@@ -234,10 +236,10 @@ export function SalesReport() {
                   <th className="text-right p-2" title="NET ürün adedi — iptal + iade + ödenmemiş hariç">Ürün Adeti <span className="text-[9px] text-emerald-600 font-normal">(Net)</span></th>
                   <th className="text-right p-2" title="Net + İptal + İade — Trendyol 'Brüt Satış' adediyle karşılaştırın">Brüt Adet</th>
                   <th className="text-right p-2">Net Ciro</th>
-                  <th className="text-right p-2">İptal</th>
+                  <th className="text-right p-2">İptal (Ürün Adedi)</th>
                   <th className="text-right p-2">İptal Tutarı</th>
                   <th className="text-right p-2">İptal %</th>
-                  <th className="text-right p-2">İade</th>
+                  <th className="text-right p-2">İade (Ürün Adedi)</th>
                   <th className="text-right p-2">İade Tutarı</th>
                   <th className="text-right p-2">İade %</th>
                   <th className="text-right p-2">Açık İade</th>
@@ -512,14 +514,14 @@ export function ProductsReport() {
   const [crPlat, setCrPlat] = useState("");
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [platFilter]);
 
-  const platLabel = (p) => ({ site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu" }[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—"));
+  const platLabel = (p) => ({ site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu", n11: "n11", amazon: "Amazon" }[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—"));
   // Sezon ürün kartındaki 'Sezon' özniteliğinden gelir (backend normalize eder); yoksa boş.
   const SEASONS = ["İlkbahar/Sonbahar", "Tüm Sezonlar", "Yaz", "Kış"];
   // Kapsama ilk tıkta KÜÇÜKTEN büyüğe: RPT durumu acil olanlar (az haftası kalanlar) üstte.
   const toggleSort = (k) => { if (sortKey === k) setSortDir(d => d === "desc" ? "asc" : "desc"); else { setSortKey(k); setSortDir(k === "name" || k === "best_size" || k === "_cover" ? "asc" : "desc"); } };
   // Filtre seçenekleri (veriden)
   const platOptions = Array.from(new Set([
-    "site", "trendyol", "hepsiburada", "temu",
+    "site", "trendyol", "hepsiburada", "temu", "n11", "amazon",
     ...top.flatMap(p => (p.platform_breakdown || []).map(x => x.platform)),
     ...top.flatMap(p => (p.cancel_return_by_platform || []).map(x => x.platform)),
   ])).sort();
@@ -736,8 +738,8 @@ export function ProductsReport() {
                 <SortTh k="velocity">Satış Hızı</SortTh>
                 <SortTh k="_mom">İvme</SortTh>
                 <SortTh k="_gross" right>Toplam Satış</SortTh>
-                <SortTh k="cancel_qty" right>İptal</SortTh>
-                <SortTh k="return_qty" right>İade</SortTh>
+                <SortTh k="cancel_qty" right>İptal Ürün Adedi</SortTh>
+                <SortTh k="return_qty" right>İade Ürün Adedi</SortTh>
                 <SortTh k="_tyretpct" right>İade % (Trendyol)</SortTh>
                 <SortTh k="qty" right>Net Satış</SortTh>
                 <SortTh k="revenue" right>Ciro (Net)</SortTh>
@@ -854,8 +856,8 @@ export function ProductsReport() {
                                   <tr>
                                     <th className="px-2.5 py-1 text-left">Beden</th>
                                     <th className="px-2.5 py-1 text-right">Toplam</th>
-                                    <th className="px-2.5 py-1 text-right">İptal</th>
-                                    <th className="px-2.5 py-1 text-right">İade</th>
+                                    <th className="px-2.5 py-1 text-right">İptal Ürün Adedi</th>
+                                    <th className="px-2.5 py-1 text-right">İade Ürün Adedi</th>
                                     <th className="px-2.5 py-1 text-right">Net</th>
                                     <th className="px-2.5 py-1 text-right">Kalan Stok</th>
                                   </tr>
@@ -942,9 +944,9 @@ export function ProductsReport() {
                   <tr>
                     <th className="text-left p-2.5">Ürün</th>
                     <th className="text-left p-2.5">Platform</th>
-                    <th className="text-right p-2.5">İptal Adet</th>
+                    <th className="text-right p-2.5">İptal Ürün Adedi</th>
                     <th className="text-right p-2.5">İptal Tutar</th>
-                    <th className="text-right p-2.5">İade Adet</th>
+                    <th className="text-right p-2.5">İade Ürün Adedi</th>
                     <th className="text-right p-2.5">İade Tutar</th>
                   </tr>
                 </thead>

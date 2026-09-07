@@ -14,7 +14,7 @@ const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("
 const TRY = (n) => `${Number(n || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺`;
 
 const CHANNEL_LABELS = {
-  trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu",
+  trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu", n11: "n11", amazon: "Amazon",
   instagram: "Instagram", google: "Google", meta: "Meta/Facebook",
   tiktok: "TikTok", youtube: "YouTube", pinterest: "Pinterest",
   email: "E-posta", sms: "SMS", direct: "Doğrudan / Site",
@@ -112,15 +112,15 @@ export default function ReportsInsights() {
             </div>
           </>
         )}
-        {tab === "location" && (
+        {["location", "hour", "pay"].includes(tab) && (
           <>
-            <div>
+            {tab === "location" && <div>
               <label className="block text-xs text-gray-500 mb-1">Grup</label>
               <select value={locGroup} onChange={(e) => setLocGroup(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
                 <option value="city">İl bazlı</option>
                 <option value="district">İlçe bazlı</option>
               </select>
-            </div>
+            </div>}
             <div>
               <label className="block text-xs text-gray-500 mb-1">Kaynak</label>
               <select value={source} onChange={(e) => setSource(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
@@ -129,6 +129,8 @@ export default function ReportsInsights() {
                 <option value="trendyol">Trendyol</option>
                 <option value="hepsiburada">Hepsiburada</option>
                 <option value="temu">Temu</option>
+                <option value="n11">n11</option>
+                <option value="amazon">Amazon</option>
               </select>
             </div>
           </>

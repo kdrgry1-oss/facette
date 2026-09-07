@@ -16,6 +16,7 @@ import httpx
 import hashlib
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id
+from .marketplace_order_mapping import canonical_hb_order_number, hb_internal_status
 from facette_defaults import facette_fixed_value_for  # tüm-pazaryeri sabit varsayılan (gap-fill)
 
 router = APIRouter(tags=["Integrations-Hepsiburada"])
@@ -277,7 +278,7 @@ def _hb_money(v, default=0.0):
 def map_hepsiburada_order(o: dict) -> dict:
     from datetime import datetime, timezone
     raw_no = str(_hb_g(o, "orderNumber", "orderId", "id"))
-    order_number = raw_no if raw_no.upper().startswith("HB") else f"HB{raw_no}"
+    order_number = canonical_hb_order_number(raw_no)
     lines = o.get("lines") or o.get("items") or []
     items, subtotal = [], 0.0
     for ln in lines:
@@ -351,6 +352,7 @@ def map_hepsiburada_order(o: dict) -> dict:
     cargo_name = _cg("cargoCompany", "cargoProviderName", "cargoCompanyName",
                      "shippingCompany", "cargoCompanyModelCode", "cargoCompanyShortName")
     cargo_link = _cg("cargoTrackingUrl", "cargoTrackingLink", "trackingUrl")
+    _status, _payment_status = hb_internal_status(_hb_g(o, "status"))
     return {
         "order_number": order_number, "platform": "hepsiburada", "marketplace": "hepsiburada",
         "hepsiburada_order_number": raw_no, "user_id": None, "items": items,
@@ -374,7 +376,7 @@ def map_hepsiburada_order(o: dict) -> dict:
             "tax_number": _hb_g(inv, "taxNumber", "vkn"), "tax_office": _hb_g(inv, "taxOffice"),
         },
         "subtotal": subtotal, "shipping_cost": 0, "discount_amount": 0, "total": total,
-        "payment_method": "marketplace", "payment_status": "paid", "status": "confirmed",
+        "payment_method": "marketplace", "payment_status": _payment_status, "status": _status,
         "marketplace_status": _hb_g(o, "status"), "hb_order_date": _hb_g(o, "orderDate"),
         # Kargo (TY ile aynı alan adları — panel/liste/etiket bu alanları okur)
         "cargo_tracking_number": cargo_no,
@@ -575,7 +577,9 @@ async def hepsiburada_import_by_number(on: str = "", current_user: dict = Depend
             onum = order_data["order_number"]
             existing = await db.orders.find_one({"order_number": onum, "platform": "hepsiburada"})
             if existing:
-                _upd = {k: v for k, v in order_data.items() if k != "status"}
+                _upd = dict(order_data)
+                if existing.get("status") in ("cancelled", "returned", "refunded") and order_data.get("status") not in ("cancelled", "returned", "refunded"):
+                    _upd.pop("status", None)
                 # Kargo alanları BOŞ geldiyse mevcut değeri EZME (henüz kargolanmamış tekrar-senkron).
                 for _ck in ("cargo_tracking_number", "cargo_provider_name", "cargo_tracking_link"):
                     if not _upd.get(_ck):
@@ -683,7 +687,9 @@ async def import_selected_hepsiburada_orders(req: HbOrderImportReq, current_user
         try:
             existing = await db.orders.find_one({"order_number": on, "platform": "hepsiburada"})
             if existing:
-                _upd = {k: v for k, v in order_data.items() if k != "status"}
+                _upd = dict(order_data)
+                if existing.get("status") in ("cancelled", "returned", "refunded") and order_data.get("status") not in ("cancelled", "returned", "refunded"):
+                    _upd.pop("status", None)
                 for _ck in ("cargo_tracking_number", "cargo_provider_name", "cargo_tracking_link"):
                     if not _upd.get(_ck):
                         _upd.pop(_ck, None)
@@ -3001,7 +3007,7 @@ async def _hb_claim_norm(claim: dict) -> dict | None:
         "claim_id": f"HB-{cid}",          # TY claim id'leriyle çakışmasın
         "hb_claim_number": cid,           # HB accept/reject uçları bu numarayı kullanır
         "platform": "hepsiburada",
-        "order_number": onum,
+        "order_number": canonical_hb_order_number(onum),
         "claim_type": ctype,
         "claim_reason": reason_txt,
         "claim_status": st,
@@ -3174,7 +3180,10 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
                     data["status"] = forced_status
                 existing = await db.orders.find_one({"order_number": number, "platform": "hepsiburada"})
                 if existing:
-                    upd = {k: v for k, v in data.items() if k != "status"}
+                    upd = dict(data)
+                    if (existing.get("status") in ("cancelled", "returned", "refunded")
+                            and data.get("status") not in ("cancelled", "returned", "refunded")):
+                        upd.pop("status", None)
                     if forced_status and existing.get("status") not in ("cancelled", "returned"):
                         upd["status"] = forced_status
                         if forced_status == "cancelled":

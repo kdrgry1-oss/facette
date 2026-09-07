@@ -24,13 +24,13 @@ ENDPOINT'LER:
   GET /api/feeds/google-merchant.xml   (public — token gerektirmez)
 =============================================================================
 """
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from xml.sax.saxutils import escape
 
-from .deps import db, require_admin
-from .report_dedup import merge_match, load_dup_dep
+from .deps import db, require_admin, tr_range_to_utc
+from .report_dedup import effective_order_date_match, merge_match, load_dup_dep
 
 router = APIRouter(tags=["Analytics Extra"], dependencies=[Depends(load_dup_dep)])
 
@@ -162,6 +162,8 @@ async def rfm_analysis(
 @router.get("/analytics-extra/marketplace-profit")
 async def marketplace_profit(
     days: int = Query(30, ge=1, le=3650),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
     current_user: dict = Depends(require_admin),
 ):
     """
@@ -174,7 +176,19 @@ async def marketplace_profit(
     Artık net = brüt − COGS − komisyon − kargo − iade. COGS, profitability
     raporuyla AYNI zincir/eşleşmeyle çekilir (aşağıdaki _cogs_pipeline).
     """
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    if bool(start_date) != bool(end_date):
+        raise HTTPException(status_code=400, detail="start_date ve end_date birlikte verilmelidir")
+    if start_date and end_date:
+        try:
+            range_start, range_end = tr_range_to_utc(start_date, end_date)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Geçersiz tarih aralığı")
+    else:
+        # `days` geriye uyumlu kalır; sınırlar Türkiye yerel günüdür.
+        today_tr = (datetime.now(timezone.utc) + timedelta(hours=3)).date()
+        first_tr = today_tr - timedelta(days=days - 1)
+        range_start, range_end = tr_range_to_utc(first_tr.isoformat(), today_tr.isoformat())
+    date_match = effective_order_date_match(range_start, range_end)
 
     # Maliyet-oranı yapılandırması (profitability ile ortak): maliyeti bilinmeyen
     # kalemlerde satış fiyatının bu oranı COGS sayılır → eksik maliyet SAHTE %100
@@ -208,12 +222,11 @@ async def marketplace_profit(
         # iadeler hem gross hem cogs'tan çıkarılır (net katkı 0). KISMİ iade (partial_refunded)
         # gross'ta kalır; yalnız GERÇEK iade tutarı (refund_amount) net'ten düşülür (eskiden tüm
         # sipariş total'i düşülüp koca siparişi zarara çekiyordu).
-        {"$match": {"created_at": {"$gte": cutoff},
+        {"$match": merge_match({"$and": [date_match, {
                     "status": {"$nin": ["cancelled", "cancel_refunded",
                                         "awaiting_payment", "payment_failed",
                                         "pending", "payment_notified",
-                                        "returned", "refunded"]}}},
-        {"$match": merge_match({})},  # ticimax_history ÇİFT kayıtları hariç (Trendyol kâr'ını şişirir)
+                                        "returned", "refunded"]}}]})},
         {"$group": {
             # Denetim: var olmayan 'channel' alanı yüzünden HER sipariş 'web'e düşüyordu.
             # Gerçek kaynak platform/marketplace'ten: trendyol/hepsiburada/temu/site.
@@ -238,12 +251,11 @@ async def marketplace_profit(
     # kalemin cirosu revenue_nocost'ta toplanır ve aşağıda cog_fallback_ratio ile tahmin edilir.
     cogs_pipeline = [
         # F1: tam iadeler COGS'tan da çıkar (mal stoğa döndü → COGS geri çevrilmeli).
-        {"$match": {"created_at": {"$gte": cutoff},
+        {"$match": merge_match({"$and": [date_match, {
                     "status": {"$nin": ["cancelled", "cancel_refunded",
                                         "awaiting_payment", "payment_failed",
                                         "pending", "payment_notified",
-                                        "returned", "refunded"]}}},
-        {"$match": merge_match({})},  # ticimax_history ÇİFT kayıtları hariç (COGS'u şişirir)
+                                        "returned", "refunded"]}}]})},
         {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
         {"$unwind": "$items"},
         {"$addFields": {"_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}}}},
@@ -306,9 +318,15 @@ async def marketplace_profit(
         })
         for k in ["orders", "gross", "cogs", "commission", "shipping_cost", "refunded", "net"]:
             totals[k] += result[-1][k] if k != "orders" else r["orders"]
-    return {"days": days, "items": result, "totals": {
+    return {"days": days, "start_date": start_date, "end_date": end_date,
+            "effective_start": range_start, "effective_end": range_end,
+            "items": result, "totals": {
         **{k: round(v, 2) for k, v in totals.items() if k != "orders"},
         "orders": totals["orders"],
+    }, "warning": {
+        "code": "legacy_marketplace_profit_scope",
+        "message": "Bu sonuç legacy/tahmini kapsamdadır; finansal karar için kanonik Kârlılık Analizi kullanılmalıdır.",
+        "authoritative_endpoint": "/api/admin/reports/profitability",
     }}
 
 

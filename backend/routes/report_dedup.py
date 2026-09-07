@@ -180,6 +180,23 @@ def allocate_order_total(line_amounts: list[float], order_total: float) -> list[
     return allocated
 
 
+def partial_cancel_net_values(total: float, units: int, cancel_amount: float,
+                              cancel_units: int, total_scope: str = "") -> tuple[float, int]:
+    """Return the active remainder without subtracting an active-only total twice.
+
+    New Trendyol reconciliation records explicitly mark totals/items that already
+    contain only active package lines. Legacy records have no marker and retain the
+    historical full-order subtraction behaviour.
+    """
+    total = max(0.0, float(total or 0))
+    units = max(0, int(units or 0))
+    if str(total_scope or "").strip().lower() == "active":
+        return total, units
+    amount = min(total, max(0.0, float(cancel_amount or 0)))
+    cancelled = min(max(0, int(cancel_units or 0)), max(0, units - 1))
+    return round(total - amount, 2), units - cancelled
+
+
 def product_quantity_metrics(net: int, cancelled: int, returned: int) -> dict:
     """Kanonik ürün adetleri ve iki açıkça adlandırılmış iade oranı.
 
@@ -269,13 +286,17 @@ def claim_items_with_status(claim: dict, statuses: set[str]) -> list[dict]:
     }
 
     if raw_items:
+        saw_marketplace_child = False
         for line_index, raw_line in enumerate(raw_items):
             raw_line = raw_line or {}
+            raw_children = raw_line.get("claimItems") or []
+            if raw_children:
+                saw_marketplace_child = True
             order_line = raw_line.get("orderLine") or {}
             barcode = str(order_line.get("barcode") or "").strip()
             if not barcode:
                 continue
-            for item_index, claim_item in enumerate(raw_line.get("claimItems") or []):
+            for item_index, claim_item in enumerate(raw_children):
                 claim_item = claim_item or {}
                 status = str(((claim_item.get("claimItemStatus") or {}).get("name") or "")).strip()
                 if status not in statuses:
@@ -293,7 +314,10 @@ def claim_items_with_status(claim: dict, statuses: set[str]) -> list[dict]:
                     amount = 0.0
                 matched.append({"key": key, "barcode": barcode, "quantity": 1,
                                 "amount": max(0.0, amount), "status": status})
-        return matched
+        # Trendyol has nested claimItems. HB commonly has a flat raw ``items``
+        # array; in that case fall through to the normalized-items parser.
+        if saw_marketplace_child:
+            return matched
 
     stored_status = str((claim or {}).get("claim_status") or "").strip()
     if stored_status not in statuses:

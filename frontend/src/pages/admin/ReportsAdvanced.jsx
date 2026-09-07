@@ -106,8 +106,8 @@ export default function ReportsAdvanced() {
               <thead className="text-xs text-gray-500 border-b">
                 <tr>
                   <th className="text-left pb-2">Ürün</th>
-                  <th className="text-right pb-2">Satılan</th>
-                  <th className="text-right pb-2">İade</th>
+                  <th className="text-right pb-2">İptal Hariç Satış Ürün Adedi</th>
+                  <th className="text-right pb-2">İade Ürün Adedi</th>
                   <th className="text-right pb-2">İade % (Trendyol)</th>
                 </tr>
               </thead>
