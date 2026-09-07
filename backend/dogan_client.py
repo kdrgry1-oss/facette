@@ -59,6 +59,24 @@ def _get_cached_client(wsdl_url, transport, settings):
     return c
 
 
+# Doğan/altyapı GEÇİCİ hataları (5xx gateway, F5 "No Available Server / TR7", timeout,
+# bağlantı sıfırlama, WSDL çekememe). Bunlar İŞ hatalarından (10009 mükerrer, 10013 şablon/şema
+# gibi — bunlar yanıtta ERROR_CODE ile döner ve retry EDİLMEZ) ayrılır; yalnız geçici hatalarda
+# kısa backoff ile yeniden denenir. Doğan tarafı kısa süre ayakta değilse fatura kendiliğinden
+# tamamlanır; kalıcı provizyon/IP sorununda ise (birkaç deneme sonrası) yine net hata döner.
+_DOGAN_TRANSIENT_MARKERS = (
+    "no available server", "tr7", " 503", "503 ", "502", "504", "500 server",
+    "service unavailable", "bad gateway", "gateway time", "temporarily unavailable",
+    "timed out", "timeout", "connection", "connect", "reset by peer",
+    "max retries", "read timed", "eof occurred", "handshake", "remotedisconnected",
+)
+
+
+def _is_transient_dogan_error(msg: str) -> bool:
+    m = (msg or "").lower()
+    return any(t in m for t in _DOGAN_TRANSIENT_MARKERS)
+
+
 def _free_shipping_line_xml(idx: int, waived_incl: float, currency: str, kdv_rate: float = 20.0) -> str:
     """Ücretsiz kargo kampanyası İSKONTO satırı. Satır-seviyesi cac:AllowanceCharge ile
     LineExtensionAmount = Fiyat − İskonto = 0 → belge TOPLAM/MATRAH/KDV'sine 0 katkı (GİB-güvenli;
@@ -1903,7 +1921,37 @@ class DoganClient:
 </Invoice>"""
         return xml
 
-    def send_efatura_invoice(self, ubl_xml: str, invoice_uuid: str,
+    def _send_with_retry(self, fn, *args, _max_attempts: int = 3, **kwargs) -> dict:
+        """Doğan gönderimini GEÇİCİ altyapı hatalarında (503/TR7/timeout/bağlantı) kısa backoff
+        ile yeniden dener. İŞ hatalarını (ERROR_CODE dolu — 10009/10013 vb.) veya kalıcı hataları
+        RETRY ETMEZ; onlarda ilk sonucu döndürür. Geçici hatada oturumu (session_id) sıfırlayıp
+        yeniden login + WSDL çekimi yaptırır (WSDL fetch 503'ü de bu yolla toparlanır)."""
+        import time as _t
+        result = {"success": False, "code": "", "message": "gönderilemedi", "raw": ""}
+        for attempt in range(max(1, _max_attempts)):
+            result = fn(*args, **kwargs)
+            if result.get("success"):
+                return result
+            # İş hatası (ERROR_CODE dolu) VEYA geçici olmayan hata → yeniden deneme
+            if result.get("code") or not _is_transient_dogan_error(result.get("message")):
+                return result
+            if attempt < _max_attempts - 1:
+                logger.warning(
+                    f"Doğan geçici hata (deneme {attempt + 1}/{_max_attempts}), yeniden denenecek: "
+                    f"{str(result.get('message'))[:160]}")
+                self.session_id = None  # oturumu tazele → yeniden login + WSDL fetch
+                _t.sleep(1.5 * (attempt + 1))
+        return result
+
+    def send_earsiv_invoice(self, *args, **kwargs) -> dict:
+        """Public: geçici Doğan hatalarında otomatik retry ile e-Arşiv gönderimi."""
+        return self._send_with_retry(self._send_earsiv_invoice_once, *args, **kwargs)
+
+    def send_efatura_invoice(self, *args, **kwargs) -> dict:
+        """Public: geçici Doğan hatalarında otomatik retry ile e-Fatura gönderimi."""
+        return self._send_with_retry(self._send_efatura_invoice_once, *args, **kwargs)
+
+    def _send_efatura_invoice_once(self, ubl_xml: str, invoice_uuid: str,
                               invoice_number: str,
                               receiver_vkn: str, receiver_alias: str,
                               sender_alias: str = "",
@@ -1978,7 +2026,7 @@ class DoganClient:
             logger.error(f"send_efatura_invoice error: {e}")
             return {"success": False, "code": "", "message": str(e), "raw": ""}
 
-    def send_earsiv_invoice(self, ubl_xml: str, invoice_uuid: str = None,
+    def _send_earsiv_invoice_once(self, ubl_xml: str, invoice_uuid: str = None,
                               email_to: str = "", archive_note: str = "") -> dict:
         """E-Arşiv faturayı Doğan WriteToArchiveExtended ile senkron olarak gönderir.
 

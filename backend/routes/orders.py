@@ -3822,6 +3822,27 @@ def _havale_invoice_block(order: dict):
     return None
 
 
+def _dogan_error_detail(kind: str, message) -> str:
+    """Doğan gönderim hatasını kullanıcıya anlaşılır şekilde döndürür. GEÇİCİ altyapı hatası
+    (503/TR7 'No Available Server'/timeout — Doğan sunucusu o an ayakta değil) ise; bu bizim
+    kod/veri hatamız DEĞİL, Doğan tarafıdır ve otomatik retry zaten denendi. Net yönlendirme
+    ver. Diğer (iş) hatalarında ham Doğan mesajını göster (VKN/adres/şablon/kontör vb.)."""
+    _msg = str(message or "")
+    try:
+        from dogan_client import _is_transient_dogan_error as _trn
+        _is_transient = _trn(_msg)
+    except Exception:
+        _is_transient = ("no available server" in _msg.lower() or "tr7" in _msg.lower()
+                         or "503" in _msg or "timeout" in _msg.lower())
+    if _is_transient:
+        return (f"Doğan {kind} sunucusu şu anda yanıt vermiyor (geçici — 'TR7 No Available Server' / "
+                f"503). Bu bir Doğan altyapı kesintisidir, siparişinizde/ayarınızda sorun yok; sistem "
+                f"otomatik birkaç kez denedi. Lütfen birkaç dakika sonra tekrar 'Fatura Kes' deneyin. "
+                f"Sürerse Doğan'a canlı e-{kind} servisinizin (ve sunucu IP izninin) aktif olup "
+                f"olmadığını sorun. [ham: {_msg[:180]}]")
+    return f"Doğan {kind} hatası: {_msg}"
+
+
 async def _ensure_payment_reminder_templates():
     """order_payment_reminder SMS+e-posta şablonlarını (yoksa) idempotent tohumlar —
     böylece buton ilk basıldığında boş gitmez; sonra admin Bildirim Şablonları'ndan düzenler."""
@@ -4458,7 +4479,7 @@ async def create_invoice_for_order(
             # 4xx gövdesiyle birlikte ara katmandan GEÇER, kullanıcı gerçek sebebi okur.
             raise HTTPException(
                 status_code=400,
-                detail=f"Doğan e-Arşiv hatası: {dogan_result.get('message')}"
+                detail=_dogan_error_detail("e-Arşiv", dogan_result.get("message"))
             )
 
     # ─── Doğan e-Fatura (TEMELFATURA) kesimi ─────────────────────────
@@ -4726,7 +4747,7 @@ async def create_invoice_for_order(
             # değiştirip gerçek mesajı sildiği için iş-hatası 400 ile döndürülür → mesaj ekrana ulaşır.
             raise HTTPException(
                 status_code=400,
-                detail=f"Doğan e-Fatura hatası: {dogan_result.get('message')}"
+                detail=_dogan_error_detail("e-Fatura", dogan_result.get("message"))
             )
 
     await db.orders.update_one(
