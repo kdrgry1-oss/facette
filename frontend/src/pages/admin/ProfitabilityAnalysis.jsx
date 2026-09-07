@@ -65,7 +65,7 @@ export default function ProfitabilityAnalysis() {
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2"><TrendingUp /> Kârlılık Analizi</h1>
-          <p className="text-sm text-gray-500 mt-1">Kategori × pazaryeri bazında GERÇEK net kâr — tüm giderler düşülür.</p>
+          <p className="text-sm text-gray-500 mt-1">Kategori × pazaryeri bazında tahmini net kâr — kayıtlı maliyet ve gider varsayımları düşülür.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <select value={source} onChange={(e) => setSource(e.target.value)} className="px-3 py-1.5 border rounded text-sm">
@@ -132,13 +132,13 @@ export default function ProfitabilityAnalysis() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-gradient-to-br from-slate-900 to-slate-700 text-white rounded-xl p-5"><div className="text-[11px] uppercase opacity-80">Net Ciro</div><div className="text-2xl font-bold mt-1">{tl(t.revenue)}</div><div className="text-[10px] opacity-70 mt-1">Brüt {tl(t.gross_revenue)} · İndirim {tl(t.discount)}</div></div>
         <div className="bg-gradient-to-br from-rose-600 to-rose-500 text-white rounded-xl p-5"><div className="text-[11px] uppercase opacity-80">Toplam Gider</div><div className="text-2xl font-bold mt-1">{tl((t.revenue || 0) - (t.net_profit || 0))}</div></div>
-        <div className="bg-gradient-to-br from-emerald-600 to-emerald-500 text-white rounded-xl p-5"><div className="text-[11px] uppercase opacity-80">Net Kâr</div><div className="text-2xl font-bold mt-1">{tl(t.net_profit)}</div></div>
+        <div className="bg-gradient-to-br from-emerald-600 to-emerald-500 text-white rounded-xl p-5"><div className="text-[11px] uppercase opacity-80">Tahmini Net Kâr</div><div className="text-2xl font-bold mt-1">{tl(t.net_profit)}</div></div>
         <div className="bg-gradient-to-br from-blue-600 to-blue-500 text-white rounded-xl p-5"><div className="text-[11px] uppercase opacity-80">Net Marj</div><div className="text-2xl font-bold mt-1">%{t.margin_pct ?? 0}</div></div>
       </div>
 
       {/* Detay tablosu */}
       <div className="bg-white rounded-xl border overflow-hidden">
-        <h3 className="font-semibold p-5 pb-3">Kategori × Pazaryeri Net Kâr {loading && <span className="text-xs text-gray-400">(yükleniyor…)</span>}</h3>
+        <h3 className="font-semibold p-5 pb-3">Kategori × Pazaryeri Tahmini Net Kâr {loading && <span className="text-xs text-gray-400">(yükleniyor…)</span>}</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-xs whitespace-nowrap">
             <thead className="bg-gray-50 uppercase text-gray-500">

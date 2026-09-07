@@ -8,12 +8,14 @@
  *   cancelOnly → İptal hariç, iade DAHİL (yalnız iptaller düşülür)
  *   returns    → İade siparişleri raporu (zaten iadeleri gösterir)
  *   stock      → Anlık stok verisi (iptal/iade tutarları etkilemez)
+ *   mixed      → Brüt, iptal, iade ve net alanlar ayrı ayrı gösterilir
  */
 const _MAP = {
   exclude:    { txt: "İptal & iade HARİÇ",        cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
   cancelOnly: { txt: "İptal hariç · iade DAHİL",  cls: "bg-amber-50 text-amber-700 ring-amber-200" },
   returns:    { txt: "İade siparişleri raporu",   cls: "bg-sky-50 text-sky-700 ring-sky-200" },
   stock:      { txt: "Anlık stok — iptal/iade etkilemez", cls: "bg-gray-100 text-gray-600 ring-gray-200" },
+  mixed:      { txt: "Brüt · iptal · iade · net ayrı", cls: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
 };
 
 export default function ReportScopeBadge({ kind = "exclude", className = "" }) {

@@ -385,7 +385,7 @@ function FastMovers() {
       <Table testid="fast-table" rows={data.items}
         cols={[
           { k: "name", l: "Ürün" }, { k: "stock_code", l: "SKU" },
-          { k: "sold_qty", l: "Satılan", num: true },
+          { k: "sold_qty", l: "Net Satılan", num: true },
           { k: "daily_velocity", l: "Günlük Hız", num: true },
           { k: "stock", l: "Stok", num: true },
           { k: "days_until_stockout", l: "Tükenir (gün)", num: true },
@@ -428,7 +428,7 @@ function SlowMovers() {
         <Table rows={data.items}
           cols={[
             { k: "name", l: "Ürün" }, { k: "stock_code", l: "SKU" },
-            { k: "stock", l: "Stok", num: true }, { k: "sold_qty_period", l: "Satış", num: true },
+            { k: "stock", l: "Stok", num: true }, { k: "sold_qty_period", l: "Net Satış", num: true },
             { k: "daily_velocity", l: "Günlük Hız" }, { k: "tied_value", l: "Bağlı Para", money: true },
           ]} />
       </div>
@@ -522,7 +522,7 @@ function ProfitByChannel() {
       </div>
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <KPI label="Sipariş" value={fmtNum(t.orders)} />
-        <KPI label="Ciro" value={fmtMoney(t.revenue)} tone="info" />
+        <KPI label="Net Ciro" value={fmtMoney(t.revenue)} tone="info" />
         <KPI label="Maliyet" value={fmtMoney(t.cost)} />
         <KPI label="Komisyon" value={fmtMoney(t.commission)} />
         <KPI label="Brüt Marj" value={fmtMoney(t.gross_margin)} tone={t.gross_margin >= 0 ? "ok" : "danger"} />
@@ -532,7 +532,7 @@ function ProfitByChannel() {
         cols={[
           { k: "channel", l: "Kanal", render: (r) => <span className="font-mono uppercase">{r.channel}</span> },
           { k: "orders", l: "Sipariş", num: true },
-          { k: "revenue", l: "Ciro", money: true },
+          { k: "revenue", l: "Net Ciro", money: true },
           { k: "cost", l: "Maliyet", money: true },
           { k: "commission", l: `Komisyon (~${"%"})`, money: true },
           { k: "shipping", l: "Kargo", money: true },

@@ -1043,9 +1043,8 @@ async def top_products(
     s, e = _iso_range(start_date, end_date, days_default=90)
     pipeline = [
         *_sales_stages(s, e, source),
-        # Sipariş platformu: platform > marketplace > 'site'
-        # DENETİM O1: "Ciro (Net)" sipariş-düzeyi indirimi (kupon + havale/EFT) DÜŞMELİ.
-        # _sub = sipariş kalem toplamı, _disc = kupon(+discount_amount) + payment_discount.
+        # Sipariş platformu: platform > marketplace > 'site'. Kalem fiyatları dağıtım
+        # ağırlığıdır; net ürün ciroları siparişin tahsil edilen total'ına kapatılır.
         {"$addFields": {"_plat": _channel_expr(),
                         "_line_count": {"$size": {"$ifNull": ["$items", []]}},
                         "_partial_cancel_amount": {"$ifNull": ["$partial_cancel_amount", 0]},
@@ -1053,10 +1052,13 @@ async def top_products(
                         "_sub": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
                                  "in": {"$add": ["$$value", {"$multiply": [
                                      {"$ifNull": ["$$this.quantity", 1]},
-                                     {"$ifNull": ["$$this.price", 0]}]}]}}},
-                        "_disc": {"$add": [
-                            {"$ifNull": ["$discount", {"$ifNull": ["$discount_amount", 0]}]},
-                            {"$ifNull": ["$payment_discount", 0]}]}}},
+                                     {"$ifNull": ["$$this.price", {"$ifNull": ["$$this.unit_price", 0]}]}]}]}}},
+                        # Satış raporunun tek parasal gerçeği orders.total'dır. Kısmi
+                        # iptal tutarı satış breakdown'ında netten ayrıca düşülür.
+                        "_order_net_total": {"$max": [0, {"$subtract": [
+                            {"$ifNull": ["$total", 0]},
+                            {"$ifNull": ["$partial_cancel_amount", 0]},
+                        ]}]}}},
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
         {"$addFields": {
             "_nm": {"$ifNull": ["$items.name",
@@ -1075,12 +1077,13 @@ async def top_products(
                 {"$ifNull": ["$items.quantity", 1]}]},
         }},
         {"$addFields": {"_net": {"$cond": [
-            {"$in": ["$_plat", _MARKETPLACES]},
-            "$_line_net",  # Pazaryeri price zaten indirimli: indirimi ikinci kez düşme.
-            {"$cond": [{"$gt": ["$_sub", 0]},
-                {"$multiply": ["$_line_net", {"$divide": [
-                    {"$max": [0, {"$subtract": ["$_sub", "$_disc"]}]}, "$_sub"]}]},
-                "$_line_net"]}
+            {"$gt": ["$_sub", 0]},
+            # Kalem fiyatı yalnız DAĞITIM AĞIRLIĞIDIR. Gerçek net ciro siparişin
+            # total alanıdır; bu oran legacy TY fiyat semantiği ve sipariş indirimi
+            # farklarını tek seferde kapatır. Tüm kalemlerin toplamı order.total'a
+            # (kısmi iptal varsa kalanına) kuruşuna eşittir.
+            {"$multiply": ["$_line_net", {"$divide": ["$_order_net_total", "$_sub"]}]},
+            "$_line_net",
         ]}}},
         # Kalem anahtarı: barkod > product_id > ad. Beden ve platform gruplamaya dahil edilir
         # ki EN ÇOK SATAN BEDEN + platform dağılımı çıkarılabilsin (parent birleştirme Python'da).
@@ -1322,8 +1325,30 @@ async def top_products(
         *canonical_order_stages(),
         {"$match": {"status": {"$in": _CR_CANCEL + _CR_RETURN}}},
         {"$addFields": {"_plat": _channel_expr(),
-                        "_kind": {"$cond": [{"$in": ["$status", _CR_CANCEL]}, "cancel", "return"]}}},
+                        "_kind": {"$cond": [{"$in": ["$status", _CR_CANCEL]}, "cancel", "return"]},
+                        "_sub": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                                 "in": {"$add": ["$$value", {"$multiply": [
+                                     {"$ifNull": ["$$this.quantity", 1]},
+                                     {"$ifNull": ["$$this.price", {"$ifNull": ["$$this.unit_price", 0]}]}]}]}}},
+                        # Tam iptal siparişinde tüm total iptaldir; iade statüsündeki
+                        # kısmi iptalde ise satış breakdown gibi iptal payı önce düşer.
+                        "_order_net_total": {"$cond": [
+                            {"$in": ["$status", _CR_CANCEL]},
+                            {"$max": [0, {"$ifNull": ["$total", 0]}]},
+                            {"$max": [0, {"$subtract": [
+                                {"$ifNull": ["$total", 0]},
+                                {"$ifNull": ["$partial_cancel_amount", 0]},
+                            ]}]},
+                        ]}}},
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
+        {"$addFields": {"_line_net": {"$multiply": [
+            {"$ifNull": ["$items.price", {"$ifNull": ["$items.unit_price", 0]}]},
+            {"$ifNull": ["$items.quantity", 1]}]}}},
+        {"$addFields": {"_allocated_net": {"$cond": [
+            {"$gt": ["$_sub", 0]},
+            {"$multiply": ["$_line_net", {"$divide": ["$_order_net_total", "$_sub"]}]},
+            "$_line_net",
+        ]}}},
         {"$group": {"_id": {"bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
                             "pid": {"$toString": {"$ifNull": ["$items.product_id", ""]}},
                             "nm": {"$ifNull": ["$items.name", {"$ifNull": ["$items.product_name", ""]}]},
@@ -1333,8 +1358,10 @@ async def top_products(
                             "on": {"$toString": {"$ifNull": ["$order_number", ""]}},
                             "kind": "$_kind", "status": "$status", "plat": "$_plat"},
                     "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
-                    "rev": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]},
-                                                   {"$ifNull": ["$items.quantity", 1]}]}},
+                    # Terminal siparişte de ürün payları aynı orders.total oranını
+                    # kullanır. Böylece kısmi iadede keep_map'e geri eklenen tutar,
+                    # aktif siparişlerdeki dağıtım tabanından sapmaz.
+                    "rev": {"$sum": "$_allocated_net"},
                     "gross_rev": {"$sum": {"$multiply": [
                         {"$ifNull": ["$items.unit_price", {"$ifNull": ["$items.price", 0]}]},
                         {"$ifNull": ["$items.quantity", 1]}]}}}},

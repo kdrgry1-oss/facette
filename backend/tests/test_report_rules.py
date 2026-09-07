@@ -27,6 +27,7 @@ product_quantity_metrics = report_dedup.product_quantity_metrics
 kept_gross_revenue = report_dedup.kept_gross_revenue
 reconciled_platform_breakdown = report_dedup.reconciled_platform_breakdown
 payment_report_group_key = report_dedup.payment_report_group_key
+allocate_order_total = report_dedup.allocate_order_total
 
 
 def test_effective_date_prefers_marketplace_and_falls_back_only_when_empty():
@@ -88,6 +89,19 @@ def test_kept_gross_revenue_applies_discount_once():
     # Brüt 1000, indirim 200; kalan net satış 400 ise kalan brüt 500'dür.
     assert kept_gross_revenue(400, 1000, 200) == 500
     assert kept_gross_revenue(400, 0, 0) == 400
+
+
+def test_product_lines_close_to_authoritative_order_total_to_the_cent():
+    # Legacy item sum is 1,400 although the paid order total is 1,000.
+    rows = allocate_order_total([700, 700], 1000)
+    assert rows == [500, 500]
+    assert sum(rows) == 1000
+
+
+def test_order_total_allocation_puts_rounding_remainder_on_last_line():
+    rows = allocate_order_total([1, 1, 1], 100)
+    assert rows == [33.33, 33.33, 33.34]
+    assert round(sum(rows), 2) == 100
 
 
 def test_profitability_platform_parts_equal_canonical_product_totals():

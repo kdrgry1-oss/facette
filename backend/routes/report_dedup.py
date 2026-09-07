@@ -158,6 +158,28 @@ def split_confirmed_return(quantity: int, amount: float, returned: int) -> tuple
     return kept, kept_amount, ret, float(amount or 0) - kept_amount
 
 
+def allocate_order_total(line_amounts: list[float], order_total: float) -> list[float]:
+    """Allocate the authoritative order total across product lines.
+
+    Marketplace history contains more than one item-price representation.  Report
+    revenue must therefore close to ``orders.total`` (the same source used by the
+    sales breakdown), while preserving each line's relative share.  The last line
+    receives the rounding remainder so the returned values add up to the cent.
+    """
+    amounts = [max(0.0, float(value or 0)) for value in (line_amounts or [])]
+    target = max(0.0, round(float(order_total or 0), 2))
+    if not amounts:
+        return []
+    base = sum(amounts)
+    if base <= 0:
+        # There is no defensible product-level weight.  Keep the full value visible
+        # on one line rather than inventing equal unit prices.
+        return [target] + [0.0] * (len(amounts) - 1)
+    allocated = [round(target * value / base, 2) for value in amounts]
+    allocated[-1] = round(allocated[-1] + target - sum(allocated), 2)
+    return allocated
+
+
 def product_quantity_metrics(net: int, cancelled: int, returned: int) -> dict:
     """Kanonik ürün adetleri ve iki açıkça adlandırılmış iade oranı.
 

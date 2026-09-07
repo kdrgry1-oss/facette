@@ -142,7 +142,7 @@ export function SalesReport() {
     <div className="space-y-5" data-testid="sales-report-page">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><TrendingUp /> Satış Raporları <ReportScopeBadge kind="exclude" /></h1>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><TrendingUp /> Satış Raporları <ReportScopeBadge kind="mixed" /></h1>
         </div>
         <div className="flex gap-2 items-center">
           <select value={source} onChange={(e) => setSource(e.target.value)} className="px-3 py-1.5 border rounded text-sm" data-testid="sales-source-select">
@@ -200,7 +200,7 @@ export function SalesReport() {
       {/* 🏬 Pazaryerine Göre Satış · İptal · İade — TEK tablo (eski iki ayrı blok birleştirildi) */}
       {cancelRet.length > 0 && (
         <div className="bg-white border rounded-xl p-4" data-testid="channel-combined">
-          <h2 className="text-sm font-bold uppercase tracking-wider mb-2">Pazaryerine Göre Satış · İptal · İade</h2>
+          <h2 className="text-sm font-bold uppercase tracking-wider mb-2">Kanala Göre Satış · İptal · İade</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-xs uppercase text-gray-500">
@@ -209,7 +209,7 @@ export function SalesReport() {
                   <th className="text-right p-2" title="NET sipariş sayısı — iptal + iade + ödenmemiş HARİÇ (sipariş birimi)">Sipariş Adeti <span className="text-[9px] text-emerald-600 font-normal">(Net)</span></th>
                   <th className="text-right p-2" title="NET ürün adedi — iptal + iade + ödenmemiş hariç">Ürün Adeti <span className="text-[9px] text-emerald-600 font-normal">(Net)</span></th>
                   <th className="text-right p-2" title="Net + İptal + İade — Trendyol 'Brüt Satış' adediyle karşılaştırın">Brüt Adet</th>
-                  <th className="text-right p-2">Ciro</th>
+                  <th className="text-right p-2">Net Ciro</th>
                   <th className="text-right p-2">İptal</th>
                   <th className="text-right p-2">İptal Tutarı</th>
                   <th className="text-right p-2">İptal %</th>
@@ -331,7 +331,7 @@ export function SalesReport() {
       <div className="bg-white rounded-xl border p-5">
         {/* Başlık seçilen kırılımı söyler; az kovalı (haftalık/aylık) görünümde iki nokta
             arasına çizgi çekmek yanıltıcıydı → gruplu görünümde ÇUBUK grafik kullanılır. */}
-        <h3 className="font-semibold mb-3">{{ day: "Günlük", week: "Haftalık", month: "Aylık" }[groupBy] || "Günlük"} Ciro & Sipariş <span className="text-[11px] font-normal text-gray-400">(aralığa göre otomatik)</span></h3>
+        <h3 className="font-semibold mb-3">{{ day: "Günlük", week: "Haftalık", month: "Aylık" }[groupBy] || "Günlük"} Net Ciro & Sipariş <span className="text-[11px] font-normal text-gray-400">(aralığa göre otomatik)</span></h3>
         <ResponsiveContainer width="100%" height={300}>
           {groupBy === "day" ? (
             <LineChart data={data?.rows || []}>
@@ -341,7 +341,7 @@ export function SalesReport() {
               <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
               <Tooltip />
               <Legend />
-              <Line yAxisId="left" type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} name="Ciro (₺)" />
+              <Line yAxisId="left" type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} name="Net Ciro (₺)" />
               <Line yAxisId="right" type="monotone" dataKey="orders" stroke="#3b82f6" strokeWidth={2} name="Sipariş" />
             </LineChart>
           ) : (
@@ -352,7 +352,7 @@ export function SalesReport() {
               <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
               <Tooltip />
               <Legend />
-              <Bar yAxisId="left" dataKey="revenue" fill="#10b981" name="Ciro (₺)" radius={[3, 3, 0, 0]} />
+              <Bar yAxisId="left" dataKey="revenue" fill="#10b981" name="Net Ciro (₺)" radius={[3, 3, 0, 0]} />
               <Bar yAxisId="right" dataKey="orders" fill="#3b82f6" name="Sipariş" radius={[3, 3, 0, 0]} />
             </BarChart>
           )}
@@ -597,7 +597,7 @@ export function ProductsReport() {
     <div className="space-y-5" data-testid="products-report-page">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Ürün Raporları <ReportScopeBadge kind="exclude" /></h1>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Ürün Raporları <ReportScopeBadge kind="mixed" /></h1>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={reconcileTrendyol} disabled={reconLoading}
@@ -640,14 +640,14 @@ export function ProductsReport() {
 
 
       <div className="bg-white rounded-xl border p-5">
-        <h3 className="font-semibold mb-3">En Çok Satan 10 Ürün (Ciro)</h3>
+        <h3 className="font-semibold mb-3">En Çok Satan 10 Ürün (Net Ciro)</h3>
         <ResponsiveContainer width="100%" height={340}>
           <BarChart data={top.slice(0, 10)} layout="vertical" margin={{ left: 120 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => Number(v).toLocaleString("tr-TR")} />
             <YAxis dataKey="name" type="category" width={200} tick={{ fontSize: 10 }} />
             <Tooltip formatter={(v) => [`₺${Number(v).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Ciro"]} />
-            <Bar dataKey="revenue" fill="#3b82f6" name="Ciro (₺)" />
+            <Bar dataKey="revenue" fill="#3b82f6" name="Net Ciro (₺)" />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -979,7 +979,7 @@ export function StockReport() {
           <div className="text-3xl font-bold mt-1">₺{(data?.totals?.value ?? 0).toLocaleString("tr-TR")}</div>
         </div>
         <div className="bg-gradient-to-br from-red-600 to-red-500 text-white rounded-xl p-5">
-          <div className="text-xs uppercase opacity-80">Stoğu Biten Ürün</div>
+          <div className="text-xs uppercase opacity-80">Listelenen Stoksuz Ürün</div>
           <div className="text-3xl font-bold mt-1">{data?.out_of_stock?.length ?? 0}</div>
         </div>
       </div>
