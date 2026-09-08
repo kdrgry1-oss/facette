@@ -162,6 +162,26 @@ async def lifespan(app: FastAPI):
         # Never elevate an existing account solely because its email matches
         # the bootstrap address. Existing owners retain their explicit flag/role.
 
+        # KURTARMA KOLU (kilitlenme önlemi): 7e50926 ile rolsüz hesaplar ve is_super_admin
+        # bayrağı olmayan sahip hesabı yönetim API'sine giremez (403) ve panelden rol/bayrak
+        # atayamaz (tavuk-yumurta). DB erişimi olmadan güvenli çıkış: yalnız deployment
+        # secret'ı OWNER_SUPER_ADMIN_EMAILS (virgülle ayrılmış) ile listelenen MEVCUT hesaplar
+        # is_super_admin=True yapılır. Env boşsa hiçbir şey yapılmaz; e-posta ile örtük yükseltme YOK.
+        try:
+            _owners = [e.strip().lower() for e in (os.environ.get("OWNER_SUPER_ADMIN_EMAILS") or "").split(",") if e.strip()]
+            for _oe in _owners:
+                _res = await db.users.update_one(
+                    {"email": _oe, "is_super_admin": {"$ne": True}},
+                    {"$set": {"is_super_admin": True, "is_admin": True, "is_active": True}})
+                if _res.modified_count:
+                    logger.warning(f"[guvenlik] OWNER_SUPER_ADMIN_EMAILS: {_oe} is_super_admin=True yapildi")
+            _n_super = await db.users.count_documents({"is_super_admin": True, "is_active": {"$ne": False}})
+            if _n_super == 0:
+                logger.error("[guvenlik] SİSTEMDE AKTİF SÜPER-ADMİN YOK — panel yönetimi kilitli olabilir. "
+                             "Railway'de OWNER_SUPER_ADMIN_EMAILS=<sahip e-postası> tanımlayıp yeniden başlatın.")
+        except Exception as _oe_err:
+            logger.error(f"[guvenlik] owner bootstrap hatasi: {_oe_err}")
+
         # GÜVENLİK: is_admin=True kalmış MÜŞTERİ hesaplarını (personel işareti taşımayan:
         # created_by/role_id/is_super_admin/varsayılan admin YOK) admin'likten düşür →
         # Üyeler listesine geçsinler, panele giremesinler. İdempotent; her başlangıçta güvenli.
