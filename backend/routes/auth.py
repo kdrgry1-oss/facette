@@ -211,6 +211,10 @@ async def register(request: Request):
             _birth_date = ""
     email = safe_str(email or "", 256).lower().strip()
     password = safe_str(password or "", 200)
+    first_name = safe_str(first_name, 100).strip()
+    last_name = safe_str(last_name, 100).strip()
+    if not first_name or not last_name:
+        raise HTTPException(status_code=400, detail="Ad ve soyad zorunludur")
     if not is_safe_email(email):
         raise HTTPException(status_code=400, detail="Geçersiz e-posta adresi")
     if len(password) < 8:
@@ -233,8 +237,8 @@ async def register(request: Request):
         "id": generate_id(),
         "email": email,
         "password": hash_password(password),
-        "first_name": safe_str(first_name, 100) or "",
-        "last_name": safe_str(last_name, 100) or "",
+        "first_name": first_name,
+        "last_name": last_name,
         "phone": phone_norm,
         "height_cm": height_cm,
         "weight_kg": weight_kg,

@@ -41,6 +41,8 @@ jobs:
           backend/tests/test_email_brevo.py
           backend/tests/test_security_hardening.py
           backend/tests/test_dependency_audit_gate.py
+          backend/tests/test_shipping_rules.py
+          backend/tests/test_registration_names.py
           tests/seo_runtime_test.py
           tests/tenant_config_test.py
 

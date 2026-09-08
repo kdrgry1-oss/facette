@@ -4,12 +4,13 @@ import Checkout from "./Checkout";
 import axios from "axios";
 
 let mockUser = null;
+let mockTotal = 100;
 const mockNavigate = jest.fn();
 const mockSearch = new URLSearchParams();
 const mockCartItems = [{ id: "test", productId: "test", name: "Test Ürün", quantity: 1, price: 100 }];
 jest.mock("react-router-dom", () => ({ useNavigate: () => mockNavigate, useSearchParams: () => [mockSearch] }), { virtual: true });
 jest.mock("../context/AuthContext", () => ({ useAuth: () => ({ user: mockUser }) }));
-jest.mock("../context/CartContext", () => ({ useCart: () => ({ items: mockCartItems, total: 100, clearCart: jest.fn() }) }));
+jest.mock("../context/CartContext", () => ({ useCart: () => ({ items: mockCartItems, total: mockTotal, clearCart: jest.fn() }) }));
 jest.mock("../lib/shipping", () => ({ useShipping: () => ({ shippingFee: 99, freeShippingThreshold: 4000 }) }));
 jest.mock("../components/Header", () => () => null);
 jest.mock("../components/Footer", () => () => null);
@@ -26,6 +27,7 @@ describe("checkout address isolation", () => {
   afterAll(() => { delete global.IS_REACT_ACT_ENVIRONMENT; });
   beforeEach(() => {
     mockUser = null;
+    mockTotal = 100;
     localStorage.clear();
     container = document.createElement("div");
     root = createRoot(container);
@@ -40,6 +42,17 @@ describe("checkout address isolation", () => {
     expect(localStorage.getItem("facette_last_address")).toBeNull();
     expect(container.textContent).not.toContain("PRIVATE_PREVIOUS_CUSTOMER");
     expect(container.textContent).not.toContain("PRIVATE_ADDRESS");
+  });
+
+  test.each([[4210.52, false], [4210.53, true]])('rendered checkout includes bank discount at %s boundary', async (total, free) => {
+    mockTotal = total;
+    axios.post.mockResolvedValue({ data: { applied: [{ code: 'KARGO0', title: 'Ücretsiz Kargo', free_shipping: true, discount: 0 }], total_discount: 0 } });
+    await act(async () => root.render(<Checkout />));
+    const row = container.querySelector('[data-testid="shipping-cost"]');
+    expect(row.textContent.includes('Bedava')).toBe(free);
+    expect(row.textContent).toContain('99.00 TL');
+    const promos = container.querySelector('[data-testid="applied-promotions"]');
+    expect(promos.textContent.includes('Ücretsiz Kargo')).toBe(free);
   });
 
   test("account switch clears address and ignores the former account's delayed response", async () => {

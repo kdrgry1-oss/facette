@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { shippingQuote } from "../lib/shippingRules";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CreditCard, Building, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil, Gift } from "lucide-react";
 import axios from "axios";
@@ -269,13 +270,8 @@ export default function Checkout() {
   // Y25: Ücretsiz kargo kuponu uygulandıysa kargo 0 gösterilir (önceden etiket "Ücretsiz Kargo"
   // yazsa da tutara kargo ekleniyordu). Eşik ya da kupon → kargo bedava.
   const hasFreeShippingPromo = (appliedPromotions || []).some((p) => p && p.free_shipping);
-  const baseShipFee = ruleShipCost != null ? ruleShipCost : shippingFee;
-  // Eşik tabanı sunucuyla AYNI: İNDİRİM SONRASI tutar (orders.create_order:
-  // (_subtotal - _server_discount) >= eşik). Eskiden indirimsiz `total` bakılıyordu →
-  // checkout "ücretsiz kargo" gösterip sunucu kargo ücreti ekleyebiliyordu.
-  const shippingCost = (hasFreeShippingPromo
-    || (freeShippingThreshold != null && Math.max(0, total - discount) >= freeShippingThreshold))
-    ? 0 : baseShipFee;
+  // A rule's preliminary zero fee cannot bypass the final merchandise minimum.
+  const baseShipFee = ruleShipCost > 0 ? ruleShipCost : shippingFee;
   const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
   const codFee = paymentMethod === "cash_on_delivery" ? COD_FEE : 0;
   // Puan tavanı SUNUCUYLA aynı tabandan hesaplanır: (ara toplam − kupon/kampanya indirimi).
@@ -300,6 +296,13 @@ export default function Checkout() {
   const memberGroupDiscount = memberDiscPct > 0
     ? Math.round((total - discount) * (memberDiscPct / 100) * 100) / 100
     : 0;
+  const shipping = shippingQuote({
+    subtotal: total,
+    discounts: [discount, bankTransferDiscount, paymentMethodDiscount, memberGroupDiscount, pointsDeduction],
+    threshold: freeShippingThreshold, fee: baseShipFee, freeShippingPromotion: hasFreeShippingPromo,
+  });
+  const shippingCost = shipping.cost;
+  const visiblePromotions = appliedPromotions.filter((p) => !p.free_shipping || shipping.free || Number(p.discount) > 0);
   const preGiftTotal = Math.max(0, total + shippingCost - discount - bankTransferDiscount - paymentMethodDiscount - memberGroupDiscount - pointsDeduction + giftWrapTotal + codFee);
   // C2 Hediye çeki: tüm indirimlerden SONRA, ödenecek tutardan düşer (sunucu-otoriter;
   // burada yalnız gösterim). Bakiye kısmi kullanılır, kalan çekte kalır.
@@ -1368,16 +1371,16 @@ export default function Checkout() {
                 {/* En avantajlı indirim otomatik uygulandı + uygulanan kampanyalar (X ile kaldır) */}
                 {(appliedPromotions.length > 0 || eligiblePromotions.length > 0) && (
                   <div className="px-5 pt-4" data-testid="applied-promotions">
-                    {appliedPromotions.length > 0 && (
+                    {visiblePromotions.length > 0 && (
                       <>
                         <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-green-700 mb-2">
                           <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3 3 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd" /></svg>
                           En avantajlı indirim otomatik uygulandı
                         </div>
                         <div className="space-y-1">
-                          {appliedPromotions.map((p, i) => (
+                          {visiblePromotions.map((p, i) => (
                             <div key={i} className="flex items-center justify-between text-xs gap-2">
-                              <span className="text-gray-700 truncate flex-1">{p.title || p.code}{p.free_shipping ? " · Ücretsiz Kargo" : ""}</span>
+                              <span className="text-gray-700 truncate flex-1">{p.title || p.code}{p.free_shipping && shipping.free ? " · Ücretsiz Kargo" : ""}</span>
                               <span className="text-green-600 font-semibold shrink-0">-{Number(p.discount).toFixed(2)} ₺</span>
                               <button type="button" onClick={() => removePromotion(p)} title="Kampanyayı kaldır" aria-label="Kaldır"
                                 className="shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">×</button>
@@ -1427,10 +1430,10 @@ export default function Checkout() {
                   <div className="flex justify-between"><span className="text-gray-600">Ara Toplam</span><span>{listSum.toFixed(2)} TL</span></div>
                   {productDisc > 0.001 && <div className="flex justify-between text-emerald-700"><span>Ürün İndirimi</span><span>-{productDisc.toFixed(2)} TL</span></div>}
                   {/* NOT: alt "Kupon" satırı kupon/koşullu indirimi gösterir; ürün-içi indirim yukarıda ayrı. */}
-                  <div className="flex justify-between">
+                  <div className="flex justify-between" data-testid="shipping-cost">
                     <span className="text-gray-600">Kargo Tutarı</span>
                     {shippingCost === 0
-                      ? <span><s className="text-gray-400">59,99 TL</s> <span className="ml-1 inline-block bg-green-50 text-green-700 px-1.5 py-0.5 text-[10px] font-semibold rounded">Bedava</span></span>
+                      ? <span><s className="text-gray-400">{baseShipFee.toFixed(2)} TL</s> <span className="ml-1 inline-block bg-green-50 text-green-700 px-1.5 py-0.5 text-[10px] font-semibold rounded">Bedava</span></span>
                       : <span>{shippingCost.toFixed(2)} TL</span>}
                   </div>
                   <div className="flex justify-between text-xs text-gray-500" data-testid="delivery-estimate">

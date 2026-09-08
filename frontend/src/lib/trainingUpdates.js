@@ -6,7 +6,7 @@
  * eksik sistem maddeleri eklenir. Böylece yeni sürüm dokümantasyonu upsert
  * edilirken tenant'a özel içerik kaybolmaz.
  */
-export const TRAINING_CONTENT_VERSION = "2026.09.08.2";
+export const TRAINING_CONTENT_VERSION = "2026.09.08.3";
 
 export const TRAINING_UPDATES = [
   {
@@ -15,6 +15,19 @@ export const TRAINING_UPDATES = [
     icon: "Settings",
     intro: "Beyaz etiket ayarları, birleşik ekranlar, rapor tanımları ve salt-okunur kontroller için güncel başvuru.",
     items: [
+      {
+        key: "net-shipping-and-registration-2026-09-08",
+        title: "İndirim sonrası ücretsiz kargo ve zorunlu ad-soyad",
+        path: "/admin/kampanyalar",
+        what: "Ücretsiz kargo eşiği kampanya/kupon, ödeme yöntemi ve kullanılan puan indirimlerinden sonraki ürün tutarıyla karşılaştırılır; eşiğe eşit tutar dahildir.",
+        where: "Pazarlama → Kampanyalar → Ücretsiz Kargo → Min. Sipariş Tutarı.",
+        how: [
+          "Eşik 4.000 TL ise son ürün tutarı 3.999,99 TL olduğunda kargo ücretli; 4.000,00 TL ve üzerinde ücretsizdir. Eşik kodda sabit değildir, kampanya ayarından gelir.",
+          "Kargo, hediye paketi ve kapıda ödeme hizmet bedeli eşiğe eklenmez. Hediye çeki/mağaza kredisi bir ödeme aracıdır; ücretsiz kargo tabanını azaltmaz.",
+          "Sepet göstergesi ön tahmindir. Son kargo kararı, ödeme yöntemi ve indirimler seçildikten sonra ödeme ekranında kesinleşir.",
+          "E-posta/şifreyle yeni üyelikte ad ve soyad zorunludur; boş veya yalnız boşluk içeren isimler sunucu tarafından da reddedilir. Üye Ol formunda 'veya' ayracı kaldırılmıştır.",
+        ],
+      },
       {
         key: "security-hardening-2026-09-08",
         title: "Personel yetkileri, gizli anahtarlar ve adres gizliliği",

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { shippingQuote } from "../lib/shippingRules";
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { useShipping } from "../lib/shipping";
@@ -40,7 +41,7 @@ export default function CartDrawer() {
   // toplam baz alınıyordu; 3490 TL'lik sepette "510 TL daha" deniyor ama 510 TL'lik ürün
   // eklenince indirim de büyüdüğü için net tutar eşiğin altında kalıp kargo yine ücretli
   // çıkıyordu (müşteriye tutmayan söz). Artık bar ödenecek tutarı baz alır.
-  const netTotal = Math.max(0, total - promoDiscount);
+  const netTotal = shippingQuote({ subtotal: total, discounts: [promoDiscount], threshold: freeShippingThreshold, fee: shippingFee }).basis;
   const remaining = freeShippingThreshold != null ? Math.max(0, freeShippingThreshold - netTotal) : 0;
   useEffect(() => {
     if (!isOpen || items.length === 0) { setPromoDiscount(0); return; }
@@ -265,7 +266,7 @@ export default function CartDrawer() {
             })()}
             {freeShippingThreshold != null && remaining <= 0 && (
               <p className="text-[11px] text-emerald-700 text-center">
-                Ücretsiz kargo kazandınız
+                Mevcut sepet ücretsiz kargo eşiğinde. Kargo, ödeme adımında tüm indirimlerden sonra kesinleşir.
               </p>
             )}
             <Link

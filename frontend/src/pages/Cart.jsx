@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import axios from "axios";
 import { shareCart } from "../lib/shareCart";
 import { useShipping } from "../lib/shipping";
+import { shippingQuote } from "../lib/shippingRules";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useCart } from "../context/CartContext";
@@ -93,9 +94,11 @@ export default function Cart() {
   // (orders.create_order: (_subtotal - _server_discount) >= eşik). Eskiden indirimSİZ ara
   // toplam baz alınıyordu → hem "X TL daha" yazısı yanlış çıkıyor hem de sepet ekranı
   // "ücretsiz kargo" gösterip siparişte kargo ücreti ekleniyordu (tutarsızlık).
-  const netTotal = Math.max(0, total - promoDiscount);
+  // Payment/points choices are not known in the cart: this is an estimate only.
+  const shipping = shippingQuote({ subtotal: total, discounts: [promoDiscount], threshold: freeShippingThreshold, fee: shippingFee });
+  const netTotal = shipping.basis;
   const remaining = freeShippingThreshold != null ? Math.max(0, freeShippingThreshold - netTotal) : 0;
-  const shippingCost = (freeShippingThreshold != null && netTotal >= freeShippingThreshold) ? 0 : shippingFee;
+  const shippingCost = shipping.cost;
 
   // Ürün-seviyesi indirim (sale_price + otomatik kampanya) — satırlarla birebir tutarlı özet.
   const listSum = items.reduce((s, it) => s + cartLineView(it).listUnit * it.quantity, 0);
@@ -207,7 +210,7 @@ export default function Cart() {
               ) : (
                 <div className="mb-8 p-4 bg-emerald-50 border border-emerald-200">
                   <p className="text-xs text-center mb-2 text-emerald-800 font-medium">
-                    Ücretsiz kargo kazandın
+                    Mevcut sepet ücretsiz kargo eşiğinde. Kargo, ödeme adımında tüm indirimlerden sonra kesinleşir.
                   </p>
                   <div className="h-[2px] bg-emerald-200 overflow-hidden">
                     <div className="h-full bg-emerald-600 w-full" />

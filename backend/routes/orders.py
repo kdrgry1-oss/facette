@@ -1357,13 +1357,13 @@ async def create_order(
         _thr = float(_thr) if _thr not in (None, "") else None
     except Exception:
         _ship_fee, _thr = 0.0, None
-    _shipping = 0.0 if _free_shipping else _ship_fee
-    if _thr is not None and (_subtotal - _server_discount) >= _thr:
-        _shipping = 0.0
+    from shipping_rules import shipping_quote
+    _ship_quote = shipping_quote(_subtotal, [_server_discount, _pm_disc], _thr, _ship_fee, _free_shipping)
+    _shipping = _ship_quote["cost"]
     order["shipping_cost"] = round(_shipping, 2)
     # #13/#14: Bedava kargo kampanyası (kupon free_shipping VEYA eşik) izini sakla —
     # iade sonrası "kampanya dışı kaldı" uyarısı ve faturada kargo-iskonto kalemi için.
-    _fs_applied = bool(_free_shipping) or (_thr is not None and (_subtotal - _server_discount) >= _thr)
+    _fs_applied = _ship_quote["free"]
     order["free_shipping_applied"] = _fs_applied
     order["free_shipping_waived_fee"] = round(_ship_fee, 2) if (_fs_applied and _shipping == 0 and _ship_fee > 0) else 0.0
     if _thr is not None:
@@ -1416,6 +1416,23 @@ async def create_order(
                 order["total"] = round(max(0.0, float(order["total"]) - _sp["points"]), 2)
             else:
                 logger.info(f"[loyalty] puan kullanılamadı: {_sp.get('error')}")
+
+    # Final eligibility includes points actually spent (never trust requested points).
+    # Reconcile the fee BEFORE gift-card reservation and the approved-total check.
+    _ship_quote = shipping_quote(
+        _subtotal, [_server_discount, _pm_disc, order.get("points_used", 0)],
+        _thr, _ship_fee, _free_shipping)
+    order["total"] = round(order["total"] + _ship_quote["cost"] - _shipping, 2)
+    _shipping = _ship_quote["cost"]
+    order["shipping_cost"] = _shipping
+    order["shipping_eligibility_basis"] = _ship_quote["basis"]
+    order["free_shipping_applied"] = _ship_quote["free"]
+    order["free_shipping_waived_fee"] = round(_ship_fee, 2) if _ship_quote["free"] else 0.0
+    if not _ship_quote["free"]:
+        order["applied_promotions"] = [
+            {**p, "free_shipping": False} for p in order.get("applied_promotions", [])
+            if not p.get("free_shipping") or float(p.get("discount") or 0) > 0
+        ]
 
     # 💳 HEDİYE ÇEKİ / MAĞAZA KREDİSİ (C2) — tüm indirimlerden SONRA, toplamın üstünden.
     # Sunucu-otoriter: bakiye ATOMİK rezerve edilir (gift_cards.redeem_gift_card_for_order),

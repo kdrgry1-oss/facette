@@ -275,11 +275,15 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isRegister && (!formData.first_name.trim() || !formData.last_name.trim())) {
+      toast.error("Ad ve soyad zorunludur");
+      return;
+    }
     setLoading(true);
 
     try {
       if (isRegister) {
-        await register(formData);
+        await register({ ...formData, first_name: formData.first_name.trim(), last_name: formData.last_name.trim() });
         toast.success("Kayıt başarılı!");
       } else {
         await login(formData.email, formData.password);
@@ -353,28 +357,30 @@ export default function Login() {
             <p className="mb-6 text-center text-xs text-gray-600" role="status">{googleStatus.message}</p>
           )}
 
-          <div className="flex items-center gap-4 mb-6">
+          {!isRegister && <div className="flex items-center gap-4 mb-6">
             <div className="flex-1 h-px bg-gray-200" />
             <span className="text-xs text-gray-500">veya</span>
             <div className="flex-1 h-px bg-gray-200" />
-          </div>
+          </div>}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {isRegister && (
               <>
                 <div>
-                  <label className="block text-xs mb-1">Ad</label>
+                  <label htmlFor="register-first-name" className="block text-xs mb-1">Ad *</label>
                   <input
                     type="text"
+                    id="register-first-name" name="given-name" autoComplete="given-name" required maxLength={100} pattern=".*\S.*"
                     value={formData.first_name}
                     onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
                     className="w-full border px-3 py-2.5 text-sm focus:outline-none focus:border-black"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs mb-1">Soyad</label>
+                  <label htmlFor="register-last-name" className="block text-xs mb-1">Soyad *</label>
                   <input
                     type="text"
+                    id="register-last-name" name="family-name" autoComplete="family-name" required maxLength={100} pattern=".*\S.*"
                     value={formData.last_name}
                     onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
                     className="w-full border px-3 py-2.5 text-sm focus:outline-none focus:border-black"
