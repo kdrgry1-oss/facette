@@ -1225,22 +1225,30 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
             # ikisiyle de eşleyebilsin (yazım hatalı girişte reddi yine göstersin).
             rejected.append({"code": entered_resolved or entered, "entered": entered, "reason": _why})
 
-    # 3) Sirala: priority -> discount -> girilen kod (esitlikte one)
-    valid.sort(key=lambda x: (x["priority"], x["discount"], x["is_entered"]), reverse=True)
+    # 3) Sirala: GİRİLEN KOD ÖNCE -> priority -> discount.
+    # CANLI OLAY (havale/EFT siparişlerinde "kod geçersiz"): müşterinin yazdığı kod, daha yüksek
+    # öncelikli/indirimli bir OTOMATİK kampanyayla (ödeme-yöntemi kampanyası, üye indirimi…)
+    # birleşemeyince istiflemede SESSİZCE düşüyordu — ne applied'da ne rejected'da → müşteri
+    # "geçersiz" görüyordu. Motorun ilkesi "en yükseği zorla" değil "müşteri seçer": yazılan kod
+    # müşterinin açık tercihidir → önce o uygulanır, onunla birleşemeyen otomatik kampanya düşer.
+    # (Birleşebilenler — ör. Lansman %20 + HOSGELDIN10 — yine birlikte uygulanır.)
+    valid.sort(key=lambda x: (x["is_entered"], x["priority"], x["discount"]), reverse=True)
 
     # 4) Stack uygula (IKILI/pairwise combinable kapisi + stack_group + kalan tabana ardisik)
     def _pair_ok(a, b):
-        # ikisi de combinable olmali; her birinin combinable_with listesi bossa "tumuyle biner",
-        # doluysa karsi tarafin id'sini icermeli (KARSILIKLI).
+        # İkisi de combinable olmalı. Eşleşme kuralı (birleşme boşluğu düzeltmesi):
+        #   1) Taraflardan biri diğerini combinable_with'te AÇIKÇA listelediyse → birleşir
+        #      (admin tek tarafta "X ile birleşir" seçtiğinde eskiden KARŞILIKLI şart aranıyor,
+        #       kampanya sessizce düşüyordu).
+        #   2) İki liste de boşsa → "her şeyle birleşir" → birleşir.
+        #   3) Aksi hâlde (bir taraf kısıtlı ve karşı tarafı listelemiyor) → birleşmez.
         if not (a["combinable"] and b["combinable"]):
             return False
         aw = a.get("combinable_with") or []
         bw = b.get("combinable_with") or []
-        if aw and b["c"]["id"] not in aw:
-            return False
-        if bw and a["c"]["id"] not in bw:
-            return False
-        return True
+        if b["c"]["id"] in aw or a["c"]["id"] in bw:
+            return True
+        return not aw and not bw
 
     applied = []
     running = cart_total
@@ -1276,6 +1284,18 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
         running = round(running - d, 2)
         if cand["stack_group"]:
             used_groups.add(cand["stack_group"])
+
+    # GÜVENLİK AĞI — ASLA SESSİZ DÜŞME: girilen kod geçerli (valid) olduğu hâlde istiflemede
+    # uygulanamadıysa (müşteri X ile kaldırmadıysa) nedenini rejected'a yaz; frontend gösterir.
+    if entered_id and entered_id not in _excluded \
+            and any(v["c"]["id"] == entered_id for v in valid) \
+            and not any(a["c"]["id"] == entered_id for a in applied) \
+            and not any(str(r.get("code")) == str(entered_resolved or entered) for r in rejected):
+        _blk = [a["c"].get("title") or a["c"].get("code") or "" for a in applied]
+        rejected.append({"code": entered_resolved or entered, "entered": entered,
+                         "reason": ("Bu kod şu kampanyayla birlikte kullanılamıyor: " + ", ".join(_blk)
+                                    + " — o kampanyayı × ile kaldırırsanız kodunuz uygulanır.") if _blk
+                         else "Bu kod bu sepette uygulanamadı."})
 
     total = round(sum(a["applied_discount"] for a in applied), 2)
 
