@@ -667,8 +667,17 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
             _ors.append({"customer_email": _em})
             _ors.append({"email": _em})  # sipariş e-postayı 'email' altında da tutabilir
         if _ors:
+            # DENETİM (canlı olay, HOSGELDIN10 "çalışmıyor"): kişi-başı limit, müşterinin kendi
+            # ÖDENMEMİŞ (awaiting_payment — 3DS yarıda kalan/terk edilen) siparişlerini de "kullanım"
+            # sayıyordu → ilk denemesi başarısız olan müşteri, sipariş otomatik iptal edilene kadar
+            # (3 saate dek) "kullanım hakkınız kalmadı" ile KİLİTLENİYORDU ve tekrar deneyemiyordu.
+            # first_order_only ile TUTARLI kural: yalnız GERÇEKTEN ödenmiş sipariş (redemption)
+            # müşterinin kişisel hakkını tüketir (redemption zaten ödeme onayından SONRA yazılır —
+            # değişmez #5). Aynı kişinin çift-kullanım riski, her siparişin ayrı ayrı gerçek kartla
+            # ödenmesini gerektirdiğinden sınırlıdır; buna karşılık meşru yeniden-deneme engeli satış
+            # kaybettiriyordu. Global usage_limit (kıt kupon) için in-flight koruması AYNEN kalır.
             used_by_user = await _coupon_used_count(c["id"], c.get("code", ""), restrict_ors=_ors,
-                                                    count_inflight=not bool(c.get("auto_apply")))
+                                                    count_inflight=False)
             if used_by_user >= c["usage_limit_per_user"]:
                 return {"valid": False, "reason": "Bu kupon için kullanım hakkınız kalmadı", "discount": 0}
     if c.get("first_order_only") and not _exempt:
@@ -985,7 +994,11 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
                 "is_entered": cid == entered_id,
             })
         elif cid == entered_id:
-            rejected.append({"code": entered, "reason": ev.get("reason", "Uygulanamadı")})
+            # Girilen kod GEÇERLİ ama bu sepette indirim 0 çıktıysa (kategori/ürün kısıtı dışı
+            # sepet) eskiden belirsiz "Uygulanamadı" dönüyordu → müşteri "kod bozuk" sanıyordu.
+            _why = ev.get("reason") or ("Bu kupon sepetinizdeki ürünlerde geçerli değil"
+                                        if ev.get("valid") else "Uygulanamadı")
+            rejected.append({"code": entered, "reason": _why})
 
     # 3) Sirala: priority -> discount -> girilen kod (esitlikte one)
     valid.sort(key=lambda x: (x["priority"], x["discount"], x["is_entered"]), reverse=True)
