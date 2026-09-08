@@ -1155,13 +1155,20 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           </div>
                         )}
                         {wfCanAct && (() => {
-                          // Bu iade ZATEN onaylandı mı? (durum onay/iade/refund VEYA onay damgası
-                          // VEYA gider pusulası kesilmiş). Onaylıysa yeşil "İade Onay" tekrar bastırmaz;
-                          // soluk/pasif "İade Onaylandı" gösterilir (karışıklık gitsin).
-                          const rowApproved = ["return_approved", "returned", "refunded", "partial_refunded"].includes(r.status)
-                            || !!r.return_approved_at || !!r.has_gider_pusulasi || !!r.gider_pusulasi_no;
+                          // KALEM ONAYI gerçekten yapılmış mı? Yalnız iade KAYDI (items_approved) ve
+                          // kesilmiş gider pusulası kilitler. Sipariş durumu (return_approved/returned…)
+                          // veya return_approved_at damgası TEK BAŞINA onay sayılmaz: sessiz durum
+                          // düzeltmesi / pazaryeri senkronu siparişi 'onaylı' gösterirken kalem onayı hiç
+                          // yapılmamış olabiliyordu → "bu iade zaten onaylanmış" deyip onaylatmıyordu (W11262).
+                          const rowApproved = (r.items_approved === true) || !!r.has_gider_pusulasi || !!r.gider_pusulasi_no;
+                          const orderLooksApproved = ["return_approved", "returned", "refunded", "partial_refunded"].includes(r.status) || !!r.return_approved_at;
                           return (
                           <div className="mt-3">
+                            {!rowApproved && orderLooksApproved && can("returns.approve") && (
+                              <div className="mb-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+                                Sipariş durumu iade-onaylı görünüyor ama <b>kalem onayı yapılmamış</b>. Gelen ürünleri seçip "İade Onay" ile onaylayın (stok ve gider pusulası buna göre işlenir).
+                              </div>
+                            )}
                             <div className="flex flex-wrap gap-2">
                               {can("returns.approve") && (rowApproved ? (
                                 <span

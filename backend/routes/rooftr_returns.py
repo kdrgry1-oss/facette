@@ -340,6 +340,11 @@ async def list_rooftr_return_orders(
         _is_approved = bool(_appr) or _cr_status in ("approved", "return_approved", "refunded", "partial_refunded") \
             or r.get("status") in ("return_approved", "refunded", "partial_refunded")
         r["return_is_approved"] = _is_approved
+        # KALEM ONAYI GERÇEĞİ (W11262 — "bu iade zaten onaylanmış" ama onaylanmamıştı): yalnız
+        # customer_returns KAYDI esas alınır; sipariş durumu/damgası (sessiz durum düzeltmesi,
+        # pazaryeri senkronu) tek başına kalem onayı SAYILMAZ. Panel "İade Onay" kilidini buna bağlar.
+        r["record_status"] = _cr_status
+        r["items_approved"] = bool(_appr) or _cr_status in ("approved", "return_approved", "refunded", "partial_refunded")
         # KRİTİK: panel r["items"] = SİPARİŞİN TÜM kalemleri; customer_returns.items = GERÇEKTE
         # İADE EDİLEN kalemler (alt küme olabilir). "Tam onay" = iadenin TÜM kalemleri, siparişin
         # tümü DEĞİL. W10205: 2 kalemli siparişte yalnız M iade edildi; eski kod range(2) yazıp

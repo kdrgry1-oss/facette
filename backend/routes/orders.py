@@ -8356,10 +8356,16 @@ async def approve_return(return_id: str, payload: dict,
         # Tam onay: eski kısmi onay artıkları kalmasın
         _upd["$unset"] = {"approved_item_indexes": "", "approved_items": ""}
     await db.customer_returns.update_one({"id": return_id}, _upd)
-    await db.orders.update_one({"id": rec.get("order_id")}, {"$set": {
-        "status": "return_approved", "return_request.status": "approved", "updated_at": now_iso,
-        "return_approved_at": now_iso,
-    }})
+    # Sipariş durumu: iade zaten daha İLERİ bir aşamadaysa (returned/refunded/partial_refunded —
+    # ör. sessiz durum düzeltmesiyle 'iade edildi/ödendi' yapılmış, kalem onayı sonradan
+    # yapılıyor; W11262) GERİ 'return_approved'a DÜŞÜRME — ödenmiş iade regrese olmasın.
+    # Aksi halde (talep/onay aşamasında) return_approved'a al.
+    _oset = {"return_request.status": "approved", "updated_at": now_iso}
+    if (order.get("status") or "") not in ("returned", "refunded", "partial_refunded"):
+        _oset["status"] = "return_approved"
+    if not order.get("return_approved_at"):
+        _oset["return_approved_at"] = now_iso
+    await db.orders.update_one({"id": rec.get("order_id")}, {"$set": _oset})
 
     # OTOMATİK STOK GERİ: iade ONAYLANDI → onaylanan kalemleri ADET kadar stoğa ekle (idempotent,
     # kısmi dahil). Güncel kaydı (yeni yazılan approved_items dahil) çekip helper'a ver.
