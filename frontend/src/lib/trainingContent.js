@@ -415,10 +415,10 @@ export const TRAINING = [
       {
         title: "E-posta Pazarlama",
         path: "/admin/eposta-pazarlama",
-        what: "Segment, kampanya, şablon ve gönderim geçmişini tek ekranda yönetir.",
+        what: "Brevo Marketing birincil, Amazon SES yedek sağlayıcı olacak şekilde izinli kitle, kampanya, şablon ve gönderim geçmişini tek ekranda yönetir.",
         where: "Pazarlama → E-posta Pazarlama.",
-        how: ["Hedef kitleyi seç, şablonu hazırla, test gönder, ardından kampanyayı yayınla."],
-        tips: ["Eski /admin/toplu-mail adresi bu ekrana yönlendirilir; gönderim geçmişi silinmez."],
+        how: ["Brevo API anahtarı, doğrulanmış gönderen ve liste ID'sini kaydet; bağlantıyı doğrula.", "Şablonu hazırla ve test gönder; ardından rızalı kitleyi Brevo listesiyle eşitleyerek kampanyayı yayınla."],
+        tips: ["Amazon SES yedek ayarları silinmez ve gerektiğinde seçilebilir.", "Eski /admin/toplu-mail adresi bu ekrana yönlendirilir; gönderim geçmişi silinmez."],
       },
       {
         title: "Ürün Yorumları & Trendyol Yorumları",

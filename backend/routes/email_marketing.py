@@ -1,16 +1,17 @@
 """
 =============================================================================
-email_marketing.py — AWS SES tabanlı E-POSTA PAZARLAMA (toplu kampanya)
+email_marketing.py — Brevo birincil, AWS SES yedek E-POSTA PAZARLAMA
 =============================================================================
-YALNIZ PAZARLAMA. İşlemsel e-posta (sipariş/şifre) ESKİSİ GİBİ Zoho ZeptoMail'den
-(email_smtp.py) gider — buraya dokunulmaz. SES ayrı kanaldır (email_ses.py, boto3 HTTPS).
+YALNIZ PAZARLAMA. İşlemsel e-posta (sipariş/şifre) Zoho ZeptoMail'den gider.
+Brevo Marketing Campaigns birincil kanaldır; mevcut SES ayarları silinmez ve
+ayar açıkken yalnız yapılandırma/yedek kanal olarak kullanılabilir.
 
 Alıcılar: db.newsletter_subscribers içinde `active!=False` VE `consent==True` olanlar
 (KVKK/İYS: yalnız açık rıza verenlere ticari e-posta). Her maile abonelikten-çık linki
 eklenir; çıkanlara İYS'ye RET bildirilir.
 
 ENDPOINTS:
-  GET/PUT /api/admin/email-marketing/settings     — SES ayarları (secret maskeli/şifreli)
+  GET/PUT /api/admin/email-marketing/settings     — Brevo + yedek SES ayarları
   POST    /api/admin/email-marketing/test         — tek test maili
   GET     /api/admin/email-marketing/audience     — rıza vermiş aktif abone sayısı
   POST    /api/admin/email-marketing/campaigns     — kampanya oluştur + arka planda gönder
@@ -35,6 +36,14 @@ from .deps import db, require_admin, generate_id, logger, require_permission
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from email_ses import get_ses_config, is_configured, send_ses_email  # noqa: E402
+from email_brevo import (  # noqa: E402
+    create_and_send_campaign,
+    get_brevo_config,
+    is_configured as brevo_is_configured,
+    send_test_email as send_brevo_test,
+    sync_contacts as sync_brevo_contacts,
+    validate_config as validate_brevo_config,
+)
 from security.sns import validate_subscribe_url, verify_sns_message  # noqa: E402
 
 admin_router = APIRouter(prefix="/admin/email-marketing", tags=["email-marketing-admin"])
@@ -95,44 +104,119 @@ async def _site_base() -> str:
     return (os.environ.get("SITE_URL") or "https://facette.com.tr").rstrip("/")
 
 
-# ── SES ayarları ────────────────────────────────────────────────────────────
+# ── Sağlayıcı ayarları ──────────────────────────────────────────────────────
 @admin_router.get("/settings")
 async def get_settings(current_user: dict = Depends(require_admin)):
-    cfg = await db.settings.find_one({"id": "email_ses"}, {"_id": 0}) or {}
+    brevo = await db.settings.find_one({"id": "email_brevo"}, {"_id": 0}) or {}
+    ses = await db.settings.find_one({"id": "email_ses"}, {"_id": 0}) or {}
+    routing = await db.settings.find_one({"id": "email_marketing_provider"}, {"_id": 0}) or {}
     return {
-        "enabled": bool(cfg.get("enabled")),
-        "region": cfg.get("region", ""),
-        "access_key": cfg.get("access_key", ""),
-        "secret_key": _SECRET_MASK if cfg.get("secret_key") else "",
-        "from_email": cfg.get("from_email", ""),
-        "from_name": cfg.get("from_name", ""),
-        "configuration_set": cfg.get("configuration_set", ""),
-        "reply_to": cfg.get("reply_to", ""),
-        "configured": is_configured(await get_ses_config(db)),
+        "provider": routing.get("provider") or "brevo",
+        "fallback_enabled": bool(routing.get("fallback_enabled", True)),
+        "brevo_enabled": bool(brevo.get("enabled")),
+        "brevo_api_key": _SECRET_MASK if brevo.get("api_key") else "",
+        "brevo_from_email": brevo.get("from_email", ""),
+        "brevo_from_name": brevo.get("from_name", ""),
+        "brevo_reply_to": brevo.get("reply_to", ""),
+        "brevo_list_id": str(brevo.get("list_id") or ""),
+        "brevo_webhook_secret": _SECRET_MASK if brevo.get("webhook_secret") else "",
+        "ses_enabled": bool(ses.get("enabled")),
+        "ses_region": ses.get("region", ""),
+        "ses_access_key": ses.get("access_key", ""),
+        "ses_secret_key": _SECRET_MASK if ses.get("secret_key") else "",
+        "ses_from_email": ses.get("from_email", ""),
+        "ses_from_name": ses.get("from_name", ""),
+        "ses_configuration_set": ses.get("configuration_set", ""),
+        "ses_reply_to": ses.get("reply_to", ""),
+        "brevo_configured": brevo_is_configured(await get_brevo_config(db)),
+        "ses_configured": is_configured(await get_ses_config(db)),
+        "configured": brevo_is_configured(await get_brevo_config(db)) or (
+            bool(routing.get("fallback_enabled", True)) and is_configured(await get_ses_config(db))
+        ),
     }
 
 
 @admin_router.put("/settings")
 async def save_settings(payload: dict, current_user: dict = Depends(require_admin)):
-    # reply_to: görünen gönderen (from_email) gerçek bir posta kutusu OLMAYABİLİR
-    # (ör. club@facette.com.tr yalnız gönderim için). Müşteri maili yanıtlarsa yanıtın
-    # kaybolmaması için okunan bir adrese yönlendirilir.
-    allowed = {"enabled", "region", "access_key", "secret_key", "from_email", "from_name",
-               "configuration_set", "reply_to"}
-    update = {k: v for k, v in (payload or {}).items() if k in allowed}
-    # Secret: maske geldiyse DOKUNMA; yeni değer geldiyse ŞİFRELE (at-rest).
-    if "secret_key" in update:
-        if update["secret_key"] in ("", _SECRET_MASK):
-            update.pop("secret_key")
-        else:
-            try:
-                from security.crypto import encrypt as _enc
-                update["secret_key"] = _enc(update["secret_key"])
-            except Exception:
-                pass
-    update["updated_at"] = _now()
-    await db.settings.update_one({"id": "email_ses"}, {"$set": update, "$setOnInsert": {"id": "email_ses"}}, upsert=True)
-    return {"success": True}
+    payload = payload or {}
+    provider = payload.get("provider") if payload.get("provider") in ("brevo", "ses") else "brevo"
+    routing = {"provider": provider, "fallback_enabled": bool(payload.get("fallback_enabled", True)), "updated_at": _now()}
+
+    brevo = {
+        "enabled": bool(payload.get("brevo_enabled")),
+        "from_email": str(payload.get("brevo_from_email") or "").strip(),
+        "from_name": str(payload.get("brevo_from_name") or "").strip(),
+        "reply_to": str(payload.get("brevo_reply_to") or "").strip(),
+        "updated_at": _now(),
+    }
+    try:
+        brevo["list_id"] = int(payload.get("brevo_list_id") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Brevo liste kimliği sayı olmalıdır.")
+    api_key = str(payload.get("brevo_api_key") or "").strip()
+    if api_key and api_key != _SECRET_MASK:
+        try:
+            from security.crypto import encrypt as _enc
+            brevo["api_key"] = _enc(api_key)
+        except Exception:
+            brevo["api_key"] = api_key
+    webhook_secret = str(payload.get("brevo_webhook_secret") or "").strip()
+    if webhook_secret and webhook_secret != _SECRET_MASK:
+        try:
+            from security.crypto import encrypt as _enc
+            brevo["webhook_secret"] = _enc(webhook_secret)
+        except Exception:
+            brevo["webhook_secret"] = webhook_secret
+
+    ses_map = {
+        "ses_enabled": "enabled", "ses_region": "region", "ses_access_key": "access_key",
+        "ses_from_email": "from_email", "ses_from_name": "from_name",
+        "ses_configuration_set": "configuration_set", "ses_reply_to": "reply_to",
+    }
+    ses = {dst: payload.get(src) for src, dst in ses_map.items() if src in payload}
+    ses["updated_at"] = _now()
+    secret = str(payload.get("ses_secret_key") or "").strip()
+    if secret and secret != _SECRET_MASK:
+        try:
+            from security.crypto import encrypt as _enc
+            ses["secret_key"] = _enc(secret)
+        except Exception:
+            ses["secret_key"] = secret
+
+    await db.settings.update_one({"id": "email_marketing_provider"}, {"$set": routing, "$setOnInsert": {"id": "email_marketing_provider"}}, upsert=True)
+    await db.settings.update_one({"id": "email_brevo"}, {"$set": brevo, "$setOnInsert": {"id": "email_brevo"}}, upsert=True)
+    await db.settings.update_one({"id": "email_ses"}, {"$set": ses, "$setOnInsert": {"id": "email_ses"}}, upsert=True)
+    return {"success": True, "provider": provider}
+
+
+async def _selected_provider() -> tuple[str, dict]:
+    routing = await db.settings.find_one({"id": "email_marketing_provider"}, {"_id": 0}) or {}
+    primary = routing.get("provider") or "brevo"
+    brevo = await get_brevo_config(db)
+    ses = await get_ses_config(db)
+    if primary == "brevo" and brevo_is_configured(brevo):
+        return "brevo", brevo
+    if primary == "ses" and is_configured(ses):
+        return "ses", ses
+    if routing.get("fallback_enabled", True):
+        if primary != "brevo" and brevo_is_configured(brevo):
+            return "brevo", brevo
+        if primary != "ses" and is_configured(ses):
+            return "ses", ses
+    return primary, {}
+
+
+@admin_router.post("/validate-provider")
+async def validate_provider(current_user: dict = Depends(require_admin)):
+    """Birincil sağlayıcının kimlik bilgilerini gönderim yapmadan doğrular."""
+    provider, cfg = await _selected_provider()
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Kullanılabilir e-posta pazarlama sağlayıcısı yok.")
+    if provider == "brevo":
+        result = await validate_brevo_config(cfg)
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=f"Brevo doğrulanamadı: {result.get('error') or 'bilinmeyen hata'}")
+    return {"success": True, "provider": provider}
 
 
 @admin_router.post("/test")
@@ -144,9 +228,9 @@ async def send_test(payload: dict, current_user: dict = Depends(require_permissi
     to = (payload or {}).get("to", "").strip()
     if not to:
         raise HTTPException(status_code=400, detail="Test için e-posta adresi gerekli.")
-    cfg = await get_ses_config(db)
-    if not is_configured(cfg):
-        raise HTTPException(status_code=400, detail="SES ayarları eksik/pasif. Bölge, anahtarlar ve gönderen adresi girip aktifleştirin.")
+    provider, cfg = await _selected_provider()
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Brevo ayarları eksik/pasif ve kullanılabilir SES yedeği yok.")
     _subject = str((payload or {}).get("subject") or "").strip()
     _body = str((payload or {}).get("html") or "")
     if _subject and _body.strip():
@@ -166,12 +250,15 @@ async def send_test(payload: dict, current_user: dict = Depends(require_permissi
             subject = _subject
         html = _wrap(subject, _body, unsub_url="")
     else:
-        subject = "Facette — SES Test"
-        html = _wrap(subject, "<p>Bu bir <b>AWS SES</b> test e-postasıdır. Bu mail size ulaştıysa pazarlama kanalı çalışıyor. 🎉</p>", unsub_url="")
-    r = await send_ses_email(cfg, to, subject, html, cfg.get("reply_to") or "")
+        subject = f"Facette — {provider.upper()} Test"
+        html = _wrap(subject, f"<p>Bu bir <b>{provider.upper()}</b> test e-postasıdır. Bu mail size ulaştıysa pazarlama kanalı çalışıyor. 🎉</p>", unsub_url="")
+    if provider == "brevo":
+        r = await send_brevo_test(cfg, to, subject, html, cfg.get("reply_to") or "")
+    else:
+        r = await send_ses_email(cfg, to, subject, html, cfg.get("reply_to") or "")
     if not r.get("success"):
-        raise HTTPException(status_code=400, detail=f"Gönderilemedi: {r.get('error') or 'bilinmeyen hata'}")
-    return {"success": True, "message_id": r.get("message_id", "")}
+        raise HTTPException(status_code=400, detail=f"Gönderilemedi: {r.get('error') or r.get('response') or 'bilinmeyen hata'}")
+    return {"success": True, "provider": provider, "message_id": r.get("message_id", "")}
 
 
 @admin_router.get("/audience")
@@ -232,7 +319,7 @@ def _wrap(subject: str, body_html: str, unsub_url: str) -> str:
 
 
 # ── Kampanyalar ───────────────────────────────────────────────────────────────
-async def _run_campaign(campaign_id: str):
+async def _run_ses_campaign(campaign_id: str):
     """Arka plan: rıza vermiş aktif abonelere SES ile gönderir; sayaçları günceller."""
     camp = await db.email_campaigns.find_one({"id": campaign_id}, {"_id": 0})
     if not camp:
@@ -343,21 +430,89 @@ async def _run_campaign(campaign_id: str):
     logger.info(f"[email-marketing] kampanya {campaign_id} bitti: {sent} gönderildi, {failed} hata / {n}")
 
 
+async def _run_brevo_campaign(campaign_id: str):
+    """Rızalı yerel kitleyi Brevo listesiyle eşitler ve Marketing Campaigns API'sine yollar."""
+    camp = await db.email_campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not camp:
+        return
+    cfg = await get_brevo_config(db)
+    if not brevo_is_configured(cfg):
+        await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+            "status": "failed", "error": "Brevo yapılandırılmadı", "finished_at": _now(),
+        }})
+        return
+    await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+        "status": "syncing", "started_at": camp.get("started_at") or _now(),
+    }})
+
+    suppressed = await _suppressed_set()
+    rows = await db.newsletter_subscribers.find(
+        {"active": {"$ne": False}, "consent": True},
+        {"_id": 0, "email": 1, "id": 1, "name": 1, "first_name": 1, "full_name": 1},
+    ).to_list(100000)
+    contacts = [row for row in rows if (row.get("email") or "").strip().lower() not in suppressed]
+    sync = await sync_brevo_contacts(cfg, contacts)
+    if not sync.get("success"):
+        await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+            "status": "failed", "failed": 0, "skipped": len(rows) - len(contacts),
+            "error": sync.get("error") or "Brevo kitle eşitleme başarısız",
+            "error_sample": sync.get("error") or "", "finished_at": _now(),
+        }})
+        return
+
+    # Eski panel placeholder'ını Brevo'nun kişi alanına dönüştür. Brevo, boş FIRSTNAME
+    # için boş değer kullanır; şablonlarda nötr hitap tercih edilmesi önerilir.
+    subject = str(camp.get("subject") or "").replace("{customer_name}", "{{ contact.FIRSTNAME }}")
+    body = str(camp.get("html") or "").replace("{customer_name}", "{{ contact.FIRSTNAME }}")
+    html = _wrap(subject, body, "{{ unsubscribe }}")
+    result = await create_and_send_campaign(
+        cfg,
+        name=f"Facette · {camp.get('subject') or campaign_id} · {campaign_id[:8]}",
+        subject=subject,
+        html=html,
+        tag=f"facette-{campaign_id[:12]}",
+    )
+    if not result.get("success"):
+        await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+            "status": "failed", "error": result.get("error") or "Brevo kampanyası başlatılamadı",
+            "error_sample": result.get("error") or "", "external_campaign_id": result.get("campaign_id"),
+            "synced": sync.get("synced", 0), "finished_at": _now(),
+        }})
+        return
+
+    # Brevo isteği kabul edip kampanyayı kendi kuyruğuna aldığında teslimat henüz kesinleşmez.
+    # Bu yüzden `sent` uydurulmaz; hedef toplam ve dış kampanya kimliği ayrı tutulur.
+    await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+        "status": "submitted", "sent": 0, "failed": 0, "total": len(contacts),
+        "skipped": len(rows) - len(contacts), "synced": sync.get("synced", 0),
+        "external_campaign_id": result.get("campaign_id"), "finished_at": _now(),
+    }})
+    logger.info(f"[email-marketing] Brevo kampanya {campaign_id}, hedef {len(contacts)}, dış id {result.get('campaign_id')}")
+
+
+async def _run_campaign(campaign_id: str):
+    camp = await db.email_campaigns.find_one({"id": campaign_id}, {"_id": 0, "provider": 1})
+    if (camp or {}).get("provider") == "brevo":
+        await _run_brevo_campaign(campaign_id)
+    else:
+        await _run_ses_campaign(campaign_id)
+
+
 @admin_router.post("/campaigns")
 async def create_campaign(payload: dict, current_user: dict = Depends(require_permission("tasarim.email"))):
     subject = (payload or {}).get("subject", "").strip()
     html = (payload or {}).get("html", "").strip()
     if not subject or not html:
         raise HTTPException(status_code=400, detail="Konu ve içerik zorunlu.")
-    cfg = await get_ses_config(db)
-    if not is_configured(cfg):
-        raise HTTPException(status_code=400, detail="SES ayarları eksik/pasif — önce ayarları girip aktifleştirin.")
+    provider, cfg = await _selected_provider()
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Brevo ayarları eksik/pasif ve kullanılabilir SES yedeği yok.")
     eligible = await db.newsletter_subscribers.count_documents({"active": {"$ne": False}, "consent": True})
     if eligible == 0:
         raise HTTPException(status_code=400, detail="Rıza vermiş aktif abone yok.")
     doc = {
         "id": generate_id(), "subject": subject, "html": html,
-        "status": "queued", "total": eligible, "sent": 0, "failed": 0,
+        "status": "queued", "provider": provider, "total": eligible, "sent": 0, "failed": 0,
         "created_by": current_user.get("email", ""), "created_at": _now(),
     }
     await db.email_campaigns.insert_one(doc)
@@ -644,6 +799,56 @@ async def picker_products(category: str = "", q: str = "", limit: int = 24,
             "price": p.get("price"), "sale_price": p.get("sale_price"),
         })
     return {"products": out, "total": len(out)}
+
+
+# ── BREVO ABONELİKTEN ÇIKIŞ / BOUNCE WEBHOOK ─────────────────────────────────
+@public_router.post("/brevo-webhook")
+async def brevo_webhook(payload: dict, request: Request):
+    """Brevo pazarlama olaylarını yerel rıza/suppression verisine yansıtır."""
+    import hmac as _hmac
+    configured = await get_brevo_config(db)
+    expected = (os.environ.get("BREVO_WEBHOOK_SECRET") or configured.get("webhook_secret") or "").strip()
+    given = (request.query_params.get("key") or request.headers.get("X-Webhook-Secret") or "").strip()
+    if not expected or not given or not _hmac.compare_digest(expected, given):
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    event = str((payload or {}).get("event") or (payload or {}).get("msg_status") or "").lower()
+    email = str((payload or {}).get("email") or "").strip().lower()
+    if email and event in {"unsubscribe", "unsubscribed"}:
+        await db.newsletter_subscribers.update_one({"email": email}, {"$set": {
+            "active": False, "unsubscribed_at": _now(), "unsubscribed_via": "brevo",
+        }})
+        return {"ok": True, "handled": 1, "event": event}
+    if email and event in {"hard_bounce", "hardbounce", "spam", "complaint", "invalid", "blocked"}:
+        reason = "complaint" if event in {"spam", "complaint"} else "bounce"
+        await _suppress(email, reason, f"brevo:{event}")
+        return {"ok": True, "handled": 1, "event": event}
+    return {"ok": True, "handled": 0, "event": event}
+
+
+# ── BREVO PAZARLAMA OLAYLARI ─────────────────────────────────────────────────
+@public_router.post("/brevo-webhook")
+async def brevo_webhook(payload: dict, request: Request):
+    """Brevo unsubscribe/spam/kalıcı bounce olaylarını yerel rıza listesine işler."""
+    import hmac as _hmac
+    cfg = await get_brevo_config(db)
+    expected = str(os.environ.get("BREVO_WEBHOOK_SECRET") or cfg.get("webhook_secret") or "").strip()
+    given = str(request.query_params.get("key") or request.headers.get("X-Webhook-Secret") or "").strip()
+    if not expected or not given or not _hmac.compare_digest(expected, given):
+        raise HTTPException(status_code=403, detail="forbidden")
+    event = str((payload or {}).get("event") or (payload or {}).get("msg_status") or "").lower()
+    email = str((payload or {}).get("email") or (payload or {}).get("to") or "").strip().lower()
+    reason_map = {
+        "unsubscribe": "unsubscribe", "unsubscribed": "unsubscribe",
+        "spam": "complaint", "complaint": "complaint",
+        "hard_bounce": "bounce", "hardbounce": "bounce", "invalid": "bounce",
+    }
+    reason = reason_map.get(event)
+    if reason and email:
+        await _suppress(email, reason, str((payload or {}).get("reason") or (payload or {}).get("description") or ""))
+        logger.info(f"[email-marketing] Brevo {event}: {email} pasifleştirildi")
+        return {"ok": True, "handled": 1}
+    return {"ok": True, "handled": 0}
 
 
 # ── SES BOUNCE / ŞİKÂYET BİLDİRİMİ (AWS SNS webhook) ──────────────────────────

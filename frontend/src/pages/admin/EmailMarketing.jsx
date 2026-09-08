@@ -1,5 +1,5 @@
 /**
- * EmailMarketing.jsx — AWS SES tabanlı e-posta pazarlama paneli.
+ * EmailMarketing.jsx — Brevo birincil, AWS SES yedek e-posta pazarlama paneli.
  * ================================================================
  * SES ayarları (Zoho'dan AYRI kanal — işlemsel maile dokunmaz) + rıza vermiş
  * bülten abonelerine toplu kampanya gönderimi + geçmiş. Alıcılar backend'de
@@ -17,7 +17,11 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const h = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
 
 export default function EmailMarketing() {
-  const [cfg, setCfg] = useState({ enabled: false, region: "", access_key: "", secret_key: "", from_email: "", from_name: "", configuration_set: "" });
+  const [cfg, setCfg] = useState({
+    provider: "brevo", fallback_enabled: true,
+    brevo_enabled: false, brevo_api_key: "", brevo_from_email: "", brevo_from_name: "", brevo_reply_to: "", brevo_list_id: "", brevo_webhook_secret: "",
+    ses_enabled: false, ses_region: "", ses_access_key: "", ses_secret_key: "", ses_from_email: "", ses_from_name: "", ses_reply_to: "", ses_configuration_set: "",
+  });
   const [configured, setConfigured] = useState(false);
   const [aud, setAud] = useState({ total: 0, eligible: 0 });
   const [testTo, setTestTo] = useState("");
@@ -312,7 +316,7 @@ export default function EmailMarketing() {
     setBusy("save");
     try {
       await axios.put(`${API}/admin/email-marketing/settings`, cfg, { headers: h() });
-      toast.success("SES ayarları kaydedildi");
+      toast.success("E-posta sağlayıcı ayarları kaydedildi");
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Kaydedilemedi"); }
     finally { setBusy(""); }
@@ -352,7 +356,7 @@ export default function EmailMarketing() {
       await axios.post(`${API}/admin/email-marketing/test`, { to, subject: camp.subject, html: camp.html }, { headers: h() });
       toast.success(`Test e-postası ${to} adresine gönderildi (markalı)`);
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Test gönderilemedi (SES sandbox'ta yalnız DOĞRULANMIŞ adrese gider)");
+      toast.error(e.response?.data?.detail || "Test gönderilemedi");
     } finally { setBusy(""); }
   };
 
@@ -365,10 +369,19 @@ export default function EmailMarketing() {
     </label>
   );
 
+  const validateProvider = async () => {
+    setBusy("validate");
+    try {
+      const r = await axios.post(`${API}/admin/email-marketing/validate-provider`, {}, { headers: h() });
+      toast.success(`${String(r.data?.provider || "Sağlayıcı").toUpperCase()} bağlantısı doğrulandı`);
+    } catch (e) { toast.error(e.response?.data?.detail || "Bağlantı doğrulanamadı"); }
+    finally { setBusy(""); }
+  };
+
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-2">
-        <Mail size={22} /><h1 className="text-xl font-bold">E-posta Pazarlama (AWS SES)</h1>
+        <Mail size={22} /><h1 className="text-xl font-bold">E-posta Pazarlama</h1>
       </div>
 
       {/* Kitle */}
@@ -379,34 +392,63 @@ export default function EmailMarketing() {
           <p className="text-xs text-gray-500">Toplam {aud.total} kayıt · yalnız KVKK/İYS onaylı ve aktif olanlara gönderilir</p>
         </div>
         <span className={`text-xs px-2 py-1 rounded-full font-semibold ${configured ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-          {configured ? "SES hazır" : "SES ayarı eksik"}
+          {configured ? `${(cfg.provider || "brevo").toUpperCase()} hazır` : "Sağlayıcı ayarı eksik"}
         </span>
       </div>
 
-      {/* SES Ayarları */}
+      {/* Brevo + yedek SES ayarları */}
       <div className="bg-white border rounded-xl p-4 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm">SES Ayarları</h2>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" checked={!!cfg.enabled} onChange={(e) => setCfg((p) => ({ ...p, enabled: e.target.checked }))} className="w-4 h-4 accent-black" />
-            Aktif
-          </label>
+          <h2 className="font-semibold text-sm">Gönderim Sağlayıcısı</h2>
+          <select value={cfg.provider || "brevo"} onChange={(e) => setCfg((p) => ({ ...p, provider: e.target.value }))}
+            className="border rounded-lg px-3 py-2 text-sm font-medium">
+            <option value="brevo">Brevo (birincil)</option>
+            <option value="ses">Amazon SES (yedek / manuel)</option>
+          </select>
         </div>
-        <div className="grid md:grid-cols-2 gap-3">
-          {field("AWS Bölgesi", "region", "text", "eu-west-1")}
-          {field("Gönderen adresi (doğrulanmış)", "from_email", "text", "club@facette.com.tr")}
-          {field("IAM Access Key ID", "access_key")}
-          {field("IAM Secret Access Key", "secret_key", "password", "••••••")}
-          {field("Gönderen adı", "from_name", "text", "Facette")}
-          {/* Yanıt adresi: görünen gönderen gerçek bir posta kutusu olmayabilir
-              (club@... yalnız gönderim için). Müşteri yanıtı kaybolmasın diye
-              okunan bir adrese yönlendirilir. */}
-          {field("Yanıt adresi (ops.)", "reply_to", "text", "info@facette.com.tr")}
-          {field("Configuration Set (ops.)", "configuration_set", "text", "açılma/bounce takibi")}
+        <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold">Brevo Marketing</div>
+              <div className="text-[11px] text-gray-500">Kişiler yerel KVKK/İYS rızasına göre Brevo listesiyle eşitlenir; kampanya Brevo Marketing API üzerinden gönderilir.</div>
+            </div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!cfg.brevo_enabled} onChange={(e) => setCfg((p) => ({ ...p, brevo_enabled: e.target.checked }))} className="accent-black" /> Aktif</label>
+          </div>
+          <div className="grid md:grid-cols-2 gap-3">
+            {field("Brevo API anahtarı", "brevo_api_key", "password", "xkeysib-...")}
+            {field("Brevo kişi listesi ID", "brevo_list_id", "number", "12")}
+            {field("Doğrulanmış gönderen adresi", "brevo_from_email", "email", "bulten@facette.com.tr")}
+            {field("Gönderen adı", "brevo_from_name", "text", "Facette")}
+            {field("Yanıt adresi", "brevo_reply_to", "email", "info@facette.com.tr")}
+            {field("Webhook güvenlik anahtarı", "brevo_webhook_secret", "password", "uzun-rastgele-bir-anahtar")}
+          </div>
+          <p className="text-[11px] text-gray-500">Brevo webhook adresi: <code>/api/email-marketing/brevo-webhook?key=GÜVENLİK_ANAHTARI</code> · unsubscribe, spam ve hard bounce olaylarını seçin.</p>
         </div>
+        <details className="rounded-xl border p-4" open={cfg.provider === "ses"}>
+          <summary className="cursor-pointer text-sm font-semibold">Amazon SES yedek ayarları</summary>
+          <div className="mt-3 space-y-3">
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!cfg.ses_enabled} onChange={(e) => setCfg((p) => ({ ...p, ses_enabled: e.target.checked }))} className="accent-black" /> SES aktif</label>
+            <div className="grid md:grid-cols-2 gap-3">
+              {field("AWS Bölgesi", "ses_region", "text", "eu-west-1")}
+              {field("Doğrulanmış gönderen", "ses_from_email", "email", "bulten@facette.com.tr")}
+              {field("IAM Access Key ID", "ses_access_key")}
+              {field("IAM Secret Access Key", "ses_secret_key", "password", "••••••")}
+              {field("Gönderen adı", "ses_from_name", "text", "Facette")}
+              {field("Yanıt adresi", "ses_reply_to", "email", "info@facette.com.tr")}
+              {field("Configuration Set", "ses_configuration_set", "text", "opsiyonel")}
+            </div>
+          </div>
+        </details>
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="checkbox" checked={!!cfg.fallback_enabled} onChange={(e) => setCfg((p) => ({ ...p, fallback_enabled: e.target.checked }))} className="accent-black" />
+          Birincil sağlayıcı yapılandırılmamışsa diğer hazır sağlayıcıyı yedek olarak kullan
+        </label>
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <button onClick={saveCfg} disabled={busy === "save"} className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50">
             <Save size={15} /> Kaydet
+          </button>
+          <button onClick={validateProvider} disabled={busy === "validate"} className="inline-flex items-center gap-2 border px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-50 disabled:opacity-50">
+            <CheckCircle2 size={15} /> Bağlantıyı doğrula
           </button>
           <div className="flex items-center gap-2">
             <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="test@ornek.com"
@@ -417,8 +459,8 @@ export default function EmailMarketing() {
           </div>
         </div>
         <p className="text-[11px] text-gray-400 leading-relaxed">
-          İşlemsel e-postalar (sipariş/şifre) Zoho'dan gitmeye devam eder — burası yalnız pazarlama kanalıdır.
-          SES ilk açılışta "sandbox" modundadır; toplu gönderim için AWS'den "production access" onayı alınmalıdır.
+          İşlemsel e-postalar (sipariş/şifre) Zoho ZeptoMail'den gitmeye devam eder. Brevo pazarlama için birincildir;
+          Amazon SES ayarları silinmez ve gerektiğinde yedek olarak seçilebilir.
         </p>
       </div>
 
@@ -647,7 +689,7 @@ export default function EmailMarketing() {
           </button>
         </div>
         <p className="text-[11px] text-gray-400 text-right">
-          SES sandbox modunda test yalnız DOĞRULANMIŞ adrese gider (ör. kdrgry@gmail.com, club@facette.com.tr).
+          Toplu kampanya, gönderim anında rızalı kitleyi Brevo listesiyle eşitler. Brevo kabulü teslimat değildir; gerçek teslim/açılma sonuçları Brevo raporundan izlenir.
         </p>
       </div>
 
@@ -663,16 +705,17 @@ export default function EmailMarketing() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-gray-500 border-b">
-                <th className="py-2">Konu</th><th>Durum</th><th className="text-right">Gönderildi</th><th className="text-right">Hata</th><th className="text-right">Toplam</th><th className="text-right">Tarih</th>
+                <th className="py-2">Konu</th><th>Sağlayıcı</th><th>Durum</th><th className="text-right">Gönderildi</th><th className="text-right">Hata</th><th className="text-right">Hedef</th><th className="text-right">Tarih</th>
               </tr></thead>
               <tbody>
                 {campaigns.map((c) => (
                   <tr key={c.id} className="border-b last:border-0">
                     <td className="py-2 pr-2">{c.subject}</td>
+                    <td className="uppercase text-xs font-medium text-gray-500">{c.provider || "ses"}</td>
                     <td>
-                      <span className={`inline-flex items-center gap-1 text-xs font-semibold ${c.status === "sent" ? "text-green-600" : c.status === "sending" ? "text-blue-600" : c.status === "failed" ? "text-red-600" : "text-gray-500"}`}>
-                        {c.status === "sent" ? <CheckCircle2 size={13} /> : c.status === "failed" ? <AlertTriangle size={13} /> : null}
-                        {c.status}
+                      <span className={`inline-flex items-center gap-1 text-xs font-semibold ${["sent", "submitted"].includes(c.status) ? "text-green-600" : ["sending", "syncing"].includes(c.status) ? "text-blue-600" : c.status === "failed" ? "text-red-600" : "text-gray-500"}`}>
+                        {["sent", "submitted"].includes(c.status) ? <CheckCircle2 size={13} /> : c.status === "failed" ? <AlertTriangle size={13} /> : null}
+                        {c.status === "submitted" ? "Brevo'ya iletildi" : c.status === "syncing" ? "Kitle eşitleniyor" : c.status}
                       </span>
                     </td>
                     <td className="text-right">{c.sent || 0}</td>

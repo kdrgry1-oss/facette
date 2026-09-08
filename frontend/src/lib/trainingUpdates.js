@@ -89,18 +89,22 @@ export const TRAINING_UPDATES = [
         key: "email-marketing-workspace",
         title: "Gelişmiş E-posta Pazarlama",
         path: "/admin/eposta-pazarlama",
-        what: "AWS SES ayarları, izinli hedef kitle, kampanya şablonları, canlı önizleme, test gönderimi ve kampanya geçmişini tek ekranda yönetir.",
+        what: "Brevo Marketing birincil ve Amazon SES yedek gönderim sağlayıcısı; izinli hedef kitle, şablonlar, canlı önizleme, test ve kampanya geçmişini tek ekranda yönetir.",
         where: "Pazarlama → E-posta Pazarlama.",
         how: [
-          "SES bağlantısını ve doğrulanmış gönderici bilgisini kaydet; önce bağlantı/test gönderimiyle yapılandırmayı doğrula.",
+          "Brevo'da API anahtarı, doğrulanmış gönderici ve rızalı kişilerin tutulacağı liste kimliğini oluştur; Brevo'yu aktif ve birincil seçip Kaydet'e bas.",
+          "Bağlantıyı doğrula ile API anahtarını gönderim yapmadan sınayabilir, Test gönder ile yalnız belirlediğin adrese gerçek deneme yapabilirsin.",
+          "Brevo webhook adresini Brevo panelinde marketing unsubscribe, spam ve hard bounce olaylarına bağla; aynı güvenlik anahtarını iki tarafta kullan.",
           "Hazır şablonu önizle veya yeni kampanyada konu, içerik ve ürün bloklarını düzenle; canlı önizlemeyi kontrol et.",
           "Kampanya taslağını şablon olarak kaydedebilir veya doğrulanmış bir adrese Test olarak gönder ile sınayabilirsin.",
-          "Hedef kitle ve ileti izinlerini kontrol ettikten sonra kampanyayı başlat; gönderilen, hatalı ve toplam sayılarını Kampanya Geçmişi'nden izle.",
+          "Hedef kitle ve ileti izinlerini kontrol ettikten sonra kampanyayı başlat; sistem Brevo listesini yerel rızalı kitleyle eşitler ve kampanyayı Brevo kuyruğuna yollar.",
+          "Amazon SES ayarları Amazon SES yedek ayarları bölümünde saklanır; silinmez. Birincil sağlayıcı hazır değilse yedek kullanımını ayrıca açıp kapatabilirsin.",
           "Eski /admin/toplu-mail yer imi otomatik olarak bu ekrana yönlenir.",
         ],
         tips: [
           "Canlı önizleme ve şablon önizleme e-posta göndermez; Test gönder ve kampanya başlatma ayrı işlemlerdir.",
-          "SES sandbox hesabında test alıcısının da doğrulanmış olması gerekebilir. Ticari ileti gönderiminden önce izin/IYS durumunu kontrol edin.",
+          "Brevo'ya iletildi durumu teslim edildi demek değildir; kesin teslim, açılma ve tıklama metriklerini Brevo kampanya raporundan kontrol edin.",
+          "Ticari ileti gönderiminden önce izin/IYS durumunu kontrol edin; Brevo'da abonelikten çıkan kişi eşitleme sırasında yeniden aktifleştirilmez.",
         ],
       },
       {
@@ -184,4 +188,3 @@ export function mergeTrainingUpdates(sections, updates = TRAINING_UPDATES) {
   }
   return merged;
 }
-
