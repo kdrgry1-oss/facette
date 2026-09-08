@@ -23,12 +23,11 @@ router = APIRouter(prefix="/admin", tags=["admin-rbac"])
 
 
 # Panel personeli AYIRT EDİCİ işaretleri: create_panel_user personele created_by + role_id
-# yazar; ayrıca is_super_admin ve varsayılan admin@facette.com personeldir. Bunlardan biri
+# yazar; ayrıca açık is_super_admin bayrağı personeli tanımlar. Bunlardan biri
 # varsa GERÇEK personel; hiçbiri yoksa is_admin=True olsa bile MÜŞTERİdir (eski/bozuk register).
 PANEL_STAFF_OR = [
     {"created_by": {"$exists": True, "$nin": [None, ""]}},
     {"is_super_admin": True},
-    {"email": "admin@facette.com"},
     {"role_id": {"$exists": True, "$nin": [None, ""]}},
 ]
 
@@ -131,7 +130,7 @@ async def delete_role(role_id: str, current_user: dict = Depends(require_super_a
 @router.get("/users")
 async def list_panel_users(current_user: dict = Depends(require_admin)):
     # Yalnız GERÇEK panel personeli. Personel create_panel_user ile oluşur → created_by +
-    # role_id taşır; ya da is_super_admin / varsayılan admin@facette.com. Bu işaretlerin
+    # role_id taşır; ya da is_super_admin. Bu işaretlerin
     # HİÇBİRİ olmayan is_admin=True hesap = eski/bozuk MÜŞTERİ (register kaydı) → gösterilmez.
     users = await db.users.find(
         {"is_admin": True, "$or": PANEL_STAFF_OR},
@@ -254,19 +253,13 @@ async def delete_panel_user(user_id: str, current_user: dict = Depends(require_s
 async def get_my_permissions(current_user: dict = Depends(require_admin)):
     """Return effective permissions of the current user."""
     await _ensure_default_roles()
-    # GÜVENLİK: süper-admin yalnızca e-posta VEYA is_super_admin bayrağı ile
-    # (rolsüz kullanıcı artık otomatik ["*"] ALMAZ → deps.get_effective_permissions ile aynı).
-    if current_user.get("email") == "admin@facette.com" or current_user.get("is_super_admin") is True:
+    permissions = await get_effective_permissions(current_user)
+    if "*" in permissions:
         return {"permissions": ["*"], "role": "Süper Admin"}
     role_id = current_user.get("role_id") or ""
     if not role_id:
-        # Rolsüz personel: tüm operasyonel yetkiler (süper-admin değil) — deps ile aynı.
-        try:
-            from permissions import ALL_PERMISSION_KEYS
-            return {"permissions": list(ALL_PERMISSION_KEYS), "role": "Yönetici (rol atanmamış)"}
-        except Exception:
-            return {"permissions": [], "role": None}
+        return {"permissions": [], "role": "Rol atanmamış"}
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
     if not role:
         return {"permissions": [], "role": None}
-    return {"permissions": role.get("permissions", []), "role": role.get("name")}
+    return {"permissions": permissions, "role": role.get("name")}

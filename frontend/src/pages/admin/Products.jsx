@@ -36,6 +36,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag, AlertTriangle, History } from "lucide-react";
 import axios from "axios";
+import { openAdminDocument } from "../../lib/adminDocuments";
 import { toast } from "sonner";
 import { stockActorDetails, stockSyncDetails, stockSyncLabel } from "../../lib/stockHistoryView";
 import {
@@ -1562,12 +1563,10 @@ export default function AdminProducts() {
    *   (giyim firmalarındaki gibi: ürün adı, stok kodu, GTIN barkod, beden, renk).
    *   BACKEND: GET /api/products/{id}/barcode-card
    */
-  const handlePrintBarcode = (productId, sizes = null) => {
-    const token = localStorage.getItem('token');
-    const q = sizes && sizes.length ? `&sizes=${encodeURIComponent(sizes.join(','))}` : '';
-    const url = `${API}/products/${productId}/barcode-card?token=${token}${q}`;
-    const w = window.open(url, '_blank', 'width=820,height=1000');
-    if (w) { w.focus(); } // otomatik yazdirma yok: kopya adedini secip "Yazdir"a bas
+  const handlePrintBarcode = async (productId, sizes = null) => {
+    const q = sizes && sizes.length ? `?sizes=${encodeURIComponent(sizes.join(','))}` : '';
+    try { await openAdminDocument(`/products/${productId}/barcode-card${q}`, 'width=820,height=1000'); }
+    catch (err) { toast.error(err.message || "Barkod kartı açılamadı"); }
   };
 
   /**

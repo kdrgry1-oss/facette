@@ -39,6 +39,8 @@ jobs:
           backend/tests/test_themes.py
           backend/tests/test_google_auth_flow.py
           backend/tests/test_email_brevo.py
+          backend/tests/test_security_hardening.py
+          backend/tests/test_dependency_audit_gate.py
           tests/seo_runtime_test.py
           tests/tenant_config_test.py
 

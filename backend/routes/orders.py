@@ -8,7 +8,7 @@ import time
 import uuid
 import re
 
-from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc, verify_admin_token, limiter, safe_str
+from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc, limiter, safe_str
 from .attribution import resolve_attribution_for_order
 from pymongo import ReturnDocument
 
@@ -5027,10 +5027,9 @@ async def upload_manual_invoice(
 # dönüşümü canlıda provider'dan gelen PDF URL'siyle değiştirilir.
 # ---------------------------------------------------------------------------
 @router.get("/{order_id}/invoice/print")
-async def print_invoice_html(order_id: str, token: str = None):
+async def print_invoice_html(order_id: str, current_user: dict = Depends(require_permission("orders.invoice"))):
     """Basit fatura HTML çıktısı (yazdırılabilir). Bulk print için iframe.
-    GÜVENLİK: token admin JWT olarak doğrulanır — kimliksiz PII sızıntısı kapatıldı."""
-    await verify_admin_token(token)
+    Yetki Authorization başlığından doğrulanır; URL'de oturum anahtarı kabul edilmez."""
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
@@ -5053,7 +5052,7 @@ async def print_invoice_html(order_id: str, token: str = None):
     from fastapi.responses import HTMLResponse
     html = f"""
 <!doctype html><html lang="tr"><head><meta charset="utf-8"/>
-<title>Fatura — {order.get('invoice_number') or order.get('order_number','')}</title>
+<title>Fatura — {_h(order.get('invoice_number') or order.get('order_number',''))}</title>
 <style>
   @page {{ size: A4; margin: 15mm; }}
   body {{ font-family: -apple-system, Arial, sans-serif; color:#111; margin:0; }}
@@ -5074,9 +5073,9 @@ async def print_invoice_html(order_id: str, token: str = None):
   </div>
   <div style="text-align:right">
     <h1>{'E-ARŞİV FATURA' if order.get('invoice_type')=='e-arsiv' else 'E-FATURA'}</h1>
-    <div class="meta">No: <strong>{order.get('invoice_number') or '-'}</strong></div>
-    <div class="meta">Tarih: {(order.get('invoice_issued_at') or order.get('created_at') or '')[:10]}</div>
-    <div class="meta">Sipariş: {order.get('order_number','')}</div>
+    <div class="meta">No: <strong>{_h(order.get('invoice_number') or '-')}</strong></div>
+    <div class="meta">Tarih: {_h((order.get('invoice_issued_at') or order.get('created_at') or '')[:10])}</div>
+    <div class="meta">Sipariş: {_h(order.get('order_number',''))}</div>
   </div>
 </div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px;">
@@ -5102,11 +5101,11 @@ async def print_invoice_html(order_id: str, token: str = None):
 </div>
 <p class="meta" style="margin-top:24px;border-top:1px solid #eee;padding-top:10px;">
   Bu belge e-Arşiv fatura olup, aktif entegratör
-  <strong>{order.get('invoice_provider') or '-'}</strong> üzerinden üretilmiştir.
+  <strong>{_h(order.get('invoice_provider') or '-')}</strong> üzerinden üretilmiştir.
 </p>
 </body></html>
 """
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 # ─── e-Fatura PDF public link (e-Arşiv WEB_KEY karşılığı) ───────────────────────
@@ -6747,14 +6746,13 @@ def _render_cargo_label_html(*, siparis_no, main_barcode, sender_company, sender
 
 
 @router.get("/{order_id}/cargo-label")
-async def get_cargo_label(order_id: str, token: str = None):
+async def get_cargo_label(order_id: str, current_user: dict = Depends(require_permission("orders.cargo"))):
     """100x150mm yazdırılabilir kargo etiketi (HTML + Code39).
     Tek barkod: kargo takip no varsa onu, yoksa sipariş numarasını kullanır.
     Tasarım: LOGO + ORIGIN ID + FROM/TO/REF + ORDER/ITEM/SHIP DATE/DIMENSIONS/WEIGHT
     + REMARKS + tek barkod sağ altta + sağ kenarda handling icon'ları.
     """
     from fastapi.responses import HTMLResponse
-    await verify_admin_token(token)  # GÜVENLİK: kimliksiz kargo etiketi PII sızıntısı kapatıldı
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
@@ -6853,7 +6851,7 @@ async def get_cargo_label(order_id: str, token: str = None):
         odeme_turu=odeme_turu,
         kargo_tipi=kargo_tipi,
     )
-    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
+    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 # ==================== MNG KARGO AYARLARI ====================

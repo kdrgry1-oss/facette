@@ -22,7 +22,7 @@ async def get_brevo_config(db) -> dict:
                 from security.crypto import decrypt
                 cfg = {**cfg, field: decrypt(cfg[field])}
             except Exception:
-                pass
+                cfg = {**cfg, field: None}
     return cfg
 
 

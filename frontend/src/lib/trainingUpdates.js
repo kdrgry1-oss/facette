@@ -6,7 +6,7 @@
  * eksik sistem maddeleri eklenir. Böylece yeni sürüm dokümantasyonu upsert
  * edilirken tenant'a özel içerik kaybolmaz.
  */
-export const TRAINING_CONTENT_VERSION = "2026.09.08.1";
+export const TRAINING_CONTENT_VERSION = "2026.09.08.2";
 
 export const TRAINING_UPDATES = [
   {
@@ -15,6 +15,25 @@ export const TRAINING_UPDATES = [
     icon: "Settings",
     intro: "Beyaz etiket ayarları, birleşik ekranlar, rapor tanımları ve salt-okunur kontroller için güncel başvuru.",
     items: [
+      {
+        key: "security-hardening-2026-09-08",
+        title: "Personel yetkileri, gizli anahtarlar ve adres gizliliği",
+        path: "/admin/ayarlar?tab=users-roles",
+        what: "Rol atanmamış personelin örtük yetkilerini kaldırır; e-posta anahtarlarının şifreleme başarısızlığında kaydedilmesini engeller.",
+        where: "Ayarlar → Kullanıcılar & Roller; Pazarlama → E-posta Pazarlama → Sağlayıcı Ayarları.",
+        how: [
+          "Süper yöneticiyle Kullanıcılar & Roller'i açıp her personele yalnız gereken izinleri içeren bir rol ata. Rolü olmayan personel yönetim API'sine erişemez.",
+          "Bir e-posta adresi tek başına süper yönetici hakkı vermez. Süper yönetici erişimi açık hesap işareti veya atanmış yetkili rolle tanımlanır.",
+          "E-posta sağlayıcı ayarlarını okumak, değiştirmek ve bağlantıyı doğrulamak settings.emails izni ister. Kampanya gönderimi tasarim.email izniyle ayrıdır.",
+          "Şifreleme hatasında yeni anahtarlar ve sağlayıcı ayarları kaydedilmez. Sunucunun şifreleme yapılandırması düzeltilmeden tekrar deneme; eski anahtarı korumak için maskeli alanı değiştirme.",
+          "Engellenen adresler listesi okunamazsa gönderim durur. Sonuç doğrulanmalı durumunda sağlayıcı kayıtlarını incelemeden yeniden gönderme; SES'e kör yeniden deneme yapılmaz.",
+        ],
+        tips: [
+          "Adresler ortak tarayıcının localStorage alanında otomatik saklanmaz. Üyenin kayıtlı adresleri yalnız kendi oturumuyla yüklenir; misafir adresi tekrar girilir.",
+          "Fatura, etiket, barkod kartı ve müşteri raporu yazdırmada oturum anahtarı URL'ye eklenmez. Eski token içeren yazdırma bağlantıları yerine paneldeki güncel Yazdır düğmesini kullanın.",
+          "Git geçmişindeki olası anahtar sızıntıları ayrıca sağlayıcıda iptal/yenileme ister. Kodun güncellenmesi geçmiş anahtarları otomatik geçersiz kılmaz.",
+        ],
+      },
       {
         key: "tenant-setting-impact-matrix",
         title: "Firma ayarları: alan → ekran / etki matrisi",

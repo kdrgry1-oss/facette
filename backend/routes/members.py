@@ -471,12 +471,11 @@ async def member_360(mid: str, start: Optional[str] = None, end: Optional[str] =
 
 
 @router.get("/{mid}/360/print")
-async def member_360_print(mid: str, start: Optional[str] = None, end: Optional[str] = None, token: str = None):
-    """Müşteri 360 A4 rapor (PDF/yazdır). token query ile kimlik; ?print=1 ile otomatik yazdır."""
+async def member_360_print(mid: str, start: Optional[str] = None, end: Optional[str] = None,
+                           current_user: dict = Depends(require_permission("customers.view"))):
+    """Müşteri 360 A4 rapor. Authorization başlığı zorunlu; ?print=1 otomatik yazdırır."""
     from fastapi.responses import HTMLResponse
-    from .orders import verify_admin_token
     import html as _h
-    await verify_admin_token(token)
     u = await db.users.find_one({"id": mid, "is_admin": {"$ne": True}}, {"_id": 0, "password": 0})
     if not u:
         raise HTTPException(status_code=404, detail="Üye bulunamadı")
@@ -541,7 +540,7 @@ table{{width:100%;border-collapse:collapse;font-size:10.5px;margin-top:4px}} th{
 <h2>İadeler ({len(d['returns'])})</h2><table><thead><tr><th>Sipariş No</th><th>Sebep / Durum</th><th>İade Tutarı</th></tr></thead><tbody>{ret_rows}</tbody></table>
 <script>window.addEventListener('load',()=>{{if(location.search.includes('print=1'))setTimeout(()=>window.print(),300)}})</script>
 </body></html>"""
-    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
+    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 @router.post("")

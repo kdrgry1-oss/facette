@@ -23,6 +23,8 @@ export default function EmailMarketing() {
     ses_enabled: false, ses_region: "", ses_access_key: "", ses_secret_key: "", ses_from_email: "", ses_from_name: "", ses_reply_to: "", ses_configuration_set: "",
   });
   const [configured, setConfigured] = useState(false);
+  const [canEditSettings, setCanEditSettings] = useState(false);
+  const [readyProvider, setReadyProvider] = useState("");
   const [aud, setAud] = useState({ total: 0, eligible: 0 });
   const [testTo, setTestTo] = useState("");
   const [camp, setCamp] = useState({ subject: "", html: "" });
@@ -184,14 +186,20 @@ export default function EmailMarketing() {
 
   const load = async () => {
     try {
-      const [s, a, c, t] = await Promise.all([
-        axios.get(`${API}/admin/email-marketing/settings`, { headers: h() }),
+      const [s, a, c, t, status] = await Promise.all([
+        axios.get(`${API}/admin/email-marketing/settings`, { headers: h() }).catch((e) => {
+          if (e.response?.status === 403) return { data: null };
+          throw e;
+        }),
         axios.get(`${API}/admin/email-marketing/audience`, { headers: h() }),
         axios.get(`${API}/admin/email-marketing/campaigns`, { headers: h() }),
         axios.get(`${API}/admin/email-marketing/templates`, { headers: h() }),
+        axios.get(`${API}/admin/email-marketing/provider-status`, { headers: h() }),
       ]);
-      setCfg((p) => ({ ...p, ...s.data }));
-      setConfigured(!!s.data.configured);
+      setCanEditSettings(!!s.data);
+      if (s.data) setCfg((p) => ({ ...p, ...s.data }));
+      setReadyProvider(status.data.provider);
+      setConfigured(!!status.data.configured);
       setAud(a.data || { total: 0, eligible: 0 });
       setCampaigns(c.data?.campaigns || []);
       setTemplates(t.data?.templates || []);
@@ -392,12 +400,12 @@ export default function EmailMarketing() {
           <p className="text-xs text-gray-500">Toplam {aud.total} kayıt · yalnız KVKK/İYS onaylı ve aktif olanlara gönderilir</p>
         </div>
         <span className={`text-xs px-2 py-1 rounded-full font-semibold ${configured ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-          {configured ? `${(cfg.provider || "brevo").toUpperCase()} hazır` : "Sağlayıcı ayarı eksik"}
+          {configured ? `${(readyProvider || "brevo").toUpperCase()} hazır` : "Sağlayıcı ayarı eksik"}
         </span>
       </div>
 
       {/* Brevo + yedek SES ayarları */}
-      <div className="bg-white border rounded-xl p-4 space-y-4">
+      {canEditSettings ? <div className="bg-white border rounded-xl p-4 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-sm">Gönderim Sağlayıcısı</h2>
           <select value={cfg.provider || "brevo"} onChange={(e) => setCfg((p) => ({ ...p, provider: e.target.value }))}
@@ -462,7 +470,7 @@ export default function EmailMarketing() {
           İşlemsel e-postalar (sipariş/şifre) Zoho ZeptoMail'den gitmeye devam eder. Brevo pazarlama için birincildir;
           Amazon SES ayarları silinmez ve gerektiğinde yedek olarak seçilebilir.
         </p>
-      </div>
+      </div> : <p className="text-sm text-gray-500">Sağlayıcı ayarlarını yönetmek için e-posta ayarları yetkisi gerekir. Kampanya araçlarını aşağıdan kullanabilirsiniz.</p>}
 
       {/* Hazır Şablonlar */}
       <div className="bg-white border rounded-xl p-4">
@@ -715,7 +723,7 @@ export default function EmailMarketing() {
                     <td>
                       <span className={`inline-flex items-center gap-1 text-xs font-semibold ${["sent", "submitted"].includes(c.status) ? "text-green-600" : ["sending", "syncing"].includes(c.status) ? "text-blue-600" : c.status === "failed" ? "text-red-600" : "text-gray-500"}`}>
                         {["sent", "submitted"].includes(c.status) ? <CheckCircle2 size={13} /> : c.status === "failed" ? <AlertTriangle size={13} /> : null}
-                        {c.status === "submitted" ? "Brevo'ya iletildi" : c.status === "syncing" ? "Kitle eşitleniyor" : c.status}
+                        {c.status === "submitted" ? "Brevo'ya iletildi" : c.status === "syncing" ? "Kitle eşitleniyor" : c.status === "needs_review" ? "Sonuç doğrulanmalı" : c.status}
                       </span>
                     </td>
                     <td className="text-right">{c.sent || 0}</td>

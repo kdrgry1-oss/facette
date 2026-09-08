@@ -37,6 +37,8 @@ import OrderMarketplaceInfo from "../../components/admin/OrderMarketplaceInfo";
 import OrderPaymentDetail from "../../components/admin/OrderPaymentDetail";
 import { toast } from "sonner";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
+import { fetchAdminDocument, openAdminDocument } from "../../lib/adminDocuments";
+import InvoiceDocument from "../../components/admin/InvoiceDocument";
 import {
   Dialog,
   DialogContent,
@@ -426,8 +428,8 @@ export default function AdminOrders({ unpaidView = false }) {
 
   // eslint-disable-next-line no-unused-vars -- per-row buton kaldırıldı (Toplu Fatura Yazdır kullanılır); detay/ileride kullanılabilir
   const handlePrintInvoice = async (orderId) => {
-    const token = localStorage.getItem('token');
-    window.open(`${API}/orders/${orderId}/invoice/print?token=${token}`, '_blank');
+    try { await openAdminDocument(`/orders/${orderId}/invoice/print`); }
+    catch (err) { toast.error(err.message || "Fatura açılamadı"); }
   };
 
   const handleGenerateCargoBarcode = async (orderId, company = selectedCargo) => {
@@ -493,17 +495,9 @@ export default function AdminOrders({ unpaidView = false }) {
   };
 
 
-  const handlePrintLabel = (orderId) => {
-    const token = localStorage.getItem('token');
-    const labelUrl = `${API}/orders/${orderId}/cargo-label?token=${token}`;
-    const printWindow = window.open(labelUrl, '_blank', 'width=400,height=600');
-    if (printWindow) {
-      printWindow.onload = () => {
-        setTimeout(() => {
-          printWindow.print();
-        }, 500);
-      };
-    }
+  const handlePrintLabel = async (orderId) => {
+    try { await openAdminDocument(`/orders/${orderId}/cargo-label`, 'width=400,height=600', true); }
+    catch (err) { toast.error(err.message || "Kargo etiketi açılamadı"); return; }
     // Etiket çekimi backend'de "yazdırıldı" damgası bırakır → listeyi tazele (kamyon sarı→yeşil).
     setTimeout(() => fetchOrders(), 1500);
   };
@@ -660,14 +654,12 @@ export default function AdminOrders({ unpaidView = false }) {
       toast.error("Lütfen sipariş seçiniz");
       return;
     }
-    const token = localStorage.getItem('token');
     toast.loading("Kargo etiketleri hazırlanıyor...", { id: "bulklbl" });
     try {
       const htmls = await Promise.all(
         selectedOrders.map(async (id) => {
           try {
-            const r = await fetch(`${API}/orders/${id}/cargo-label?token=${token}`);
-            if (!r.ok) return "";
+            const r = await fetchAdminDocument(`/orders/${id}/cargo-label`);
             return await r.text();
           } catch {
             return "";
@@ -782,14 +774,12 @@ export default function AdminOrders({ unpaidView = false }) {
       toast.error("Lütfen sipariş seçiniz");
       return;
     }
-    const token = localStorage.getItem('token');
     toast.loading("Faturalar hazırlanıyor...", { id: "bulkinv" });
     try {
       const htmls = await Promise.all(
         selectedOrders.map(async (id) => {
           try {
-            const r = await fetch(`${API}/orders/${id}/invoice/print?token=${token}`);
-            if (!r.ok) return "";
+            const r = await fetchAdminDocument(`/orders/${id}/invoice/print`);
             return await r.text();
           } catch {
             return "";
@@ -1846,10 +1836,6 @@ export default function AdminOrders({ unpaidView = false }) {
               {(selectedOrder.invoice_issued || selectedOrder.invoice_number || selectedOrder.invoice?.invoice_number || selectedOrder.invoice_pdf_url || selectedOrder.invoice_link) && (() => {
                 const invNo = selectedOrder.invoice?.invoice_number || selectedOrder.invoice_number;
                 const rawUrl = selectedOrder.invoice_pdf_url || selectedOrder.invoice_link || "";
-                const tok = localStorage.getItem('token');
-                const pdfSrc = (typeof rawUrl === 'string' && rawUrl.startsWith('http'))
-                  ? rawUrl
-                  : `${API}/orders/${selectedOrder.id}/invoice/print?token=${tok}`;
                 return (
                   <div className="border border-green-200 bg-green-50 rounded p-4">
                     <div className="flex items-center justify-between mb-3 gap-3">
@@ -1857,9 +1843,8 @@ export default function AdminOrders({ unpaidView = false }) {
                         <h3 className="font-medium text-green-800">Fatura</h3>
                         {invNo && <p className="text-sm text-gray-700">No: <span className="font-medium">{invNo}</span></p>}
                       </div>
-                      <a href={pdfSrc} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline shrink-0">Yeni sekmede aç ↗</a>
                     </div>
-                    <iframe src={pdfSrc} title="Fatura" className="w-full rounded border bg-white" style={{ height: 520 }} />
+                    <InvoiceDocument orderId={selectedOrder.id} externalUrl={rawUrl} />
                     {/* #20: Faturada kullanılan MATRAH bilgileri (birim fiyat · iskonto · KDV) */}
                     {(() => {
                       const items = selectedOrder.items || selectedOrder.lines || [];

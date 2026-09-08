@@ -73,6 +73,8 @@ def _load_master_key() -> bytes:
                         jwt_secret = _fh.read().strip()
             except Exception:
                 pass
+    if not jwt_secret or len(jwt_secret) < 32:
+        raise RuntimeError("A strong SECRETS_MASTER_KEY or JWT_SECRET is required for secret encryption")
     logger.warning(
         "SECRETS_MASTER_KEY missing. Deriving from JWT_SECRET (NOT recommended for production). "
         "Generate a strong key with: python -c \"from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())\""

@@ -377,7 +377,7 @@ def _token_revoked(payload: dict, user: dict) -> bool:
     try:
         return int((user or {}).get("token_version", 0) or 0) > int((payload or {}).get("tv", 0) or 0)
     except Exception:
-        return False
+        return True
 
 
 def _decode_jwt_strict(token: str) -> dict:
@@ -438,92 +438,30 @@ async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(secu
     if not user or user.get("is_active") is False:
         raise HTTPException(status_code=401, detail="Hesap devre dışı")
     # GÜVENLİK: Yalnız GERÇEK panel personeli admin erişebilir. Panel personeli
-    # create_panel_user ile oluşur → 'created_by' + 'role_id' taşır; ya da is_super_admin /
-    # varsayılan admin@facette.com. Bunların HİÇBİRİ yoksa hesap bir MÜŞTERİdir (eski/bozuk
+    # create_panel_user ile oluşur → atanmış 'role_id' taşır; ya da is_super_admin.
+    # Bunların HİÇBİRİ yoksa hesap yetkisizdir (eski/bozuk
     # veride is_admin=True kalmış register kaydı — 'role' alanı bile yok) → admin erişimi REDDEDİLİR.
     _is_staff = (
-        (user.get("created_by") not in (None, ""))
-        or bool(user.get("is_super_admin"))
-        or user.get("email") == "admin@facette.com"
+        user.get("is_super_admin") is True
         or (user.get("role_id") not in (None, ""))
     )
-    if user.get("role") == "customer" or not _is_staff:
+    if user.get("is_admin") is not True or user.get("role") == "customer" or not _is_staff:
         raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
-    if _token_revoked(payload, user):
-        raise HTTPException(status_code=401, detail="Oturum sonlandırıldı, tekrar giriş yapın")
-    return user
-
-
-async def verify_admin_token(token: str) -> dict:
-    """URL query'sinde gelen token'i (iframe/yazdirma gorunumleri icin) ADMIN JWT
-    olarak dogrular. Gecersiz/eksik/yetkisiz ise HTTPException firlatir.
-    Kimliksiz erisilen PII yazdirma uclarini (fatura/kargo etiketi) kapatir."""
-    if not token:
-        raise HTTPException(status_code=401, detail="Yetkilendirme gerekli")
-    try:
-        payload = _decode_jwt_strict(token)
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token süresi dolmuş")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Geçersiz token")
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
-    user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
-    if not user or user.get("is_active") is False:
-        raise HTTPException(status_code=401, detail="Hesap devre dışı")
-    # GÜVENLİK: Yalnız GERÇEK panel personeli admin erişebilir. Panel personeli
-    # create_panel_user ile oluşur → 'created_by' + 'role_id' taşır; ya da is_super_admin /
-    # varsayılan admin@facette.com. Bunların HİÇBİRİ yoksa hesap bir MÜŞTERİdir (eski/bozuk
-    # veride is_admin=True kalmış register kaydı — 'role' alanı bile yok) → admin erişimi REDDEDİLİR.
-    _is_staff = (
-        (user.get("created_by") not in (None, ""))
-        or bool(user.get("is_super_admin"))
-        or user.get("email") == "admin@facette.com"
-        or (user.get("role_id") not in (None, ""))
-    )
-    if user.get("role") == "customer" or not _is_staff:
-        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    if not await get_effective_permissions(user):
+        raise HTTPException(status_code=403, detail="Geçerli bir personel rolü atanmalı")
     if _token_revoked(payload, user):
         raise HTTPException(status_code=401, detail="Oturum sonlandırıldı, tekrar giriş yapın")
     return user
 
 
 async def get_effective_permissions(user: dict) -> list:
-    """Kullanicinin etkin yetki listesini dondurur.
-
-    Kural (admin_rbac /me/permissions ile birebir ayni):
-      - email == 'admin@facette.com' VEYA role_id yok  -> ['*'] (super admin)
-      - aksi halde rol kaydindaki permissions listesi
-    """
-    # GÜVENLİK: eskiden boş role_id → ["*"] (süper-admin) idi → rolsüz oluşturulan
-    # personel sessizce tam yetki alıyordu. Artık süper-admin YALNIZCA e-posta
-    # eşleşmesi VEYA açık is_super_admin bayrağı ile. Rolsüz kullanıcı → [] (fail-closed).
+    """Explicit super-admin flag or assigned role only; no implicit email grants."""
     u = user or {}
-    if u.get("email") == "admin@facette.com" or u.get("is_super_admin") is True:
+    if u.get("is_super_admin") is True:
         return ["*"]
     role_id = u.get("role_id") or ""
     if not role_id:
-        # GÜVENLİK + GERİYE-UYUM: Rolü ATANMAMIŞ personel süper-admin ('*') OLMAZ
-        # (kullanıcı/rol yönetimi + escalation kapalı) AMA tüm OPERASYONEL yetkileri alır
-        # (iade/refund/sipariş vb. işleri aksamasın). Least-privilege isteniyorsa panelden
-        # kişiye özel rol atanır → o zaman yalnız rolündeki yetkiler geçerli olur.
-        # DENETİM (RBAC son adım): rolsüz personel operasyonel işleri yapabilir AMA
-        # kimlik/ayar/geri-alınamaz-silme yetkilerini ALMAZ (denylist). Süper-admin ('*')
-        # yukarıda ayrıldı → SAHİP hesabı bundan etkilenmez; yalnız gerçekten rolsüz personel.
-        _ROLELESS_DENY = {
-            "integrations.iyzico", "integrations.trendyol", "integrations.hepsiburada",
-            "integrations.temu", "integrations.mng", "integrations.netgsm",
-            "integrations.dogan_edonusum",
-            "settings.company", "settings.site", "settings.emails",
-            "admin.users", "admin.roles", "admin.logs", "admin.backup",
-            "audit.read",
-            "products.delete", "customers.delete",
-        }
-        try:
-            from permissions import ALL_PERMISSION_KEYS
-            return [k for k in ALL_PERMISSION_KEYS if k not in _ROLELESS_DENY]
-        except Exception:
-            return []
+        return []
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
     if not role:
         return []

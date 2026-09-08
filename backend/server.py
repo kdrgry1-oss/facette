@@ -159,11 +159,8 @@ async def lifespan(app: FastAPI):
                     "created_at": datetime.now(timezone.utc).isoformat()
                 })
                 logger.info("Admin olusturuldu (admin@facette.com) — ADMIN_INITIAL_PASSWORD kullanildi.")
-        elif not admin.get("is_super_admin"):
-            await db.users.update_one(
-                {"email": "admin@facette.com"},
-                {"$set": {"is_super_admin": True}},
-            )
+        # Never elevate an existing account solely because its email matches
+        # the bootstrap address. Existing owners retain their explicit flag/role.
 
         # GÜVENLİK: is_admin=True kalmış MÜŞTERİ hesaplarını (personel işareti taşımayan:
         # created_by/role_id/is_super_admin/varsayılan admin YOK) admin'likten düşür →

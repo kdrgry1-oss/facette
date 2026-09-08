@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import axios from "axios";
+import { openAdminDocument } from "../../lib/adminDocuments";
 import { toast } from "sonner";
 import {
   Users, Search, UserPlus, Eye, Mail, Phone, ShoppingCart, TrendingUp,
@@ -77,12 +78,12 @@ export default function Members() {
     </th>
   );
 
-  const open360Print = () => {
-    const t = localStorage.getItem("token");
-    const qs = [`token=${encodeURIComponent(t || "")}`, "print=1"];
+  const open360Print = async () => {
+    const qs = ["print=1"];
     if (d360.start) qs.push(`start=${d360.start}`);
     if (d360.end) qs.push(`end=${d360.end}`);
-    window.open(`${API}/admin/members/${detailId}/360/print?${qs.join("&")}`, "_blank");
+    try { await openAdminDocument(`/admin/members/${detailId}/360/print?${qs.join("&")}`); }
+    catch (err) { toast.error(err.message || "Rapor açılamadı"); }
   };
 
   const export360CSV = () => {

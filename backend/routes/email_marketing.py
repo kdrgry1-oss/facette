@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from datetime import datetime, timezone
 
-from .deps import db, require_admin, generate_id, logger, require_permission
+from .deps import db, generate_id, logger, require_permission
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -85,11 +85,14 @@ async def _suppressed_set() -> set:
     """Kampanya başında kara listeyi TEK sorguda çeker (alıcı başına sorgu atmamak için —
     hem hız hem MongoDB veri transferi maliyeti)."""
     try:
-        rows = await db.email_suppressions.find({}, {"_id": 0, "email": 1}).to_list(100000)
-        return {(r.get("email") or "").strip().lower() for r in rows if r.get("email")}
-    except Exception as e:
-        logger.warning(f"[email-marketing] suppression listesi okunamadı: {e}")
-        return set()
+        emails = set()
+        async for row in db.email_suppressions.find({}, {"_id": 0, "email": 1}):
+            if row.get("email"):
+                emails.add(row["email"].strip().lower())
+        return emails
+    except Exception:
+        logger.error("[email-marketing] suppression listesi okunamadı; gönderim engellendi")
+        raise HTTPException(status_code=503, detail="Gönderim engelleme listesi okunamadı; işlem durduruldu.") from None
 
 
 async def _site_base() -> str:
@@ -106,7 +109,7 @@ async def _site_base() -> str:
 
 # ── Sağlayıcı ayarları ──────────────────────────────────────────────────────
 @admin_router.get("/settings")
-async def get_settings(current_user: dict = Depends(require_admin)):
+async def get_settings(current_user: dict = Depends(require_permission("settings.emails"))):
     brevo = await db.settings.find_one({"id": "email_brevo"}, {"_id": 0}) or {}
     ses = await db.settings.find_one({"id": "email_ses"}, {"_id": 0}) or {}
     routing = await db.settings.find_one({"id": "email_marketing_provider"}, {"_id": 0}) or {}
@@ -137,7 +140,7 @@ async def get_settings(current_user: dict = Depends(require_admin)):
 
 
 @admin_router.put("/settings")
-async def save_settings(payload: dict, current_user: dict = Depends(require_admin)):
+async def save_settings(payload: dict, current_user: dict = Depends(require_permission("settings.emails"))):
     payload = payload or {}
     provider = payload.get("provider") if payload.get("provider") in ("brevo", "ses") else "brevo"
     routing = {"provider": provider, "fallback_enabled": bool(payload.get("fallback_enabled", True)), "updated_at": _now()}
@@ -159,14 +162,14 @@ async def save_settings(payload: dict, current_user: dict = Depends(require_admi
             from security.crypto import encrypt as _enc
             brevo["api_key"] = _enc(api_key)
         except Exception:
-            brevo["api_key"] = api_key
+            raise HTTPException(status_code=503, detail="Anahtar şifrelenemedi; hiçbir ayar kaydedilmedi.") from None
     webhook_secret = str(payload.get("brevo_webhook_secret") or "").strip()
     if webhook_secret and webhook_secret != _SECRET_MASK:
         try:
             from security.crypto import encrypt as _enc
             brevo["webhook_secret"] = _enc(webhook_secret)
         except Exception:
-            brevo["webhook_secret"] = webhook_secret
+            raise HTTPException(status_code=503, detail="Anahtar şifrelenemedi; hiçbir ayar kaydedilmedi.") from None
 
     ses_map = {
         "ses_enabled": "enabled", "ses_region": "region", "ses_access_key": "access_key",
@@ -181,7 +184,7 @@ async def save_settings(payload: dict, current_user: dict = Depends(require_admi
             from security.crypto import encrypt as _enc
             ses["secret_key"] = _enc(secret)
         except Exception:
-            ses["secret_key"] = secret
+            raise HTTPException(status_code=503, detail="Anahtar şifrelenemedi; hiçbir ayar kaydedilmedi.") from None
 
     await db.settings.update_one({"id": "email_marketing_provider"}, {"$set": routing, "$setOnInsert": {"id": "email_marketing_provider"}}, upsert=True)
     await db.settings.update_one({"id": "email_brevo"}, {"$set": brevo, "$setOnInsert": {"id": "email_brevo"}}, upsert=True)
@@ -206,8 +209,15 @@ async def _selected_provider() -> tuple[str, dict]:
     return primary, {}
 
 
+@admin_router.get("/provider-status")
+async def provider_status(current_user: dict = Depends(require_permission("tasarim.email"))):
+    """Marketing staff can see readiness, never provider credentials/settings."""
+    provider, cfg = await _selected_provider()
+    return {"provider": provider, "configured": bool(cfg)}
+
+
 @admin_router.post("/validate-provider")
-async def validate_provider(current_user: dict = Depends(require_admin)):
+async def validate_provider(current_user: dict = Depends(require_permission("settings.emails"))):
     """Birincil sağlayıcının kimlik bilgilerini gönderim yapmadan doğrular."""
     provider, cfg = await _selected_provider()
     if not cfg:
@@ -262,7 +272,7 @@ async def send_test(payload: dict, current_user: dict = Depends(require_permissi
 
 
 @admin_router.get("/audience")
-async def audience(current_user: dict = Depends(require_admin)):
+async def audience(current_user: dict = Depends(require_permission("tasarim.email"))):
     """Ticari e-posta gönderilebilecek kitle = aktif + açık rıza (consent)."""
     total = await db.newsletter_subscribers.count_documents({})
     eligible = await db.newsletter_subscribers.count_documents({"active": {"$ne": False}, "consent": True})
@@ -491,11 +501,27 @@ async def _run_brevo_campaign(campaign_id: str):
 
 
 async def _run_campaign(campaign_id: str):
-    camp = await db.email_campaigns.find_one({"id": campaign_id}, {"_id": 0, "provider": 1})
-    if (camp or {}).get("provider") == "brevo":
-        await _run_brevo_campaign(campaign_id)
-    else:
-        await _run_ses_campaign(campaign_id)
+    try:
+        camp = await db.email_campaigns.find_one({"id": campaign_id}, {"_id": 0, "provider": 1})
+        if not camp:
+            return
+        if camp.get("provider") == "brevo":
+            await _run_brevo_campaign(campaign_id)
+        else:
+            await _run_ses_campaign(campaign_id)
+    except HTTPException as exc:
+        # In particular, never continue a send when the suppression check fails.
+        await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+            "status": "failed", "error": str(exc.detail), "finished_at": _now(),
+        }})
+    except Exception:
+        # A provider may have accepted a request before a timeout/DB failure.
+        # Do not automatically resend through SES; that could duplicate mail.
+        logger.error("[email-marketing] kampanya sonucu doğrulanamadı: %s", campaign_id)
+        await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+            "status": "needs_review", "error": "Gönderim sonucu doğrulanamadı. Tekrar göndermeden önce sağlayıcı kayıtlarını kontrol edin.",
+            "finished_at": _now(),
+        }})
 
 
 @admin_router.post("/campaigns")
@@ -523,7 +549,7 @@ async def create_campaign(payload: dict, current_user: dict = Depends(require_pe
 
 
 @admin_router.get("/campaigns")
-async def list_campaigns(limit: int = 50, current_user: dict = Depends(require_admin)):
+async def list_campaigns(limit: int = 50, current_user: dict = Depends(require_permission("tasarim.email"))):
     limit = max(1, min(limit, 200))
     rows = await db.email_campaigns.find({}, {"_id": 0, "html": 0}).sort("created_at", -1).to_list(limit)
     return {"campaigns": rows}
@@ -671,7 +697,7 @@ async def seed_email_templates() -> int:
 
 
 @admin_router.get("/templates")
-async def list_templates(current_user: dict = Depends(require_admin)):
+async def list_templates(current_user: dict = Depends(require_permission("tasarim.email"))):
     """Hazır (builtin) + kullanıcının kaydettiği şablonlar. Builtin'ler önce, sonra en yeni."""
     await seed_email_templates()  # idempotent: yoksa ekler
     rows = await db.email_templates.find({}, {"_id": 0}).to_list(1000)
@@ -686,7 +712,7 @@ async def list_templates(current_user: dict = Depends(require_admin)):
 
 
 @admin_router.post("/templates")
-async def save_template(payload: dict, current_user: dict = Depends(require_admin)):
+async def save_template(payload: dict, current_user: dict = Depends(require_permission("tasarim.email"))):
     """Kullanıcı şablonu kaydet/güncelle. Builtin'ler DEĞİŞTİRİLEMEZ — builtin id gelirse
     ya da id yoksa YENİ kullanıcı şablonu oluşturulur (kopyala-düzenle). Yalnız mevcut
     bir KULLANICI şablonunun id'si güncellenir."""
@@ -718,7 +744,7 @@ async def save_template(payload: dict, current_user: dict = Depends(require_admi
 
 
 @admin_router.delete("/templates/{template_id}")
-async def delete_template(template_id: str, current_user: dict = Depends(require_admin)):
+async def delete_template(template_id: str, current_user: dict = Depends(require_permission("tasarim.email"))):
     """Kullanıcı şablonunu siler. Builtin (hazır) şablonlar SİLİNEMEZ."""
     if str(template_id).startswith("builtin:"):
         raise HTTPException(status_code=400, detail="Hazır şablonlar silinemez (kopyalayıp düzenleyin).")
@@ -732,7 +758,7 @@ async def delete_template(template_id: str, current_user: dict = Depends(require
 
 
 @admin_router.post("/preview")
-async def preview_email(payload: dict, current_user: dict = Depends(require_admin)):
+async def preview_email(payload: dict, current_user: dict = Depends(require_permission("tasarim.email"))):
     """Verilen {subject, html} için TAM markalı e-postayı (logo + footer + abonelikten-çık)
     döndürür — gönderim/secret YOK, sadece render. Kullanıcı göndermeden önce görür."""
     p = payload or {}
@@ -765,7 +791,7 @@ def _abs_img_url(imgs, base: str) -> str:
 
 @admin_router.get("/products")
 async def picker_products(category: str = "", q: str = "", limit: int = 24,
-                          current_user: dict = Depends(require_admin)):
+                          current_user: dict = Depends(require_permission("tasarim.email"))):
     """E-posta composer ürün seçici için MİNİMAL ürün listesi. `category` = YEREL kategori id
     (category_ids/category_id ile eşleşir). Yalnız aktif+görselli ürünler; base64 YOK — ilk
     görsel MUTLAK https, ad, fiyat, satış fiyatı, slug, ürün URL'si döner (payload hafif)."""
@@ -935,7 +961,7 @@ async def ses_webhook(payload: dict, request: Request):
 
 
 @admin_router.get("/suppressions")
-async def list_suppressions(limit: int = 200, current_user: dict = Depends(require_admin)):
+async def list_suppressions(limit: int = 200, current_user: dict = Depends(require_permission("tasarim.email"))):
     """Kara liste (bounce/şikâyet) — hangi adrese neden gönderilmiyor."""
     limit = max(1, min(limit, 1000))
     rows = await db.email_suppressions.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)

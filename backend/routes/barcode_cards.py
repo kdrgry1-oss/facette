@@ -35,7 +35,7 @@ import base64
 import io
 import re
 
-from .deps import db, get_current_user, require_admin, verify_admin_token
+from .deps import db, get_current_user, require_admin, require_permission
 
 # python-barcode zaten requirements.txt'te (0.16.1)
 import barcode
@@ -239,19 +239,16 @@ def _product_cards_html(product: dict, sizes: list | None = None) -> str:
 @router.get("/{product_id}/barcode-card")
 async def get_product_barcode_card(
     product_id: str,
-    token: str = Query(None),
+    current_user: dict = Depends(require_permission("products.view")),
     sizes: str = Query(None, description="Virgülle ayrık beden filtresi (örn. 'S,M'). Boş = tüm bedenler."),
 ):
     """
     Tek ürün için yazdırılabilir barkod kartı sayfası döner.
     Ürünün her varyantı için ayrı kart; `sizes` verilirse yalnız o bedenler.
 
-    GÜVENLİK: Bu uç window.open ile ?token= üzerinden açılır. Eskiden
-    get_current_user (None dönebilen) çağrılıp SONUÇ HİÇ KONTROL EDİLMİYORDU →
-    kimliksiz erişilip ürün barkod/stok kodları sızabiliyordu. Artık fatura/
-    kargo etiketi ile aynı şekilde verify_admin_token ile ADMIN doğrulanır.
+    Yetki Authorization başlığından doğrulanır. İstemci çıktıyı blob olarak açar;
+    oturum anahtarı URL'ye yazılmaz.
     """
-    await verify_admin_token(token)
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
@@ -261,7 +258,7 @@ async def get_product_barcode_card(
     if not cards:
         raise HTTPException(status_code=404, detail="Seçilen bedenlerde varyant bulunamadı")
     html = _build_html(cards, title=f"{product.get('name', 'Ürün')} — Barkod Kartı")
-    return Response(content=html, media_type="text/html; charset=utf-8")
+    return Response(content=html, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 # ---------------------------------------------------------------------------
@@ -294,4 +291,4 @@ async def get_bulk_barcode_cards(
     if not cards:
         raise HTTPException(status_code=404, detail="Seçilen bedenlerde varyant bulunamadı")
     html = _build_html(cards, title=f"{len(products)} Ürün — Barkod Kartları")
-    return Response(content=html, media_type="text/html; charset=utf-8")
+    return Response(content=html, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})

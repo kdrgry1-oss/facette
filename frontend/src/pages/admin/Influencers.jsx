@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
+import { openAdminDocument } from "../../lib/adminDocuments";
 import { toast } from "sonner";
 import {
   Plus, TrendingUp, CheckCircle, Trash2, X,
@@ -589,7 +590,7 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
                         data-testid={`pr-track-${e.id}`}><Truck size={14} /><span className="text-[10px] font-medium">takip çek</span></button>
                     )}
                     <button
-                      onClick={() => { const t = localStorage.getItem("token"); window.open(`${API}/influencer-pr/${e.id}/cargo-label?token=${encodeURIComponent(t || "")}&print=1`, "_blank", "width=420,height=640"); }}
+                      onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/cargo-label?print=1`, "width=420,height=640").catch((err) => toast.error(err.message)); }}
                       title="Kargo etiketini yazdır"
                       className="inline-flex items-center text-gray-600 hover:text-black border border-gray-200 rounded px-1.5 py-1"
                       data-testid={`pr-print-${e.id}`}><Printer size={14} /></button>
@@ -601,7 +602,7 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
             )}
             {(e.products || []).length > 0 && (
               <button
-                onClick={() => { const t = localStorage.getItem("token"); window.open(`${API}/influencer-pr/${e.id}/irsaliye?token=${encodeURIComponent(t || "")}&print=1`, "_blank"); }}
+                onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/irsaliye?print=1`).catch((err) => toast.error(err.message)); }}
                 title="Sevk irsaliyesi (PDF) — gönderilen ürünler"
                 className="inline-flex items-center text-gray-600 hover:text-black border border-gray-200 rounded px-1.5 py-1"
                 data-testid={`pr-irsaliye-${e.id}`}><FileText size={14} /></button>
@@ -628,7 +629,7 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
               <div><span className="text-gray-400">Follow-up: </span><span className="text-gray-900">{e.follow_up || "—"}</span></div>
               {e.adres && <div className="w-full"><span className="text-gray-400">Adres: </span><span className="text-gray-900">{e.adres}</span></div>}
               {e.cargo_barcode && <div className="w-full flex items-center gap-2"><span><span className="text-gray-400">Kargo barkodu: </span><span className="font-mono text-gray-800">{e.cargo_barcode}</span>{e.cargo_tracking_no ? <span className="text-gray-400"> · Takip: {e.cargo_tracking_no}</span> : null}</span>
-                <button onClick={() => { const t = localStorage.getItem("token"); window.open(`${API}/influencer-pr/${e.id}/cargo-label?token=${encodeURIComponent(t || "")}&print=1`, "_blank", "width=420,height=640"); }}
+                <button onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/cargo-label?print=1`, "width=420,height=640").catch((err) => toast.error(err.message)); }}
                   className="inline-flex items-center gap-1 text-[11px] text-gray-600 hover:text-black border border-gray-300 rounded px-2 py-0.5" title="Kargo etiketini yazdır">
                   <Printer size={12} /> Etiketi Yazdır
                 </button></div>}

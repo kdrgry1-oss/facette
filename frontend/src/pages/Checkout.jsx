@@ -364,10 +364,17 @@ export default function Checkout() {
 
   // Load saved addresses for logged-in users
   useEffect(() => {
+    let active = true;
+    setSavedAddresses([]);
+    setShippingAddress({ ...emptyAddress, email: user?.email || "" });
+    setBillingAddress({ ...emptyAddress });
+    setAddressForm({ ...emptyAddress });
+    setAddressModal(null);
     if (!user) return;
     const token = localStorage.getItem("token");
     axios.get(`${API}/my-addresses`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => {
+        if (!active) return;
         const list = r.data?.addresses || [];
         setSavedAddresses(list);
         const def = list.find((a) => a.is_default) || list[0];
@@ -377,27 +384,16 @@ export default function Checkout() {
         }
       })
       .catch(() => {});
-  }, [user]);
-
-  // Kayıtlı adres yoksa (misafir dahil) tarayıcıda daha önce girilen adresi otomatik yükle
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("facette_last_address");
-      if (!saved) return;
-      const a = JSON.parse(saved);
-      if (!a || (!a.first_name && !a.address)) return;
-      setShippingAddress((p) => (p.first_name || p.address) ? p : { ...emptyAddress, ...a, email: user?.email || a.email || "" });
-      setBillingAddress((p) => (p.first_name || p.address) ? p : { ...emptyAddress, ...a });
-    } catch {}
+    return () => { active = false; };
+    // Only an account change should clear an address being edited.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user?.id]);
 
-  // Girilen adresi tarayıcıda hatırla → sonraki siparişte otomatik gelsin
+  // Legacy unscoped addresses can belong to another person on a shared device.
+  // Saved addresses are loaded only through the authenticated address API above.
   useEffect(() => {
-    if (shippingAddress && (shippingAddress.first_name || shippingAddress.address)) {
-      try { localStorage.setItem("facette_last_address", JSON.stringify(shippingAddress)); } catch {}
-    }
-  }, [shippingAddress]);
+    try { localStorage.removeItem("facette_last_address"); } catch {}
+  }, []);
 
   // Madde 4 — Kampanya motoru: otomatik kampanyalar + (varsa) girilen kodu BIRLIKTE hesaplar.
   // Sunucudaki /coupons/evaluate ile ayni sonuc (onizleme = siparis).

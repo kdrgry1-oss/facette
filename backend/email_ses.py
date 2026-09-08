@@ -27,7 +27,7 @@ async def get_ses_config(db) -> dict:
             from security.crypto import decrypt as _dec
             cfg = {**cfg, "secret_key": _dec(cfg["secret_key"])}
         except Exception:
-            pass
+            cfg = {**cfg, "secret_key": None}
     return cfg
 
 

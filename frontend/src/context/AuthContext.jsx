@@ -18,22 +18,17 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(() => Boolean(_lsGet("token")));
 
   useEffect(() => {
+    let active = true;
     if (token) {
       axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-      fetchUser();
+      axios.get(`${API}/auth/me`)
+        .then((res) => { if (active) setUser(res.data); })
+        .catch(() => { if (active) logout(); })
+        .finally(() => { if (active) setLoading(false); });
     }
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
-
-  const fetchUser = async () => {
-    try {
-      const res = await axios.get(`${API}/auth/me`);
-      setUser(res.data);
-    } catch (err) {
-      logout();
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const login = async (email, password) => {
     // O19: Şifreyi URL query yerine istek GÖVDESİNDE gönder (log/geçmiş/Referer sızıntısı olmasın).
@@ -98,9 +93,11 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     _lsDel("token");
+    _lsDel("facette_last_address");
     delete axios.defaults.headers.common["Authorization"];
     setToken(null);
     setUser(null);
+    setLoading(false);
   };
 
   return (

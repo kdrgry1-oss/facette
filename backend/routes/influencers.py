@@ -1226,13 +1226,12 @@ async def refresh_pr_tracking(entry_id: str, current_user: dict = Depends(requir
 
 
 @router.get("/influencer-pr/{entry_id}/cargo-label")
-async def influencer_pr_cargo_label(entry_id: str, token: str = None):
+async def influencer_pr_cargo_label(entry_id: str, current_user: dict = Depends(require_admin)):
     """Influencer PR gönderisinin YAZDIRILABİLİR kargo etiketi — sipariş etiketiyle AYNI şablon
     (orders._render_cargo_label_html). Alıcı = influencer kargo adresi, barkod = cargo_barcode.
-    token query ile kimlik doğrulanır (yeni sekmede yazdırma; sipariş cargo-label ile aynı desen)."""
+    Authorization başlığı ile kimlik doğrulanır; URL'de oturum anahtarı kabul edilmez."""
     from fastapi.responses import HTMLResponse
-    from .orders import _render_cargo_label_html, _get_sender_info, _get_mng_settings, verify_admin_token
-    await verify_admin_token(token)
+    from .orders import _render_cargo_label_html, _get_sender_info, _get_mng_settings
     e = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
     if not e:
         raise HTTPException(status_code=404, detail="PR kaydı bulunamadı")
@@ -1258,18 +1257,17 @@ async def influencer_pr_cargo_label(entry_id: str, token: str = None):
         receiver_name=rname, receiver_phone=rphone, receiver_full_addr=rfull,
         cargo_company_display="DHL E-Commerce", odeme_turu="Peşin Ödemeli", kargo_tipi="Peşin Ödemeli Kargo",
     )
-    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
+    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 @router.get("/influencer-pr/{entry_id}/irsaliye")
-async def influencer_pr_irsaliye(entry_id: str, token: str = None):
+async def influencer_pr_irsaliye(entry_id: str, current_user: dict = Depends(require_admin)):
     """Influencer PR gönderisinin A4 SEVK İRSALİYESİ (yazdırılabilir/PDF) — gönderilen ürünleri
     (ad, beden, adet, barkod) influencer bilgileriyle listeler. Bedelsiz tanıtım/numune notu içerir.
-    token query ile kimlik; ?print=1 ile otomatik yazdır."""
+    Authorization başlığı ile kimlik; ?print=1 ile otomatik yazdır."""
     from fastapi.responses import HTMLResponse
-    from .orders import _get_sender_info, verify_admin_token
+    from .orders import _get_sender_info
     import html as _h
-    await verify_admin_token(token)
     e = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
     if not e:
         raise HTTPException(status_code=404, detail="PR kaydı bulunamadı")
@@ -1375,7 +1373,7 @@ async def influencer_pr_irsaliye(entry_id: str, token: str = None):
   }});
 </script>
 </body></html>"""
-    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
+    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 @router.get("/influencers/{influencer_id}/history")

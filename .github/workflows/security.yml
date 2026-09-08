@@ -96,8 +96,15 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            let n = 0;
-            try { n = (JSON.parse(fs.readFileSync('gitleaks.sarif','utf8')).runs[0].results || []).length; } catch (e) {}
+            let n;
+            try {
+              const runs = JSON.parse(fs.readFileSync('gitleaks.sarif','utf8')).runs;
+              if (!Array.isArray(runs) || !runs.length || runs.some(r => !Array.isArray(r.results))) throw new Error('Invalid SARIF');
+              n = runs.reduce((total, run) => total + run.results.length, 0);
+            } catch (e) {
+              core.setFailed('Gitleaks raporu doğrulanamadı; mevcut güvenlik issue’ları kapatılmadı.');
+              return;
+            }
             const { owner, repo } = context.repo;
             const title = '🔐 Security: gitleaks sır bulgusu (SLA takibi)';
             const open = await github.rest.issues.listForRepo({ owner, repo, state: 'open', labels: 'security', per_page: 50 });
@@ -134,7 +141,7 @@ jobs:
         continue-on-error: true
 
   # 3) Bağımlılık açık taraması — backend (pip-audit) + frontend (yarn audit).
-  #    Sonuç iş ÖZETİNE (Summary) markdown yazılır; adımlar yeşil geçer.
+  #    Bulgu veya tarama hatası başarısızdır; eksik tarama temiz sayılmaz.
   dependencies:
     name: Dependency Audit
     runs-on: ubuntu-latest
@@ -147,32 +154,31 @@ jobs:
           python-version: "3.11"
       - name: pip-audit (backend)
         run: |
-          python -m pip install --upgrade pip pip-audit >/dev/null 2>&1 || true
+          python -m pip install pip-audit
           echo "### 🐍 Backend bağımlılık açıkları (pip-audit)" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f backend/requirements.txt ]; then
-            if pip-audit -r backend/requirements.txt -f markdown -o pipaudit.md 2>pipaudit.err; then
-              if [ -s pipaudit.md ]; then cat pipaudit.md >> "$GITHUB_STEP_SUMMARY"; else echo "Açık bulunamadı ✅" >> "$GITHUB_STEP_SUMMARY"; fi
-            else
-              echo "Tarama tamamlanamadı (bazı paketler özel index'ten çözülemedi):" >> "$GITHUB_STEP_SUMMARY"
-              echo '```' >> "$GITHUB_STEP_SUMMARY"; tail -n 15 pipaudit.err >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true; echo '```' >> "$GITHUB_STEP_SUMMARY"
-            fi
-          else
-            echo "requirements.txt yok" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          audit_status=0
+          pip-audit -r backend/requirements.txt -f json -o pipaudit.json || audit_status=$?
+          python scripts/check_dependency_audit.py pip pipaudit.json "$audit_status" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node
+        if: always()
         uses: actions/setup-node@v4
         with:
           node-version: "20"
       - name: yarn audit (frontend)
+        if: always()
         working-directory: frontend
         run: |
           echo "### 📦 Frontend bağımlılık açıkları (yarn audit)" >> "$GITHUB_STEP_SUMMARY"
-          corepack enable >/dev/null 2>&1 || true
-          if [ -f yarn.lock ]; then
-            # yarn audit bulgu varsa non-zero döner; özet için yakalıyoruz (adım yeşil).
-            yarn audit --groups dependencies --level high > yarnaudit.txt 2>&1 || true
-            echo '```' >> "$GITHUB_STEP_SUMMARY"; (tail -n 20 yarnaudit.txt || echo "rapor yok") >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "yarn.lock yok" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          corepack enable
+          audit_status=0
+          yarn audit --groups dependencies --json > yarnaudit.jsonl || audit_status=$?
+          python ../scripts/check_dependency_audit.py yarn yarnaudit.jsonl "$audit_status" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve dependency audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit
+          path: |
+            pipaudit.json
+            frontend/yarnaudit.jsonl
