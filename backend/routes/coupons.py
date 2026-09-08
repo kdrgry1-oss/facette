@@ -17,7 +17,7 @@ from typing import Optional, List
 import re
 import uuid
 
-from .deps import db, require_admin, require_auth, get_current_user, logger, require_permission
+from .deps import db, require_admin, require_auth, get_current_user, logger, require_permission, safe_str
 
 
 def _is_personal_coupon(c: dict) -> bool:
@@ -222,6 +222,60 @@ async def seed_coupon_exceptions():
         _EXEMPT_CACHE["at"] = 0.0
     except Exception as e:
         logger.warning(f"[kupon-istisna seed] {e}")
+
+
+async def _log_coupon_attempt(entered_raw, entered_resolved, entered_id, rejected, applied,
+                              email, user_id, cart_total, items, payment_method):
+    """TEŞHİS GÜNLÜĞÜ: müşteri bir kod yazdı ama UYGULANMADI → ne yazdı, neye çözüldü, neden
+    reddedildi (ya da istiflemede düştü) kaydedilir. Admin /admin/coupons/attempts ile listeler;
+    "müşteri kodu geçersiz diyor" şikâyetinde müşteriye sormadan gerçek neden görülür.
+    Yalnız BAŞARISIZ denemeler; aynı kimlik+kod+neden 10 dk içinde tekrar yazılmaz (spam yok)."""
+    try:
+        if entered_id and any(a["c"]["id"] == entered_id for a in applied):
+            return  # uygulandı → kayıt yok
+        if not entered_id:
+            reason = "Kod sistemde bulunamadı (çözümlenemedi)"
+        elif rejected:
+            reason = "; ".join(str(r.get("reason") or "") for r in rejected)[:300]
+        else:
+            reason = "Kampanya çakışması (istifleme): başka kampanya öncelikli, kod sessizce uygulanmadı"
+        _em = (email or "").strip().lower()
+        _key = {"entered": str(entered_raw or "")[:60], "reason": reason[:300],
+                "who": (str(user_id or "") or _em or "misafir")}
+        _since = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        if await db.coupon_attempts.find_one({**_key, "at": {"$gte": _since}}, {"_id": 1}):
+            return
+        await db.coupon_attempts.insert_one({
+            **_key, "resolved": entered_resolved or "", "coupon_id": entered_id or "",
+            "email": _em, "user_id": str(user_id or ""), "payment_method": payment_method or "",
+            "cart_total": float(cart_total or 0),
+            "items": [{"product_id": str(it.get("product_id") or ""), "price": it.get("price"),
+                       "qty": it.get("qty"), "sale": bool(it.get("_has_manual_sale"))} for it in (items or [])][:20],
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as _e:
+        logger.warning(f"[coupon_attempts] kayıt hatası: {_e}")
+
+
+@admin_router.get("/attempts")
+async def list_coupon_attempts(limit: int = 50, code: str = "", email: str = "",
+                               current_user: dict = Depends(require_admin)):
+    """Son BAŞARISIZ kupon denemeleri (müşteri ne yazdı → neye çözüldü → neden uygulanmadı).
+    Filtre: code (yazılan/çözülen), email. En yeni önce."""
+    limit = max(1, min(int(limit or 50), 500))
+    q = {}
+    if code:
+        _c = safe_str(code, 60)
+        q["$or"] = [{"entered": {"$regex": re.escape(_c), "$options": "i"}},
+                    {"resolved": {"$regex": re.escape(_c), "$options": "i"}}]
+    if email:
+        q["email"] = safe_str(email, 120).strip().lower()
+    rows = await db.coupon_attempts.find(q, {"_id": 0}).sort("at", -1).to_list(limit)
+    # Neden dağılımı (hızlı özet)
+    _agg = {}
+    for r in rows:
+        _agg[r.get("reason") or "?"] = _agg.get(r.get("reason") or "?", 0) + 1
+    return {"total": len(rows), "by_reason": sorted(_agg.items(), key=lambda x: -x[1]), "items": rows}
 
 
 @admin_router.get("/diagnose")
@@ -1235,6 +1289,11 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
             a["applied_discount"] = round(a["applied_discount"] * factor, 2)
         total = round(sum(a["applied_discount"] for a in applied), 2)
         capped = True
+
+    # TEŞHİS GÜNLÜĞÜ: müşteri kod yazdı ama uygulanmadı → kaydet (admin /admin/coupons/attempts)
+    if entered:
+        await _log_coupon_attempt(entered_code, entered_resolved, entered_id, rejected, applied,
+                                  email, user_id, cart_total, items, payment_method)
 
     return {
         "applied": [{
