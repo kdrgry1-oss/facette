@@ -73,3 +73,16 @@ def test_only_opaque_secret_refs_survive_schema():
     }).model_dump()
     assert cfg["secret_refs"] == {"smtp": "vault:smtp.primary"}
     assert "smtp_password" not in cfg
+
+
+def test_legacy_bare_domains_are_normalized_to_absolute_urls():
+    cfg = TenantConfig.model_validate({
+        "domains": {
+            "storefront_url": "facette.com.tr/",
+            "api_url": "//api.facette.com.tr/",
+            "cdn_url": "localhost:3000/",
+        }
+    })
+    assert cfg.domains.storefront_url == "https://facette.com.tr"
+    assert cfg.domains.api_url == "https://api.facette.com.tr"
+    assert cfg.domains.cdn_url == "http://localhost:3000"

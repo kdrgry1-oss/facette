@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import time
 from typing import Any, Dict, List
 
@@ -59,7 +60,22 @@ class DomainsConfig(_Section):
     @field_validator("storefront_url", "api_url", "cdn_url")
     @classmethod
     def strip_url(cls, value: str) -> str:
-        return (value or "").strip().rstrip("/")
+        value = (value or "").strip().rstrip("/")
+        if not value:
+            return ""
+        if value.startswith("//"):
+            value = "https:" + value
+        elif not re.match(r"^https?://", value, flags=re.I):
+            # Legacy settings commonly stored only ``example.com``. Treat a
+            # hostname as HTTPS, never as a relative path (which produced
+            # duplicated canonicals such as example.com/example.com/urun/…).
+            if re.match(r"^(localhost|127\.0\.0\.1)(:\d+)?(?:/|$)", value, flags=re.I):
+                value = "http://" + value
+            elif re.match(r"^[a-z0-9.-]+(?::\d+)?(?:/|$)", value, flags=re.I):
+                value = "https://" + value
+            else:
+                return ""
+        return value.rstrip("/")
 
 
 class OrderNumberingConfig(_Section):
