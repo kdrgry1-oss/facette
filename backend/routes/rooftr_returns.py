@@ -308,16 +308,21 @@ async def list_rooftr_return_orders(
     _oids = [r["id"] for r in rows if r.get("id")]
     _cr_map = {}
     if _oids:
+        # MÜKERRER kayıt güvenliği: siparişe ait TÜM kayıtları topla, kanonik olanı seç
+        # (_pick_return_record — /open ile AYNI kural). Eskiden 'son gelen kazanır' idi.
+        _cr_all = {}
         async for cr in db.customer_returns.find(
             {"order_id": {"$in": _oids}},
             {"_id": 0, "order_id": 1, "return_code": 1, "barcode_url": 1, "cargo_provider_name": 1,
              "iade_no": 1, "gonderi_no": 1, "mng_ref": 1, "contract_no": 1,
              "reship_code": 1, "reshipped_at": 1, "refund_payment": 1, "reason": 1,
              "has_gider_pusulasi": 1, "gider_pusulasi_no": 1,
-             "status": 1, "approval": 1, "approved_item_indexes": 1, "approved_items": 1,
-             "refund_breakdown": 1, "items": 1},
+             "status": 1, "approval": 1, "rejection": 1, "approved_item_indexes": 1, "approved_items": 1,
+             "refund_breakdown": 1, "items": 1, "created_at": 1, "updated_at": 1},
         ):
-            _cr_map[cr.get("order_id")] = cr
+            _cr_all.setdefault(cr.get("order_id"), []).append(cr)
+        for _k, _lst in _cr_all.items():
+            _cr_map[_k] = _pick_return_record(_lst) or {}
     for r in rows:
         cr = _cr_map.get(r["id"]) or {}
         if cr.get("reason"):
@@ -952,6 +957,27 @@ async def export_rooftr_return_orders(
 # ============================================================================
 # BRIDGE — Ticimax iade siparişini zengin iade akışına (customer_returns) bağlar
 # ============================================================================
+def _pick_return_record(recs):
+    """MÜKERRER customer_returns kayıtlarında KANONİK kaydı seçer — liste, /open ve gider pusulası
+    AYNI kaydı görsün (W11262: 3 kayıt; liste 'son gelen', /open 'ilk bulunan' alıp çelişiyordu).
+      1) 'expired' olmayanlar (hepsi expired ise hepsi),
+      2) gerçek KARAR nesnesi (approval/rejection) olan varsa → en son kararlı olan,
+      3) yoksa → en son güncellenen/oluşturulan.
+    Hiç yoksa None. Kayıt SİLMEZ/BİRLEŞTİRMEZ — yalnız seçer (veri kaybı yok)."""
+    recs = [r for r in (recs or []) if r]
+    if not recs:
+        return None
+    live = [r for r in recs if str(r.get("status") or "") != "expired"] or recs
+
+    def _ts(r):
+        return str(r.get("updated_at") or r.get("created_at") or "")
+
+    decided = [r for r in live if (r.get("approval") or r.get("rejection"))]
+    if decided:
+        return max(decided, key=lambda r: str(((r.get("approval") or r.get("rejection") or {}).get("at")) or _ts(r)))
+    return max(live, key=_ts)
+
+
 def _decision_of(rec: dict):
     """Bir customer_returns kaydının GERÇEKTEN karara bağlanıp bağlanmadığı.
     Döner: (decided: bool, kind: 'approved'|'rejected'|'closed'|None, by, at).
@@ -1007,6 +1033,61 @@ async def diagnose_rooftr_return(order_number: str, current_user: dict = Depends
                               else ("Gerçek karar var" if recs and recs[0]["decided"] else "Kayıt karara bağlı değil / kayıt yok")))}
 
 
+def _cr_summary(r: dict) -> dict:
+    _dec, _kind, _by, _at = _decision_of(r)
+    return {"id": r.get("id"), "status": r.get("status"), "source": r.get("source"),
+            "created_at": r.get("created_at"), "updated_at": r.get("updated_at"),
+            "decided": _dec, "decision_kind": _kind, "decision_by": _by, "decision_at": _at,
+            "approved_item_indexes": r.get("approved_item_indexes"), "items_count": len(r.get("items") or []),
+            "has_gider_pusulasi": bool(r.get("has_gider_pusulasi")), "gider_pusulasi_no": r.get("gider_pusulasi_no"),
+            "refund_amount": r.get("refund_amount")}
+
+
+@router.post("/returns/dedupe")
+async def dedupe_rooftr_returns(
+    order_number: str = Query(..., description="Sipariş no (ör. W11262)"),
+    confirm: bool = Query(False, description="true → uygula; false → kuru çalıştırma (yalnız plan)"),
+    keep: str = Query("", description="Tutulacak return_id (boş → otomatik kanonik seçim)"),
+    current_user: dict = Depends(require_admin),
+):
+    """MÜKERRER customer_returns TEMİZLİĞİ (soft): kanonik kayıt tutulur, diğerleri status='expired'
+    yapılır — SİLİNMEZ (tüm sorgular expired'ı dışlar → panelde kaybolur; geri alınabilir:
+    status_before_expire saklanır). Kanonik seçim: keep param > gider pusulası bağlı olan >
+    _pick_return_record (gerçek karar > en yeni). Sipariş köprüsü kanonik kayda sabitlenir."""
+    onum = (order_number or "").strip()
+    o = await db.orders.find_one({"order_number": onum}, {"_id": 0, "id": 1, "order_number": 1, "status": 1})
+    if not o:
+        raise HTTPException(status_code=404, detail=f"Sipariş bulunamadı: {onum}")
+    recs = [cr async for cr in db.customer_returns.find({"order_id": o["id"]}, {"_id": 0})]
+    live = [r for r in recs if str(r.get("status") or "") != "expired"]
+    if len(live) <= 1:
+        return {"success": True, "dry_run": not confirm, "message": "Mükerrer canlı kayıt yok",
+                "records": [_cr_summary(r) for r in recs]}
+    if keep:
+        canon = next((r for r in live if r.get("id") == keep), None)
+        if not canon:
+            raise HTTPException(status_code=400, detail=f"keep={keep} bu siparişin canlı kayıtları arasında yok")
+    else:
+        _gp = [r for r in live if r.get("has_gider_pusulasi") or r.get("gider_pusulasi_no")]
+        canon = _pick_return_record(_gp) if _gp else _pick_return_record(live)
+    to_expire = [r for r in live if r.get("id") != canon.get("id")]
+    plan = {"order": o, "keep": _cr_summary(canon), "expire": [_cr_summary(r) for r in to_expire]}
+    if not confirm:
+        return {"success": True, "dry_run": True, **plan,
+                "hint": "Uygulamak için confirm=true (isteğe bağlı keep=<return_id>)"}
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for r in to_expire:
+        await db.customer_returns.update_one({"id": r["id"]}, {"$set": {
+            "status": "expired", "status_before_expire": r.get("status"),
+            "expired_reason": f"dedupe→{canon.get('id')}",
+            "expired_by": current_user.get("email") or current_user.get("id"), "expired_at": now_iso,
+            "updated_at": now_iso}})
+    await db.orders.update_one({"id": o["id"]}, {"$set": {"return_request.return_id": canon.get("id")}})
+    logger.info(f"[dedupe-returns] {onum}: keep={canon.get('id')} expired={[r.get('id') for r in to_expire]} by={current_user.get('email')}")
+    return {"success": True, "dry_run": False, **plan}
+
+
 @router.post("/returns/{order_id}/open")
 async def open_rooftr_return(order_id: str, current_user: dict = Depends(require_admin)):
     """Ticimax iade siparişinden, zengin iade akışı (onayla/reddet/gider/öde) için bir
@@ -1022,10 +1103,19 @@ async def open_rooftr_return(order_id: str, current_user: dict = Depends(require
     # İdempotent: bu siparişe ait köprü kaydı zaten varsa onu döndür.
     # ONARIM: eski kayıtta items hiç yazılmamışsa (boş) sipariş kalemleriyle doldur —
     # gider pusulası/iade akışları kalemleri bu kayıttan okur, boş kayıt kısmi seçimi bozar.
-    existing = await db.customer_returns.find_one(
+    # MÜKERRER kayıt güvenliği: tüm canlı kayıtları al, kanonik olanı seç (liste ile AYNI kural).
+    _cands = []
+    async for _c in db.customer_returns.find(
         {"order_id": order_id, "status": {"$ne": "expired"}},
-        {"_id": 0, "id": 1, "status": 1, "items": 1, "approval": 1, "rejection": 1, "refund_payment": 1})
+        {"_id": 0, "id": 1, "status": 1, "items": 1, "approval": 1, "rejection": 1, "refund_payment": 1,
+         "created_at": 1, "updated_at": 1}):
+        _cands.append(_c)
+    existing = _pick_return_record(_cands)
     if existing:
+        if len(_cands) > 1:
+            # Sipariş köprüsünü kanonik kayda sabitle → liste/pencere/gider pusulası aynı kaydı görür.
+            await db.orders.update_one({"id": order_id},
+                                       {"$set": {"return_request.return_id": existing.get("id")}})
         if not (existing.get("items") or []):
             _src = order.get("items") or []
             _fix = [{
