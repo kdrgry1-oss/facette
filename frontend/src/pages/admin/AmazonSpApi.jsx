@@ -13,7 +13,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const REDIRECT_URI = `${process.env.REACT_APP_BACKEND_URL}/api/amazon/spapi/oauth/callback`;
 const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
 
-export default function AmazonSpApi() {
+export default function AmazonSpApi({ embedded = false }) {
   const [status, setStatus] = useState(null);
   const [form, setForm] = useState({
     client_id: "", client_secret: "", refresh_token: "", app_id: "",
@@ -54,7 +54,7 @@ export default function AmazonSpApi() {
     else if (st === "exchange_failed") toast.error("Token alınamadı — Client Secret'ı kontrol edin");
     else if (st === "no_refresh_token") toast.error("Refresh token alınamadı");
     else if (st === "error") toast.error("Yetkilendirme iptal edildi/başarısız");
-    if (st) window.history.replaceState({}, "", "/admin/amazon");
+    if (st) window.history.replaceState({}, "", "/admin/amazon?tab=connection");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -189,10 +189,10 @@ export default function AmazonSpApi() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto" data-testid="amazon-spapi-page">
-      <div className="flex items-center justify-between mb-5">
+    <div className={embedded ? "max-w-5xl" : "p-6 max-w-4xl mx-auto"} data-testid="amazon-spapi-page">
+      <div className={`flex items-center justify-between ${embedded ? "mb-4" : "mb-5"}`}>
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
+          <h1 className={`${embedded ? "text-lg" : "text-2xl"} font-bold flex items-center gap-2`}>
             <ShoppingCart className="text-orange-500" size={24} /> Amazon SP-API Entegrasyonu
           </h1>
           <p className="text-sm text-gray-500 mt-1">

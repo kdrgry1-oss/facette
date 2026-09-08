@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { TrendingUp, Settings, RefreshCw } from "lucide-react";
 import { REPORT_MIN_DATE, clampReportDate, defaultReportRange, reportPresetRange } from "../../lib/reportFilters";
+import { createLatestRequestManager, isCanceledRequest } from "../../lib/latestRequest";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -20,18 +21,32 @@ export default function ProfitabilityAnalysis() {
   const [showCfg, setShowCfg] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const requestManagerRef = useRef(null);
+  if (!requestManagerRef.current) requestManagerRef.current = createLatestRequestManager();
 
-  const load = async (f = from, t = to) => {
+  const load = async (f = from, t = to, selectedSource = source) => {
+    const query = Object.freeze({ start_date: f, end_date: t, source: selectedSource });
+    const request = requestManagerRef.current.begin();
     setLoading(true);
     try {
       const { data: d } = await axios.get(`${API}/admin/reports/profitability`, {
-        headers: authHeaders(), params: { start_date: f, end_date: t + "T23:59:59", source },
+        headers: authHeaders(), params: query, signal: request.signal,
       });
+      if (!requestManagerRef.current.isCurrent(request.id)) return;
       setData(d);
       setCfg(d.config);
-    } finally { setLoading(false); }
+      setLoadError("");
+    } catch (error) {
+      if (isCanceledRequest(error) || !requestManagerRef.current.isCurrent(request.id)) throw error;
+      setLoadError("Kârlılık raporu yüklenemedi; ekrandaki önceki değerleri karar amacıyla kullanmayın.");
+      throw error;
+    } finally {
+      if (requestManagerRef.current.isCurrent(request.id)) setLoading(false);
+    }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [source]);
+  useEffect(() => { load().catch(() => {}); /* eslint-disable-next-line */ }, [source]);
+  useEffect(() => () => requestManagerRef.current?.cancel(), []);
 
   const setDatePreset = (kind) => {
     const { from: f, to: tt } = reportPresetRange(kind);
@@ -89,6 +104,8 @@ export default function ProfitabilityAnalysis() {
           <button key={k} type="button" onClick={() => setDatePreset(k)} className="px-2 py-1 border rounded text-xs bg-white hover:bg-gray-100 transition-colors">{l}</button>
         ))}
       </div>
+
+      {loadError && <div role="alert" className="rounded border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">{loadError}</div>}
 
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
         <span className="font-semibold">Bu raporda:</span> Her kategori/pazaryeri için <b>Net Ciro − Ürün Maliyeti (COGS) − Pazaryeri Komisyonu − Kargo − Hizmet Bedeli − Reklam Gideri − Ödenecek KDV − Kurumlar Vergisi = NET KÂR</b> ve marj %. Net ciro, ürün/kampanya/kupon/havale indirimleri bir kez düşülmüş tutardır. Komisyon/reklam/vergi oranları <b>Gider Ayarları</b>'ndan yönetilir. Maliyet, ürünlerin <b>alış fiyatından</b> gelir; girilmemişse satış fiyatının %'siyle tahmin edilir (ayarlanabilir).

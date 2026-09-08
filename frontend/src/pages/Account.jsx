@@ -260,7 +260,7 @@ export default function Account() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="sf-page min-h-screen flex items-center justify-center bg-white">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-black border-t-transparent" />
       </div>
     );
@@ -268,7 +268,7 @@ export default function Account() {
   if (!user) return <Navigate to="/giris" />;
 
   return (
-    <div className="min-h-screen bg-[#fafafa]" data-testid="account-page">
+    <div className="sf-page min-h-screen bg-[#fafafa]" data-testid="account-page">
       <Header />
 
       {/* ───────────────────── Hero / Welcome ───────────────────── */}
@@ -674,7 +674,7 @@ function OrderCard({ order, expanded, onToggle, onChanged }) {
               {it.image ? (
                 <img src={it.image} alt={it.name || it.product_name || ""} className="w-full h-full object-contain" />
               ) : (
-                <div className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-200" />
+                <div className="w-full h-full bg-neutral-100" />
               )}
             </div>
           )) : (
@@ -803,7 +803,7 @@ function OrderCard({ order, expanded, onToggle, onChanged }) {
                 <div className="w-14 h-16 bg-white border border-gray-100 overflow-hidden shrink-0">
                   {it.image
                     ? <img src={it.image} alt={it.name || it.product_name || ""} className="w-full h-full object-contain" />
-                    : <div className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-200" />}
+                    : <div className="w-full h-full bg-neutral-100" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm leading-snug">{it.name || it.product_name || "Ürün"}</p>

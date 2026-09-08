@@ -7,10 +7,12 @@ Tracks manufacturing orders end-to-end:
 - Stage history per record with user + timestamp
 - On "teslim alındı" (delivered/stocked) the product stock is incremented
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid
+import copy
+from stock_audit import record_stock_audit
 
 from .deps import db, require_admin, logger
 
@@ -254,7 +256,8 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
 
 
 @router.post("/{record_id}/advance")
-async def advance_stage(record_id: str, payload: dict, current_user: dict = Depends(require_admin)):
+async def advance_stage(record_id: str, payload: dict, request: Request,
+                        current_user: dict = Depends(require_admin)):
     rec = await db.manufacturing.find_one({"id": record_id}, {"_id": 0})
     if not rec:
         raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
@@ -300,8 +303,13 @@ async def advance_stage(record_id: str, payload: dict, current_user: dict = Depe
         _do_increment = (_claim.modified_count == 1)
     if _do_increment:
         try:
-            product = await db.products.find_one({"id": rec["product_id"]}, {"_id": 0, "id": 1, "variants": 1, "stock": 1})
+            product = await db.products.find_one(
+                {"id": rec["product_id"]},
+                {"_id": 0, "id": 1, "name": 1, "stock_code": 1, "barcode": 1,
+                 "variants": 1, "stock": 1},
+            )
             if product:
+                before_product = copy.deepcopy(product)
                 variants = product.get("variants") or []
                 size_dist = rec.get("size_distribution") or {}
                 total_increment = 0
@@ -346,17 +354,17 @@ async def advance_stage(record_id: str, payload: dict, current_user: dict = Depe
                         {"id": product["id"]},
                         {"$set": {"variants": variants, "stock": new_total, "updated_at": datetime.now(timezone.utc).isoformat()}}
                     )
-                await db.stock_movements.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "type": "manufacturing_delivered",
-                    "record_id": record_id,
-                    "code": rec.get("code"),
-                    "product_id": product["id"],
-                    "total_increment": total_increment,
-                    "size_distribution": size_dist,
-                    "created_by": current_user.get("email", ""),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
+                after_product = {
+                    **product, "variants": variants,
+                    "stock": (sum(int(v.get("stock", 0) or 0) for v in variants)
+                              if variants else int(product.get("stock", 0) or 0) + total_increment),
+                }
+                await record_stock_audit(
+                    db, product_id=product["id"], product_name=product.get("name", ""),
+                    before=before_product, after=after_product, source="manufacturing",
+                    current_user=current_user, request=request, action="manufacturing_delivered",
+                    metadata={"record_id": record_id, "code": rec.get("code")},
+                )
         except Exception as e:
             logger.error(f"Stock increment on manufacturing delivery failed: {e}")
 
@@ -365,7 +373,8 @@ async def advance_stage(record_id: str, payload: dict, current_user: dict = Depe
 
 
 @router.post("/{record_id}/create-product")
-async def create_product_from_manufacturing(record_id: str, current_user: dict = Depends(require_admin)):
+async def create_product_from_manufacturing(record_id: str, request: Request,
+                                            current_user: dict = Depends(require_admin)):
     """"Ürünler Kartına Aktar" — imalat kaydından ürün oluşturur (kullanıcı isteği:
     ürün İLK imalatta doğar, son aşamada onaylanınca Ürünler sayfasına aktarılır).
 
@@ -418,7 +427,7 @@ async def create_product_from_manufacturing(record_id: str, current_user: dict =
         "notes": f"İmalat kaydından aktarıldı: {rec.get('code')}",
     }
     try:
-        res = await _create_product(payload, current_user)
+        res = await _create_product(payload, request, current_user)
     except Exception as e:
         # Aktarım başarısızsa bayrağı geri aç (tekrar denenebilsin)
         await db.manufacturing.update_one({"id": record_id}, {"$set": {"product_created": False}})
@@ -430,13 +439,9 @@ async def create_product_from_manufacturing(record_id: str, current_user: dict =
         {"$set": {"product_id": (pids[0] if pids else ""), "created_product_ids": pids,
                   "stock_incremented": True,
                   "updated_at": datetime.now(timezone.utc).isoformat()}})
-    await db.stock_movements.insert_one({
-        "id": str(uuid.uuid4()), "type": "manufacturing_delivered",
-        "record_id": record_id, "record_code": rec.get("code"),
-        "items": [{"color_size": k, "qty": v} for k, v in dist.items()],
-        "created_by": current_user.get("email", ""),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    # Product creation already writes one canonical schema-v2 stock audit per
+    # created product/SKU. A second manufacturing-only summary here used to
+    # duplicate the same receipt and lacked product/SKU before/after values.
     return {"success": True, "product_ids": pids,
             "message": f"{len(pids) or 1} ürün kartı oluşturuldu (taslak) — Ürünler sayfasından fiyat/görsel ekleyip yayına alın"}
 

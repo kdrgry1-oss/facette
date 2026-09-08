@@ -19,6 +19,7 @@ import httpx
 import hashlib
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, _search_tr_regex, require_permission
+from .report_dedup import marketplace_claim_status_bucket
 from facette_defaults import facette_fixed_value_for  # tüm-pazaryeri sabit varsayılan (gap-fill)
 
 router = APIRouter(tags=["Integrations-Common"])
@@ -2037,17 +2038,7 @@ def _claim_bucket(c: dict) -> str:
         return _ORDER_STATUS_BUCKET.get(c.get("order_status"), "talep_olusturulan")
     st = (c.get("claim_status") or "").strip()
     has_cargo = bool(str(c.get("cargo_tracking_number") or "").strip())
-    if st == "Accepted":
-        return "onaylanan"
-    if st == "Cancelled":
-        return "iptal"
-    if st in ("Rejected", "Unresolved"):
-        return "reddedilen"
-    if st in ("WaitingInAction", "InAnalysis"):
-        return "aksiyon_bekleyen"
-    if st == "Created":
-        return "kargoya_verilen" if has_cargo else "talep_olusturulan"
-    return "talep_olusturulan"
+    return marketplace_claim_status_bucket(st, has_cargo) or "talep_olusturulan"
 # DENETİM HATA-1: sipariş bu statülerdeyse iade işaretlemesi YAPILMAZ (zaten iptal/iade)
 _ORDER_EXCLUDED_FOR_RETURN = [
     "cancelled", "cancel_refunded",

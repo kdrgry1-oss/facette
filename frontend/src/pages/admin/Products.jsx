@@ -34,9 +34,10 @@
  */
 import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
-import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag, AlertTriangle } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag, AlertTriangle, History } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
+import { stockActorDetails, stockSyncDetails, stockSyncLabel } from "../../lib/stockHistoryView";
 import {
   Dialog,
   DialogContent,
@@ -276,6 +277,11 @@ export default function AdminProducts() {
   const [globalTrendyolMarkup, setGlobalTrendyolMarkup] = useState(0);
   const [globalVatRate, setGlobalVatRate] = useState(10);
   const [activeTab, setActiveTab ] = useState("basic");
+  const [stockHistory, setStockHistory] = useState([]);
+  const [stockHistoryCoverage, setStockHistoryCoverage] = useState("");
+  const [stockHistoryLoading, setStockHistoryLoading] = useState(false);
+  const [stockHistoryError, setStockHistoryError] = useState("");
+  const stockHistoryRequest = useRef(0);
   const [attributeSearchTerm, setAttributeSearchTerm] = useState("");
   const [showAllAttributes, setShowAllAttributes] = useState(false);
   const [variantSearchTerm, setVariantSearchTerm] = useState("");
@@ -1550,48 +1556,6 @@ export default function AdminProducts() {
   };
 
   /**
-   * handleTrendyolUpdate — Mevcut Trendyol ürününün STOK/FİYAT bilgisini günceller.
-   *   (Yeni ürün göndermek için handleTrendyolSync kullanılır; bu fonksiyon
-   *    sadece envanter/price güncellemesi yapar.)
-   *   BACKEND: POST /api/integrations/trendyol/products/{id}/sync-inventory
-   */
-  const handleTrendyolUpdate = async (product) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/trendyol/products/${product.id}/sync-inventory`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      toast.success(res.data.message || "Trendyol stok/fiyat güncellendi");
-    } catch (err) {
-      toast.error("Güncelleme başarısız: " + (err.response?.data?.detail || err.message));
-    }
-  };
-
-  /**
-   * handleSplitByColor — Bu ürünün farklı RENK varyantlarını AYRI ürünlere böler.
-   *   İlk renk ana üründe kalır; diğer renkler yeni ürün olur (aynı kart id → "Diğer Renkler").
-   *   Bedenler her renk ürününün altında varyant olarak kalır.
-   *   BACKEND: POST /api/products/{id}/split-by-color
-   */
-  const handleSplitByColor = async (product) => {
-    if (!window.confirm(`"${product.name}" ürününün farklı renkleri AYRI ürünlere bölünecek. Devam edilsin mi?`)) return;
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/products/${product.id}/split-by-color`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.data?.success) {
-        toast.success(res.data.message || "Renkler ayrıldı");
-        fetchProducts();
-      } else {
-        toast.info(res.data?.message || "Ayırma gerekmedi");
-      }
-    } catch (err) {
-      toast.error("Ayırma başarısız: " + (err.response?.data?.detail || err.message));
-    }
-  };
-
-  /**
    * handlePrintBarcode — TEK ürünün barkod/ürün kartını yeni sekmede açar ve
    *   yazdırma diyalogunu tetikler.
    *   Backend endpoint'i her varyant için ayrı bir barkod kartı döner
@@ -1718,6 +1682,28 @@ export default function AdminProducts() {
    *   yerleştirir. Ölçü Tablosu sekmesinde SizeTablePanel bileşeni
    *   `product.id`'yi kullanarak kendi verisini çeker.
    */
+  const loadStockHistory = async (id) => {
+    if (!id) return;
+    const historySeq = ++stockHistoryRequest.current;
+    setStockHistory([]);
+    setStockHistoryCoverage("");
+    setStockHistoryError("");
+    setStockHistoryLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const historyResponse = await axios.get(`${API}/products/${id}/stock-movements`, {
+        headers: { Authorization: `Bearer ${token}` }, params: { limit: 500 },
+      });
+      if (historySeq !== stockHistoryRequest.current) return;
+      setStockHistory(historyResponse.data?.movements || []);
+      setStockHistoryCoverage(historyResponse.data?.coverage || "");
+    } catch {
+      if (historySeq === stockHistoryRequest.current) setStockHistoryError("Stok geçmişi alınamadı.");
+    } finally {
+      if (historySeq === stockHistoryRequest.current) setStockHistoryLoading(false);
+    }
+  };
+
   const openEditModal = async (productArg, options = {}) => {
     const { skipNavigate = false } = options;
     // Liste scroll konumunu YAKALA (navigate/re-render öncesi) → kapanışta geri yüklenir.
@@ -1728,6 +1714,7 @@ export default function AdminProducts() {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
       const id = typeof productArg === "string" ? productArg : productArg.id;
+      loadStockHistory(id);
       const res = await axios.get(`${API}/products/${id}`, { headers });
       if (res.data) product = res.data;
     } catch {
@@ -1879,6 +1866,9 @@ export default function AdminProducts() {
 
   const resetForm = () => {
     setEditingProduct(null);
+    setActiveTab("basic");
+    stockHistoryRequest.current += 1;
+    setStockHistory([]); setStockHistoryCoverage(""); setStockHistoryError(""); setStockHistoryLoading(false);
     setShowAllAttributes(false);
     setTechnicalDetails({});   // önceki düzenlemeden teknik detay TAŞINMASIN (yeni üründe boş)
     setMemberPriceManual(false); setMultiSizes([]); setMultiColors([]);
@@ -2569,20 +2559,6 @@ export default function AdminProducts() {
                           <Store size={16} />
                         </button>
                         <button
-                          onClick={() => handleTrendyolUpdate(product)}
-                          className="p-1.5 hover:bg-orange-100 rounded text-orange-600 transition-colors"
-                          title="Trendyol Stok/Fiyat Güncelle"
-                        >
-                          <RefreshCw size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleSplitByColor(product)}
-                          className="p-1.5 hover:bg-teal-50 rounded text-teal-600 transition-colors"
-                          title="Renge Göre Ayır (her renk ayrı ürün)"
-                        >
-                          <Layers size={16} />
-                        </button>
-                        <button
                           onClick={() => openBarcodeSizePicker('single', product)}
                           className="p-1.5 hover:bg-purple-50 rounded text-purple-600 transition-colors"
                           title="Barkod Kartı Yazdır"
@@ -2651,6 +2627,7 @@ export default function AdminProducts() {
                  <TabsTrigger value="pricing" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Fiyat</TabsTrigger>
                  <TabsTrigger value="images" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Görseller</TabsTrigger>
                  <TabsTrigger value="variants" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Varyantlar</TabsTrigger>
+                 {editingProduct && <TabsTrigger value="stock-history" data-testid="stock-history-tab" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Stok Geçmişi</TabsTrigger>}
                  <TabsTrigger value="seo" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">SEO</TabsTrigger>
                  <TabsTrigger value="attributes" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Özellikler</TabsTrigger>
                  <TabsTrigger value="sizetable" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Ölçü Tablosu</TabsTrigger>
@@ -3865,6 +3842,60 @@ export default function AdminProducts() {
                   </div>
                 </div>
               </TabsContent>
+
+              {editingProduct && (
+                <TabsContent value="stock-history" className="space-y-4 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="bg-white rounded-xl border shadow-sm overflow-hidden" data-testid="stock-history-panel">
+                    <div className="p-5 border-b flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="font-semibold text-gray-900 flex items-center gap-2"><History size={18} /> Stok Hareket Geçmişi</h3>
+                        <p className="text-xs text-amber-700 mt-1">{stockHistoryCoverage || "Kesin eski/yeni stok ve kullanıcı bilgisi kayıt başlangıcından itibaren gösterilir; geçmiş eksikler tahmin edilmez."}</p>
+                      </div>
+                      <button type="button" onClick={() => loadStockHistory(editingProduct.id)}
+                        className="px-3 py-1.5 text-xs border rounded hover:bg-gray-50">Yenile</button>
+                    </div>
+                    {stockHistoryLoading ? (
+                      <div className="p-8 text-center text-sm text-gray-500">Stok geçmişi yükleniyor…</div>
+                    ) : stockHistoryError ? (
+                      <div role="alert" className="m-4 p-3 rounded border border-red-200 bg-red-50 text-sm text-red-700">{stockHistoryError}</div>
+                    ) : stockHistory.length === 0 ? (
+                      <div className="p-8 text-center text-sm text-gray-500">Kayıt başlangıcından itibaren stok hareketi bulunamadı.</div>
+                    ) : (
+                      <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+                        <table className="w-full text-xs">
+                          <thead className="bg-gray-50 sticky top-0 text-gray-600 uppercase">
+                            <tr>
+                              <th className="text-left p-3">Tarih / Saat</th><th className="text-left p-3">Kullanıcı</th>
+                              <th className="text-left p-3">Kaynak</th><th className="text-left p-3">Varyant / SKU</th>
+                              <th className="text-right p-3">Eski</th><th className="text-right p-3">Yeni</th>
+                              <th className="text-right p-3">Fark</th><th className="text-left p-3">Senkron</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {stockHistory.map((move, idx) => {
+                              const dt = move.date ? new Date(move.date) : null;
+                              const dateText = dt && !Number.isNaN(dt.getTime()) ? dt.toLocaleString("tr-TR") : (move.date || "—");
+                              const variant = [move.color, move.size].filter(Boolean).join(" / ");
+                              const syncStatus = stockSyncLabel(move.sync_result);
+                              const syncDetails = stockSyncDetails(move.sync_result);
+                              return <tr key={`${move.date}-${move.sku}-${idx}`} className="hover:bg-gray-50">
+                                <td className="p-3 whitespace-nowrap">{dateText}</td>
+                                <td className="p-3" title={stockActorDetails(move)}>{move.by || "Sistem"}</td>
+                                <td className="p-3"><div className="font-medium">{move.reason || move.action || "—"}</div><div className="text-[10px] text-gray-400">{move.source || "—"}</div></td>
+                                <td className="p-3"><div>{variant || "Ana stok"}</div><div className="font-mono text-[10px] text-gray-500">{move.sku || move.barcode || move.variant_id || "—"}</div></td>
+                                <td className="p-3 text-right tabular-nums">{move.old_stock ?? "—"}</td>
+                                <td className="p-3 text-right tabular-nums">{move.new_stock ?? "—"}</td>
+                                <td className={`p-3 text-right font-bold tabular-nums ${move.delta > 0 ? "text-emerald-600" : move.delta < 0 ? "text-red-600" : "text-gray-500"}`}>{move.delta > 0 ? "+" : ""}{move.delta ?? 0}</td>
+                                <td className="p-3" title={syncDetails}>{syncStatus}</td>
+                              </tr>;
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              )}
 
               {/* Trendyol Tab */}
               <TabsContent value="trendyol" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">

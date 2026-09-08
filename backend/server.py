@@ -274,6 +274,9 @@ async def lifespan(app: FastAPI):
         await db.auth_audit_logs.create_index([("event", 1), ("email", 1), ("created_at", -1)])
         await db.auth_audit_logs.create_index([("ip", 1), ("created_at", -1)])
         await db.auth_audit_logs.create_index([("success", 1), ("created_at", -1)])
+        await db.audit_logs.create_index([("created_at", -1)])
+        await db.audit_logs.create_index([("actor.email", 1), ("created_at", -1)])
+        await db.audit_logs.create_index([("action", 1), ("source", 1), ("created_at", -1)])
         # Mobile devices (push notifications)
         await db.user_devices.create_index([("user_id", 1), ("device_id", 1)], unique=True)
         await db.user_devices.create_index([("push_token", 1)])
@@ -740,6 +743,9 @@ app.add_middleware(ErrorTrackingMiddleware)
 
 # Main API Router
 api_router = APIRouter(prefix="/api")
+
+from routes.admin_activity import router as admin_activity_router
+api_router.include_router(admin_activity_router)
 
 # Documentation download (public — markdown indir)
 from routes.docs import router as docs_router

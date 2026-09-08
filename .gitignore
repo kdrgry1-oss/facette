@@ -1,17 +1,10 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# DB yedekleri — PII içerir, repoya gönderme (veri zaten Atlas'ta)
-db_backup/
-*.archive.gz
-
-
-# IDE and editors
+# Operating systems and editors
+.DS_Store
 .idea/
 .vscode/
 
-# Dependencies
+# Dependencies and package-manager state
 node_modules/
-/node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
@@ -21,55 +14,59 @@ node_modules/
 !.yarn/releases
 !.yarn/versions
 
-# Testing
-/coverage
-
-# Next.js
+# Build and test output
+/build/
+dist/
 /.next/
 /out/
-next-env.d.ts
+/coverage/
+.cache/
+.pytest_cache/
+**/.pytest_cache/
+.ruff_cache/
 *.tsbuildinfo
+next-env.d.ts
 
-# Production builds
-/build
-dist/
-dist
-
-# Environment files (comprehensive coverage)
-
-*token.json*
-*credentials.json*
-
-# Logs and debug files
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-dump.rdb
-
-# System files
-.DS_Store
-*.pem
-
-# Python
+# Python bytecode and virtual environments
 __pycache__/
-*pyc*
+*.py[cod]
 venv/
 .venv/
+custom-venv/
+rootvenv/
 
-# Development tools
+# Environment files and credentials
+*.env
+*.env.*
+*token.json*
+*credentials.json*
+*.pem
+*.key
+.credentials
+**/.jwt_secret
+**/.admin_initial_password
+
+# Logs, caches, and local tooling
+*.log*
+dump.rdb
 chainlit.md
 .chainlit
 .ipynb_checkpoints/
 .ac
-
-# Deployment
 .vercel
 
-# Data and databases
-agenthub/agents/youtube/db
+# Local data, imports, exports, and backups
+db_backup/
+*.archive.gz
+data_export/
+backend/scripts/backups/
+backend/imports/
+backend/uploads/
+dump/
+memory/
+*.xlsx
 
-# Archive files and large assets
+# Archive files and large binary assets
 **/*.zip
 **/*.tar.gz
 **/*.tar
@@ -78,186 +75,14 @@ agenthub/agents/youtube/db
 *.deb
 *.dylib
 
-# Build caches
-.cache/
+# Repository-local generated snapshots and reports
+/.iys-backup-*/
+/.iys-yedek-manuel/
+/facette_deploy/
+/test_reports/
+/outputs/
 
-# Mobile development
-android-sdk/ frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/0.pack
--e 
-# Environment files
-*.env
-*.env.*
-
-# Custom logs
-*.log
-backend/*.log
-frontend/*.log
-*.log*
-
-# Custom Venvs
-custom-venv/
-rootvenv/
-.venv/
-venv/
-
-# Temporary / Test files
-test_*.py
-!backend/tests/test_sns_security.py
-!backend/tests/test_report_rules.py
-setup_*.py
-fix_*.py
-test_attributes.xlsx
-dump/
-memory/
-# Nested or Duplicate Repos
+# Development-only nested workspaces and SDKs
+agenthub/agents/youtube/db
 frontend/fcc/
-backend/uploads/
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-
-# --- Hassas veri / yedekler ---
-# DENETİM SEC-5 F-14: at-rest sır dosyaları asla commit edilmesin
-backend/data/.jwt_secret
-backend/data/.admin_initial_password
-**/.jwt_secret
-**/.admin_initial_password
-backend/imports/
-db_backup/*.archive.gz
-data_export/
-backend/scripts/backups/
-*.xlsx
-*.archive.gz
+android-sdk/

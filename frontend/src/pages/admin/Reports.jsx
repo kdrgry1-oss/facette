@@ -9,6 +9,7 @@ import {
   REPORT_MIN_DATE, clampReportDate, defaultReportRange, filterReportChannels,
   productExportParams, productReportScope, reportPresetRange, splitReportRange,
 } from "../../lib/reportFilters";
+import { createLatestRequestManager, isCanceledRequest } from "../../lib/latestRequest";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -102,6 +103,9 @@ export function SalesReport() {
   const [paymentData, setPayData] = useState([]);
   const [brk, setBrk] = useState(null);
   const [cancelRet, setCancelRet] = useState([]);
+  const [loadError, setLoadError] = useState("");
+  const requestManagerRef = useRef(null);
+  if (!requestManagerRef.current) requestManagerRef.current = createLatestRequestManager();
   const paymentNet = paymentData.reduce((a, row) => ({
     revenue: a.revenue + Number(row.revenue || 0),
     orders: a.orders + Number(row.orders || 0),
@@ -122,24 +126,36 @@ export function SalesReport() {
   );
 
   const load = async () => {
-    const [s, p, b] = await Promise.all([
-      axios.get(`${API}/admin/reports/sales`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group_by: groupBy, source } }),
-      axios.get(`${API}/admin/reports/payments`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } }),
-      axios.get(`${API}/admin/reports/sales-breakdown`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } }),
-    ]);
-    setData(s.data);
-    setPayData(p.data.items || []);
-    setBrk(b.data);
-    // Saat + Gün analizi (reklam planlaması) — aynı tarih aralığı ve kaynak filtresiyle
-    axios.get(`${API}/admin/reports/sales-by-hour`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
-      .then((r) => setHourData(r.data)).catch(() => {});
-    axios.get(`${API}/admin/reports/sales-by-weekday`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
-      .then((r) => setWeekdayData(r.data)).catch(() => {});
-    axios.get(`${API}/admin/reports/cancel-return-by-source`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
-      .then((r) => setCancelRet(filterReportChannels(r.data.items || [], source))).catch(() => {});
-    // İl/İlçe & Kanal (eski ayrı sekme buraya taşındı — kullanıcı isteği)
-    axios.get(`${API}/admin/reports/by-location`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group: "city", source, limit: 100 } })
-      .then((r) => setLocData(r.data.rows || [])).catch(() => {});
+    const query = Object.freeze({ start_date: from, end_date: to, source });
+    const request = requestManagerRef.current.begin();
+    const config = (params) => ({ headers: authHeaders(), params, signal: request.signal });
+    try {
+      // Every visible block belongs to one immutable query generation. Commit
+      // only after all endpoints succeed, so cards and tables cannot mix scopes.
+      const [s, p, b, h, w, c, l] = await Promise.all([
+        axios.get(`${API}/admin/reports/sales`, config({ ...query, group_by: groupBy })),
+        axios.get(`${API}/admin/reports/payments`, config(query)),
+        axios.get(`${API}/admin/reports/sales-breakdown`, config(query)),
+        axios.get(`${API}/admin/reports/sales-by-hour`, config(query)),
+        axios.get(`${API}/admin/reports/sales-by-weekday`, config(query)),
+        axios.get(`${API}/admin/reports/cancel-return-by-source`, config(query)),
+        axios.get(`${API}/admin/reports/by-location`, config({ ...query, group: "city", limit: 100 })),
+      ]);
+      if (!requestManagerRef.current.isCurrent(request.id)) return;
+      setData(s.data);
+      setPayData(p.data.items || []);
+      setBrk(b.data);
+      setHourData(h.data);
+      setWeekdayData(w.data);
+      setCancelRet(filterReportChannels(c.data.items || [], query.source));
+      setLocData(l.data.rows || []);
+      setLoadError("");
+    } catch (error) {
+      if (isCanceledRequest(error) || !requestManagerRef.current.isCurrent(request.id)) throw error;
+      setLoadError("Satış raporunun tüm bölümleri yüklenemedi. Eski veriler karar amacıyla kullanılmamalıdır.");
+      toast.error("Satış raporu eksiksiz yüklenemedi.");
+      throw error;
+    }
   };
   const [locData, setLocData] = useState([]);
 
@@ -147,7 +163,8 @@ export function SalesReport() {
   // Saat/Gün analizi + Sipariş Edilen Ürünler (sayfadaki tarih aralığına bağlı)
   const [hourData, setHourData] = useState(null);
   const [weekdayData, setWeekdayData] = useState(null);
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [source]);
+  useEffect(() => { load().catch(() => {}); /* eslint-disable-next-line */ }, [source]);
+  useEffect(() => () => requestManagerRef.current?.cancel(), []);
   const tl = (v) => `₺${(v ?? 0).toLocaleString("tr-TR")}`;
 
   // O8 audit-fix: "Ortalama Sepet (Net)" kartı NET ciro/NET sipariş üzerinden hesaplanır
@@ -175,6 +192,12 @@ export function SalesReport() {
           <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
         </div>
       </div>
+
+      {loadError && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" data-testid="sales-load-error">
+          {loadError}
+        </div>
+      )}
 
       {integrityMismatch && (
         <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800" data-testid="report-integrity-warning">
@@ -242,7 +265,7 @@ export function SalesReport() {
                   <th className="text-right p-2">İade (Ürün Adedi)</th>
                   <th className="text-right p-2">İade Tutarı</th>
                   <th className="text-right p-2">İade %</th>
-                  <th className="text-right p-2">Açık İade</th>
+                  <th className="text-right p-2" title="Seçili tarih aralığında sipariş edilmiş ürünlerden halen sonuçlanmamış iade adedi ve tutarı (sipariş tarihi kapsamı)">Açık İade <span className="text-[9px] font-normal text-gray-400">(seçili dönem)</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -450,6 +473,9 @@ export function ProductsReport() {
   const [reconLoading, setReconLoading] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set()); // açılır: beden dağılımı
   const [top90Map, setTop90Map] = useState({});              // İvme: 90 günlük haftalık hız haritası
+  const [loadError, setLoadError] = useState("");
+  const requestManagerRef = useRef(null);
+  if (!requestManagerRef.current) requestManagerRef.current = createLatestRequestManager();
   const toggleExpand = (k) => setExpanded(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const reconcileTrendyol = async () => {
@@ -491,28 +517,37 @@ export function ProductsReport() {
   };
 
   const load = async () => {
-    const [t, c] = await Promise.all([
-      axios.get(`${API}/admin/reports/products/top`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source: platFilter || "all", limit: 2000 } }),
-      axios.get(`${API}/admin/reports/categories`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source: platFilter || "all" } }),
-    ]);
-    setTop(t.data.items || []);
-    setCats(c.data.items || []);
-    // İade & İptal raporu (ürün bazlı — platform/tarih/ada göre filtrelenebilir)
-    axios.get(`${API}/admin/reports/cancel-return-products`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source: platFilter || "all" } })
-      .then((r) => setCrRows(r.data.items || [])).catch(() => {});
-    // İVME: seçili aralıktaki hız, 90 günlük tabana kıyaslanır (yükselen/sönen ürün tespiti)
+    const query = Object.freeze({ start_date: from, end_date: to, source: platFilter || "all" });
     const d90 = reportPresetRange("90", new Date(`${to}T12:00:00`)).from;
-    axios.get(`${API}/admin/reports/products/top`, { headers: authHeaders(), params: { start_date: d90, end_date: to + "T23:59:59", source: platFilter || "all", limit: 2000 } })
-      .then((r) => {
-        const m = {};
-        (r.data.items || []).forEach(p => { if (p.product_id) m[p.product_id] = (p.velocity || {}).weekly_rate ?? 0; });
-        setTop90Map(m);
-      }).catch(() => {});
+    const request = requestManagerRef.current.begin();
+    const config = (params) => ({ headers: authHeaders(), params, signal: request.signal });
+    try {
+      const [t, c, cr, t90] = await Promise.all([
+        axios.get(`${API}/admin/reports/products/top`, config({ ...query, limit: 2000 })),
+        axios.get(`${API}/admin/reports/categories`, config(query)),
+        axios.get(`${API}/admin/reports/cancel-return-products`, config(query)),
+        axios.get(`${API}/admin/reports/products/top`, config({ ...query, start_date: d90, limit: 2000 })),
+      ]);
+      if (!requestManagerRef.current.isCurrent(request.id)) return;
+      const velocityMap = {};
+      (t90.data.items || []).forEach(p => { if (p.product_id) velocityMap[p.product_id] = (p.velocity || {}).weekly_rate ?? 0; });
+      setTop(t.data.items || []);
+      setCats(c.data.items || []);
+      setCrRows(cr.data.items || []);
+      setTop90Map(velocityMap);
+      setLoadError("");
+    } catch (error) {
+      if (isCanceledRequest(error) || !requestManagerRef.current.isCurrent(request.id)) throw error;
+      setLoadError("Ürün raporunun tüm bölümleri yüklenemedi. Eski veriler karar amacıyla kullanılmamalıdır.");
+      toast.error("Ürün raporu eksiksiz yüklenemedi.");
+      throw error;
+    }
   };
   const [crRows, setCrRows] = useState([]);
   const [crQ, setCrQ] = useState("");
   const [crPlat, setCrPlat] = useState("");
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [platFilter]);
+  useEffect(() => { load().catch(() => {}); /* eslint-disable-next-line */ }, [platFilter]);
+  useEffect(() => () => requestManagerRef.current?.cancel(), []);
 
   const platLabel = (p) => ({ site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu", n11: "n11", amazon: "Amazon" }[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—"));
   // Sezon ürün kartındaki 'Sezon' özniteliğinden gelir (backend normalize eder); yoksa boş.
@@ -631,6 +666,12 @@ export function ProductsReport() {
           <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
         </div>
       </div>
+
+      {loadError && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" data-testid="products-load-error">
+          {loadError}
+        </div>
+      )}
 
       {recon && (
         <div className={`rounded-xl border p-4 ${recon.diff?.orders || recon.diff?.units || Math.abs(recon.diff?.amount || 0) > 0.01 ? "bg-amber-50 border-amber-300" : "bg-emerald-50 border-emerald-300"}`}

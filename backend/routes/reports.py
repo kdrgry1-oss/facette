@@ -21,6 +21,8 @@ from .report_dedup import (
     claim_items_with_status, product_quantity_metrics, kept_gross_revenue,
     reconciled_platform_breakdown,
     payment_report_group_key, partial_cancel_net_values, product_platform_metrics,
+    OPEN_MARKETPLACE_CLAIM_STATUSES, marketplace_claim_status_bucket,
+    dedupe_return_records, dedupe_return_items,
 )
 
 
@@ -512,7 +514,7 @@ async def day_orders(
 async def sales(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    group_by: str = Query("day", regex="^(day|week|month)$"),
+    group_by: str = Query("day", pattern="^(day|week|month)$"),
     source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
     current_user: dict = Depends(require_admin),
 ):
@@ -538,12 +540,13 @@ async def sales(
 
 _CANCEL_STATUSES = ["cancelled", "cancel_refunded"]
 # İade grubu (return_rejected HARİÇ — satış geçerli sayılır, ciroda kalır)
-_RETURN_STATUSES_BD = ["return_requested", "return_approved", "return_in_transit",
-                       "returned", "refunded", "partial_refunded"]
+_RETURN_OPEN_STATUSES_BD = ["return_requested", "return_in_transit"]
+_RETURN_CLOSED_STATUSES_BD = ["return_approved", "returned", "refunded", "partial_refunded"]
+_RETURN_STATUSES_BD = _RETURN_OPEN_STATUSES_BD + _RETURN_CLOSED_STATUSES_BD
 # Pazaryeri iade talebi AÇIK (henüz onaylanmamış) sayılan claim durumları. Trendyol'un
 # satış raporu bu adetleri ANINDA "İade"ye yazar; biz yalnız Accepted olanı siparişe
 # yansıtıyoruz (integrations_trendyol.py:3951). Aradaki fark bu kovadır.
-_OPEN_CLAIM_STATUSES = ["Created", "WaitingInAction", "InAnalysis"]
+_OPEN_CLAIM_STATUSES = list(OPEN_MARKETPLACE_CLAIM_STATUSES)
 
 
 def _order_units(o: dict) -> int:
@@ -610,17 +613,19 @@ async def _split_maps(order_numbers: list, order_ids: list) -> tuple:
     if order_ids:
         for i in range(0, len(order_ids), 5000):
             chunk = order_ids[i:i + 5000]
-            async for r in db.customer_returns.find(
+            _return_rows = await db.customer_returns.find(
                     {"order_id": {"$in": chunk}},
-                    {"_id": 0, "order_id": 1, "order_number": 1, "status": 1,
-                     "approved_items": 1, "items": 1, "refund_amount": 1}):
+                    {"_id": 1, "id": 1, "order_id": 1, "order_number": 1, "status": 1,
+                     "approved_items": 1, "items": 1, "refund_amount": 1,
+                     "created_at": 1, "updated_at": 1}).to_list(None)
+            for r in dedupe_return_records(_return_rows):
                 st = str(r.get("status") or "").lower()
                 if st in ("cancelled", "canceled", "rejected", "return_rejected"):
                     continue
                 onum = str(r.get("order_number") or "")
                 if not onum:
                     continue
-                its = r.get("approved_items") or r.get("items") or []
+                its = dedupe_return_items(r.get("approved_items") or r.get("items") or [])
                 qty = sum(max(1, int((it or {}).get("quantity") or 1)) for it in its)
                 # DENETİM (finansal F2): iade tutarı GERÇEK iade (refund_amount) ile hizalanmalı;
                 # eskiden ham liste fiyatı × adet alınıp donmuş KUPON İNDİRİMİ yok sayılıyordu →
@@ -747,7 +752,8 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
                 total, units, pc, pc_u, o.get("partial_cancel_total_scope"))
 
         c = closed.get(onum)
-        if st in _RETURN_STATUSES_BD:
+        op = open_.get(onum)
+        if st in _RETURN_CLOSED_STATUSES_BD:
             # İade edilmiş sipariş — kalem bazlı tutar varsa YALNIZ o kadarı iadeye gider.
             r_amt = min(float(c["amount"]), total) if (c and c["amount"] > 0.005) else total
             r_qty = min(int(c["qty"]), units) if (c and c["qty"] > 0) else units
@@ -784,7 +790,11 @@ def _bucket_orders(orders: list, closed: dict, open_: dict) -> dict:
         net["revenue"] += max(0.0, total)
         net["orders"] += 1
         net["units"] += max(0, units)
-        op = open_.get(onum)
+        # Legacy site rows can carry an operational open order status even when
+        # their customer_returns bridge is missing.  Do not silently turn those
+        # requests into completed returns; project the remaining order instead.
+        if st in _RETURN_OPEN_STATUSES_BD and not op:
+            op = {"amount": total, "qty": units}
         if op and (op["amount"] > 0.005 or op["qty"] > 0):
             pending["revenue"] += min(float(op["amount"]), total)
             pending["orders"] += 1
@@ -942,7 +952,7 @@ async def products_export_xlsx(
     season: Optional[str] = Query(None),
     velocity: Optional[str] = Query(None),
     sort_by: Optional[str] = Query(None),
-    sort_dir: str = Query("desc", regex="^(asc|desc)$"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     current_user: dict = Depends(require_admin),
 ):
     """Ürün raporunun Excel çıktısı — ekrandaki listeyle aynı veri (tüm ürünler,
@@ -2125,6 +2135,189 @@ async def cancel_return_by_source(
     return {"items": items}
 
 
+@router.get("/open-returns/reconciliation")
+async def open_returns_reconciliation(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Read-only explanation of operational-open vs dated-report return counts.
+
+    No order/claim identifiers or customer data leave this endpoint.  Counts are
+    deliberately split into exclusion reasons so an admin can prove why an
+    all-time Returns badge differs from the selected sales-order cohort.
+    """
+    s, e = _iso_range(start_date, end_date)
+    orders, closed, open_ = await _canonical_report_context(s, e)
+    by_onum = {str(o.get("order_number") or ""): o for o in orders if o.get("order_number")}
+
+    def _channel(o: dict) -> str:
+        platform = str(o.get("platform") or "").strip().lower()
+        marketplace = str(o.get("marketplace") or "").strip().lower()
+        return platform if platform in _MARKETPLACES else (
+            marketplace if marketplace in _MARKETPLACES else "site")
+
+    report_pending = {}
+    for channel in ("site", "trendyol", "hepsiburada", "temu", "n11", "amazon"):
+        rows = [o for o in orders if _channel(o) == channel]
+        bucket = _bucket_orders(rows, closed, open_)["pending_returns"]
+        report_pending[channel] = bucket
+
+    # Build the exact read-side marketplace population used by the Returns page,
+    # including its order-derived manual fallback rows, but perform no sync/write.
+    from .integrations_common import _claim_bucket
+    from .integrations_trendyol import (
+        _dedup_claims_by_content, _group_hb_claims_by_order,
+        _order_derived_trendyol_returns,
+    )
+
+    raw_claims = await db.trendyol_claims.find(
+        {"claim_type": {"$ne": "CANCEL"}}, {"_id": 0}
+    ).sort("created_date", -1).to_list(None)
+    seen_claims, deduped = set(), []
+    for claim in raw_claims:
+        key = claim.get("claim_id") or claim.get("order_number")
+        if key in seen_claims:
+            continue
+        seen_claims.add(key)
+        deduped.append(claim)
+    visible_orders = {c.get("order_number") for c in deduped
+                      if c.get("order_number") and _claim_bucket(c) != "iptal"}
+    manual = await _order_derived_trendyol_returns(
+        exclude_order_numbers=visible_orders)
+    manual_onums = {r.get("order_number") for r in manual if r.get("order_number")}
+    if manual_onums:
+        deduped = [c for c in deduped
+                   if not (c.get("order_number") in manual_onums and not c.get("manual"))]
+    deduped.extend(manual)
+    deduped = _dedup_claims_by_content(deduped)
+
+    platform_claims = {
+        "trendyol": [c for c in deduped
+                     if str(c.get("platform") or "").lower() != "hepsiburada"],
+        "hepsiburada": _group_hb_claims_by_order([
+            c for c in deduped if str(c.get("platform") or "").lower() == "hepsiburada"
+        ]),
+    }
+    all_claim_onums = list({str(c.get("order_number") or "")
+                            for rows in platform_claims.values() for c in rows
+                            if c.get("order_number")})
+    existing_onums = set()
+    for i in range(0, len(all_claim_onums), 5000):
+        async for row in db.orders.find(
+                {"order_number": {"$in": all_claim_onums[i:i + 5000]}},
+                {"_id": 0, "order_number": 1}):
+            existing_onums.add(str(row.get("order_number") or ""))
+
+    marketplace = {}
+    for platform, claims in platform_claims.items():
+        events, seen_items = [], set()
+        operational_open = action_waiting = 0
+
+        def _safe_float(value) -> float:
+            try:
+                return float(value or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def _safe_qty(value, default=0) -> int:
+            try:
+                return max(0, int(value if value not in (None, "") else default))
+            except (TypeError, ValueError):
+                return max(0, int(default))
+
+        for claim in claims:
+            if _claim_bucket(claim) == "iptal":
+                continue
+            has_cargo = bool(str(claim.get("cargo_tracking_number") or "").strip())
+            if claim.get("manual"):
+                bucket = _claim_bucket(claim)
+                if bucket not in ("talep_olusturulan", "kargoya_verilen", "aksiyon_bekleyen"):
+                    continue
+                for index, item in enumerate(claim.get("items") or [{}]):
+                    qty = max(1, _safe_qty((item or {}).get("quantity"), 1))
+                    amount = max(0.0, _safe_float((item or {}).get("price"))) * qty
+                    events.append((str(claim.get("order_number") or ""), qty, amount, bucket))
+                    operational_open += qty if bucket in ("talep_olusturulan", "kargoya_verilen") else 0
+                    action_waiting += qty if bucket == "aksiyon_bekleyen" else 0
+                continue
+            for item in claim_items_with_status(claim, set(OPEN_MARKETPLACE_CLAIM_STATUSES)):
+                if item["key"] in seen_items:
+                    continue
+                seen_items.add(item["key"])
+                bucket = marketplace_claim_status_bucket(item.get("status"), has_cargo)
+                qty = _safe_qty(item.get("quantity"))
+                events.append((str(claim.get("order_number") or ""), qty,
+                               max(0.0, _safe_float(item.get("amount"))), bucket))
+                operational_open += qty if bucket in ("talep_olusturulan", "kargoya_verilen") else 0
+                action_waiting += qty if bucket == "aksiyon_bekleyen" else 0
+
+        reasons = {"no_matching_order": 0, "outside_selected_order_scope": 0,
+                   "terminal_cancelled_or_unpaid_order": 0,
+                   "exceeds_remaining_order_units": 0, "included_in_report": 0}
+        scoped = {}
+        for onum, qty, amount, _bucket in events:
+            if not onum or onum not in existing_onums:
+                reasons["no_matching_order"] += qty
+            elif onum not in by_onum or _channel(by_onum[onum]) != platform:
+                reasons["outside_selected_order_scope"] += qty
+            else:
+                d = scoped.setdefault(onum, {"amount": 0.0, "qty": 0})
+                d["amount"] += amount
+                d["qty"] += qty
+        for onum, pending in scoped.items():
+            order = by_onum[onum]
+            applied = _bucket_orders([order], closed, {onum: pending})["pending_returns"]["units"]
+            reasons["included_in_report"] += applied
+            rejected = max(0, pending["qty"] - applied)
+            if rejected:
+                status = str(order.get("status") or "")
+                if status in (_CANCEL_STATUSES + _RETURN_CLOSED_STATUSES_BD + _UNPAID_STATUSES):
+                    reasons["terminal_cancelled_or_unpaid_order"] += rejected
+                else:
+                    reasons["exceeds_remaining_order_units"] += rejected
+        marketplace[platform] = {
+            "operational_open_units_all_time": operational_open,
+            "action_waiting_units_all_time": action_waiting,
+            "report_candidate_units_all_time": operational_open + action_waiting,
+            "report_open_units_selected_period": report_pending[platform]["units"],
+            "report_open_amount_selected_period": report_pending[platform]["revenue"],
+            "breakdown_units": reasons,
+            "breakdown_total_units": sum(reasons.values()),
+            "reconciliation_delta_units": (
+                report_pending[platform]["units"] - reasons["included_in_report"]),
+        }
+
+    site_match = {"platform": {"$nin": _MARKETPLACES},
+                  "marketplace": {"$nin": _MARKETPLACES},
+                  "status": {"$in": _RETURN_OPEN_STATUSES_BD}}
+    site_status_counts = {}
+    async for row in db.orders.aggregate([
+        {"$match": site_match}, {"$group": {"_id": "$status", "count": {"$sum": 1}}}
+    ]):
+        site_status_counts[str(row.get("_id") or "unknown")] = int(row.get("count") or 0)
+    selected_site_open_orders = sum(
+        1 for o in orders if _channel(o) == "site"
+        and str(o.get("status") or "") in _RETURN_OPEN_STATUSES_BD)
+
+    return {
+        "scope": {"start_utc": s, "end_utc": e,
+                  "basis": "Sipariş tarihi; bitiş günü Türkiye saatinde dahildir"},
+        "definitions": {
+            "open_return": "Created/return_requested ve kargodaki sonuçlanmamış iadeler",
+            "action_waiting": "WaitingInAction/InAnalysis; Açık İade rozetinden ayrı",
+            "report_value": "Yalnız seçili dönemde sipariş edilmiş ürünler",
+        },
+        "site": {
+            "operational_open_orders_all_time_by_status": site_status_counts,
+            "operational_open_orders_selected_period": selected_site_open_orders,
+            "report_open_units_selected_period": report_pending["site"]["units"],
+            "report_open_amount_selected_period": report_pending["site"]["revenue"],
+        },
+        "marketplaces": marketplace,
+    }
+
+
 @router.get("/cargo")
 async def cargo_report(
     start_date: Optional[str] = None,
@@ -2427,7 +2620,7 @@ async def manufacturer_performance(current_user: dict = Depends(require_admin)):
 async def sales_by_location(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    group: str = Query("city", regex="^(city|district)$"),
+    group: str = Query("city", pattern="^(city|district)$"),
     source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
     limit: int = Query(100, ge=1, le=1000),
     current_user: dict = Depends(require_admin),

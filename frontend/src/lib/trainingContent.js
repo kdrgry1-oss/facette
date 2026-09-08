@@ -387,7 +387,7 @@ export const TRAINING = [
     key: "pazarlama",
     title: "Pazarlama",
     icon: "Megaphone",
-    intro: "Kampanya, kupon, kargo/ödeme kuralları, toplu mail ve yorumlar.",
+    intro: "Kampanya, kupon, kargo/ödeme kuralları, e-posta pazarlama ve yorumlar.",
     items: [
       {
         title: "Kampanyalar",
@@ -413,12 +413,12 @@ export const TRAINING = [
         tips: ["Kapıda ödeme ücreti gibi sabitler Ayarlar → İşletme Kuralları'nda da yönetilir."],
       },
       {
-        title: "Toplu Mail",
-        path: "/admin/toplu-mail",
-        what: "Segment/gruba toplu e-posta gönderimi.",
-        where: "Pazarlama → Toplu Mail.",
-        how: ["Hedef kitleyi seç, şablonu hazırla, test gönder, yayınla."],
-        tips: ["Gönderim için SMTP (Ayarlar → E-posta) ve gönderim kredisi gerekir."],
+        title: "E-posta Pazarlama",
+        path: "/admin/eposta-pazarlama",
+        what: "Segment, kampanya, şablon ve gönderim geçmişini tek ekranda yönetir.",
+        where: "Pazarlama → E-posta Pazarlama.",
+        how: ["Hedef kitleyi seç, şablonu hazırla, test gönder, ardından kampanyayı yayınla."],
+        tips: ["Eski /admin/toplu-mail adresi bu ekrana yönlendirilir; gönderim geçmişi silinmez."],
       },
       {
         title: "Ürün Yorumları & Trendyol Yorumları",

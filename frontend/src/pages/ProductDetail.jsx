@@ -12,7 +12,7 @@ import { slugify } from "../lib/slug";
 import { priceView } from "../lib/price";
 import { resolveColor } from "../lib/colorMap";
 import { isRecommendedSize, recommendLetterSize } from "../lib/sizeRecommend";
-import { setProductSeo } from "../lib/seo";
+import { applyRuntimeSeo, setProductSeo } from "../lib/seo";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { useAuth } from "../context/AuthContext";
@@ -301,67 +301,17 @@ export default function ProductDetail() {
     }
   };
 
-  // SEO — JSON-LD yapısal veri (Product + BreadcrumbList). react-helmet yok,
-  // bu yüzden <head>'e script'i elle enjekte edip temizliyoruz. Google'ın
-  // "rich results" (fiyat, stok, marka) göstermesini sağlar.
+  // Edge ile aynı canonical runtime SEO sonucunu SPA gezinmesinde de uygula.
+  // Backend yalnız gerçek ürün verisini JSON-LD'ye ekler; veri yoksa uydurmaz.
   useEffect(() => {
     if (!product) return;
-    // Per-sayfa meta (title/description/canonical/OG) — edge basmış olsa da idempotent.
-    // Eskiden ürün sayfası ana sayfanın meta'sını taşıyordu (canonical=ana sayfa).
-    try { setProductSeo(product); } catch (_) {}
-    // Edge SEO middleware (functions/_middleware.js) zaten JSON-LD bastıysa
-    // client tarafında tekrar ekleme — Google'da duplicate Product/Breadcrumb olmasın.
-    if (typeof document !== "undefined" && document.querySelector('script[data-seo="edge"]')) return;
-    const origin = (typeof window !== "undefined" && window.location && window.location.origin) || "https://facette.com.tr";
-    const canonical = `${origin}/urun/${product.slug || product.id}`;
-    const price = product.sale_price || product.price;
-    const inStock = Array.isArray(product.variants) && product.variants.length > 0
-      ? product.variants.some((v) => (v.stock || 0) > 0)
-      : true;
-
-    const productLd = {
-      "@context": "https://schema.org/",
-      "@type": "Product",
-      name: product.name,
-      image: Array.isArray(product.images) && product.images.length ? product.images : undefined,
-      description: product.description || product.name,
-      sku: product.barcode || product.stock_code || product.id,
-      brand: product.brand ? { "@type": "Brand", name: product.brand } : undefined,
-      offers: {
-        "@type": "Offer",
-        url: canonical,
-        priceCurrency: "TRY",
-        price: price != null ? String(price) : undefined,
-        availability: inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-      },
-    };
-
-    const crumbs = [{ name: "Ana Sayfa", item: origin }];
-    if (product.category_name) {
-      crumbs.push({ name: product.category_name, item: `${origin}/${slugify(product.category_name || product.category_slug || "")}` });
-    }
-    crumbs.push({ name: product.name, item: canonical });
-    const breadcrumbLd = {
-      "@context": "https://schema.org/",
-      "@type": "BreadcrumbList",
-      itemListElement: crumbs.map((c, i) => ({
-        "@type": "ListItem",
-        position: i + 1,
-        name: c.name,
-        item: c.item,
-      })),
-    };
-
-    const tag = document.createElement("script");
-    tag.type = "application/ld+json";
-    tag.setAttribute("data-seo", "product");
-    tag.text = JSON.stringify([productLd, breadcrumbLd]);
-    // Önceki kalmışsa temizle, sonra ekle
-    document.querySelectorAll('script[data-seo="product"]').forEach((el) => el.remove());
-    document.head.appendChild(tag);
-
+    const controller = new AbortController();
+    applyRuntimeSeo(`/urun/${product.slug || product.id}`, () => setProductSeo(product), {
+      signal: controller.signal,
+    });
     return () => {
-      document.querySelectorAll('script[data-seo="product"]').forEach((el) => el.remove());
+      controller.abort();
+      document.querySelectorAll('script[data-seo="runtime"]').forEach((el) => el.remove());
     };
   }, [product]);
 
@@ -573,7 +523,7 @@ export default function ProductDetail() {
 
   if (loading) {
     return (
-      <div className="min-h-screen">
+      <div className="sf-page min-h-screen">
         <Header />
         <div className="max-w-screen-2xl mx-auto px-4 py-8">
           <div className="grid md:grid-cols-2 gap-8">
@@ -591,7 +541,7 @@ export default function ProductDetail() {
 
   if (!product) {
     return (
-      <div className="min-h-screen">
+      <div className="sf-page min-h-screen">
         <Header />
         <div className="max-w-screen-2xl mx-auto px-4 py-16 text-center">
           <p className="text-gray-500">Ürün bulunamadı</p>
@@ -639,7 +589,7 @@ export default function ProductDetail() {
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="sf-page min-h-screen">
       <Header />
 
       {/* Sticky Product Bar — mobile: bottom, desktop: top.

@@ -24,10 +24,11 @@ from typing import Optional
 import uuid
 import os
 import re as _re
-import html as _html
 
 from fastapi import Request
 from .deps import db, require_admin, require_auth, logger, safe_str, get_current_user, limiter
+from tenant_config import TenantConfig, get_tenant_config, invalidate as invalidate_tenant_config
+from seo_runtime import resolve_product, resolve_category
 
 
 # --------------- ABANDONED CART ---------------
@@ -317,31 +318,135 @@ async def get_public_meta(path: str):
     return {"found": bool(doc), "meta": doc}
 
 
+@seo_public_router.get("/runtime-config")
+async def seo_runtime_config():
+    """Public, non-secret company/SEO values used by SPA navigation."""
+    cfg = await get_tenant_config(db)
+    # Explicit projection: banking/tax identifiers and secret_refs must never
+    # become public merely because the canonical schema later grows.
+    return {
+        "brand": {k: cfg["brand"].get(k) for k in ("store_name", "logo_url", "favicon_url")},
+        "company": {k: cfg["company"].get(k) for k in
+                    ("legal_name", "address", "city", "district", "country")},
+        "contact": {k: cfg["contact"].get(k) for k in
+                    ("email", "support_email", "phone", "whatsapp", "instagram", "facebook", "x", "tiktok")},
+        "domains": {k: cfg["domains"].get(k) for k in ("storefront_url", "cdn_url")},
+        "commerce": {k: cfg["commerce"].get(k) for k in
+                     ("currency_code", "currency_symbol", "locale", "prices_include_vat")},
+        "seo_geo": cfg["seo_geo"],
+    }
+
+
+@seo_admin_router.get("/config")
+async def get_seo_config(current_user: dict = Depends(require_admin)):
+    cfg = await get_tenant_config(db, use_cache=False)
+    return cfg["seo_geo"]
+
+
+@seo_admin_router.put("/config")
+async def save_seo_config(payload: dict, current_user: dict = Depends(require_admin)):
+    cfg = await get_tenant_config(db, use_cache=False)
+    merged = {**cfg.get("seo_geo", {}), **(payload or {})}
+    candidate = TenantConfig.model_validate({**cfg, "seo_geo": merged}).model_dump()
+    await db.settings.update_one({"id": "tenant_config"}, {"$set": candidate}, upsert=True)
+    invalidate_tenant_config(db)
+    return {"success": True, "seo_geo": candidate["seo_geo"]}
+
+
+async def _seo_preview_rows(kind: str, limit: int = 100):
+    cfg = await get_tenant_config(db)
+    rows = []
+    if kind in ("product", "all"):
+        async for item in db.products.find(
+            {"is_active": {"$ne": False}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1, "name": 1, "slug": 1, "description": 1,
+             "seo_description": 1, "meta_title": 1, "meta_description": 1,
+             "images": 1, "image": 1, "price": 1, "sale_price": 1, "stock": 1,
+             "variants": 1, "brand": 1, "barcode": 1, "stock_code": 1,
+             "category_name": 1, "category_slug": 1},
+        ).limit(limit):
+            resolved = resolve_product(item, cfg)
+            rows.append({"kind": "product", "id": item.get("id"), "name": item.get("name"),
+                         "current": {"title": item.get("meta_title") or "",
+                                     "description": item.get("meta_description") or ""},
+                         "generated": {k: resolved.get(k) for k in ("title", "description", "canonical", "og_image", "robots", "sources")},
+                         "would_change": bool((not item.get("meta_title") and resolved.get("title")) or
+                                              (not item.get("meta_description") and resolved.get("description")))})
+    if kind in ("category", "all"):
+        async for item in db.categories.find(
+            {"is_active": {"$ne": False}, "members_only": {"$ne": True}},
+            {"_id": 0, "id": 1, "name": 1, "slug": 1, "description": 1,
+             "meta_title": 1, "meta_description": 1, "image": 1},
+        ).limit(limit):
+            resolved = resolve_category(item, cfg)
+            rows.append({"kind": "category", "id": item.get("id"), "name": item.get("name"),
+                         "current": {"title": item.get("meta_title") or "",
+                                     "description": item.get("meta_description") or ""},
+                         "generated": {k: resolved.get(k) for k in ("title", "description", "canonical", "og_image", "robots", "sources")},
+                         "would_change": bool((not item.get("meta_title") and resolved.get("title")) or
+                                              (not item.get("meta_description") and resolved.get("description")))})
+    return rows
+
+
+@seo_admin_router.get("/bulk-preview")
+async def seo_bulk_preview(kind: str = Query("all"),
+                           limit: int = Query(100, ge=1, le=1000),
+                           current_user: dict = Depends(require_admin)):
+    if kind not in ("all", "product", "category"):
+        raise HTTPException(status_code=400, detail="kind geçersiz")
+    rows = await _seo_preview_rows(kind, limit)
+    return {"dry_run": True, "apply_executed": False, "count": len(rows), "items": rows}
+
+
+@seo_admin_router.post("/bulk-apply")
+async def seo_bulk_apply(payload: dict, current_user: dict = Depends(require_admin)):
+    """Explicit snapshot apply; never overwrites manual title/description."""
+    if (payload or {}).get("confirmation") != "APPLY_GENERATED_SEO":
+        raise HTTPException(status_code=400, detail="confirmation=APPLY_GENERATED_SEO gerekli")
+    kind = (payload or {}).get("kind", "all")
+    if kind not in ("all", "product", "category"):
+        raise HTTPException(status_code=400, detail="kind geçersiz")
+    try:
+        limit = int((payload or {}).get("limit") or 100)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="limit geçersiz")
+    if not 1 <= limit <= 1000:
+        raise HTTPException(status_code=400, detail="limit 1-1000 arasında olmalı")
+    rows = await _seo_preview_rows(kind, limit)
+    updated = 0
+    for row in rows:
+        if row.get("id") is None:
+            continue
+        generated = row["generated"]
+        collection = db.products if row["kind"] == "product" else db.categories
+        # Separate conditional writes prevent a concurrent manual edit in one
+        # field being overwritten while the other field is still empty.
+        changed = False
+        if not row["current"]["title"] and generated.get("title"):
+            result = await collection.update_one(
+                {"id": row["id"], "meta_title": {"$in": [None, ""]}},
+                {"$set": {"meta_title": generated["title"]}},
+            )
+            changed = changed or bool(result.modified_count)
+        if not row["current"]["description"] and generated.get("description"):
+            result = await collection.update_one(
+                {"id": row["id"], "meta_description": {"$in": [None, ""]}},
+                {"$set": {"meta_description": generated["description"]}},
+            )
+            changed = changed or bool(result.modified_count)
+        updated += int(changed)
+    return {"success": True, "updated": updated, "manual_overrides_preserved": True}
+
+
 # =============================================================================
 # EDGE SEO — per-sayfa meta çözümleyici (functions/_middleware.js buradan okur)
 # =============================================================================
-_FRONT_URL = (os.environ.get("FRONTEND_PUBLIC_URL") or "https://facette.com.tr").rstrip("/")
+_FRONT_URL = (os.environ.get("FRONTEND_PUBLIC_URL") or "").rstrip("/")
 # Ürün/kategori OLMAYAN, indekslenmeyen veya statik kök yollar → soft-404 taraması yapma.
 _SEO_NONINDEX_PREFIXES = ("/sepet", "/odeme", "/checkout", "/hesabim", "/account", "/admin",
                           "/giris", "/login", "/kayit", "/register", "/order-success",
                           "/siparis", "/sifremi", "/reset", "/iade", "/return")
 _SEO_KNOWN_STATIC = {"/", "/hakkimizda", "/iletisim", "/sss", "/kvkk", "/gizlilik"}
-
-
-def _clean_desc(s: str, limit: int = 160) -> str:
-    s = _re.sub(r"<[^>]+>", " ", str(s or ""))
-    s = _html.unescape(s)                 # &nbsp; &amp; … çöz
-    s = s.replace("\xa0", " ")            # non-breaking space
-    s = _re.sub(r"\s+", " ", s).strip()
-    return (s[:limit].rstrip() + "…") if len(s) > limit else s
-
-
-async def _seo_company() -> dict:
-    try:
-        from company import get_company
-        return await get_company(db) or {}
-    except Exception:
-        return {}
 
 
 @seo_public_router.get("/page-meta")
@@ -359,10 +464,8 @@ async def seo_page_meta(path: str = Query("/", max_length=512)):
             raw = "/" + raw
         p = raw.rstrip("/") or "/"
         low = p.lower()
-        comp = await _seo_company()
-        # SEO başlığı için KISA marka adı (store_name) — uzun yasal ünvan (company_name) değil.
-        brand = comp.get("store_name") or comp.get("website") or "FACETTE"
-        site = (comp.get("site_url") or _FRONT_URL).rstrip("/")
+        cfg = await get_tenant_config(db)
+        site = (cfg["domains"].get("storefront_url") or _FRONT_URL).rstrip("/")
 
         # Admin override varsa öncelik (mevcut seo_meta)
         override = await db.seo_meta.find_one({"path": low}, {"_id": 0})
@@ -371,11 +474,44 @@ async def seo_page_meta(path: str = Query("/", max_length=512)):
         if any(low == pre or low.startswith(pre + "/") or low.startswith(pre) for pre in _SEO_NONINDEX_PREFIXES):
             return {"found": True, "robots": "noindex,follow", "canonical": f"{site}{p}"}
 
-        # Ana sayfa / bilinen statikler → varsayılan (index.html zaten doğru) → dokunma
+        # Ana sayfa / bilinen statikler use canonical global settings at runtime.
         if low in _SEO_KNOWN_STATIC:
-            m = {"found": True, "robots": "index,follow", "canonical": f"{site}/"}
+            seo = cfg["seo_geo"]
+            canonical = f"{site}/" if low == "/" else f"{site}{p}"
+            m = {"found": True, "robots": seo.get("default_robots") or "index,follow",
+                 "canonical": canonical, "title": seo.get("default_title") or "",
+                 "description": seo.get("default_description") or "",
+                 "og_title": seo.get("default_title") or "",
+                 "og_description": seo.get("default_description") or "",
+                 "og_url": canonical, "og_image": seo.get("default_og_image_url") or "",
+                 "og_type": "website", "og_site_name": cfg["brand"].get("store_name") or "",
+                 "og_locale": seo.get("locale") or ""}
+            if low == "/":
+                address = {"@type": "PostalAddress",
+                           "streetAddress": cfg["company"].get("address") or None,
+                           "addressLocality": cfg["company"].get("district") or cfg["company"].get("city") or None,
+                           "addressRegion": cfg["company"].get("city") or None,
+                           "addressCountry": cfg["company"].get("country") or None}
+                address = {k: v for k, v in address.items() if v not in (None, "")}
+                same_as = [cfg["contact"].get(key) for key in
+                           ("instagram", "facebook", "x", "tiktok") if cfg["contact"].get(key)]
+                org = {"@context": "https://schema.org", "@type": "Organization",
+                       "name": cfg["brand"].get("store_name"), "url": site,
+                       "legalName": cfg["company"].get("legal_name") or None,
+                       "logo": cfg["brand"].get("logo_url") or None,
+                       "description": seo.get("organization_description") or None,
+                       "email": cfg["contact"].get("email") or None,
+                       "telephone": cfg["contact"].get("phone") or None,
+                       "address": address if len(address) > 1 else None,
+                       "sameAs": same_as or None}
+                m["jsonld"] = [{k: v for k, v in org.items() if v not in (None, "")}]
             if override:
-                m.update({k: override.get(k) for k in ("title", "description", "og_image") if override.get(k)})
+                if override.get("title"):
+                    m["title"] = m["og_title"] = override["title"]
+                if override.get("description"):
+                    m["description"] = m["og_description"] = override["description"]
+                if override.get("og_image"):
+                    m["og_image"] = override["og_image"]
                 if override.get("noindex"):
                     m["robots"] = "noindex,nofollow"
             return m
@@ -383,8 +519,11 @@ async def seo_page_meta(path: str = Query("/", max_length=512)):
         # Slug çöz: /urun/{slug} veya /{slug}
         slug = None
         mprod = _re.match(r"^/urun/([^/]+)$", p)
+        mcat = _re.match(r"^/kategori/([^/]+)$", p)
         if mprod:
             slug = mprod.group(1)
+        elif mcat:
+            slug = p.split("/", 2)[2]
         elif _re.match(r"^/[^/]+$", p):
             slug = p[1:]
         if not slug:
@@ -395,66 +534,18 @@ async def seo_page_meta(path: str = Query("/", max_length=512)):
 
         # 1) ÜRÜN dene (aktif + silinmemiş; üyeye-özel değil)
         prod = None
-        cands = await db.products.find(
-            {"$or": [{"slug": slug_l}, {"slug": slug}, {"slug_aliases": slug_l}, {"id": slug}]},
-            {"_id": 0, "name": 1, "slug": 1, "id": 1, "description": 1, "seo_description": 1,
-             "meta_description": 1, "meta_title": 1, "images": 1, "image": 1, "price": 1,
-             "sale_price": 1, "brand": 1, "barcode": 1, "stock_code": 1, "variants": 1,
-             "category_name": 1, "category_slug": 1, "is_active": 1, "is_deleted": 1,
-             "members_only": 1, "category_id": 1, "category_ids": 1}).to_list(10)
-        prod = (next((c for c in cands if c.get("is_active") is True and not c.get("is_deleted")), None)
-                or None)
+        if not mcat:
+            cands = await db.products.find(
+                {"$or": [{"slug": slug_l}, {"slug": slug}, {"slug_aliases": slug_l}, {"id": slug}]},
+                {"_id": 0, "name": 1, "slug": 1, "id": 1, "description": 1, "seo_description": 1,
+                 "meta_description": 1, "meta_title": 1, "images": 1, "image": 1, "price": 1,
+                 "sale_price": 1, "brand": 1, "barcode": 1, "stock_code": 1, "variants": 1,
+                 "category_name": 1, "category_slug": 1, "stock": 1, "is_active": 1, "is_deleted": 1,
+                 "members_only": 1, "category_id": 1, "category_ids": 1}).to_list(10)
+            prod = (next((c for c in cands if c.get("is_active") is not False and not c.get("is_deleted")), None)
+                    or None)
         if prod and not prod.get("members_only"):
-            _slug = prod.get("slug") or slug_l
-            canonical = f"{site}/urun/{_slug}"
-            title = (prod.get("meta_title") or f"{prod.get('name','')} | {brand}").strip()
-            desc = _clean_desc(prod.get("meta_description") or prod.get("seo_description")
-                               or prod.get("description") or prod.get("name") or "")
-            imgs = []
-            for im in (prod.get("images") or []):
-                if isinstance(im, str) and im.startswith("http"):
-                    imgs.append(im)
-                elif isinstance(im, dict):
-                    u = im.get("url") or im.get("src") or im.get("image")
-                    if u and str(u).startswith("http"):
-                        imgs.append(u)
-            if prod.get("image") and str(prod["image"]).startswith("http"):
-                imgs.insert(0, prod["image"])
-            imgs = list(dict.fromkeys(imgs))
-            og_image = imgs[0] if imgs else f"{site}/og-image.jpg"
-            price = prod.get("sale_price") or prod.get("price")
-            in_stock = True
-            if isinstance(prod.get("variants"), list) and prod["variants"]:
-                in_stock = any((v.get("stock") or 0) > 0 for v in prod["variants"])
-            crumbs = [{"name": "Ana Sayfa", "item": site}]
-            if prod.get("category_name"):
-                crumbs.append({"name": prod["category_name"],
-                               "item": f"{site}/{prod.get('category_slug') or ''}".rstrip("/")})
-            crumbs.append({"name": prod.get("name") or "", "item": canonical})
-            product_ld = {"@context": "https://schema.org/", "@type": "Product",
-                          "name": prod.get("name"), "image": imgs or None,
-                          "description": desc or prod.get("name"),
-                          "sku": prod.get("barcode") or prod.get("stock_code") or prod.get("id"),
-                          "brand": ({"@type": "Brand", "name": prod["brand"]} if prod.get("brand") else None),
-                          "offers": {"@type": "Offer", "url": canonical, "priceCurrency": "TRY",
-                                     "price": (str(price) if price is not None else None),
-                                     "availability": ("https://schema.org/InStock" if in_stock
-                                                      else "https://schema.org/OutOfStock")}}
-            product_ld = {k: v for k, v in product_ld.items() if v is not None}
-            breadcrumb_ld = {"@context": "https://schema.org/", "@type": "BreadcrumbList",
-                             "itemListElement": [{"@type": "ListItem", "position": i + 1,
-                                                  "name": c["name"], "item": c["item"]}
-                                                 for i, c in enumerate(crumbs)]}
-            m = {"found": True, "type": "product", "title": title, "description": desc,
-                 "canonical": canonical, "og_title": title, "og_description": desc,
-                 "og_url": canonical, "og_image": og_image, "og_type": "product",
-                 "robots": "index,follow", "jsonld": [product_ld, breadcrumb_ld]}
-            if override:
-                if override.get("title"): m["title"] = m["og_title"] = override["title"]
-                if override.get("description"): m["description"] = m["og_description"] = override["description"]
-                if override.get("og_image"): m["og_image"] = override["og_image"]
-                if override.get("noindex"): m["robots"] = "noindex,nofollow"
-            return m
+            return resolve_product(prod, cfg, override=override)
 
         # 2) KATEGORİ dene
         cat = await db.categories.find_one(
@@ -462,23 +553,7 @@ async def seo_page_meta(path: str = Query("/", max_length=512)):
             {"_id": 0, "name": 1, "slug": 1, "description": 1, "meta_title": 1,
              "meta_description": 1, "image": 1, "members_only": 1})
         if cat and not cat.get("members_only"):
-            _slug = cat.get("slug") or slug_l
-            canonical = f"{site}/{_slug}"
-            title = (cat.get("meta_title") or f"{cat.get('name','')} | {brand}").strip()
-            desc = _clean_desc(cat.get("meta_description") or cat.get("description")
-                               or f"{cat.get('name','')} kategorisindeki yeni sezon ürünleri {brand}'te keşfedin.")
-            og_image = (cat.get("image") if str(cat.get("image") or "").startswith("http")
-                        else f"{site}/og-image.jpg")
-            m = {"found": True, "type": "category", "title": title, "description": desc,
-                 "canonical": canonical, "og_title": title, "og_description": desc,
-                 "og_url": canonical, "og_image": og_image, "og_type": "website",
-                 "robots": "index,follow"}
-            if override:
-                if override.get("title"): m["title"] = m["og_title"] = override["title"]
-                if override.get("description"): m["description"] = m["og_description"] = override["description"]
-                if override.get("og_image"): m["og_image"] = override["og_image"]
-                if override.get("noindex"): m["robots"] = "noindex,nofollow"
-            return m
+            return resolve_category(cat, cfg, override=override)
 
         # 3) Ne ürün ne kategori → soft-404: noindex (Google indeks bütçesi boşa gitmesin)
         return {"found": True, "robots": "noindex,follow", "canonical": f"{site}{p}"}

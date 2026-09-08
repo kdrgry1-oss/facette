@@ -62,10 +62,29 @@ def _next_pw_history(user: dict) -> list:
     _h = [user.get("password", "")] + list(user.get("password_history") or [])
     return [h for h in _h if h][:_PW_HISTORY_KEEP]
 
-# Google OAuth Configuration
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "") or "49503095707-cahr1ntbc30lqeho6nj1pbggq3tatien.apps.googleusercontent.com"
+# Google OAuth Configuration. Client ID secret değildir; yine de marka/ortam sabiti
+# olarak koda gömülmez. Client secret yalnız deployment secret'ından okunur.
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_FACETTE_CLIENT_ID = "681857904365-4pnp7jm4q6vsdqgtsrjte4e1ve2outei.apps.googleusercontent.com"
+
+
+async def _google_client_ids() -> list[str]:
+    configured = []
+    raw = ",".join(filter(None, [
+        os.environ.get("GOOGLE_CLIENT_IDS", ""),
+        os.environ.get("GOOGLE_CLIENT_ID", ""),
+    ]))
+    configured.extend(x.strip() for x in raw.split(",") if x.strip())
+    try:
+        social = await db.settings.find_one(
+            {"id": "social_auth"}, {"_id": 0, "google_client_id": 1, "google_enabled": 1}
+        ) or {}
+        if "google_enabled" in social and not social.get("google_enabled"):
+            return []
+        if social.get("google_client_id"):
+            configured.append(safe_str(social["google_client_id"], 512))
+    except Exception:
+        pass
+    return list(dict.fromkeys(x for x in configured if x))
 
 
 async def _google_user_from_credential(credential: str, expected_nonce: str = "") -> dict:
@@ -80,8 +99,10 @@ async def _google_user_from_credential(credential: str, expected_nonce: str = ""
     if not credential:
         raise HTTPException(status_code=400, detail="Google kimlik tokeni eksik")
     idinfo = None
-    # Eski mobil/web istemcisini kırmadan Facette'nin yeni Web istemcisini kabul et.
-    for audience in dict.fromkeys((GOOGLE_FACETTE_CLIENT_ID, GOOGLE_CLIENT_ID)):
+    audiences = await _google_client_ids()
+    if not audiences:
+        raise HTTPException(status_code=503, detail="Google ile giris yapilandirilmamis")
+    for audience in audiences:
         try:
             idinfo = google_id_token.verify_oauth2_token(
                 credential, google_requests.Request(), audience
@@ -1063,7 +1084,7 @@ async def google_redirect_callback(request: Request):
     """
     from fastapi.responses import RedirectResponse
 
-    site_url = os.environ.get("SITE_URL", "https://facette.com.tr").rstrip("/")
+    site_url = await _google_storefront_url()
     body = await request.body()
     if len(body) > 16_384:
         return RedirectResponse(f"{site_url}/giris?google_error=invalid_response", status_code=303)
@@ -1077,17 +1098,11 @@ async def google_redirect_callback(request: Request):
     csrf_valid = bool(
         form_csrf and cookie_csrf and hmac.compare_digest(form_csrf, cookie_csrf)
     )
-    nonce_cookie = safe_str(request.cookies.get("facette_google_nonce", ""), 512)
-    # GIS'in g_csrf_token çerezi farklı alt alan adına bazı tarayıcılarda taşınmıyor.
-    # Bu durumda Google'ın imzaladığı ID token içindeki nonce ile SameSite=None
-    # çerezimizi eşleştirerek login-CSRF korumasını sürdürürüz.
-    if not csrf_valid and not nonce_cookie:
+    if not csrf_valid:
         return RedirectResponse(f"{site_url}/giris?google_error=csrf", status_code=303)
 
     try:
-        user = await _google_user_from_credential(
-            credential, expected_nonce=nonce_cookie
-        )
+        user = await _google_user_from_credential(credential)
     except HTTPException as exc:
         code = "inactive" if exc.status_code == 403 else "verification"
         return RedirectResponse(f"{site_url}/giris?google_error={code}", status_code=303)
@@ -1102,14 +1117,9 @@ async def google_redirect_callback(request: Request):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "expires_at": now_ts + 120,
     })
-    response = RedirectResponse(
+    return RedirectResponse(
         f"{site_url}/giris?{urlencode({'google_code': raw_code})}", status_code=303
     )
-    response.delete_cookie(
-        "facette_google_nonce", path="/api/auth/google/callback",
-        domain="facette.com.tr", secure=True, httponly=False, samesite="none",
-    )
-    return response
 
 
 @router.post("/google/exchange")
@@ -1217,113 +1227,127 @@ async def google_session(request: Request, session_id: str = Query(...)):
     }
 
 
+def _safe_google_return_to(value: str) -> str:
+    value = safe_str(value, 1024)
+    return value if value.startswith("/") and not value.startswith("//") else "/hesabim"
+
+
+def _google_redirect_uri(request: Request) -> str:
+    configured = (os.environ.get("GOOGLE_REDIRECT_URI") or "").strip()
+    return configured or f"{str(request.base_url).rstrip('/')}/api/auth/google/callback"
+
+
+async def _google_storefront_url() -> str:
+    try:
+        from tenant_config import get_tenant_config
+        cfg = await get_tenant_config(db)
+        site = safe_str((cfg.get("domains") or {}).get("storefront_url", ""), 1000).rstrip("/")
+        if site.startswith(("https://", "http://localhost", "http://127.0.0.1")):
+            return site
+    except Exception:
+        pass
+    site = (os.environ.get("SITE_URL") or os.environ.get("FRONTEND_PUBLIC_URL") or "").rstrip("/")
+    if site.startswith(("https://", "http://localhost", "http://127.0.0.1")):
+        return site
+    raise HTTPException(status_code=503, detail="Magaza adresi yapilandirilmamis")
+
+
 @router.get("/google/login")
-async def google_login(request: Request):
-    """Initiate Google OAuth login.
-    GÜVENLİK: Bu legacy redirect akışı `state` (CSRF) korumasından yoksundu ve token'ı
-    URL'de döndürüyordu; frontend yalnız modern /auth/google (GIS) kullanıyor. Devre dışı."""
-    raise HTTPException(status_code=410, detail="Bu giriş yöntemi kaldırıldı. Google ile Giriş'i kullanın.")
-    if not GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=500, detail="Google OAuth yapılandırılmamış")
-    
-    # Get the base URL from request
-    base_url = str(request.base_url).rstrip('/')
-    redirect_uri = f"{base_url}/api/auth/google/callback"
-    
-    google_auth_url = (
-        f"https://accounts.google.com/o/oauth2/v2/auth"
-        f"?client_id={GOOGLE_CLIENT_ID}"
-        f"&redirect_uri={redirect_uri}"
-        f"&response_type=code"
-        f"&scope=email%20profile"
-        f"&access_type=offline"
+@(limiter.limit("10/minute") if limiter else (lambda f: f))
+async def google_login(request: Request, return_to: str = Query("/hesabim")):
+    """Popup kullanamayan webview'lar için state+nonce korumalı tam sayfa OAuth başlangıcı."""
+    from fastapi.responses import RedirectResponse
+
+    audiences = await _google_client_ids()
+    if not audiences or not GOOGLE_CLIENT_SECRET:
+        site = await _google_storefront_url()
+        return RedirectResponse(f"{site}/giris?google_error=configuration", status_code=303)
+
+    state = secrets.token_urlsafe(32)
+    browser = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    now_ts = datetime.now(timezone.utc).timestamp()
+    await db.google_oauth_states.delete_many({"expires_at": {"$lte": now_ts}})
+    await db.google_oauth_states.insert_one({
+        "state_hash": hashlib.sha256(state.encode()).hexdigest(),
+        "browser_hash": hashlib.sha256(browser.encode()).hexdigest(),
+        "nonce": nonce,
+        "return_to": _safe_google_return_to(return_to),
+        "redirect_uri": _google_redirect_uri(request),
+        "used": False,
+        "expires_at": now_ts + 600,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    params = urlencode({
+        "client_id": audiences[0],
+        "redirect_uri": _google_redirect_uri(request),
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "nonce": nonce,
+        "prompt": "select_account",
+    })
+    response = RedirectResponse(f"https://accounts.google.com/o/oauth2/v2/auth?{params}", status_code=303)
+    response.set_cookie(
+        "google_oauth_browser", browser, max_age=600, httponly=True,
+        secure=request.url.scheme == "https", samesite="lax", path="/api/auth/google/callback",
     )
-    
-    return {"auth_url": google_auth_url}
+    return response
+
 
 @router.get("/google/callback")
-async def google_callback(code: str, request: Request):
-    """Handle Google OAuth callback.
-    GÜVENLİK: `state` doğrulaması yoktu (login-CSRF) ve token URL query'de dönüyordu
-    (Referer sızıntısı). Legacy + kullanılmıyor → devre dışı."""
-    raise HTTPException(status_code=410, detail="Bu giriş yöntemi kaldırıldı.")
+@(limiter.limit("10/minute") if limiter else (lambda f: f))
+async def google_callback(request: Request, code: str = Query(""), state: str = Query(""), error: str = Query("")):
+    """Tam sayfa OAuth callback; uygulama JWT'si URL'ye hiçbir zaman yazılmaz."""
     import httpx
+    from fastapi.responses import RedirectResponse
 
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=500, detail="Google OAuth yapılandırılmamış")
-    
-    base_url = str(request.base_url).rstrip('/')
-    redirect_uri = f"{base_url}/api/auth/google/callback"
-    
-    # Exchange code for token
-    async with httpx.AsyncClient() as client:
-        token_response = await client.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "client_id": GOOGLE_CLIENT_ID,
+    site = await _google_storefront_url()
+    if error:
+        return RedirectResponse(f"{site}/giris?google_error=access_denied", status_code=303)
+    browser = safe_str(request.cookies.get("google_oauth_browser", ""), 256)
+    if not code or not state or not browser:
+        return RedirectResponse(f"{site}/giris?google_error=csrf", status_code=303)
+    now_ts = datetime.now(timezone.utc).timestamp()
+    state_doc = await db.google_oauth_states.find_one_and_update(
+        {
+            "state_hash": hashlib.sha256(state.encode()).hexdigest(),
+            "browser_hash": hashlib.sha256(browser.encode()).hexdigest(),
+            "used": False,
+            "expires_at": {"$gt": now_ts},
+        },
+        {"$set": {"used": True, "used_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if not state_doc:
+        return RedirectResponse(f"{site}/giris?google_error=csrf", status_code=303)
+    audiences = await _google_client_ids()
+    if not audiences or not GOOGLE_CLIENT_SECRET:
+        return RedirectResponse(f"{site}/giris?google_error=configuration", status_code=303)
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            token_response = await client.post("https://oauth2.googleapis.com/token", data={
+                "client_id": audiences[0],
                 "client_secret": GOOGLE_CLIENT_SECRET,
                 "code": code,
                 "grant_type": "authorization_code",
-                "redirect_uri": redirect_uri,
-            }
-        )
-        
+                "redirect_uri": state_doc["redirect_uri"],
+            })
         if token_response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Google token alınamadı")
-        
-        token_data = token_response.json()
-        access_token = token_data.get("access_token")
-        
-        # Get user info
-        user_response = await client.get(
-            "https://www.googleapis.com/oauth2/v2/userinfo",
-            headers={"Authorization": f"Bearer {access_token}"}
+            raise ValueError("oauth exchange rejected")
+        user = await _google_user_from_credential(
+            safe_str(token_response.json().get("id_token", ""), 4096),
+            expected_nonce=safe_str(state_doc.get("nonce", ""), 512),
         )
-        
-        if user_response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Google kullanıcı bilgisi alınamadı")
-        
-        google_user = user_response.json()
-    
-    # Find or create user
-    email = google_user.get("email", "").lower()
-    user = await db.users.find_one({"email": email})
-    
-    if not user:
-        user = {
-            "id": generate_id(),
-            "email": email,
-            "password": "",  # No password for OAuth users
-            "first_name": google_user.get("given_name", ""),
-            "last_name": google_user.get("family_name", ""),
-            "google_id": google_user.get("id"),
-            "avatar": google_user.get("picture"),
-            "is_admin": False,
-            "is_active": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.users.insert_one(user)
-    else:
-        # Update Google info
-        await db.users.update_one(
-            {"email": email},
-            {"$set": {
-                "google_id": google_user.get("id"),
-                "avatar": google_user.get("picture"),
-            }}
-        )
-        user = await db.users.find_one({"email": email}, {"_id": 0, "password": 0})
+    except Exception:
+        return RedirectResponse(f"{site}/giris?google_error=verification", status_code=303)
 
-    token = create_token(user["id"], user.get("is_admin", False), token_version=user.get("token_version", 0))
-
-    # Güvenlik: yanıt gövdesinde bcrypt şifre hash'i ASLA dönmemeli.
-    user.pop("password", None)
-    user.pop("_id", None)
-
-    # Redirect to frontend with token
-    frontend_url = os.environ.get("FRONTEND_URL", "")
-    if frontend_url:
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(f"{frontend_url}/auth/callback?token={token}")
-
-    return {"token": token, "user": user}
+    raw_code = secrets.token_urlsafe(32)
+    await db.google_login_codes.insert_one({
+        "code_hash": hashlib.sha256(raw_code.encode()).hexdigest(),
+        "user_id": user["id"], "used": False,
+        "created_at": datetime.now(timezone.utc).isoformat(), "expires_at": now_ts + 120,
+    })
+    query = urlencode({"google_code": raw_code, "redirect": state_doc.get("return_to", "/hesabim")})
+    response = RedirectResponse(f"{site}/giris?{query}", status_code=303)
+    response.delete_cookie("google_oauth_browser", path="/api/auth/google/callback")
+    return response

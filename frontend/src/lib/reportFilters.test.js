@@ -37,7 +37,7 @@ test("product export carries every visible table filter", () => {
     season: "Yaz", velocity: "green", query: "bermuda", sortKey: "revenue", sortDir: "desc",
   });
   expect(Object.fromEntries(params)).toEqual({
-    start_date: "2026-06-05", end_date: "2026-09-07T23:59:59", source: "trendyol",
+    start_date: "2026-06-05", end_date: "2026-09-07", source: "trendyol",
     platform: "trendyol", size: "M", season: "Yaz", velocity: "green", q: "bermuda",
     sort_by: "revenue", sort_dir: "desc",
   });

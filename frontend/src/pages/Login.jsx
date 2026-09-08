@@ -5,22 +5,33 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useAuth } from "../context/AuthContext";
 import axios from "axios";
+import {
+  createGooglePopupFlow,
+  googleErrorMessage,
+  isEmbeddedWebView,
+  safeReturnPath,
+} from "../lib/googleAuthFlow";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-// Facette'ye ait, erişilebilir Google Cloud projesindeki Web istemcisi.
-const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID_V2 || "681857904365-4pnp7jm4q6vsdqgtsrjte4e1ve2outei.apps.googleusercontent.com";
-const GOOGLE_LOGIN_URI = `${process.env.REACT_APP_BACKEND_URL}/api/auth/google/callback`;
-const GOOGLE_REDIRECT_FLOW_VERSION = "2026-09-07-2";
+const BUILD_GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID_V2 || process.env.REACT_APP_GOOGLE_CLIENT_ID || "";
+const GOOGLE_FLOW_VERSION = "2026-09-08-popup-fallback-1";
 
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const _redirectTo = new URLSearchParams(location.search).get("redirect") || "/hesabim";
+  const _redirectTo = safeReturnPath(new URLSearchParams(location.search).get("redirect"));
   const { login, register, user, loginWithToken } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
   const [loading, setLoading] = useState(false);
   // FAZ 3+ — Hangi sosyal sağlayıcılar aktif?
-  const [socialProviders, setSocialProviders] = useState({ apple: false, facebook: false });
+  const [socialProviders, setSocialProviders] = useState({
+    apple: false,
+    facebook: false,
+    google: Boolean(BUILD_GOOGLE_CLIENT_ID),
+    google_client_id: BUILD_GOOGLE_CLIENT_ID,
+  });
+  const [googleStatus, setGoogleStatus] = useState({ phase: "idle", message: "" });
+  const embeddedGoogle = isEmbeddedWebView();
   useEffect(() => {
     fetch(`${API}/auth/social/providers`).then((r) => r.ok && r.json())
       .then((d) => d && setSocialProviders(d)).catch(() => {});
@@ -34,6 +45,7 @@ export default function Login() {
   });
 
   const googleBtnRef = useRef(null);
+  const googleFlowRef = useRef(null);
 
   // Tam-sayfa Google dönüşü: URL'deki kısa ömürlü kodu backend'de bir kez JWT'ye çevir.
   useEffect(() => {
@@ -41,24 +53,33 @@ export default function Login() {
     const code = q.get("google_code");
     const error = q.get("google_error");
     if (!code && !error) return;
-    window.history.replaceState({}, "", "/giris");
+    const returnTo = safeReturnPath(q.get("redirect") || (() => {
+      try { return sessionStorage.getItem("google_redirect_to"); } catch { return ""; }
+    })());
+    window.history.replaceState({}, "", `/giris?redirect=${encodeURIComponent(returnTo)}`);
     if (error) {
-      toast.error(error === "csrf" ? "Google giriş doğrulaması güvenlik kontrolünden geçemedi" : "Google ile giriş başarısız");
+      const message = googleErrorMessage(error);
+      setGoogleStatus({ phase: "error", message });
+      toast.error(message);
       return;
     }
     (async () => {
       setLoading(true);
+      setGoogleStatus({ phase: "exchanging", message: "Google oturumu doğrulanıyor…" });
       try {
         const res = await axios.post(`${API}/auth/google/exchange`, { code });
         if (res.data?.token) {
           loginWithToken(res.data.token, res.data.user);
           toast.success("Google ile giriş başarılı!");
-          let to = "/hesabim";
-          try { to = sessionStorage.getItem("google_redirect_to") || to; } catch {}
-          navigate(to);
+          try { sessionStorage.removeItem("google_redirect_to"); } catch {}
+          navigate(returnTo, { replace: true });
+        } else {
+          throw new Error("missing app token");
         }
       } catch (err) {
-        toast.error(err.response?.data?.detail || "Google ile giriş başarısız");
+        const message = err.response?.data?.detail || googleErrorMessage("verification");
+        setGoogleStatus({ phase: "error", message });
+        toast.error(message);
       } finally { setLoading(false); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -156,22 +177,44 @@ export default function Login() {
   };
 
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) return;
+    const googleClientId = socialProviders.google_client_id || BUILD_GOOGLE_CLIENT_ID;
+    if (!socialProviders.google || !googleClientId) return;
+    if (embeddedGoogle) {
+      setGoogleStatus({
+        phase: "embedded",
+        message: "Bu uygulama içi tarayıcı Google penceresini desteklemeyebilir.",
+      });
+      return;
+    }
+    let disposed = false;
+    const flow = createGooglePopupFlow({
+      exchangeCredential: async (credential) => {
+        const res = await axios.post(`${API}/auth/google`, { credential });
+        return res.data;
+      },
+      onSuccess: (result) => {
+        if (disposed) return;
+        loginWithToken(result.token, result.user);
+        try { sessionStorage.removeItem("google_redirect_to"); } catch {}
+        setLoading(false);
+        setGoogleStatus({ phase: "success", message: "Giriş başarılı, yönlendiriliyorsunuz…" });
+        navigate(_redirectTo, { replace: true });
+      },
+      onError: (code, error) => {
+        if (disposed) return;
+        const message = error?.response?.data?.detail || googleErrorMessage(code);
+        setLoading(false);
+        setGoogleStatus({ phase: "error", message });
+      },
+    });
+    googleFlowRef.current = flow;
     const init = () => {
-      if (!window.google?.accounts?.id) return;
-      let googleNonce = "";
-      try {
-        googleNonce = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, "");
-        if (window.location.hostname.endsWith("facette.com.tr")) {
-          document.cookie = `facette_google_nonce=${googleNonce}; Domain=facette.com.tr; Path=/api/auth/google/callback; Max-Age=600; SameSite=None; Secure`;
-        }
-      } catch { /* nonce yoksa backend Google'ın g_csrf_token kontrolünü kullanır */ }
+      if (disposed || !window.google?.accounts?.id) return;
       window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        ux_mode: "redirect",
-        login_uri: GOOGLE_LOGIN_URI,
-        nonce: googleNonce || undefined,
-        state_cookie_domain: window.location.hostname.endsWith("facette.com.tr") ? "facette.com.tr" : undefined,
+        client_id: googleClientId,
+        callback: (response) => flow.credential(response),
+        error_callback: (event) => flow.popupError(event),
+        ux_mode: "popup",
         button_auto_select: false,
         auto_select: false,
         itp_support: true,
@@ -185,8 +228,12 @@ export default function Login() {
           locale: "tr",
           click_listener: () => {
             try { sessionStorage.setItem("google_redirect_to", _redirectTo); } catch {}
+            setLoading(true);
+            setGoogleStatus({ phase: "popup", message: "Google hesap penceresi bekleniyor…" });
+            flow.begin();
           },
         });
+        setGoogleStatus((current) => current.phase === "idle" ? { phase: "ready", message: "" } : current);
       }
     };
     if (window.google?.accounts?.id) {
@@ -202,14 +249,29 @@ export default function Login() {
         document.body.appendChild(s);
       }
       s.addEventListener("load", init);
+      s.addEventListener("error", () => {
+        if (!disposed) setGoogleStatus({ phase: "error", message: "Google giriş bileşeni yüklenemedi." });
+      }, { once: true });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => {
+      disposed = true;
+      flow.dispose();
+      googleFlowRef.current = null;
+    };
+  }, [socialProviders.google, socialProviders.google_client_id, embeddedGoogle, _redirectTo, loginWithToken, navigate]);
 
-  if (user) {
-    navigate(_redirectTo);
-    return null;
-  }
+  const handleGoogleRedirectFallback = () => {
+    try { sessionStorage.setItem("google_redirect_to", _redirectTo); } catch {}
+    setGoogleStatus({ phase: "redirect", message: "Google'ın güvenli giriş sayfasına yönlendiriliyorsunuz…" });
+    const url = `${API}/auth/google/login?return_to=${encodeURIComponent(_redirectTo)}`;
+    window.location.assign(url);
+  };
+
+  useEffect(() => {
+    if (user) navigate(_redirectTo, { replace: true });
+  }, [user, navigate, _redirectTo]);
+
+  if (user) return <div className="sf-page min-h-screen flex items-center justify-center text-sm">Yönlendiriliyorsunuz…</div>;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -232,7 +294,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="sf-page min-h-screen">
       <Header />
 
       <div className="max-w-screen-2xl mx-auto px-4 py-16">
@@ -244,7 +306,9 @@ export default function Login() {
           {/* Sosyal giriş — ikon butonlar yan yana (Google + Facebook + Apple), eşit ölçü */}
           <div className="flex items-center justify-center gap-3 mb-6">
             {/* Google — resmi GIS ikon butonu (kırpma yok; kendi boyutunda render olur) */}
-            <div ref={googleBtnRef} data-testid="google-login-btn" data-flow-version={GOOGLE_REDIRECT_FLOW_VERSION} className="flex items-center justify-center" />
+            {!embeddedGoogle && socialProviders.google && (
+              <div ref={googleBtnRef} data-testid="google-login-btn" data-flow-version={GOOGLE_FLOW_VERSION} className="flex items-center justify-center" />
+            )}
             {/* Facebook */}
             {socialProviders.facebook && (
               <button type="button" onClick={handleFacebookLogin} disabled={loading}
@@ -269,6 +333,25 @@ export default function Login() {
               </button>
             )}
           </div>
+
+          {socialProviders.google && ["error", "embedded"].includes(googleStatus.phase) && (
+            <div className="mb-6 border border-amber-200 bg-amber-50 px-3 py-3 text-center" role="alert" data-testid="google-login-status">
+              <p className="text-xs text-amber-900 mb-2">{googleStatus.message}</p>
+              <button
+                type="button"
+                onClick={handleGoogleRedirectFallback}
+                disabled={googleStatus.phase === "redirect"}
+                className="text-xs underline font-medium disabled:opacity-60"
+                data-testid="google-redirect-fallback"
+              >
+                Tam sayfa Google girişiyle devam et
+              </button>
+            </div>
+          )}
+
+          {["popup", "exchanging", "redirect", "success"].includes(googleStatus.phase) && googleStatus.message && (
+            <p className="mb-6 text-center text-xs text-gray-600" role="status">{googleStatus.message}</p>
+          )}
 
           <div className="flex items-center gap-4 mb-6">
             <div className="flex-1 h-px bg-gray-200" />

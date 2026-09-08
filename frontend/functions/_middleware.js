@@ -4,7 +4,7 @@
  * =============================================================================
  * SORUN (SEO denetimi P0): Site tamamen client-side render (CRA). Her sayfanın İLK
  * HTML'i public/index.html → HEPSİNDE aynı <title>, aynı description ve
- * <link rel="canonical" href="https://facette.com.tr/"> vardı. Google tüm ürün/
+ * ana sayfa canonical değeri vardı. Google tüm ürün/
  * kategori URL'lerini ANA SAYFAYA canonical'ledi → ürün/kategori sayfaları
  * indekslenmiyordu (uzun-kuyruk trafiğinin tamamı kayıp).
  *
@@ -22,14 +22,6 @@
  */
 
 const NONHTML_EXT = /\.(js|css|map|png|jpe?g|webp|avif|gif|svg|ico|woff2?|ttf|eot|mp4|webm|json|xml|txt|pdf|wasm)$/i;
-
-function esc(s) {
-  return String(s == null ? "" : s)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
 
 // JSON-LD güvenli gömme: </script> ve < kaçırma
 function jsonForScript(obj) {
@@ -62,7 +54,10 @@ export async function onRequest(context) {
     if (!ct.includes("text/html")) return response;
 
     // 3) Backend'den sayfa meta'sını çek (zaman-aşımlı, edge-cache'li, fail-open)
-    const apiBase = (env && env.API_BASE) || "https://api.facette.com.tr/api";
+    // API_BASE deployment binding is the bootstrap address. Brand/domain data
+    // itself comes from canonical tenant_config via this endpoint.
+    const apiBase = env && env.API_BASE;
+    if (!apiBase) return response;
     const metaUrl = `${apiBase}/seo/page-meta?path=${encodeURIComponent(path)}`;
     let meta = null;
     try {
@@ -83,14 +78,14 @@ export async function onRequest(context) {
     // 4) HTMLRewriter ile <head>'i güncelle
     const rw = new HTMLRewriter();
 
-    if (meta.title) {
+    if (Object.prototype.hasOwnProperty.call(meta, "title")) {
       rw.on("title", {
-        element(el) { el.setInnerContent(meta.title); },
+        element(el) { el.setInnerContent(meta.title || ""); },
       });
     }
-    if (meta.description) {
+    if (Object.prototype.hasOwnProperty.call(meta, "description")) {
       rw.on('meta[name="description"]', {
-        element(el) { el.setAttribute("content", meta.description); },
+        element(el) { el.setAttribute("content", meta.description || ""); },
       });
     }
     if (meta.canonical) {
@@ -105,18 +100,37 @@ export async function onRequest(context) {
       "og:url": meta.og_url || meta.canonical,
       "og:image": meta.og_image,
       "og:type": meta.og_type,
+      "og:site_name": meta.og_site_name,
+      "og:locale": meta.og_locale,
     };
     for (const [prop, val] of Object.entries(ogMap)) {
-      if (!val) continue;
+      if (val == null) continue;
       rw.on(`meta[property="${prop}"]`, {
-        element(el) { el.setAttribute("content", val); },
+        element(el) { el.setAttribute("content", val || ""); },
+      });
+    }
+
+    const twitterMap = {
+      "twitter:title": meta.title,
+      "twitter:description": meta.description,
+      "twitter:image": meta.og_image,
+    };
+    for (const [name, val] of Object.entries(twitterMap)) {
+      if (val == null) continue;
+      rw.on(`meta[name="${name}"]`, {
+        element(el) { el.setAttribute("content", val || ""); },
       });
     }
 
     // <head> sonuna: robots (varsa) + JSON-LD (ürün) + edge marker
     const headAppend = [];
     if (meta.robots) {
-      headAppend.push(`<meta name="robots" content="${esc(meta.robots)}" data-seo="edge">`);
+      rw.on('meta[name="robots"]', {
+        element(el) {
+          el.setAttribute("content", meta.robots);
+          el.setAttribute("data-seo", "edge");
+        },
+      });
     }
     if (Array.isArray(meta.jsonld)) {
       for (const item of meta.jsonld) {
@@ -126,9 +140,6 @@ export async function onRequest(context) {
     }
     // İstemciye "edge meta enjekte edildi" işareti (twitter card da ekle)
     headAppend.push('<meta name="twitter:card" content="summary_large_image" data-seo="edge">');
-    if (meta.og_image) {
-      headAppend.push(`<meta name="twitter:image" content="${esc(meta.og_image)}" data-seo="edge">`);
-    }
     if (headAppend.length) {
       rw.on("head", {
         element(el) { el.append("\n" + headAppend.join("\n") + "\n", { html: true }); },

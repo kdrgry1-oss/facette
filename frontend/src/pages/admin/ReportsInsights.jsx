@@ -3,11 +3,12 @@
  * Tarih aralığı + kaynak filtresiyle: konum, satış kanalı (Instagram/Google/pazaryeri),
  * ve uzun süredir satış görmeyen ürünler.
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import axios from "axios";
 import { MapPin, Radio, PackageX, TrendingUp, Clock, CreditCard, Ticket, UserPlus } from "lucide-react";
 import ReportScopeBadge from "../../components/ReportScopeBadge";
 import { REPORT_MIN_DATE, clampReportDate, defaultReportRange, reportPresetRange } from "../../lib/reportFilters";
+import { createLatestRequestManager, isCanceledRequest } from "../../lib/latestRequest";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
@@ -37,23 +38,39 @@ export default function ReportsInsights() {
   const [coupon, setCoupon] = useState(null);
   const [cust, setCust] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const requestManagerRef = useRef(null);
+  if (!requestManagerRef.current) requestManagerRef.current = createLatestRequestManager();
 
   const load = useCallback(async () => {
+    const query = Object.freeze({ start, end, source, locGroup, days, tab });
+    const request = requestManagerRef.current.begin();
+    const requestAuth = { ...auth(), signal: request.signal };
     setLoading(true);
-    const q = `start_date=${start}&end_date=${end}`;
+    const q = `start_date=${encodeURIComponent(query.start)}&end_date=${encodeURIComponent(query.end)}`;
     try {
-      if (tab === "location") setLoc((await axios.get(`${API}/admin/reports/by-location?${q}&group=${locGroup}&source=${source}&limit=200`, auth())).data);
-      else if (tab === "source") setSrc((await axios.get(`${API}/admin/reports/by-source?${q}`, auth())).data);
-      else if (tab === "never") setNever((await axios.get(`${API}/admin/reports/never-sold?days=${days}&limit=1000`, auth())).data);
-      else if (tab === "hour") setHour((await axios.get(`${API}/admin/reports/by-hour?${q}&source=${source}`, auth())).data);
-      else if (tab === "pay") setPay((await axios.get(`${API}/admin/reports/by-payment?${q}&source=${source}`, auth())).data);
-      else if (tab === "coupon") setCoupon((await axios.get(`${API}/admin/reports/coupon-performance?${q}`, auth())).data);
-      else if (tab === "cust") setCust((await axios.get(`${API}/admin/reports/customer-type?${q}`, auth())).data);
-    } catch (_) { /* sessiz */ }
-    finally { setLoading(false); }
+      let commit;
+      if (query.tab === "location") { const value = (await axios.get(`${API}/admin/reports/by-location?${q}&group=${query.locGroup}&source=${query.source}&limit=200`, requestAuth)).data; commit = () => setLoc(value); }
+      else if (query.tab === "source") { const value = (await axios.get(`${API}/admin/reports/by-source?${q}`, requestAuth)).data; commit = () => setSrc(value); }
+      else if (query.tab === "never") { const value = (await axios.get(`${API}/admin/reports/never-sold?days=${query.days}&limit=1000`, requestAuth)).data; commit = () => setNever(value); }
+      else if (query.tab === "hour") { const value = (await axios.get(`${API}/admin/reports/by-hour?${q}&source=${query.source}`, requestAuth)).data; commit = () => setHour(value); }
+      else if (query.tab === "pay") { const value = (await axios.get(`${API}/admin/reports/by-payment?${q}&source=${query.source}`, requestAuth)).data; commit = () => setPay(value); }
+      else if (query.tab === "coupon") { const value = (await axios.get(`${API}/admin/reports/coupon-performance?${q}`, requestAuth)).data; commit = () => setCoupon(value); }
+      else if (query.tab === "cust") { const value = (await axios.get(`${API}/admin/reports/customer-type?${q}`, requestAuth)).data; commit = () => setCust(value); }
+      if (!requestManagerRef.current.isCurrent(request.id)) return;
+      commit?.();
+      setLoadError("");
+    } catch (error) {
+      if (!isCanceledRequest(error) && requestManagerRef.current.isCurrent(request.id)) {
+        setLoadError("Rapor yüklenemedi; önceki filtreye ait değerleri karar amacıyla kullanmayın.");
+      }
+    } finally {
+      if (requestManagerRef.current.isCurrent(request.id)) setLoading(false);
+    }
   }, [tab, start, end, source, locGroup, days]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => () => requestManagerRef.current?.cancel(), []);
 
   const setDatePreset = (kind) => {
     const { from: s, to: e } = reportPresetRange(kind);
@@ -74,6 +91,8 @@ export default function ReportsInsights() {
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
         <span className="font-semibold">Bu raporda:</span> Seçtiğiniz tarih aralığında satışlarınızı farklı açılardan kesersiniz — <b>il/ilçe bazlı</b> (nereden ne kadar satıyorsunuz), <b>satış kanalı</b> (pazaryeri + Instagram/Google/Meta gibi trafik kaynakları), <b>saatlik yoğunluk</b>, <b>ödeme tipi</b>, <b>kupon performansı</b> ve <b>yeni/tekrar eden müşteri</b> kırılımı. <b>Uzun süredir satılmayan</b> sekmesiyle 30–365 gündür hiç satmayan ürünleri ve bunlara bağlanmış stok değerini görüp indirim/tasfiye kararı verebilirsiniz.
       </div>
+
+      {loadError && <div role="alert" className="rounded border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">{loadError}</div>}
 
       {/* Sekmeler */}
       <div className="flex flex-wrap gap-2">

@@ -126,7 +126,9 @@ export function productReportScope(product = {}, platform = "") {
 export function productExportParams({ from, to, platform, size, season, velocity, query, sortKey, sortDir }) {
   const params = new URLSearchParams({
     start_date: clampReportDate(from),
-    end_date: `${clampReportDate(to)}T23:59:59`,
+    // Backend expands a plain YMD to the complete Turkish local day, including
+    // the final microsecond. Sending T23:59:59 would truncate that last second.
+    end_date: clampReportDate(to),
   });
   if (platform) {
     params.set("source", platform);

@@ -335,7 +335,7 @@ export default function ProductCard({ product, listId = "", listName = "", index
                   aria-label={sib.color || "Renk"}
                 >
                   {fallback
-                    ? <span className="block w-full h-full bg-gradient-to-br from-gray-200 to-gray-400" />
+                      ? <span className="block w-full h-full bg-neutral-200" />
                     : <span className="block w-full h-full" style={bgStyle} />}
                 </Link>
               );

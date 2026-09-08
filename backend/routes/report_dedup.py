@@ -299,6 +299,72 @@ def payment_report_group_key(order: dict) -> str:
     return str((order or {}).get("payment_method") or "—").strip().lower() or "—"
 
 
+# Marketplace return state is shared by the operational Returns screen and the
+# financial reports.  Keeping this vocabulary here prevents the two surfaces
+# from silently assigning the same Trendyol claim item to different buckets.
+OPEN_MARKETPLACE_CLAIM_STATUSES = frozenset({"Created", "WaitingInAction", "InAnalysis"})
+
+
+def marketplace_claim_status_bucket(status: str, has_cargo: bool = False) -> str | None:
+    """Map a marketplace claim-item status to the canonical operational bucket."""
+    status = str(status or "").strip()
+    if status == "Accepted":
+        return "onaylanan"
+    if status in ("Rejected", "Unresolved"):
+        return "reddedilen"
+    if status in ("WaitingInAction", "InAnalysis"):
+        return "aksiyon_bekleyen"
+    if status == "Created":
+        return "kargoya_verilen" if has_cargo else "talep_olusturulan"
+    if status == "Cancelled":
+        return "iptal"
+    return None
+
+
+def dedupe_return_records(records: list[dict]) -> list[dict]:
+    """Keep one current document per return id, without merging distinct returns.
+
+    Historical imports can leave multiple versions of the same ``customer_returns``
+    record.  A repeated id is one return, while two different ids for the same
+    order can be legitimate separate return attempts and must both survive.
+    """
+    terminal = {"returned", "refunded", "partial_refunded", "return_approved",
+                "approved", "completed", "complete"}
+
+    def rank(row: dict):
+        status = str((row or {}).get("status") or "").lower()
+        return (1 if status in terminal else 0,
+                str((row or {}).get("updated_at") or (row or {}).get("created_at") or ""))
+
+    best: dict[str, dict] = {}
+    anonymous: list[dict] = []
+    for row in records or []:
+        rid = str((row or {}).get("id") or (row or {}).get("_id") or "").strip()
+        if not rid:
+            anonymous.append(row)
+            continue
+        current = best.get(rid)
+        if current is None or rank(row) > rank(current):
+            best[rid] = row
+    return list(best.values()) + anonymous
+
+
+def dedupe_return_items(items: list[dict]) -> list[dict]:
+    """Remove repeated item ids inside one return; id-less lines remain distinct."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for index, item in enumerate(items or []):
+        item = item or {}
+        iid = str(item.get("id") or item.get("return_item_id")
+                  or item.get("claim_item_id") or "").strip()
+        key = f"id:{iid}" if iid else f"row:{index}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
 def claim_items_with_status(claim: dict, statuses: set[str]) -> list[dict]:
     """Return marketplace claim units whose child status is in ``statuses``.
 
@@ -307,7 +373,10 @@ def claim_items_with_status(claim: dict, statuses: set[str]) -> list[dict]:
     actionable child status, so it is not a safe source for historical return
     quantities.  Reports must inspect every raw claim item instead.
 
-    Each Trendyol ``claimItem`` is one returned unit.  Legacy/manual rows do not
+    Each Trendyol ``claimItem`` is one returned unit.  Barcode is optional here:
+    order-level financial reconciliation still has to count a unit whose legacy
+    line is missing a barcode (product-level reports may ignore that barcode).
+    Legacy/manual rows do not
     always have raw data; for those, normalized items are used only when the
     stored claim itself is accepted.  Returned rows include a stable key so a
     repeated claim item cannot inflate totals.
@@ -331,8 +400,6 @@ def claim_items_with_status(claim: dict, statuses: set[str]) -> list[dict]:
                 saw_marketplace_child = True
             order_line = raw_line.get("orderLine") or {}
             barcode = str(order_line.get("barcode") or "").strip()
-            if not barcode:
-                continue
             for item_index, claim_item in enumerate(raw_children):
                 claim_item = claim_item or {}
                 status = str(((claim_item.get("claimItemStatus") or {}).get("name") or "")).strip()

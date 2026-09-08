@@ -963,12 +963,14 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
     ATLAYARAK yollar. AMAZON_ALLOW_WRITE=0 iken dry-run. Döner: özet dict."""
     import asyncio as _aio
     from routes.marketplace_hub import log_integration_event
-    summary = {"mode": "live", "pushed": 0, "skipped": 0, "failed": 0, "remaining": 0,
+    summary = {"mode": "live", "pushed": 0, "skipped": 0, "failed": 0, "deferred": 0,
+               "quarantined": 0, "remaining": 0,
                "candidates": 0, "dry_run": False}
     try:
         from routes.amazon_spapi import (_get_config, _amazon_push_stock_price, ALLOW_WRITE,
                                          _amazon_markup, _amazon_price_of, _amazon_seller_sku,
                                          _resolve_amazon_pt_and_defaults)
+        from routes.amazon_helpers import safe_amazon_failure, amazon_retry_policy
         _pt_cache = {}  # stok-sync #3: ürün başına gerçek productType (sabit "PRODUCT" değil)
         cfg = await _get_config()
         if not cfg or not cfg.get("refresh_token_enc") or not cfg.get("selling_partner_id"):
@@ -1004,7 +1006,7 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
                 message=f"[amazon] stok/fiyat DRY-RUN: {summary['candidates']} SKU hazır.")
             return summary
 
-        pushed = skipped = failed = remaining = 0
+        pushed = skipped = failed = deferred = quarantined = remaining = 0
         # Otomatik cron: 40/tur (seed'i yay). Manuel tetik: TAVAN YOK (tümünü gönder).
         _CAP = 1000000 if (manual or _filtered) else 40
         _force = force or _filtered
@@ -1020,14 +1022,23 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
                     qty = int(v.get("stock") or 0)
                 except Exception:
                     qty = 0
+                st = await _db.amazon_sku_state.find_one({"sku": sku}, {"_id": 0})
                 if not _force:
-                    st = await _db.amazon_sku_state.find_one({"sku": sku}, {"_id": 0})
+                    # Basarisiz SKU'yu her iki dakikada sonsuza dek dovme: kademeli backoff,
+                    # 8. ardışık hatadan sonra 24 saat karantina. Manuel force bunu atlayabilir.
+                    _now_s = datetime.now(timezone.utc).isoformat()
+                    if st and str(st.get("next_retry_at") or "") > _now_s:
+                        deferred += 1
+                        if st.get("quarantined"):
+                            quarantined += 1
+                        continue
                     if st and st.get("qty") == qty and st.get("price") == pr:
                         skipped += 1
                         continue
                 if pushed >= _CAP:
                     remaining += 1
                     continue
+                _push_error = None
                 try:
                     _pid = p.get("id")
                     if _pid not in _pt_cache:
@@ -1038,21 +1049,50 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
                             _pt_cache[_pid] = "PRODUCT"
                     res = await _amazon_push_stock_price(sku, qty, pr, product_type=_pt_cache[_pid])
                 except Exception as _pe:
-                    failed += 1
-                    logger.error(f"[amazon] stok push {sku}: {_pe}")
-                    continue
+                    res = {}
+                    _push_error = _pe
                 if res.get("ok"):
                     await _db.amazon_sku_state.update_one(
                         {"sku": sku},
                         {"$set": {"sku": sku, "qty": qty, "price": pr,
-                                  "updated_at": datetime.now(timezone.utc).isoformat()}},
+                                  "updated_at": datetime.now(timezone.utc).isoformat(),
+                                  "failure_count": 0, "quarantined": False},
+                         "$unset": {"last_error_code": "", "last_error_message": "",
+                                    "last_error_http": "", "last_failed_at": "", "next_retry_at": ""}},
                         upsert=True)
                     pushed += 1
                 else:
                     failed += 1
+                    _detail = safe_amazon_failure(res, _push_error)
+                    _failure_count = int((st or {}).get("failure_count") or 0) + 1
+                    _delay, _is_quarantined = amazon_retry_policy(_failure_count)
+                    _failed_at = datetime.now(timezone.utc)
+                    _next_retry = (_failed_at + timedelta(seconds=_delay)).isoformat()
+                    await _db.amazon_sku_state.update_one(
+                        {"sku": sku},
+                        {"$set": {"sku": sku, "failure_count": _failure_count,
+                                  "last_error_code": _detail["code"],
+                                  "last_error_message": _detail["message"],
+                                  "last_error_http": _detail.get("http"),
+                                  "last_failed_at": _failed_at.isoformat(),
+                                  "next_retry_at": _next_retry,
+                                  "quarantined": _is_quarantined}},
+                        upsert=True)
+                    # Log hacmini sinirla: ilk iki hata, 4. hata ve karantinaya giris.
+                    if _failure_count in (1, 2, 4, 8):
+                        await log_integration_event(
+                            marketplace="amazon", action="stock_sync", status="failed",
+                            direction="outbound", ref_id=sku,
+                            message=(f"Amazon stok SKU hatasi [{_detail['code']}]: "
+                                     f"{_detail['message']} (deneme {_failure_count}, "
+                                     f"{'karantina' if _is_quarantined else f'{_delay}sn backoff'})"))
+                    logger.warning("[amazon] stok push basarisiz sku=%s code=%s attempt=%s",
+                                   sku, _detail["code"], _failure_count)
                 await _aio.sleep(0.25)  # Listings PATCH 5 rps — güvenli aralık
-        summary.update({"pushed": pushed, "skipped": skipped, "failed": failed, "remaining": remaining})
+        summary.update({"pushed": pushed, "skipped": skipped, "failed": failed,
+                        "deferred": deferred, "quarantined": quarantined, "remaining": remaining})
         summary["message"] = (f"{pushed} gönderildi / {skipped} değişmedi / {failed} hata"
+                              + (f" / {deferred} backoff'ta ({quarantined} karantina)" if deferred else "")
                               + (f" / {remaining} sonraki tura" if remaining else ""))
         if pushed or failed or remaining:
             await log_integration_event(

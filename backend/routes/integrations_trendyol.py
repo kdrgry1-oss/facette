@@ -15,7 +15,9 @@ import httpx
 import hashlib
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, get_effective_permissions, require_permission
-from .report_dedup import canonical_order_stages, effective_order_date_match, merge_match
+from .report_dedup import (canonical_order_stages, effective_order_date_match, merge_match,
+                           marketplace_claim_status_bucket)
+from stock_audit import record_stock_sync_audit
 from facette_defaults import (
     facette_company_value,     # yalnız GPSR (Üretici/İthalatçı) — beyaz-etiket, dinamik
     FACETTE_FIXED_ATTR_DEFAULTS,  # statik seed haritası (yalnız DB'de doküman YOKSA fallback)
@@ -2776,13 +2778,29 @@ async def sync_trendyol_inventory(payload: dict = Body(default={}), current_user
 @router.post("/trendyol/products/{product_id}/sync-inventory")
 async def sync_single_product_inventory(
     product_id: str,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Sync stock and prices for a single product to Trendyol"""
     product = await db.products.find_one({"id": product_id})
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
-    return await _sync_inventory_to_trendyol([product])
+    try:
+        result = await _sync_inventory_to_trendyol([product])
+        await record_stock_sync_audit(
+            db, product=product, platform="trendyol",
+            status="submitted" if result.get("success") else "failed",
+            current_user=current_user, request=request, batch_id=result.get("batch_id", ""),
+            message=result.get("message", ""),
+        )
+        return result
+    except Exception as exc:
+        await record_stock_sync_audit(
+            db, product=product, platform="trendyol", status="error",
+            current_user=current_user, request=request,
+            message=f"Trendyol stok senkronu başarısız ({type(exc).__name__})",
+        )
+        raise
 async def _sync_inventory_to_trendyol(products: list, force_quantity: int = None):
     """Ürünlerin stok+fiyatını Trendyol'a gönderir. force_quantity verilirse (ör. 0)
     her kalemin miktarı DB stoğu yerine o değere ZORLANIR (pasife-alma → 0 stok).
@@ -5340,6 +5358,9 @@ async def get_trendyol_claims(
 
     # base_query (arama/tip filtreli, AMA status filtresiz) ile TÜM kayıtları çek.
     # Status filtresi bellekte uygulanır ki tab_counts tüm kovaları doğru sayabilsin.
+    # The large raw_data payload is fetched selectively below only for the
+    # platform-scoped claim ids.  Keeping it out of this all-history read avoids
+    # a large memory spike on every tab refresh.
     raw = await db.trendyol_claims.find(
         base_query, {"_id": 0, "raw_data": 0}
     ).sort("created_date", -1).to_list(None)
@@ -5404,6 +5425,27 @@ async def get_trendyol_claims(
     # HB kalem-bazlı claim'leri sipariş no'ya göre tek satırda birleştir (4598214509 gibi).
     platform_scoped = _group_hb_claims_by_order(platform_scoped)
     iade_scoped = [c for c in platform_scoped if _claim_bucket(c) != "iptal"]
+    # Mixed claims must be counted by child claimItem status, not by the single
+    # claim-level status. Fetch only the nested fields used for counting/reason
+    # enrichment, then discard them before responding to the browser.
+    _raw_by_claim = {}
+    _raw_ids = list({str(c.get("claim_id") or "") for c in iade_scoped
+                     if c.get("claim_id") and not c.get("manual")})
+    for _i in range(0, len(_raw_ids), 5000):
+        async for _rd in db.trendyol_claims.find(
+            {"claim_id": {"$in": _raw_ids[_i:_i + 5000]}},
+            {"_id": 0, "claim_id": 1, "created_date": 1,
+             "raw_data.items.orderLine.barcode": 1,
+             "raw_data.items.claimItems.id": 1,
+             "raw_data.items.claimItems.claimItemStatus.name": 1,
+             "raw_data.items.claimItems.customerClaimItemReason.name": 1},
+        ).sort("created_date", -1):
+            _raw_by_claim.setdefault(str(_rd.get("claim_id") or ""),
+                                     _rd.get("raw_data") or {})
+    for _claim in iade_scoped:
+        _cid = str(_claim.get("claim_id") or "")
+        if _cid in _raw_by_claim:
+            _claim["raw_data"] = _raw_by_claim[_cid]
     # En yeni HAREKET en üstte (site/Trendyol/HB fark etmez) — talep/onay/ret/değişiklik en yenisi.
     iade_scoped.sort(key=_claim_activity_key, reverse=True)
 
@@ -5514,18 +5556,6 @@ async def get_trendyol_claims(
     # YANLIŞ (Trendyol'u aşar). Doğrusu: her claimItem'i KENDİ statüsüyle kovaya atmak.
     # Statü kaynağı: raw_data.items[].claimItems[].claimItemStatus.name (her claim'de mevcut,
     # re-sync gerekmez). Manuel/site kaydı veya raw yoksa → claim kovasında stored kalem (min 1).
-    def _item_status_to_bucket(_nm: str, _has_cargo: bool):
-        _nm = (_nm or "").strip()
-        if _nm == "Accepted":
-            return "onaylanan"
-        if _nm in ("Rejected", "Unresolved"):
-            return "reddedilen"
-        if _nm in ("WaitingInAction", "InAnalysis"):
-            return "aksiyon_bekleyen"
-        if _nm == "Created":
-            return "kargoya_verilen" if _has_cargo else "talep_olusturulan"
-        return None  # Cancelled / bilinmeyen → sayma (iptal edilmiş kalem iadelerde görünmez)
-
     _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
     _ccount = dict(_bcount)  # claim (satır) adedi — liste satır sayısıyla tutması için
     _all_items = 0
@@ -5540,7 +5570,7 @@ async def get_trendyol_claims(
             for _it in (_raw.get("items") or []):
                 for _ci in (_it.get("claimItems") or []):
                     _nm = ((_ci.get("claimItemStatus") or {}).get("name") or "")
-                    _b = _item_status_to_bucket(_nm, _has_cargo)
+                    _b = marketplace_claim_status_bucket(_nm, _has_cargo)
                     if _b in _bcount:
                         _bcount[_b] += 1
                         _all_items += 1
@@ -5558,6 +5588,9 @@ async def get_trendyol_claims(
     total_returns = len(iade_scoped)
     total_cancels = await db.trendyol_claims.count_documents({"claim_type": "CANCEL"})
     total_refund = sum((c.get("refund_amount") or 0) for c in iade_scoped)
+
+    for c in claims:
+        c.pop("raw_data", None)
 
     return {
         "claims": claims,

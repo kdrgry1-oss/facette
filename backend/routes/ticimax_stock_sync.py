@@ -16,7 +16,7 @@ ENDPOINT:
   POST /api/admin/ticimax/sync-stock?max_products=500&aktif=1
 =============================================================================
 """
-from fastapi import APIRouter, Depends, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, Query, BackgroundTasks, Request
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 import sys, os
@@ -28,6 +28,7 @@ if _BACKEND_PATH not in sys.path:
 
 from .deps import db, logger, require_admin
 from .marketplace_hub import log_integration_event
+from stock_audit import record_stock_audit
 
 router = APIRouter(prefix="/admin/ticimax", tags=["admin-ticimax-stock"])
 
@@ -113,6 +114,7 @@ async def sync_ticimax_stock(
     aktif: Optional[int] = Query(None, description="1=aktif, 0=pasif, None=hepsi"),
     page_size: int = Query(50, ge=10, le=100),
     current_user: dict = Depends(require_admin),
+    request: Request = None,
 ):
     """Ticimax SelectUrun ile canlı stok değerlerini çek + DB'de güncelle.
 
@@ -199,7 +201,8 @@ async def sync_ticimax_stock(
         if tc_card_id:
             product_doc = await db.products.find_one(
                 {"csv_card_id": {"$in": [tc_card_id, str(tc_card_id)]}},
-                {"_id": 0, "id": 1, "variants": 1}
+                {"_id": 0, "id": 1, "name": 1, "stock": 1, "stock_code": 1,
+                 "barcode": 1, "variants": 1}
             )
 
         # ÖNCELİK 2: ticimax variant barkod/stock_code'larından bizdeki ürünü bul
@@ -215,7 +218,9 @@ async def sync_ticimax_stock(
                 or_clauses.append({"barcode": {"$in": tv_bars}})
             if or_clauses:
                 product_doc = await db.products.find_one(
-                    {"$or": or_clauses}, {"_id": 0, "id": 1, "variants": 1}
+                    {"$or": or_clauses},
+                    {"_id": 0, "id": 1, "name": 1, "stock": 1, "stock_code": 1,
+                     "barcode": 1, "variants": 1}
                 )
 
         # ÖNCELİK 3: Top-level StokKodu (Varyasyon yoksa) - tek varyantlı ürünler
@@ -231,7 +236,9 @@ async def sync_ticimax_stock(
                 tcl.append({"barcode": top_bar})
             if tcl:
                 product_doc = await db.products.find_one(
-                    {"$or": tcl}, {"_id": 0, "id": 1, "variants": 1}
+                    {"$or": tcl},
+                    {"_id": 0, "id": 1, "name": 1, "stock": 1, "stock_code": 1,
+                     "barcode": 1, "variants": 1}
                 )
 
         if not product_doc:
@@ -292,6 +299,14 @@ async def sync_ticimax_stock(
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }}
             )
+            await record_stock_audit(
+                db, product_id=product_doc["id"], product_name=product_doc.get("name", ""),
+                before=product_doc,
+                after={**product_doc, "stock": new_stock, "variants": new_variants},
+                source="ticimax_inbound", current_user=current_user, request=request,
+                action="marketplace_stock_imported",
+                sync_result={"status": "success", "platform": "ticimax"},
+            )
         except Exception as e:
             errors.append(f"product {product_doc['id']}: {e}")
 
@@ -323,6 +338,7 @@ async def sync_ticimax_stock(
 @router.post("/sync-stock-async")
 async def sync_ticimax_stock_async(
     background_tasks: BackgroundTasks,
+    request: Request,
     max_products: int = Query(5000, ge=10, le=20000),
     aktif: Optional[int] = Query(None),
     page_size: int = Query(50, ge=10, le=100),
@@ -334,7 +350,7 @@ async def sync_ticimax_stock_async(
         try:
             from ticimax_client import get_products  # noqa
             await sync_ticimax_stock(max_products=max_products, aktif=aktif,
-                                     page_size=page_size, current_user=current_user)
+                                     page_size=page_size, current_user=current_user, request=request)
         except Exception as e:
             await log_integration_event(
                 marketplace="ticimax", action="stock_sync", status="error",

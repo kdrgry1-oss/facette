@@ -1,11 +1,12 @@
 """
 Banner routes - CRUD
 """
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from typing import Optional
 from datetime import datetime, timezone
 
 from .deps import db, logger, require_admin, generate_id
+from activity_audit import record_admin_audit
 
 router = APIRouter(prefix="/banners", tags=["Banners"])
 
@@ -35,6 +36,7 @@ async def get_banner(banner_id: str):
 @router.post("")
 async def create_banner(
     banner_data: dict,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Create banner (admin only)"""
@@ -64,12 +66,17 @@ async def create_banner(
     }
 
     await db.banners.insert_one(banner)
+    await record_admin_audit(
+        db, action="banner.create", entity_type="banner", entity_id=banner["id"],
+        before={}, after=banner, current_user=current_user, request=request, source="content.banners",
+    )
     return {"id": banner["id"], "message": "Banner oluşturuldu"}
 
 @router.put("/{banner_id}")
 async def update_banner(
     banner_id: str,
     banner_data: dict,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Update banner (admin only)"""
@@ -93,15 +100,27 @@ async def update_banner(
     banner_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     await db.banners.update_one({"id": banner_id}, {"$set": banner_data})
+    await record_admin_audit(
+        db, action="banner.update", entity_type="banner", entity_id=banner_id,
+        before=existing, after={**existing, **banner_data}, current_user=current_user,
+        request=request, source="content.banners",
+    )
     return {"message": "Banner güncellendi"}
 
 @router.delete("/{banner_id}")
 async def delete_banner(
     banner_id: str,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Delete banner (admin only)"""
+    existing = await db.banners.find_one({"id": banner_id}, {"_id": 0})
     result = await db.banners.delete_one({"id": banner_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Banner bulunamadı")
+    await record_admin_audit(
+        db, action="banner.delete", entity_type="banner", entity_id=banner_id,
+        before=existing or {}, after={}, current_user=current_user, request=request,
+        source="content.banners",
+    )
     return {"message": "Banner silindi"}

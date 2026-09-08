@@ -3,6 +3,11 @@ from typing import Dict, Any
 from datetime import datetime, timezone
 
 from .deps import db, require_admin, limiter, require_permission
+from tenant_config import (
+    TenantConfig, get_tenant_config, invalidate as invalidate_tenant_config,
+    legacy_write_through,
+)
+from activity_audit import record_admin_audit
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
@@ -94,12 +99,13 @@ async def get_maintenance_status():
         {"id": "main"},
         {"_id": 0, "maintenance_mode": 1, "maintenance_title": 1, "maintenance_message": 1, "logo_url": 1, "site_name": 1},
     ) or {}
+    tenant = await get_tenant_config(db)
     return {
         "maintenance_mode": bool(settings.get("maintenance_mode", False)),
         "maintenance_title": settings.get("maintenance_title") or "Sitemiz sizin için yenileniyor",
         "maintenance_message": settings.get("maintenance_message") or "Çok yakında, daha iyi bir alışveriş deneyimiyle buradayız. Anlayışınız için teşekkür ederiz.",
-        "logo_url": settings.get("logo_url") or "",
-        "site_name": settings.get("site_name") or "FACETTE",
+        "logo_url": tenant["brand"]["logo_url"],
+        "site_name": tenant["brand"]["store_name"],
     }
 
 @router.get("")
@@ -109,7 +115,7 @@ async def get_settings():
     if not settings:
         settings = {
             "id": "main",
-            "site_name": "FACETTE",
+            "site_name": "Mağaza",
             "logo_url": "",
             "free_shipping_limit": 500,
             "rotating_texts": [],
@@ -138,15 +144,31 @@ async def get_settings():
     settings["shipping_fee"] = resolve_shipping_fee(settings)
     settings["free_shipping_threshold"] = await resolve_free_shipping_threshold(settings)
 
+    settings["tenant_config"] = await get_tenant_config(db)
     return settings
 
 @router.post("")
 async def update_settings(
     settings_data: dict,
+    request: Request,
     current_user: dict = Depends(require_permission("settings.site"))
 ):
     """Update global settings"""
+    before_main = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
+    before_tenant = await db.settings.find_one({"id": "tenant_config"}, {"_id": 0}) or {}
     settings_data.pop("_id", None)
+    # New admin clients write the canonical nested document. Keep it out of
+    # settings.main so there is only one authoritative copy.
+    tenant_payload = settings_data.pop("tenant_config", None)
+    if tenant_payload is not None:
+        tenant = TenantConfig.model_validate(tenant_payload).model_dump()
+        await db.settings.update_one(
+            {"id": "tenant_config"}, {"$set": tenant}, upsert=True
+        )
+        # Temporary dual-write keeps old order/shipping/invoice consumers live
+        # while they are migrated independently to get_tenant_config().
+        settings_data.update(legacy_write_through(tenant))
+        invalidate_tenant_config(db)
     existing = await db.settings.find_one({"id": "main"})
     if not existing:
         settings_data["id"] = "main"
@@ -161,7 +183,52 @@ async def update_settings(
         _co_inv()
     except Exception:
         pass
+    after_main = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
+    await record_admin_audit(
+        db, action="settings.update", entity_type="settings", entity_id="main",
+        before=before_main, after=after_main, current_user=current_user, request=request,
+        source="settings",
+    )
+    if tenant_payload is not None:
+        await record_admin_audit(
+            db, action="tenant_config.update", entity_type="settings", entity_id="tenant_config",
+            before=before_tenant, after=tenant, current_user=current_user, request=request,
+            source="settings",
+        )
     return {"message": "Ayarlar güncellendi"}
+
+
+@router.get("/tenant-config")
+async def read_tenant_config(current_user: dict = Depends(require_admin)):
+    """Canonical white-label settings; contains secret references, never secrets."""
+    return await get_tenant_config(db, use_cache=False)
+
+
+@router.put("/tenant-config")
+async def write_tenant_config(
+    payload: dict,
+    request: Request,
+    current_user: dict = Depends(require_permission("settings.site")),
+):
+    before = await db.settings.find_one({"id": "tenant_config"}, {"_id": 0}) or {}
+    tenant = TenantConfig.model_validate(payload).model_dump()
+    await db.settings.update_one({"id": "tenant_config"}, {"$set": tenant}, upsert=True)
+    await db.settings.update_one(
+        {"id": "main"}, {"$set": legacy_write_through(tenant), "$setOnInsert": {"id": "main"}}, upsert=True
+    )
+    invalidate_tenant_config(db)
+    await record_admin_audit(
+        db, action="tenant_config.update", entity_type="settings", entity_id="tenant_config",
+        before=before, after=tenant, current_user=current_user, request=request, source="settings",
+    )
+    return {"success": True, "schema_version": tenant["schema_version"]}
+
+
+@router.get("/tenant-config/migration-preview")
+async def preview_tenant_config_migration(current_user: dict = Depends(require_admin)):
+    """Read-only migration preview. Legal/CMS documents are intentionally excluded."""
+    from tenant_config import migrate_tenant_config
+    return await migrate_tenant_config(db, apply=False)
 
 
 # =============================================================================
@@ -170,17 +237,6 @@ async def update_settings(
 #       account_holder,is_default} ] }
 # =============================================================================
 import uuid as _uuid
-
-
-def _seed_default_banks():
-    return [{
-        "id": _uuid.uuid4().hex[:12],
-        "bank_name": "TÜRKİYE İŞ BANKASI",
-        "branch": "CUMHURİYET CADDESİ ESENYURT ŞUBESİ",
-        "iban": "TR86 0006 4000 0011 4540 1414 67",
-        "account_holder": "FACETTE DIŞ TİC. A.Ş",
-        "is_default": True,
-    }]
 
 
 def _ensure_single_default(banks):
@@ -194,10 +250,6 @@ async def payment_overview(current_user: dict = Depends(require_admin)):
     """Ödeme Tipleri sayfasi: aktif odeme entegrasyonlari + havale banka hesaplari."""
     pay = await db.settings.find_one({"id": "payment"}, {"_id": 0}) or {}
     banks = pay.get("bank_accounts") or []
-    if not banks:
-        banks = _seed_default_banks()
-        await db.settings.update_one({"id": "payment"},
-                                     {"$set": {"id": "payment", "bank_accounts": banks}}, upsert=True)
     iyz = await db.settings.find_one({"id": "iyzico"}, {"_id": 0}) or {}
     integrations = [{
         "key": "iyzico",
@@ -344,7 +396,9 @@ async def get_store_info(current_user: dict = Depends(require_admin)):
 
 
 @router.post("/store-info")
-async def save_store_info(payload: Dict[str, Any], current_user: dict = Depends(require_admin)):
+async def save_store_info(payload: Dict[str, Any], request: Request,
+                          current_user: dict = Depends(require_admin)):
+    before = await db.settings.find_one({"id": "store_info"}, {"_id": 0}) or {}
     data = {
         "id": "store_info",
         "sender_name": str(payload.get("sender_name") or "").strip(),
@@ -356,6 +410,10 @@ async def save_store_info(payload: Dict[str, Any], current_user: dict = Depends(
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.settings.update_one({"id": "store_info"}, {"$set": data}, upsert=True)
+    await record_admin_audit(
+        db, action="store_info.update", entity_type="settings", entity_id="store_info",
+        before=before, after=data, current_user=current_user, request=request, source="settings",
+    )
     return {"success": True}
 
 
@@ -367,13 +425,14 @@ async def save_store_info(payload: Dict[str, Any], current_user: dict = Depends(
 @router.get("/email-smtp")
 async def get_email_smtp(current_user: dict = Depends(require_admin)):
     s = await db.settings.find_one({"id": "email_smtp"}, {"_id": 0}) or {}
+    tenant = await get_tenant_config(db)
     return {
         "enabled": bool(s.get("enabled", False)),
         "host": s.get("host", "smtp.zoho.eu"),
         "port": int(s.get("port", 465)),
         "secure": s.get("secure", "ssl"),
         "username": s.get("username", ""),
-        "from_name": s.get("from_name", "FACETTE"),
+        "from_name": s.get("from_name") or tenant["brand"]["store_name"],
         # Sipariş maillerinin ayrı gönderen kimliği (ör. siparis@...). Boşsa sipariş
         # mailleri de varsayılan gönderenden gider. Pazarlama (SES) ile işlemsel (Zoho)
         # itibar ayrımının tamamlayıcısı: sipariş mailleri şifre/pazarlamadan ayrışır.
@@ -385,8 +444,10 @@ async def get_email_smtp(current_user: dict = Depends(require_admin)):
 
 
 @router.post("/email-smtp")
-async def save_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(require_permission("settings.emails"))):
+async def save_email_smtp(payload: Dict[str, Any], request: Request,
+                          current_user: dict = Depends(require_permission("settings.emails"))):
     existing = await db.settings.find_one({"id": "email_smtp"}, {"_id": 0}) or {}
+    tenant = await get_tenant_config(db)
     pwd = payload.get("password")
     data = {
         "id": "email_smtp",
@@ -395,7 +456,7 @@ async def save_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(
         "port": int(payload.get("port") or 465),
         "secure": (str(payload.get("secure") or "ssl")).strip().lower(),
         "username": (str(payload.get("username") or "")).strip(),
-        "from_name": (str(payload.get("from_name") or "FACETTE")).strip(),
+        "from_name": (str(payload.get("from_name") or tenant["brand"]["store_name"])).strip(),
         # Sipariş maili gönderen kimliği (opsiyonel; boş → varsayılan gönderen).
         "order_from_email": (str(payload.get("order_from_email") or "")).strip(),
         "order_from_name": (str(payload.get("order_from_name") or "")).strip(),
@@ -413,6 +474,10 @@ async def save_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(
     elif existing.get("password"):
         data["password"] = existing["password"]
     await db.settings.update_one({"id": "email_smtp"}, {"$set": data}, upsert=True)
+    await record_admin_audit(
+        db, action="email_smtp.update", entity_type="settings", entity_id="email_smtp",
+        before=existing, after=data, current_user=current_user, request=request, source="settings",
+    )
     return {"success": True}
 
 
@@ -423,9 +488,10 @@ async def test_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(
         raise HTTPException(status_code=400, detail="Test için alıcı e-posta gerekli")
     from email_smtp import send_smtp_email, get_smtp_config, _endpoint
     cfg = await get_smtp_config(db)
+    tenant = await get_tenant_config(db)
     res = await send_smtp_email(
         db, to,
-        "Facette SMTP Test",
+        f"{tenant['brand']['store_name']} SMTP Test",
         "<p>Bu bir test e-postasıdır. Zoho SMTP ayarlarınız çalışıyor 🎉</p>",
     )
     if not res.get("success"):

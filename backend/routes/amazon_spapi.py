@@ -28,6 +28,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query, Body, Upl
 from fastapi.responses import RedirectResponse
 
 from .deps import db, logger, require_admin
+from .amazon_helpers import (
+    amazon_image_candidates,
+    amazon_sibling_query,
+    build_amazon_seller_sku,
+    canonical_amazon_color,
+)
 
 router = APIRouter(prefix="/amazon/spapi", tags=["Amazon SP-API"])
 
@@ -741,21 +747,21 @@ def _amazon_image_url(u: str) -> str:
     return u
 
 
-def _product_images(product: dict) -> list:
-    urls = []
-    for im in (product.get("images") or []):
-        if isinstance(im, str) and im.startswith("http"):
-            urls.append(im)
-        elif isinstance(im, dict):
-            u = im.get("url") or im.get("src") or im.get("image")
-            if u and str(u).startswith("http"):
-                urls.append(u)
-    for k in ("image", "main_image"):
-        u = product.get(k)
-        if u and str(u).startswith("http") and u not in urls:
-            urls.insert(0, u)
-    urls = list(dict.fromkeys(urls))[:9]  # main + 8 other (Amazon limiti)
-    return [_amazon_image_url(u) for u in urls]  # WebP → JPEG proxy
+def _product_images(product: dict, variant: dict = None) -> list:
+    # Varyant/rengin kendi gorseli varsa Amazon child listing'inde ana gorsel odur.
+    # Urun gorselleri kalan slotlari doldurur (Amazon: main + en fazla 8 other).
+    return [_amazon_image_url(u) for u in amazon_image_candidates(product, variant)]
+
+
+def _amazon_color_of(product: dict, variant: dict = None) -> str:
+    """Tek kanonik renk cozucu: varyant/urun/attributes ve son olarak urun adi."""
+    fallback = ""
+    try:
+        from .products import _resolve_prod_color
+        fallback = _resolve_prod_color(product or {})
+    except Exception:
+        pass
+    return canonical_amazon_color(product or {}, variant or {}, fallback)
 
 
 def _pick_variation_theme(enum, has_color: bool, has_size: bool) -> str:
@@ -860,7 +866,7 @@ def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, b
     Eksik/zorunlu alanları Amazon PUT yanıtındaki issues[] söyler → çağıran gösterir."""
     name = (product.get("name") or "").strip()
     desc = (product.get("description") or name or "").strip()
-    imgs = _product_images(product)
+    imgs = _product_images(product, variant)
     barcode = str(variant.get("barcode") or "").strip()
     brand = (product.get("brand") or brand_default or "").strip() or "Facette"
     bullets = []
@@ -898,10 +904,9 @@ def _amazon_listing_attributes(product, variant, product_type, mp, price, qty, b
         # DENETİM (Amazon P3): beden değeri (M / 38) LOKALİZE DEĞİL — birçok apparel productType
         # 'size' alanında language_tag KABUL ETMEZ, göndermek varyantı düşürüyordu. language_tag'siz.
         attrs["size"] = [{"value": str(variant["size"]), "marketplace_id": mp}]
-    if variant.get("color") or product.get("color"):
-        _clr = str(variant.get("color") or product.get("color") or "").strip()
-        if _clr:
-            attrs["color"] = [{"value": _clr, "language_tag": "tr_TR", "marketplace_id": mp}]
+    _clr = _amazon_color_of(product, variant)
+    if _clr:
+        attrs["color"] = [{"value": _clr, "language_tag": "tr_TR", "marketplace_id": mp}]
     # Site-alanı eşleştirmeleri (attribute_mappings): kullanıcı bir Amazon alanını Facette
     # özelliğine eşlediyse, ürünün o özellik DEĞERİNİ gönder (varsayılandan ÖNCE gelir).
     if attr_mappings:
@@ -1017,14 +1022,8 @@ def _amazon_seller_sku(variant: dict, product: dict = None) -> str:
     """Varyant için BENZERSİZ Amazon SellerSKU. Renkler AYNI stok kodunu paylaşabildiğinden
     (Siyah/Acı Kahve → FCSS1800001) SKU'ya RENK de girer: stok_kodu[-renk][-beden].
     Renk/beden yoksa o parça atlanır; hiçbiri yoksa barkod."""
-    import re as _re
     product = product or {}
-    sc = str(variant.get("stock_code") or product.get("stock_code") or "").strip()
-    color = str(variant.get("color") or product.get("color") or "").strip()
-    sz = str(variant.get("size") or "").strip()
-    color_slug = _re.sub(r"[^A-Za-z0-9ğüşöçıİĞÜŞÖÇ]+", "", color)[:20]
-    parts = [x for x in (sc, color_slug, sz) if x]
-    return "-".join(parts) or str(variant.get("barcode") or "").strip()
+    return build_amazon_seller_sku(variant, product, _amazon_color_of(product, variant))
 
 
 def _amz_code_match(product: dict, variant: dict, bset: set, sset: set, pset: set) -> bool:
@@ -1130,7 +1129,7 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
                 _tally({"sku": _amazon_seller_sku(v, pp), "product": pp.get("name"),
                         "ok": False, "error": "Amazon productType yok (kategori eşleştir)."}, False, False)
             return
-        n_color = len({str(pp.get("color") or "").strip() for pp, _ in specs if str(pp.get("color") or "").strip()})
+        n_color = len({_amazon_color_of(pp, v) for pp, v in specs if _amazon_color_of(pp, v)})
         _has_size = any(str(v.get("size") or "").strip() for _, v in specs)
         # DENETİM (Amazon P3): variation_theme'i productType şemasının GEÇERLİ enum'undan seç
         # (sabit 'SIZE_NAME/COLOR_NAME' Amazon'ca reddediliyordu → beden/renk düşüyordu).
@@ -1198,7 +1197,7 @@ async def sync_products_to_amazon(payload: dict, current_user: dict) -> dict:
     _sibs = _dd(list)
     if _scodes:
         _codes = list(_scodes)
-        _sq = {"$or": [{"stock_code": {"$in": _codes}}, {"sku": {"$in": _codes}}]}
+        _sq = amazon_sibling_query(_codes)
         _q2 = _sq if _filtered else {"$and": [_sq, {"is_active": True}]}
         async for sp in db.products.find(_q2, {"_id": 0}):
             _sk = _rsc(sp)
@@ -1270,7 +1269,7 @@ async def validate_products_for_amazon(payload: dict, current_user: dict) -> dic
             sc = str(v.get("stock_code") or "").strip()
             if _filtered and not _amz_code_match(p, v, _bset, _sset, _pset):
                 continue
-            sku = _amazon_seller_sku(v)
+            sku = _amazon_seller_sku(v, p)
             if not sku:
                 continue
             attrs = _amazon_listing_attributes(p, v, pt or "PRODUCT", mp, price,
@@ -1719,7 +1718,7 @@ async def spapi_products_preview(q: str = Query(...), current_user: dict = Depen
         for r in (sch.get("required") or []):
             if r not in attrs:
                 missing.append(r)
-    imgs = _product_images(prod)
+    imgs = _product_images(prod, v0)
     return {
         "found": True, "product": prod.get("name"), "product_id": prod.get("id"),
         "product_type": pt or None,

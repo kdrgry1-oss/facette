@@ -141,7 +141,7 @@ export default function Cart() {
 
   if (items.length === 0) {
     return (
-      <div className="min-h-screen bg-white" data-testid="cart-page">
+      <div className="sf-page min-h-screen bg-white" data-testid="cart-page">
         <Header />
         <div className="container-main py-24 text-center">
           <p className="text-[10px] tracking-[0.3em] text-black/50 uppercase mb-6">SEPETİM</p>
@@ -163,7 +163,7 @@ export default function Cart() {
   }
 
   return (
-    <div className="min-h-screen bg-white pb-32 md:pb-12" data-testid="cart-page">
+    <div className="sf-page min-h-screen bg-white pb-32 md:pb-12" data-testid="cart-page">
       <Header />
 
       <div className="container-main py-6 md:py-12">
@@ -207,7 +207,7 @@ export default function Cart() {
               ) : (
                 <div className="mb-8 p-4 bg-emerald-50 border border-emerald-200">
                   <p className="text-xs text-center mb-2 text-emerald-800 font-medium">
-                    🎉 Ücretsiz kargo kazandın!
+                    Ücretsiz kargo kazandın
                   </p>
                   <div className="h-[2px] bg-emerald-200 overflow-hidden">
                     <div className="h-full bg-emerald-600 w-full" />

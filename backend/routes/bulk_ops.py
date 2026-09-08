@@ -21,13 +21,15 @@ KULLANAN FRONTEND:
   /app/frontend/src/pages/admin/StockAlerts.jsx
 =============================================================================
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from fastapi.responses import StreamingResponse
 from datetime import datetime, timezone
 from io import BytesIO
 import openpyxl
+import copy
 
-from .deps import db, require_admin, logger, generate_id
+from .deps import db, require_admin, logger
+from stock_audit import record_stock_audit
 
 router = APIRouter(prefix="/bulk-ops", tags=["Bulk Operations"])
 
@@ -155,7 +157,7 @@ async def preview_upload(file: UploadFile = File(...),
 # Apply
 # ---------------------------------------------------------------------------
 @router.post("/price-stock/apply")
-async def apply_upload(file: UploadFile = File(...),
+async def apply_upload(request: Request, file: UploadFile = File(...),
                         current_user: dict = Depends(require_admin)):
     """Yüklenen Excel'i uygular — eşleşen her ürün için updateOne çağırır."""
     content = await file.read()
@@ -180,12 +182,16 @@ async def apply_upload(file: UploadFile = File(...),
             skipped += 1; continue
         # DENETİM FIX: find_one → TÜM eşleşen ürünler. Renk-kardeşleri stock_code'u paylaşır;
         # eskiden yalnız BİR ürün güncelleniyordu.
-        products = await db.products.find(query, {"_id": 0, "id": 1, "variants": 1}).to_list(200)
+        products = await db.products.find(query, {"_id": 0, "id": 1, "name": 1, "stock": 1,
+                                                  "stock_code": 1, "sku": 1, "barcode": 1,
+                                                  "variants": 1}).to_list(200)
         if not products:
             fail += 1; continue
 
         _row_applied = False
         for product in products:
+            audit_before = copy.deepcopy(product)
+            audit_after = copy.deepcopy(product)
             root_updates = {}
             if r.get("price") not in (None, ""):
                 try: root_updates["price"] = float(r["price"])
@@ -214,15 +220,14 @@ async def apply_upload(file: UploadFile = File(...),
                         if key_used == "barcode" and v.get("barcode") == ref:
                             target_idx = i; break
                     if target_idx is not None:
-                        _old_v = variants[target_idx] if target_idx < len(variants) else {}
-                        try:
-                            _old_stock = int(_old_v.get("stock") or 0)
-                        except Exception:
-                            _old_stock = 0
                         await db.products.update_one(
                             {"id": product["id"]},
                             {"$set": {f"variants.{target_idx}.stock": new_stock, "updated_at": now}}
                         )
+                        audit_variants = copy.deepcopy(variants)
+                        audit_variants[target_idx]["stock"] = new_stock
+                        audit_after["variants"] = audit_variants
+                        audit_after["stock"] = sum(int(v.get("stock", 0) or 0) for v in audit_variants)
                         # KÖK-NEDEN FIX (desync): varyant stoğu yazıldıktan sonra parent 'stock'
                         # HER ZAMAN Σvaryant'a eşitlenir — create/update/sipariş yollarındaki AYNI
                         # invariant (products.py:2159, orders.py). Aksi halde admin'de "stok var"
@@ -235,26 +240,6 @@ async def apply_upload(file: UploadFile = File(...),
                             }}}}}],
                         )
                         variant_updated = True
-                        # Manuel (toplu Excel) stok düzeltmesi denetimi — hareket kaydı bırak.
-                        if new_stock != _old_stock:
-                            try:
-                                await db.stock_movements.insert_one({
-                                    "id": generate_id(),
-                                    "type": "manual_adjust",
-                                    "product_id": product["id"],
-                                    "items": [{
-                                        "product_id": product["id"],
-                                        "barcode": str(_old_v.get("barcode") or ref or ""),
-                                        "size": _old_v.get("size") or "",
-                                        "delta": new_stock - _old_stock,
-                                        "old": _old_stock, "new": new_stock,
-                                    }],
-                                    "created_at": now,
-                                    "created_by": (current_user or {}).get("email") or "",
-                                    "source": "bulk_excel",
-                                })
-                            except Exception as _me:
-                                logger.error(f"[bulk manual_stock_log {product['id']}] {_me}")
                     else:
                         # Varyantsız üründe parent stok = kaynak-doğru. Varyantlı üründe eşleşmeyen
                         # ref'e parent'ı BAĞIMSIZ yazma (desync olur) — atla.
@@ -264,8 +249,14 @@ async def apply_upload(file: UploadFile = File(...),
             if root_updates:
                 root_updates["updated_at"] = now
                 await db.products.update_one({"id": product["id"]}, {"$set": root_updates})
+                audit_after.update(root_updates)
             if root_updates or variant_updated:
                 _row_applied = True
+                await record_stock_audit(
+                    db, product_id=product["id"], product_name=product.get("name", ""),
+                    before=audit_before, after=audit_after, source="bulk_excel",
+                    current_user=current_user, request=request, action="manual_adjust",
+                )
 
         if _row_applied: ok += 1
         else: skipped += 1

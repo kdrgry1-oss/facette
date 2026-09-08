@@ -594,7 +594,7 @@ function ShopLookModal({ post, onClose }) {
     toast.success(`Sepete eklendi · Beden ${s.size}`);
     setJustAdded(true);
   };
-  const addNoSize = (p) => { addItem(p, null, 1); toast.success("Sepete eklendi 🛍️"); setJustAdded(true); };
+  const addNoSize = (p) => { addItem(p, null, 1); toast.success("Sepete eklendi"); setJustAdded(true); };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center" onClick={onClose}>
@@ -1003,7 +1003,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white" data-testid="home-page">
+    <div className="sf-page min-h-screen bg-white" data-testid="home-page">
       {/* Üst Duyuru Barı (rotating_text) artık Header'ın FIXED sarmalayıcısı İÇİNDE
           (CountdownBar'ın hemen ALTINDA, bitişik) render edilir → editorial-hero overlay
           header'ı onu ÖRTMEZ; sayaç + duyuru barı ikisi de görünür ve boşluksuz altlı-üstlü durur. */}

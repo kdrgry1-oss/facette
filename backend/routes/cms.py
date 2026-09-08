@@ -1,11 +1,12 @@
 """
 CMS routes - Page blocks, homepage content management
 """
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from typing import Optional
 from datetime import datetime, timezone
 
 from .deps import db, logger, require_admin, generate_id
+from activity_audit import record_admin_audit
 
 router = APIRouter(prefix="/page-blocks", tags=["CMS"])
 
@@ -35,7 +36,8 @@ async def get_header_menu():
 
 
 @router.put("/header-menu")
-async def save_header_menu(payload: dict, current_user: dict = Depends(require_admin)):
+async def save_header_menu(payload: dict, request: Request,
+                           current_user: dict = Depends(require_admin)):
     """Header menüsünü kaydeder. tabs: [{id,label,type,link,style,active,columns:[{title,link,items:[{name,link}]}]}]"""
     tabs = payload.get("tabs")
     if not isinstance(tabs, list) or not tabs:
@@ -70,11 +72,17 @@ async def save_header_menu(payload: dict, current_user: dict = Depends(require_a
     if not clean:
         raise HTTPException(status_code=400, detail="Geçerli sekme yok")
 
+    before = await db.settings.find_one({"id": "header_menu"}, {"_id": 0}) or {}
     await db.settings.update_one(
         {"id": "header_menu"},
         {"$set": {"tabs": clean, "updated_at": datetime.now(timezone.utc).isoformat(),
                   "updated_by": current_user.get("email") or current_user.get("id")}},
         upsert=True,
+    )
+    await record_admin_audit(
+        db, action="header_menu.update", entity_type="content", entity_id="header_menu",
+        before=before, after={"id": "header_menu", "tabs": clean},
+        current_user=current_user, request=request, source="content.menu",
     )
     return {"success": True, "tabs": clean}
 
@@ -90,6 +98,7 @@ async def get_page_block(block_id: str):
 @router.post("")
 async def create_page_block(
     block_data: dict,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Create page block (admin only)"""
@@ -109,12 +118,17 @@ async def create_page_block(
     }
     
     await db.page_blocks.insert_one(block)
+    await record_admin_audit(
+        db, action="page_block.create", entity_type="page_block", entity_id=block["id"],
+        before={}, after=block, current_user=current_user, request=request, source="content.blocks",
+    )
     return {"id": block["id"], "message": "Blok oluşturuldu"}
 
 @router.put("/{block_id}")
 async def update_page_block(
     block_id: str,
     block_data: dict,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Update page block (admin only).
@@ -129,17 +143,29 @@ async def update_page_block(
     update_set["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     await db.page_blocks.update_one({"id": block_id}, {"$set": update_set})
+    await record_admin_audit(
+        db, action="page_block.update", entity_type="page_block", entity_id=block_id,
+        before=existing, after={**existing, **update_set}, current_user=current_user,
+        request=request, source="content.blocks",
+    )
     return {"message": "Blok güncellendi"}
 
 @router.delete("/{block_id}")
 async def delete_page_block(
     block_id: str,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Delete page block (admin only)"""
+    existing = await db.page_blocks.find_one({"id": block_id}, {"_id": 0})
     result = await db.page_blocks.delete_one({"id": block_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Blok bulunamadı")
+    await record_admin_audit(
+        db, action="page_block.delete", entity_type="page_block", entity_id=block_id,
+        before=existing or {}, after={}, current_user=current_user, request=request,
+        source="content.blocks",
+    )
     return {"message": "Blok silindi"}
 
 

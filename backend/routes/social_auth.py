@@ -44,6 +44,8 @@ router = APIRouter(prefix="/auth", tags=["social-auth"])
 # =============================================================================
 
 class SocialSettingsReq(BaseModel):
+    google_enabled: bool = False
+    google_client_id: Optional[str] = ""       # OAuth Web client ID; secret değildir
     apple_enabled: bool = False
     apple_client_id: Optional[str] = ""       # Services ID, ör. com.facette.web
     apple_team_id: Optional[str] = ""
@@ -76,8 +78,13 @@ async def _get_social_settings() -> Dict[str, Any]:
 async def get_providers():
     """Public — frontend hangi butonu gösterecek karar verir."""
     s = await _get_social_settings()
+    env_google_id = (os.environ.get("GOOGLE_CLIENT_ID") or "").strip()
+    google_id = (s.get("google_client_id") or env_google_id).strip()
+    google_on = bool(google_id and (s.get("google_enabled") if "google_enabled" in s else env_google_id))
     fb_on = bool(s.get("facebook_enabled") and s.get("facebook_app_id"))
     return {
+        "google": google_on,
+        "google_client_id": google_id if google_on else "",
         "apple": bool(s.get("apple_enabled") and s.get("apple_client_id")),
         "apple_client_id": s.get("apple_client_id", "") if s.get("apple_enabled") else "",
         "facebook": fb_on,
@@ -89,10 +96,13 @@ async def get_providers():
 @router.get("/social/settings")
 async def admin_get_settings(current_user: dict = Depends(require_admin)):
     s = await _get_social_settings()
+    env_google_id = (os.environ.get("GOOGLE_CLIENT_ID") or "").strip()
     # Secret alanları tamamen maskele (yalnız bayrak döndür, ham değer asla dönmez)
     has_apple_key = bool(s.get("apple_private_key"))
     has_fb_secret = bool(s.get("facebook_app_secret"))
     return {
+        "google_enabled": bool(s.get("google_enabled") if "google_enabled" in s else env_google_id),
+        "google_client_id": s.get("google_client_id") or env_google_id,
         "apple_enabled": bool(s.get("apple_enabled")),
         "apple_client_id": s.get("apple_client_id", ""),
         "apple_team_id": s.get("apple_team_id", ""),
@@ -112,6 +122,7 @@ async def admin_save_settings(req: SocialSettingsReq, current_user: dict = Depen
     existing = await _get_social_settings()
     data: Dict[str, Any] = {"id": "social_auth"}
     fields = [
+        "google_enabled", "google_client_id",
         "apple_enabled", "apple_client_id", "apple_team_id", "apple_key_id", "apple_private_key",
         "facebook_enabled", "facebook_app_id", "facebook_app_secret", "facebook_redirect_uri",
     ]

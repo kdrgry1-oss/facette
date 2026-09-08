@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 import re
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id, build_used_urun_id_set, next_urun_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc, require_permission
+from stock_audit import record_stock_audit
+from activity_audit import record_admin_audit
 from product_schema import BOOL_COLS as PRODUCT_BOOL_COLS
 from fastapi import Response, UploadFile, File, Form
 import pandas as pd
@@ -1401,12 +1403,19 @@ _STOCK_MOVE_REASONS = {
     "manual_increment": "Manuel stok girişi",
     "manual_adjust": "Manuel stok düzeltmesi",
     "production": "Üretim — stok girişi",
+    "product_created": "Ürün oluşturuldu — başlangıç stoğu",
+    "manufacturing_delivered": "İmalat teslimi — stok girişi",
+    "marketplace_stock_sync": "Pazaryeri stok senkronu",
+    "marketplace_stock_imported": "Pazaryerinden stok güncellendi",
+    "bulk_stock_adjusted": "Toplu varyant stok düzeltmesi",
+    "negative_stock_fixed": "Negatif stok sıfırlandı",
 }
 
 
 async def _log_manual_stock_change(product_id: str, product_name: str, existing: dict,
                                    new_variants, new_root_stock, by_email: str,
-                                   source: str = "admin_edit") -> None:
+                                   source: str = "admin_edit", current_user: dict = None,
+                                   request: Request = None) -> None:
     """Manuel stok düzeltmelerini db.stock_movements'a yazar.
 
     Neden: Ürün düzenleme formu / toplu Excel yalnız variants[].stock'u $set eder,
@@ -1417,64 +1426,19 @@ async def _log_manual_stock_change(product_id: str, product_name: str, existing:
     düzeltmeler, gider_pusulası/iade restock'larıyla AYNI zaman çizelgesine düşer.
     """
     try:
-        old_variants = existing.get("variants") or []
-        old_by_bc, old_by_id = {}, {}
-        for v in old_variants:
-            _bc = str(v.get("barcode") or "").strip()
-            if _bc:
-                old_by_bc[_bc] = v
-            _id = str(v.get("id") or v.get("urun_id") or "").strip()
-            if _id:
-                old_by_id[_id] = v
-        items = []
-        for nv in (new_variants or []):
-            bc = str(nv.get("barcode") or "").strip()
-            ov = old_by_bc.get(bc) if bc else None
-            if ov is None:
-                ov = old_by_id.get(str(nv.get("id") or nv.get("urun_id") or "").strip())
-            if ov is None:
-                continue  # yeni eklenen varyant — 'ekleme', düzeltme değil
-            try:
-                old_s = int(ov.get("stock") or 0)
-            except Exception:
-                old_s = 0
-            if nv.get("stock") is None:
-                continue
-            try:
-                new_s = int(nv.get("stock") or 0)
-            except Exception:
-                continue
-            if new_s != old_s:
-                items.append({
-                    "product_id": product_id,
-                    "barcode": bc,
-                    "size": nv.get("size") or ov.get("size") or "",
-                    "delta": new_s - old_s,
-                    "old": old_s,
-                    "new": new_s,
-                })
-        # Varyantsız ürün — kök stok
-        if new_root_stock is not None and not old_variants:
-            try:
-                old_root = int(existing.get("stock") or 0)
-                new_root = int(new_root_stock)
-                if new_root != old_root:
-                    items.append({"product_id": product_id, "barcode": "", "size": "",
-                                  "delta": new_root - old_root, "old": old_root, "new": new_root})
-            except Exception:
-                pass
-        if not items:
-            return
-        await db.stock_movements.insert_one({
-            "id": generate_id(),
-            "type": "manual_adjust",
-            "product_id": product_id,
-            "product_name": product_name or existing.get("name", ""),
-            "items": items,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "created_by": by_email or "",
-            "source": source,
-        })
+        after = dict(existing or {})
+        if new_variants is not None:
+            after["variants"] = new_variants
+        if new_root_stock is not None:
+            after["stock"] = new_root_stock
+        actor = dict(current_user or {})
+        if by_email and not actor.get("email"):
+            actor["email"] = by_email
+        await record_stock_audit(
+            db, product_id=product_id, product_name=product_name or existing.get("name", ""),
+            before=existing, after=after, source=source, current_user=actor,
+            request=request, action="manual_adjust",
+        )
     except Exception as e:
         logger.error(f"[manual_stock_log {product_id}] {e}")
 
@@ -1482,25 +1446,26 @@ async def _log_manual_stock_change(product_id: str, product_name: str, existing:
 @router.get("/{product_id}/stock-movements")
 async def get_product_stock_movements(product_id: str, limit: int = Query(300, ge=1, le=2000),
                                       current_user: dict = Depends(require_admin)):
-    """Bir ürünün stok hareketlerini sebebiyle döndürür (en yeni önce)."""
-    q = {"$or": [{"items.product_id": product_id}, {"product_id": product_id}]}
+    """Bir ürünün stok hareketlerini varyant/SKU bazında döndürür (en yeni önce).
+
+    Eski hareketlerde kaydedilmemiş old/new veya sync sonucunu geriye dönük tahmin
+    etmeyiz; ``None/not_recorded`` döner. Kesin alanlar schema v2 kayıt başlangıcından
+    itibaren mevcuttur.
+    """
+    q = {"$or": [
+        {"items.product_id": product_id}, {"moves.product_id": product_id},
+        {"product_id": product_id},
+    ]}
     rows = await db.stock_movements.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
     out = []
+    def _optional_int(value):
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
     for r in rows:
-        delta = 0
-        _items = r.get("items") or []
-        if _items:
-            for it in _items:
-                if it.get("product_id") == product_id:
-                    try:
-                        delta += int(it.get("delta") if it.get("delta") is not None else it.get("qty") or 0)
-                    except Exception:
-                        pass
-        elif r.get("product_id") == product_id:
-            try:
-                delta = int(r.get("delta") if r.get("delta") is not None else r.get("quantity") or 0)
-            except Exception:
-                delta = 0
         _t = r.get("type", "") or ""
         # 'tüketildi' işaretli (reaktivasyon/reconcile'de guard dışına taşınan) restore hareketi:
         # ham type + '_consumed'. Silinmiyor → tarihçede kalıyor; okunaklı etiketle.
@@ -1509,15 +1474,56 @@ async def get_product_stock_movements(product_id: str, limit: int = Query(300, g
             _reason = _STOCK_MOVE_REASONS.get(_base, _base or "—") + " → sonradan tekrar düşüldü (tüketildi)"
         else:
             _reason = _STOCK_MOVE_REASONS.get(_t, _t or "—")
-        out.append({
-            "date": r.get("created_at", ""),
-            "type": _t,
-            "reason": _reason,
-            "delta": delta,
+        _actor = r.get("actor") or {}
+        _sync = r.get("sync_result") if isinstance(r.get("sync_result"), dict) else None
+        _base = {
+            "date": r.get("created_at", ""), "type": _t, "reason": _reason,
+            "action": r.get("action") or _t, "source": r.get("source") or "",
             "order_number": r.get("order_number", ""),
-            "by": r.get("created_by") or r.get("source") or "",
-        })
-    return {"movements": out, "count": len(out)}
+            "by": _actor.get("email") or r.get("created_by") or r.get("source") or "Sistem",
+            "actor": _actor, "context": r.get("context") or {},
+            "sync_result": _sync or {"status": "not_recorded"},
+            "schema_version": int(r.get("schema_version") or 1),
+        }
+        _items = r.get("items") or r.get("moves") or []
+        if not _items and isinstance(r.get("size_distribution"), dict):
+            _items = [{"product_id": product_id, "size": size, "delta": qty}
+                      for size, qty in r["size_distribution"].items()]
+        if not _items:
+            _items = [{
+                "product_id": product_id,
+                "delta": r.get("delta") if r.get("delta") is not None else r.get("quantity") or r.get("total_increment") or 0,
+                "old": r.get("old") if r.get("old") is not None else r.get("old_stock"),
+                "new": r.get("new") if r.get("new") is not None else r.get("new_stock"),
+                "sku": r.get("sku") or r.get("stock_code") or "",
+                "barcode": r.get("barcode") or "",
+            }]
+        for it in _items:
+            if it.get("product_id") not in (None, "", product_id):
+                continue
+            try:
+                _delta = int(it.get("delta") if it.get("delta") is not None
+                             else it.get("qty") if it.get("qty") is not None
+                             else it.get("quantity") or 0)
+            except Exception:
+                _delta = 0
+            out.append({
+                **_base,
+                "delta": _delta,
+                "old_stock": _optional_int(it.get("old") if it.get("old") is not None else it.get("old_stock")),
+                "new_stock": _optional_int(it.get("new") if it.get("new") is not None else it.get("new_stock")),
+                "variant_id": str(it.get("variant_id") or it.get("id") or ""),
+                "sku": str(it.get("sku") or it.get("stock_code") or it.get("barcode") or ""),
+                "barcode": str(it.get("barcode") or ""),
+                "size": str(it.get("size") or ""),
+                "color": str(it.get("color") or ""),
+            })
+    return {
+        "movements": out,
+        "count": len(out),
+        "coverage": "Kesin eski/yeni stok, kullanıcı ve oturum bağlamı yalnız kayıt başlangıcından itibaren mevcuttur; geçmiş eksik alanlar tahmin edilmez.",
+        "schema_version": 2,
+    }
 
 
 # GÜVENLİK: Public yanıtlardan iç/ticari alanları (alış fiyatı, tedarikçi, marj vb.)
@@ -2209,6 +2215,7 @@ def _variants_for_color(variants, color):
 @router.post("")
 async def create_product(
     product_data: dict,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Create new product (admin only)"""
@@ -2328,6 +2335,16 @@ async def create_product(
         if _colors and not product.get("color"):
             product["color"] = _colors[0]
         await db.products.insert_one(product)
+        await record_stock_audit(
+            db, product_id=product["id"], product_name=product.get("name", ""),
+            before={}, after=product, source="admin_create", current_user=current_user,
+            request=request, action="product_created",
+        )
+        await record_admin_audit(
+            db, action="product.create", entity_type="product", entity_id=product["id"],
+            before={}, after=product, current_user=current_user, request=request,
+            source="products",
+        )
         logger.info(f"Product created: {product['id']}")
         return {"id": product["id"], "message": "Ürün oluşturuldu"}
 
@@ -2351,6 +2368,16 @@ async def create_product(
         _doc["created_at"] = _doc.get("created_at") or _now
         _doc["updated_at"] = _now
         await db.products.insert_one(_doc)
+        await record_stock_audit(
+            db, product_id=_doc["id"], product_name=_doc.get("name", ""),
+            before={}, after=_doc, source="admin_create", current_user=current_user,
+            request=request, action="product_created",
+        )
+        await record_admin_audit(
+            db, action="product.create", entity_type="product", entity_id=_doc["id"],
+            before={}, after=_doc, current_user=current_user, request=request,
+            source="products",
+        )
         _created_ids.append(_doc["id"])
     logger.info(f"Product created with color split: {_created_ids} (card {urun_karti_id})")
     return {
@@ -2587,6 +2614,7 @@ async def backfill_variant_ids(payload: dict = None):
 async def update_product(
     product_id: str,
     product_data: dict,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Update product (admin only)"""
@@ -2716,6 +2744,8 @@ async def update_product(
             product_data.get("variants"),
             product_data.get("stock"),
             (current_user or {}).get("email") or (current_user or {}).get("username") or "",
+            current_user=current_user,
+            request=request,
         )
 
     # ⛔→0 PASİFE ALMA KANCASI: yalnız is_active TRUE→FALSE GEÇİŞİNDE (spam yok) pazaryerlerine
@@ -2800,11 +2830,17 @@ async def update_product(
     except Exception as _sib_e:
         logger.error(f"[renk-kardeşi senkron {product_id}] {_sib_e}")
 
+    await record_admin_audit(
+        db, action="product.update", entity_type="product", entity_id=product_id,
+        before=existing, after={**existing, **product_data}, current_user=current_user,
+        request=request, source="products",
+    )
     return {"message": "Ürün güncellendi"}
 
 @router.delete("/{product_id}")
 async def delete_product(
     product_id: str,
+    request: Request,
     current_user: dict = Depends(require_permission("products.delete"))
 ):
     """Ürünü çöp kutusuna taşır (soft delete). Kalıcı silme için /permanent kullanın."""
@@ -2826,15 +2862,21 @@ async def delete_product(
     # Çöpe atma da bir TRUE→FALSE geçişidir → aktifti ise pazaryerlerine 0 stok.
     if product.get("is_active"):
         _fire_stock_zero_on_passive(dict(product))
+    await record_admin_audit(
+        db, action="product.soft_delete", entity_type="product", entity_id=product_id,
+        before=product, after={**product, "is_deleted": True, "is_active": False},
+        current_user=current_user, request=request, source="products",
+    )
     return {"message": "Ürün çöp kutusuna taşındı"}
 
 @router.post("/{product_id}/restore")
 async def restore_product(
     product_id: str,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Çöp kutusundaki ürünü geri yükler."""
-    product = await db.products.find_one({"id": product_id}, {"_id": 0, "prev_active": 1})
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     await db.products.update_one(
@@ -2843,22 +2885,36 @@ async def restore_product(
                   "updated_at": datetime.now(timezone.utc).isoformat()},
          "$unset": {"deleted_at": "", "prev_active": ""}}
     )
+    await record_admin_audit(
+        db, action="product.restore", entity_type="product", entity_id=product_id,
+        before=product, after={**product, "is_deleted": False,
+                               "is_active": product.get("prev_active", True)},
+        current_user=current_user, request=request, source="products",
+    )
     return {"message": "Ürün geri yüklendi"}
 
 @router.delete("/{product_id}/permanent")
 async def permanent_delete_product(
     product_id: str,
+    request: Request,
     current_user: dict = Depends(require_permission("products.delete"))
 ):
     """Ürünü veritabanından KALICI olarak siler (geri alınamaz)."""
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
     result = await db.products.delete_one({"id": product_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    await record_admin_audit(
+        db, action="product.permanent_delete", entity_type="product", entity_id=product_id,
+        before=product or {}, after={}, current_user=current_user, request=request,
+        source="products",
+    )
     return {"message": "Ürün kalıcı olarak silindi"}
 
 @router.post("/{product_id}/toggle-active")
 async def toggle_product_active(
     product_id: str,
+    request: Request,
     current_user: dict = Depends(require_admin)
 ):
     """Toggle product active status"""
@@ -2881,6 +2937,12 @@ async def toggle_product_active(
     # TRUE→FALSE geçişi (new_status False = önceki aktifti) → pazaryerlerine 0 stok.
     if not new_status:
         _fire_stock_zero_on_passive(dict(product))
+
+    await record_admin_audit(
+        db, action="product.toggle_active", entity_type="product", entity_id=product_id,
+        before=product, after={**product, "is_active": new_status},
+        current_user=current_user, request=request, source="products",
+    )
 
     return {"is_active": new_status}
 
@@ -3414,7 +3476,7 @@ async def update_product_attributes(product_id: str, payload: dict, current_user
     return {"success": True, "message": "Ozellikler guncellendi"}
 
 @router.post("/fix-negative-stock")
-async def fix_negative_stock(current_user: dict = Depends(require_admin)):
+async def fix_negative_stock(request: Request, current_user: dict = Depends(require_admin)):
     """İDEMPOTENT: eksiye düşmüş (stok < 0) varyant/ürün stoklarını 0'a sabitler ve
     parent stoğu varyant toplamından yeniden hesaplar. Negatif stok artık oluşamaz
     (sipariş düşümleri 0'da kelepçeli) — bu uç geçmişten kalanları temizler."""
@@ -3441,6 +3503,20 @@ async def fix_negative_stock(current_user: dict = Depends(require_admin)):
             )
         elif int(p.get("stock") or 0) < 0:
             await db.products.update_one({"id": p["id"]}, {"$set": {"stock": 0}})
+        _after = dict(p)
+        if p.get("variants"):
+            _after["variants"] = [
+                {**v, "stock": max(0, int(v.get("stock") or 0))}
+                for v in (p.get("variants") or [])
+            ]
+            _after["stock"] = sum(int(v.get("stock") or 0) for v in _after["variants"])
+        else:
+            _after["stock"] = max(0, int(p.get("stock") or 0))
+        await record_stock_audit(
+            db, product_id=p["id"], product_name=p.get("name", ""), before=p, after=_after,
+            source="admin_maintenance", current_user=current_user, request=request,
+            action="negative_stock_fixed",
+        )
         fixed.append({"id": p["id"], "name": p.get("name"), "negative_variants": _bad,
                       "old_parent_stock": p.get("stock")})
     return {"fixed_count": len(fixed), "fixed": fixed[:50]}
@@ -3733,6 +3809,7 @@ async def migrate_uuid_product_ids(
 @router.post("/bulk/set-variant-stock")
 async def bulk_set_variant_stock(
     payload: dict,
+    request: Request,
     dry_run: bool = Query(True, description="True → önizleme (YAZMAZ). False → uygular."),
     current_user: dict = Depends(require_admin),
 ):
@@ -3784,6 +3861,12 @@ async def bulk_set_variant_stock(
             await db.products.update_one(
                 {"id": p["id"]},
                 {"$set": {"variants": new_vs, "stock": new_total, "updated_at": _now}})
+            await record_stock_audit(
+                db, product_id=p["id"], product_name=p.get("name", ""), before=p,
+                after={**p, "variants": new_vs, "stock": new_total},
+                source="bulk_variant_stock", current_user=current_user, request=request,
+                action="bulk_stock_adjusted",
+            )
             total_updated += 1
     return {
         "requested": len(items), "matched": len(results), "not_found": not_found,
@@ -4194,6 +4277,7 @@ async def analyze_products_excel(file: UploadFile = File(...), current_user: dic
 
 @router.post("/import/excel")
 async def import_products_excel(
+    request: Request,
     file: UploadFile = File(...),
     columns: str = Form(""),      # seçmeli mod: virgüllü sütun listesi (boş = eski tam aktarım)
     categories: str = Form(""),   # seçmeli mod: yalnız bu kategorilerdeki satırlar güncellenir
@@ -4207,7 +4291,7 @@ async def import_products_excel(
     sel_cols = [c.strip() for c in (columns or "").split(",") if c.strip()]
     sel_cats = {c.strip() for c in (categories or "").split(",") if c.strip()}
     if sel_cols:
-        return await _selective_import(file, sel_cols, sel_cats)
+        return await _selective_import(file, sel_cols, sel_cats, current_user, request)
     try:
         contents = await file.read()
         df = pd.read_excel(io.BytesIO(contents))
@@ -4269,6 +4353,19 @@ async def import_products_excel(
                         {"id": existing["id"], "variants.barcode": barcode},
                         {"$set": update_fields}
                     )
+                    await db.products.update_one(
+                        {"id": existing["id"]},
+                        [{"$set": {"stock": {"$sum": {"$map": {
+                            "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                            "in": {"$max": [0, {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}]},
+                        }}}}}],
+                    )
+                    _after = await db.products.find_one({"id": existing["id"]}, {"_id": 0}) or existing
+                    await record_stock_audit(
+                        db, product_id=existing["id"], product_name=existing.get("name", ""),
+                        before=existing, after=_after, source="product_excel_import",
+                        current_user=current_user, request=request, action="bulk_stock_adjusted",
+                    )
                     stats["updated"] += 1
                 else:
                     # Create new product or add as variant to existing product with same name
@@ -4299,6 +4396,19 @@ async def import_products_excel(
                             {"id": prod_by_name["id"]},
                             {"$push": {"variants": variant}, "$set": update_fields}
                         )
+                        await db.products.update_one(
+                            {"id": prod_by_name["id"]},
+                            [{"$set": {"stock": {"$sum": {"$map": {
+                                "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                                "in": {"$max": [0, {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}]},
+                            }}}}}],
+                        )
+                        _after = await db.products.find_one({"id": prod_by_name["id"]}, {"_id": 0}) or prod_by_name
+                        await record_stock_audit(
+                            db, product_id=prod_by_name["id"], product_name=prod_by_name.get("name", ""),
+                            before=prod_by_name, after=_after, source="product_excel_import",
+                            current_user=current_user, request=request, action="bulk_stock_adjusted",
+                        )
                         stats["updated"] += 1
                     else:
                         # Create full new product
@@ -4322,6 +4432,11 @@ async def import_products_excel(
                             "updated_at": datetime.now(timezone.utc).isoformat()
                         }
                         await db.products.insert_one(new_p)
+                        await record_stock_audit(
+                            db, product_id=new_p["id"], product_name=new_p.get("name", ""),
+                            before={}, after=new_p, source="product_excel_import",
+                            current_user=current_user, request=request, action="product_created",
+                        )
                         stats["created"] += 1
             except Exception as row_err:
                 logger.error(f"Import row error: {row_err}")
@@ -4334,7 +4449,8 @@ async def import_products_excel(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _selective_import(file: UploadFile, sel_cols: list, sel_cats: set):
+async def _selective_import(file: UploadFile, sel_cols: list, sel_cats: set,
+                            current_user: dict = None, request: Request = None):
     """Seçmeli güncelleme: yalnız seçilen sütunlar + (verildiyse) seçilen kategorilerdeki
     satırlar. Yeni ürün AÇILMAZ. Barkod→ürün eşlemesi TOPLU sorgu ile önceden çekilir."""
     import time as _time
@@ -4440,7 +4556,24 @@ async def _selective_import(file: UploadFile, sel_cols: list, sel_cats: set):
                 stats["skipped"] += 1
                 continue
             _upd = {**vset, **pset} if len(vset) > 1 else {"updated_at": _now, **pset}
+            _before = None
+            if "variants.$.stock" in _upd:
+                _before = await db.products.find_one({"id": p["id"]}, {"_id": 0})
             await db.products.update_one({"id": p["id"], "variants.barcode": bc}, {"$set": _upd})
+            if _before is not None:
+                await db.products.update_one(
+                    {"id": p["id"]},
+                    [{"$set": {"stock": {"$sum": {"$map": {
+                        "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                        "in": {"$max": [0, {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}]},
+                    }}}}}],
+                )
+                _after = await db.products.find_one({"id": p["id"]}, {"_id": 0}) or _before
+                await record_stock_audit(
+                    db, product_id=p["id"], product_name=_before.get("name", ""),
+                    before=_before, after=_after, source="product_excel_selective",
+                    current_user=current_user, request=request, action="bulk_stock_adjusted",
+                )
             stats["updated_rows"] += 1
             updated_products.add(p["id"])
             # Toplu import ile is_active TRUE→FALSE geçişi → pazaryerlerine 0 stok (ürün başına 1 kez).

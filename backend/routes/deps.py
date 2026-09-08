@@ -516,6 +516,7 @@ async def get_effective_permissions(user: dict) -> list:
             "integrations.dogan_edonusum",
             "settings.company", "settings.site", "settings.emails",
             "admin.users", "admin.roles", "admin.logs", "admin.backup",
+            "audit.read",
             "products.delete", "customers.delete",
         }
         try:

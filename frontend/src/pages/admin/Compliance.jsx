@@ -17,7 +17,7 @@ const STATUS_META = {
   process: { label: "Süreç", icon: <Cog size={13} />, cls: "bg-amber-50 text-amber-700 border-amber-200" },
 };
 
-export default function Compliance() {
+export default function Compliance({ embedded = false }) {
   const [checklist, setChecklist] = useState([]);
   const [retention, setRetention] = useState(null);
   const [days, setDays] = useState(30);
@@ -64,9 +64,9 @@ export default function Compliance() {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto" data-testid="compliance-page">
+    <div className={embedded ? "max-w-5xl" : "p-6 max-w-5xl mx-auto"} data-testid="compliance-page">
       <div className="mb-5">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
+        <h1 className={`${embedded ? "text-lg" : "text-2xl"} font-bold flex items-center gap-2`}>
           <ShieldCheck className="text-green-600" size={24} /> Amazon DPP Uyum
         </h1>
         <p className="text-sm text-gray-500 mt-1">

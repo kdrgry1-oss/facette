@@ -153,6 +153,13 @@ PERMISSION_TREE = [
         ],
     },
     {
+        "key": "audit",
+        "label": "İşlem Geçmişi",
+        "children": [
+            {"key": "audit.read", "label": "Genel işlem geçmişini görüntüle"},
+        ],
+    },
+    {
         "key": "admin",
         "label": "Yönetim",
         "children": [

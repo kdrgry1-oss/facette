@@ -8,7 +8,7 @@ import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { trackViewItemList } from "../lib/dataLayer";
 import { slugify } from "../lib/slug";
-import { setCategorySeo } from "../lib/seo";
+import { applyRuntimeSeo, setCategorySeo } from "../lib/seo";
 import { dedupeColorGroups } from "../lib/colorGroups";
 import { sortLikeSize } from "../utils/sizeSort";
 import { resolveColor, needsBorder, MULTI_GRADIENT } from "../lib/colorMap";
@@ -248,8 +248,16 @@ export default function Category() {
   // canonical'lanmıyor. slug "all" (tüm ürünler) hariç.
   useEffect(() => {
     if (slug && slug !== "all") {
-      try { setCategorySeo(categoryName, slug, "FACETTE", currentCategory?.description); } catch (_) {}
+      const controller = new AbortController();
+      applyRuntimeSeo(`/kategori/${slug}`, () => {
+        try { setCategorySeo(categoryName, slug, "", currentCategory?.description); } catch (_) {}
+      }, { signal: controller.signal });
+      return () => {
+        controller.abort();
+        document.querySelectorAll('script[data-seo="runtime"]').forEach((el) => el.remove());
+      };
     }
+    return undefined;
   }, [slug, categoryName, currentCategory?.description]);
 
   // Sıralama menüsü (toolbar ortası) — seçim URL'e yazılır, liste yenilenir
@@ -289,7 +297,7 @@ export default function Category() {
   }, [minPrice, maxPrice, sizesParam, colorsParam, sort, order]);
 
   return (
-    <div className="min-h-screen bg-white" data-testid="category-page">
+    <div className="sf-page min-h-screen bg-white" data-testid="category-page">
       <Header />
 
       <div className="w-full px-2 md:px-4 relative">
@@ -553,7 +561,7 @@ export default function Category() {
                   let style, fb = false;
                   if (col?.type === "solid") style = { backgroundColor: col.value };
                   else if (col?.type === "multi") style = { background: MULTI_GRADIENT };
-                  else { fb = true; style = { background: "linear-gradient(135deg,#f3f4f6,#d1d5db)" }; }
+                  else { fb = true; style = { background: "#e5e5e5" }; }
                   const light = col?.type === "solid" && needsBorder(col.value);
                   return (
                     <button

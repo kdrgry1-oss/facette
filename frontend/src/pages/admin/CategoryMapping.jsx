@@ -24,15 +24,17 @@ import {
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-export default function CategoryMapping() {
+export default function CategoryMapping({ lockedMarketplace = "", embedded = false }) {
   const [marketplaces, setMarketplaces] = useState([]);
   // Aktif pazaryeri URL'de ?mp=<slug> olarak tutulur → her pazaryeri ayrı (paylaşılabilir) link.
   const [active, setActive] = useState(() => {
+    if (lockedMarketplace) return lockedMarketplace;
     try { return new URLSearchParams(window.location.search).get("mp") || "trendyol"; }
     catch { return "trendyol"; }
   });
   // Sekmeye tıklayınca URL'i güncelle (ayrı geçmiş kaydı → geri/ileri ve link paylaşımı çalışır).
   const selectMarketplace = (key) => {
+    if (lockedMarketplace) return;
     setActive(key);
     try {
       const url = new URL(window.location.href);
@@ -42,13 +44,14 @@ export default function CategoryMapping() {
   };
   // Tarayıcı geri/ileri → aktif sekmeyi URL'den senkronla.
   useEffect(() => {
+    if (lockedMarketplace) return undefined;
     const onPop = () => {
       try { setActive(new URLSearchParams(window.location.search).get("mp") || "trendyol"); }
       catch { /* no-op */ }
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, []);
+  }, [lockedMarketplace]);
   const [data, setData] = useState({ items: [], total: 0, matched: 0, unmatched: 0 });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -66,11 +69,12 @@ export default function CategoryMapping() {
   const auth = { headers: { Authorization: `Bearer ${token}` } };
 
   useEffect(() => {
+    if (lockedMarketplace) return undefined;
     axios.get(`${API}/marketplace-hub/marketplaces`, auth)
       .then((r) => setMarketplaces(r.data?.marketplaces || []))
       .catch(() => {});
     // eslint-disable-next-line
-  }, []);
+  }, [lockedMarketplace]);
 
   const load = async () => {
     setLoading(true);
@@ -225,9 +229,13 @@ export default function CategoryMapping() {
     <div data-testid="category-mapping-page">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-bold">Kategori Eşleştirme</h1>
+          <h1 className={`${embedded ? "text-lg" : "text-2xl"} font-bold`}>
+            {lockedMarketplace === "amazon-tr" ? "Amazon Aktarım & Eşleştirme" : "Kategori Eşleştirme"}
+          </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Sistem kategorilerinizi pazaryerlerinin kategori ağacıyla eşleştirin. Her pazaryeri için ayrı sekme.
+            {lockedMarketplace === "amazon-tr"
+              ? "Amazon kategorilerini, zorunlu özellikleri, renk/beden değerlerini ve hedefli ürün aktarımını yönetin."
+              : "Sistem kategorilerinizi pazaryerlerinin kategori ağacıyla eşleştirin. Her pazaryeri için ayrı sekme."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -266,7 +274,7 @@ export default function CategoryMapping() {
         </div>
       </div>
 
-      <div className="flex items-center gap-1 border-b border-gray-200 mb-4 overflow-x-auto">
+      {!lockedMarketplace && <div className="flex items-center gap-1 border-b border-gray-200 mb-4 overflow-x-auto">
         {marketplaces.map((m) => {
           const isActive = m.key === active;
           return (
@@ -284,7 +292,7 @@ export default function CategoryMapping() {
             </button>
           );
         })}
-      </div>
+      </div>}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
         <div className="bg-white border border-stone-200 rounded-xl p-4">

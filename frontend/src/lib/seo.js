@@ -14,7 +14,12 @@ function _setMeta(selectorAttr, key, content) {
   if (typeof document === "undefined") return;
   const sel = `meta[${selectorAttr}="${key}"]`;
   let el = document.head.querySelector(sel);
-  if (!content) return;
+  if (!content) {
+    // A previous SPA route must not leak its metadata into a page with no fact.
+    if (el?.getAttribute("data-seo-client") === "1") el.remove();
+    else if (el) el.setAttribute("content", "");
+    return;
+  }
   if (!el) {
     el = document.createElement("meta");
     el.setAttribute(selectorAttr, key);
@@ -37,9 +42,9 @@ function _setCanonical(href) {
 
 function _origin() {
   try {
-    return (window.location && window.location.origin) || "https://facette.com.tr";
+    return (window.location && window.location.origin) || "";
   } catch (_) {
-    return "https://facette.com.tr";
+    return "";
   }
 }
 
@@ -50,25 +55,61 @@ function _origin() {
 export function setPageSeo(opts = {}) {
   if (typeof document === "undefined") return;
   try {
-    const { title, description, canonical, ogImage, ogType } = opts;
+    const { title, description, canonical, ogImage, ogType, robots } = opts;
     if (title) {
       document.title = title;
       _setMeta("property", "og:title", title);
     }
-    if (description) {
-      _setMeta("name", "description", description);
-      _setMeta("property", "og:description", description);
-    }
+    _setMeta("name", "description", description || "");
+    _setMeta("property", "og:description", description || "");
     let canon = canonical;
     if (canon && !/^https?:\/\//i.test(canon)) canon = _origin() + (canon.startsWith("/") ? "" : "/") + canon;
     if (canon) {
       _setCanonical(canon);
       _setMeta("property", "og:url", canon);
     }
-    if (ogImage) _setMeta("property", "og:image", ogImage);
+    _setMeta("property", "og:image", ogImage || "");
     if (ogType) _setMeta("property", "og:type", ogType);
+    if (robots) _setMeta("name", "robots", robots);
   } catch (_) {
     /* sessiz */
+  }
+}
+
+/** Apply the same canonical runtime result used by the edge renderer. */
+export async function applyRuntimeSeo(path, fallback, { signal } = {}) {
+  try {
+    const base = process.env.REACT_APP_BACKEND_URL || "";
+    const response = await fetch(`${base}/api/seo/page-meta?path=${encodeURIComponent(path)}`, { signal });
+    if (!response.ok) throw new Error("runtime SEO unavailable");
+    const meta = await response.json();
+    if (signal?.aborted) return null;
+    if (!meta?.found) throw new Error("runtime SEO missing");
+    setPageSeo({
+      title: meta.title, description: meta.description, canonical: meta.canonical,
+      ogImage: meta.og_image, ogType: meta.og_type, robots: meta.robots,
+    });
+    _setMeta("name", "twitter:title", meta.title || "");
+    _setMeta("name", "twitter:description", meta.description || "");
+    _setMeta("name", "twitter:image", meta.og_image || "");
+    if (typeof document !== "undefined") {
+      // Edge JSON-LD belongs to the initial URL. SPA navigation must replace
+      // it, otherwise a second product can inherit the first product schema.
+      document.querySelectorAll(
+        'script[data-seo="runtime"], script[type="application/ld+json"][data-seo="edge"]'
+      ).forEach((el) => el.remove());
+      (Array.isArray(meta.jsonld) ? meta.jsonld : []).forEach((value) => {
+        const tag = document.createElement("script");
+        tag.type = "application/ld+json";
+        tag.setAttribute("data-seo", "runtime");
+        tag.text = JSON.stringify(value).replace(/</g, "\\u003c");
+        document.head.appendChild(tag);
+      });
+    }
+    return meta;
+  } catch (_) {
+    if (!signal?.aborted && typeof fallback === "function") fallback();
+    return null;
   }
 }
 
@@ -77,10 +118,8 @@ export function setPageSeo(opts = {}) {
  *  Yalnız ana sayfa/statikler için varsayılana döndürmek istenirse kullanılır. */
 export function resetPageSeoToHome(defaults = {}) {
   setPageSeo({
-    title: defaults.title || "FACETTE | Yeni Sezon Kadın Giyim & Moda",
-    description:
-      defaults.description ||
-      "FACETTE — kadın modasında yeni sezon koleksiyonu. Zamansız elbise, pantolon, ceket ve aksesuar parçaları.",
+    title: defaults.title || "",
+    description: defaults.description || "",
     canonical: _origin() + "/",
     ogType: "website",
   });
@@ -92,7 +131,7 @@ function _clean(s, limit = 160) {
 }
 
 /** Ürün nesnesinden meta üretip uygular. */
-export function setProductSeo(product, brand = "FACETTE") {
+export function setProductSeo(product, brand = "") {
   if (!product) return;
   const slug = product.slug || product.id;
   const title = (product.meta_title || `${product.name || ""} | ${brand}`).trim();
@@ -113,9 +152,9 @@ export function setProductSeo(product, brand = "FACETTE") {
 }
 
 /** Kategori adı/slug'ından meta üretip uygular. */
-export function setCategorySeo(name, slug, brand = "FACETTE", description) {
+export function setCategorySeo(name, slug, brand = "", description) {
   if (!name && !slug) return;
   const title = `${name || slug} | ${brand}`;
-  const desc = _clean(description || `${name || slug} kategorisindeki yeni sezon ürünleri ${brand}'te keşfedin.`);
-  setPageSeo({ title, description: desc, canonical: `/${slug || ""}`, ogType: "website" });
+  const desc = _clean(description || name || slug || "");
+  setPageSeo({ title, description: desc, canonical: `/kategori/${slug || ""}`, ogType: "website" });
 }

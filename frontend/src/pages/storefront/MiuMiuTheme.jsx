@@ -1,41 +1,43 @@
-/**
- * Miu Miu theme — full storefront home page (Phase 1).
- * - Sticky header with logo, mega menu (hover), account/search/wish/bag icons
- * - Full-screen scrollable blocks (hero, editorial cards)
- * - Product scroller (loads from /api/products?category=…)
- * - Newsletter
- * - Minimal footer
- *
- * Editable from /admin/temalar
- */
-import React, { useEffect, useMemo, useRef, useState } from "react";
+/** Original multi-layout storefront theme renderer. */
+import React, { useEffect, useState } from "react";
 import axios from "axios";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { Search, User, Heart, ShoppingBag, X, Menu, ChevronDown } from "lucide-react";
+import { themeCssVariables, themeImage, themePrice } from "../../lib/themeGallery";
 import "./miumiu.css";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-export default function MiuMiuTheme() {
+export default function StorefrontTheme() {
   const { slug } = useParams();
+  const location = useLocation();
   const [theme, setTheme] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [liveMenu, setLiveMenu] = useState([]);     // user's real categories → mega menu
+  const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [company, setCompany] = useState({ site_name: "Facette", logo_url: "" });
 
   useEffect(() => {
     let cancel = false;
     (async () => {
       try {
         const url = slug ? `${API}/storefront/themes/${slug}` : `${API}/storefront/themes/active`;
-        const [themeRes, catRes] = await Promise.all([
+        const [themeRes, catRes, productRes, companyRes] = await Promise.all([
           axios.get(url),
           axios.get(`${API}/categories?visible_only=true`).catch(() => ({ data: [] })),
+          axios.get(`${API}/products`, { params: { limit: 60 } }).catch(() => ({ data: [] })),
+          axios.get(`${API}/settings/maintenance`).catch(() => ({ data: {} })),
         ]);
         if (cancel) return;
         setTheme(themeRes.data);
         // Build mega menu from user's actual category tree
         const cats = Array.isArray(catRes.data) ? catRes.data : (catRes.data.items || []);
+        const productItems = Array.isArray(productRes.data) ? productRes.data : (productRes.data.products || productRes.data.items || []);
+        setCategories(cats);
+        setProducts(productItems);
+        setCompany(companyRes.data || {});
         setLiveMenu(buildMegaMenu(cats, themeRes.data.slug));
       } catch (e) {
         if (!cancel) setTheme(null);
@@ -56,30 +58,28 @@ export default function MiuMiuTheme() {
   const otherBlocks = blocks.filter(b => b.type !== "announcement_bar");
   const totalScreens = otherBlocks.filter(b => ["hero_fullscreen", "editorial_card"].includes(b.type)).length;
 
+  const categoryMatch = location.pathname.match(/\/kategori\/([^/]+)/);
+  const productMatch = location.pathname.match(/\/urun\/([^/]+)/);
   return (
-    <div className="mm-root">
+    <div className="mm-root" data-layout={theme.settings?.layout || "editorial"} style={themeCssVariables(theme.settings?.tokens)}>
       {announcement && (
         <div className="mm-announcement" style={{ background: announcement.settings?.bg || "#000", color: announcement.settings?.color || "#fff" }}>
           {announcement.title}
         </div>
       )}
 
-      <Header theme={theme} menu={menu} onToggleMobile={() => setMobileMenu(v => !v)} mobileOpen={mobileMenu} />
+      <Header theme={theme} company={company} menu={menu} onToggleMobile={() => setMobileMenu(v => !v)} mobileOpen={mobileMenu} />
       {mobileMenu && <MobileMenu theme={theme} menu={menu} onClose={() => setMobileMenu(false)} />}
 
-      <main>
-        {otherBlocks.map((b, idx) => (
-          <BlockRenderer key={b.id} block={b} idx={idx} total={totalScreens} themeSlug={theme.slug} />
-        ))}
-      </main>
+      <main>{productMatch ? <StoreProduct product={products.find(p => p.slug === decodeURIComponent(productMatch[1]))} /> : categoryMatch ? <StoreCategory slug={decodeURIComponent(categoryMatch[1])} categories={categories} products={products} themeSlug={theme.slug} /> : <>{otherBlocks.map((b, idx) => <BlockRenderer key={b.id} block={b} idx={idx} total={totalScreens} themeSlug={theme.slug} />)}<StoreCategory title="Koleksiyonlar" categories={categories} products={products.slice(0, 8)} themeSlug={theme.slug} compact /></>}</main>
 
-      <Footer theme={theme} />
+      <Footer theme={theme} company={company} />
     </div>
   );
 }
 
 /**
- * Build Miu-Miu style mega menu from user's flat category list.
+ * Build a mega menu from the real category tree.
  * - Root categories (parent_id null) become top-level nav items.
  * - First-level children → grouped as columns within the mega panel.
  * - Second-level children → links inside each column.
@@ -121,8 +121,8 @@ function buildMegaMenu(cats, themeSlug) {
 }
 
 /* ---------- Header ---------- */
-function Header({ theme, menu, onToggleMobile, mobileOpen }) {
-  const brand = theme.settings?.brand_name || "miu miu";
+function Header({ theme, company, menu, onToggleMobile, mobileOpen }) {
+  const brand = company?.site_name || "Facette";
   const [openIdx, setOpenIdx] = useState(null);
 
   return (
@@ -131,7 +131,7 @@ function Header({ theme, menu, onToggleMobile, mobileOpen }) {
         <button className="mm-burger" onClick={onToggleMobile} aria-label="Menu" data-testid="btn-mobile-menu">
           {mobileOpen ? <X size={22}/> : <Menu size={22}/>}
         </button>
-        <Link to={`/tema/${theme.slug}`} className="mm-logo" data-testid="brand-logo">{brand}</Link>
+        <Link to={`/tema/${theme.slug}`} className="mm-logo" data-testid="brand-logo">{company?.logo_url ? <img src={company.logo_url} alt={brand}/> : brand}</Link>
         <nav className="mm-nav">
           {menu.map((m, i) => (
             <div key={i} className="mm-nav-item" onMouseEnter={() => setOpenIdx(i)} onMouseLeave={() => setOpenIdx(null)}>
@@ -278,8 +278,7 @@ function ProductScroller({ block, themeSlug }) {
     return () => { cancel = true; };
   }, [block.settings?.category_slug, block.settings?.limit]);
 
-  // If user has no products yet, show editorial placeholder cards
-  const display = items.length > 0 ? items : (loaded ? PLACEHOLDER_PRODUCTS : []);
+  const display = items;
 
   return (
     <section className="mm-scroller" data-testid={`block-product-scroller-${block.id}`}>
@@ -290,6 +289,7 @@ function ProductScroller({ block, themeSlug }) {
       <div className="mm-scroller-track">
         {display.map((p, i) => <ProductCard key={p.id || p.slug || i} p={p} themeSlug={themeSlug} />)}
       </div>
+      {loaded && !display.length && <p className="mm-empty">Gösterilebilir ürün bulunamadı.</p>}
     </section>
   );
 }
@@ -348,7 +348,7 @@ function Newsletter({ block }) {
 }
 
 /* ---------- Footer ---------- */
-function Footer({ theme }) {
+function Footer({ theme, company }) {
   return (
     <footer className="mm-footer" data-testid="storefront-footer">
       <div className="mm-footer-grid">
@@ -379,7 +379,7 @@ function Footer({ theme }) {
           </ul>
         </div>
         <div>
-          <h5>Follow {theme.settings?.brand_name || "us"}</h5>
+          <h5>{company?.site_name || "Facette"} sosyal</h5>
           <ul>
             <li><a href="#">Instagram</a></li>
             <li><a href="#">YouTube</a></li>
@@ -389,23 +389,28 @@ function Footer({ theme }) {
         </div>
       </div>
       <div className="mm-footer-bot">
-        <span>© {new Date().getFullYear()} {theme.settings?.brand_name || "Storefront"}. All rights reserved.</span>
+        <span>© {new Date().getFullYear()} {company?.site_name || "Facette"}. Tüm hakları saklıdır.</span>
         <span>Türkiye · TR</span>
       </div>
     </footer>
   );
 }
 
-const PLACEHOLDER_IMG = "https://images.unsplash.com/photo-1591047139829-d91aecb6caea?auto=format&fit=crop&w=600&q=70";
-const PLACEHOLDER_PRODUCTS = [
-  { id: "p1", name: "Leather shoulder bag", image: "https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&w=600&q=70" },
-  { id: "p2", name: "Poplin shirt", image: "https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=600&q=70" },
-  { id: "p3", name: "Mini skirt", image: "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=600&q=70" },
-  { id: "p4", name: "Sandals", image: "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=600&q=70" },
-  { id: "p5", name: "Raffia hat", image: "https://images.unsplash.com/photo-1601925268684-09b1bf2c3e25?auto=format&fit=crop&w=600&q=70" },
-  { id: "p6", name: "Cat-eye sunglasses", image: "https://images.unsplash.com/photo-1572635196237-14b3f281503f?auto=format&fit=crop&w=600&q=70" },
-  { id: "p7", name: "Leather wallet", image: "https://images.unsplash.com/photo-1601924994987-69e26d50dc26?auto=format&fit=crop&w=600&q=70" },
-  { id: "p8", name: "Tote bag", image: "https://images.unsplash.com/photo-1590874103328-eac38a683ce7?auto=format&fit=crop&w=600&q=70" },
-  { id: "p9", name: "Pleated dress", image: "https://images.unsplash.com/photo-1572804013309-59a88b7e92f1?auto=format&fit=crop&w=600&q=70" },
-  { id: "p10", name: "Knit cardigan", image: "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=600&q=70" },
-];
+function StoreCategory({ slug, categories, products, themeSlug, title, compact = false }) {
+  const category = categories.find(c => c.slug === slug);
+  const filtered = !slug || slug === "tumu" ? products : products.filter(p => p.category_id === category?.id || p.category_slug === slug || (p.categories || []).includes(category?.id));
+  return <section className={`mm-category ${compact ? "mm-category-compact" : ""}`} data-testid="theme-category-view">
+    <header><small>{compact ? "FACETTE SEÇKİSİ" : "KOLEKSİYON"}</small><h1>{title || category?.name || "Tüm ürünler"}</h1>{!compact && <p>{filtered.length} ürün</p>}</header>
+    <div className="mm-category-grid">{filtered.map((p,i)=><ProductCard key={p.id || p.slug || i} p={p} themeSlug={themeSlug}/>)}</div>
+    {!filtered.length && <p className="mm-empty">Bu kategoride gösterilebilir ürün bulunamadı.</p>}
+  </section>;
+}
+
+function StoreProduct({ product }) {
+  if (!product) return <div className="mm-empty">Ürün bulunamadı.</div>;
+  const images = Array.isArray(product.images) ? product.images : [];
+  const gallery = images.length ? images : [themeImage(product)].filter(Boolean);
+  return <section className="mm-product-detail" data-testid="theme-product-view"><div className="mm-product-gallery">{gallery.slice(0,4).map((img,i)=><img key={i} src={typeof img === "string" ? img : img?.url} alt={i ? "" : product.name || product.title}/>)}</div><aside><small>FACETTE</small><h1>{product.name || product.title}</h1><strong>{themePrice(product)}</strong><p>{product.short_description || "Renk ve beden seçeneklerini inceleyin."}</p><a href={product.slug ? `/urun/${product.slug}` : "#"}>Ürün sayfasında aç</a></aside></section>;
+}
+
+const PLACEHOLDER_IMG = "";
