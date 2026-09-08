@@ -118,6 +118,7 @@ async def create_coupon(payload: dict, current_user: dict = Depends(require_perm
     }
     await db.coupons.insert_one(doc)
     doc.pop("_id", None)
+    invalidate_codes_cache()  # bulanık çözümleyici yeni kodu hemen görsün
     return {"success": True, "coupon": doc}
 
 
@@ -136,6 +137,7 @@ async def update_coupon(cid: str, payload: dict, current_user: dict = Depends(re
     res = await db.coupons.update_one({"id": cid}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Kupon bulunamadı")
+    invalidate_codes_cache()  # aktiflik/kod değişimi çözümleyiciye hemen yansısın
     return {"success": True}
 
 
@@ -144,6 +146,7 @@ async def delete_coupon(cid: str, current_user: dict = Depends(require_admin)):
     res = await db.coupons.delete_one({"id": cid})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Kupon bulunamadı")
+    invalidate_codes_cache()
     return {"success": True}
 
 
@@ -721,12 +724,13 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
 
 @public_router.post("/apply")
 async def apply_coupon(payload: dict, current_user: dict = Depends(get_current_user)):
-    code = fold_code(payload.get("code") or "")
-    if not code:
+    if not (payload.get("code") or "").strip():
         return {"valid": False, "reason": "Kupon kodu boş", "discount": 0}
-    c = await db.coupons.find_one({"code": code}, {"_id": 0})
+    # BULANIK ÇÖZÜMLEME: her yazım varyantı sistemdeki gerçek kupona eşlenir.
+    c, _canon = await resolve_coupon_code(payload.get("code") or "")
     if not c:
         return {"valid": False, "reason": "Kupon bulunamadı", "discount": 0}
+    code = c.get("code") or _canon
     cart_total = float(payload.get("cart_total") or 0)
     items = payload.get("items") or []
     items = await _enrich_items_category_ids(items)
@@ -942,6 +946,120 @@ def fold_code(s) -> str:
     return folded
 
 
+# ── BULANIK KUPON ÇÖZÜMLEYİCİ ───────────────────────────────────────────────────
+# Müşteri kupon alanına ne yazarsa yazsın (HOŞGELDİN10 / hoş geldin %10 / HOSGELDIN-10 /
+# HOSGELDIN1O (harf O) / HOSGELDN10 (harf eksik) …) sistemdeki hangi kuponu kastettiğini
+# algılar. Sabit bir HOSGELDIN listesi DEĞİL, DB'deki gerçek kuponlara karşı normalize edip
+# eşler. Yanlış kupona ATLAMAMAK için katı sıra + eşikler (aşağıda).
+_CODE_ALNUM = re.compile(r"[^A-Z0-9]+")
+_TR_FOLD = str.maketrans({
+    "İ": "I", "ı": "I", "Ş": "S", "ş": "S", "Ğ": "G", "ğ": "G",
+    "Ü": "U", "ü": "U", "Ö": "O", "ö": "O", "Ç": "C", "ç": "C",
+})
+_CONFUSABLE = str.maketrans({"O": "0", "I": "1", "L": "1"})
+
+
+def _norm_code(s) -> str:
+    """Karşılaştırma formu: Türkçe harf katla → BÜYÜK → yalnız A-Z0-9 (boşluk, %, -, _, nokta
+    atılır). 'hoş geldin %10' → 'HOSGELDIN10'; 'HAVALE%5' → 'HAVALE5'."""
+    return _CODE_ALNUM.sub("", (s or "").strip().translate(_TR_FOLD).upper())
+
+
+def _norm_code2(s) -> str:
+    """İkinci geçiş: sık karıştırılan karakterler eşitlenir (harf O ↔ sıfır, I/L ↔ bir).
+    İKİ tarafa da uygulandığından karşılaştırma tutarlıdır ('HOSGELDIN1O' ≡ 'HOSGELDIN10')."""
+    return _norm_code(s).translate(_CONFUSABLE)
+
+
+_CODES_CACHE = {"rows": [], "at": 0.0}
+
+
+async def _all_coupon_codes() -> list:
+    """Tüm kuponların (aktif+pasif) hafif listesi, 60 sn önbellek — evaluate her sepet
+    değişiminde çağrıldığından DB yorulmasın. Kupon yazımında invalidate_codes_cache()."""
+    now = _time.time()
+    if now - _CODES_CACHE["at"] < 60 and _CODES_CACHE["rows"]:
+        return _CODES_CACHE["rows"]
+    rows = []
+    async for c in db.coupons.find({}, {"_id": 0, "code": 1, "id": 1, "is_active": 1,
+                                        "reward_user_id": 1, "reward_email": 1}):
+        if c.get("code"):
+            rows.append(c)
+    _CODES_CACHE["rows"], _CODES_CACHE["at"] = rows, now
+    return rows
+
+
+def invalidate_codes_cache():
+    _CODES_CACHE["at"] = 0.0
+
+
+async def resolve_coupon_code(entered: str):
+    """Müşterinin yazdığı kodu sistemdeki kupona çözümler → (coupon_doc | None, canonical_code).
+
+    Sıra (güvenlik: yanlış kupona ATLAMAMAK için):
+      1) fold_code (mevcut hoş-geldin takma adı HOSGELDIN→HOSGELDIN10 korunur) + normalize.
+      2) TAM eşleşme — TÜM kuponlarda (pasif dahil): pasif kupon 'Kupon pasif' desin, başka
+         bir kupona sıçramasın.
+      3) Karışan-karakter eşleşmesi (O↔0, I/L↔1) — tüm kuponlarda.
+      4) BULANIK — YALNIZ aktif + kişiye özel OLMAYAN + takma ad OLMAYAN kuponlar; girilen ≥5 kr:
+         a) önek/kapsama: biri diğerinin başlangıcı, kısa olan uzunun ≥%70'i (HOSGELDIN1 ~ HOSGELDIN10)
+         b) benzerlik (difflib) ≥ 0.80 → yazım hatası (HOSGELDN10, HOSGELDIM10)
+         Her iki adımda en iyi aday BENZERSİZ olmalı (ikinciyle fark ≥ 0.05); belirsizlikte
+         tahmin ETMEZ → None (müşteri 'geçersiz' görür, yanlış indirim uygulanmaz).
+    Kişiye özel ödül kuponları (reward_user_id/email) asla bulanık eşlenmez (yalnız tam)."""
+    raw = fold_code(entered or "")
+    n1 = _norm_code(raw)
+    if not n1:
+        return None, ""
+    rows = await _all_coupon_codes()
+
+    async def _full(c):
+        return await db.coupons.find_one({"id": c["id"]}, {"_id": 0}), c["code"]
+
+    # 2) tam
+    for c in rows:
+        if _norm_code(c["code"]) == n1:
+            return await _full(c)
+    # 3) karışan karakter
+    n2 = _norm_code2(raw)
+    for c in rows:
+        if _norm_code2(c["code"]) == n2:
+            return await _full(c)
+    # 4) bulanık
+    if len(n1) < 5:
+        return None, raw
+    pool = [c for c in rows
+            if c.get("is_active") and not c.get("reward_user_id") and not c.get("reward_email")
+            and fold_code(c["code"]) == c["code"]]   # takma ad olan kod (HOSGELDIN→HOSGELDIN10) havuz dışı
+    # a) önek / kapsama
+    pre = []
+    for c in pool:
+        cn = _norm_code(c["code"])
+        if not cn:
+            continue
+        short, long_ = (n1, cn) if len(n1) <= len(cn) else (cn, n1)
+        if len(short) >= 5 and long_.startswith(short) and len(short) / len(long_) >= 0.7:
+            pre.append((len(short) / len(long_), c))
+    if pre:
+        pre.sort(key=lambda x: x[0], reverse=True)
+        if len(pre) == 1 or pre[0][0] - pre[1][0] >= 0.05:
+            return await _full(pre[0][1])
+    # b) benzerlik
+    import difflib
+    scored = []
+    for c in pool:
+        cn = _norm_code(c["code"])
+        if not cn:
+            continue
+        r = max(difflib.SequenceMatcher(None, n1, cn).ratio(),
+                difflib.SequenceMatcher(None, n2, _norm_code2(c["code"])).ratio())
+        scored.append((r, c))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    if scored and scored[0][0] >= 0.80 and (len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.05):
+        return await _full(scored[0][1])
+    return None, raw
+
+
 async def evaluate_cart_promotions(cart_total: float, items: list,
                                    user_id=None, email: str = "", entered_code: str = "",
                                    payment_method: str = "", excluded_ids=None) -> dict:
@@ -971,14 +1089,15 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
         async for c in db.coupons.find({"is_active": True, "auto_apply": True}, {"_id": 0}):
             candidates[c["id"]] = c
     entered_id = None
+    entered_resolved = ""
     if entered:
-        # Harf/Türkçe-I duyarsız eşleşme: girilen kod katlanmış (fold_code); kayıtlı kodla
-        # büyük-küçük harf gözetmeksizin eşle (kayıtlı kodlar ASCII büyük harf).
-        ec = await db.coupons.find_one(
-            {"code": {"$regex": f"^{re.escape(entered)}$", "$options": "i"}}, {"_id": 0})
+        # BULANIK ÇÖZÜMLEME: müşterinin yazdığı her varyant (Türkçe harf, boşluk, %, tire,
+        # O↔0, eksik/yanlış harf) sistemdeki gerçek kupona eşlenir (resolve_coupon_code).
+        ec, entered_resolved = await resolve_coupon_code(entered_code)
         if ec:
             candidates[ec["id"]] = ec
             entered_id = ec["id"]
+            entered_resolved = ec.get("code") or entered_resolved
 
     # 2) Tekil degerlendirme
     valid, rejected = [], []
@@ -998,7 +1117,9 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
             # sepet) eskiden belirsiz "Uygulanamadı" dönüyordu → müşteri "kod bozuk" sanıyordu.
             _why = ev.get("reason") or ("Bu kupon sepetinizdeki ürünlerde geçerli değil"
                                         if ev.get("valid") else "Uygulanamadı")
-            rejected.append({"code": entered, "reason": _why})
+            # code = çözülen KANONİK kod, entered = müşterinin yazdığı (katlanmış) — frontend
+            # ikisiyle de eşleyebilsin (yazım hatalı girişte reddi yine göstersin).
+            rejected.append({"code": entered_resolved or entered, "entered": entered, "reason": _why})
 
     # 3) Sirala: priority -> discount -> girilen kod (esitlikte one)
     valid.sort(key=lambda x: (x["priority"], x["discount"], x["is_entered"]), reverse=True)
@@ -1078,6 +1199,9 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
         "capped": capped,
         "cap_pct": cap_pct,
         "rejected": rejected,
+        # Girilen kodun çözüldüğü KANONİK kupon kodu (bulanık eşleşmede yazılandan farklı olabilir).
+        # Frontend applied/rejected eşlemesini ve siparişe yazılacak kodu buna göre yapar.
+        "entered_resolved": entered_resolved,
         # eligible: bu sepette GECERLI tum kampanyalar (uygulanmis olsun olmasin) — musteri
         # X ile kaldirip baskasini secebilsin diye. discount = tek basina (standalone) deger.
         "eligible": [{

@@ -1312,6 +1312,11 @@ async def create_order(
         _server_discount = round(float(_ev.get("total_discount", 0) or 0), 2)
         _free_shipping = bool(_ev.get("free_shipping"))
         order["applied_promotions"] = _ev.get("applied") or []
+        # Bulanık kupon çözümleme: müşteri 'hoş geldin %10' gibi bir varyant yazdıysa siparişe
+        # KANONİK kod (HOSGELDIN10) yazılır → record_order_redemptions kuponu birebir bulur.
+        _res_code = str(_ev.get("entered_resolved") or "").strip()
+        if _res_code and (order.get("coupon_code") or "").strip():
+            order["coupon_code"] = _res_code
     except Exception as _promo_err:
         logger.warning(f"Promo değerlendirme hatası (indirim 0 kabul edildi): {_promo_err}")
         _server_discount = 0.0

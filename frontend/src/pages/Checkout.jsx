@@ -614,15 +614,20 @@ export default function Checkout() {
     if (!code) return;
     const d = await recalcPromotions(code);
     if (!d) { toast.error("Kampanya hesaplanamadı"); return; }
-    const hit = (d.applied || []).find((a) => foldCode(a.code) === code);
+    // BULANIK ÇÖZÜMLEME: sunucu, yazılan varyantı (hoş geldin %10, HOSGELDN10, HOSGELDIN1O…)
+    // sistemdeki KANONİK koda çözer (entered_resolved). applied/rejected eşlemesi ve
+    // appliedCoupon bu kanonik kodla yapılır; böylece sonraki hesaplamalar/sipariş doğru kodu taşır.
+    const resolved = foldCode(d.entered_resolved || code);
+    const hit = (d.applied || []).find((a) => foldCode(a.code) === resolved || foldCode(a.code) === code);
     if (hit) {
-      setAppliedCoupon({ code });
+      setAppliedCoupon({ code: hit.code || resolved });
       setCouponCode(rawCode);
       setPendingCode(""); // uygulandı → bekleyen kod kalmasın
-      toast.success(`Kupon uygulandı: ${Number(hit.discount).toFixed(2)} TL indirim`);
+      toast.success(`Kupon uygulandı (${hit.code || resolved}): ${Number(hit.discount).toFixed(2)} TL indirim`);
       return;
     }
-    const rej = (d.rejected || []).find((r) => foldCode(r.code) === code);
+    const rej = (d.rejected || []).find((r) =>
+      foldCode(r.code) === resolved || foldCode(r.code) === code || foldCode(r.entered || "") === code);
     if (rej) {
       // Kod GEÇERLİ bir kupon ama bu sepete uygulanamıyor (ör. kampanya çakışması / ilk sipariş).
       // İLK-SİPARİŞ + KİMLİK YOK: kodu HATIRLA; müşteri giriş yapınca/e-posta girince otomatik uygulanır.
