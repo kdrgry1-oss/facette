@@ -733,6 +733,11 @@ async def apply_coupon(payload: dict, current_user: dict = Depends(get_current_u
     code = c.get("code") or _canon
     cart_total = float(payload.get("cart_total") or 0)
     items = payload.get("items") or []
+    # CANLI DENETİM: /apply kalemleri 'quantity' ile gelirken indirim motoru 'qty' okuyor → adet 0
+    # sayılıp indirimli-ürün (sale_price) dışlaması ve adet-bazlı kurallar ATLANIYORDU. Sonuç:
+    # /apply "geçerli ₺138" derken checkout (/evaluate, 'qty' gönderir) aynı sepeti REDDEDİYORDU —
+    # müşteri "kupon uygulandı" görüp ödemede kaybediyordu. Aynı motor, aynı alan: qty'yi doldur.
+    items = [{**it, "qty": int(it.get("qty", it.get("quantity", 1)) or 1)} for it in items if isinstance(it, dict)]
     items = await _enrich_items_category_ids(items)
     # SEC-2 F1: kimlik doğrulanmışsa token'dan (istemci user_id'sine güvenilmez); misafirde e-posta.
     _uid = (current_user or {}).get("id") or payload.get("user_id")
@@ -1115,8 +1120,23 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
         elif cid == entered_id:
             # Girilen kod GEÇERLİ ama bu sepette indirim 0 çıktıysa (kategori/ürün kısıtı dışı
             # sepet) eskiden belirsiz "Uygulanamadı" dönüyordu → müşteri "kod bozuk" sanıyordu.
-            _why = ev.get("reason") or ("Bu kupon sepetinizdeki ürünlerde geçerli değil"
-                                        if ev.get("valid") else "Uygulanamadı")
+            # CANLI DENETİM (kök neden — "HOSGELDIN10 çalışmıyor"): kupon GEÇERLİ ama sepetteki
+            # ürünler ürün kartında İNDİRİMLİ (sale_price) olduğu için kampanya tabanından
+            # dışlanıyor (skip_discounted) → indirim 0. Müşteriye NEDENİNİ söyle; aksi halde
+            # "geçerli değil" mesajı kupon bozuk sanılıyor. Kupon indirimli ürünlerde de geçsin
+            # isteniyorsa admin kampanya formundan "İndirimli ürünlere uygulansın" açılır.
+            _all_sale = bool(items) and all(bool(it.get("_has_manual_sale")) for it in items)
+            if ev.get("valid") and not ev.get("reason"):
+                if c.get("skip_discounted", True) and _all_sale:
+                    _why = ("Sepetinizdeki ürünler zaten indirimli olduğu için bu kupon uygulanamıyor "
+                            "(kupon indirimsiz ürünlerde geçerlidir).")
+                elif c.get("skip_discounted", True) and any(bool(it.get("_has_manual_sale")) for it in items):
+                    _why = ("Bu kupon yalnızca sepetinizdeki indirimsiz ürünlere uygulanır; "
+                            "indirimli ürünler kapsam dışıdır.")
+                else:
+                    _why = "Bu kupon sepetinizdeki ürünlerde geçerli değil"
+            else:
+                _why = ev.get("reason") or "Uygulanamadı"
             # code = çözülen KANONİK kod, entered = müşterinin yazdığı (katlanmış) — frontend
             # ikisiyle de eşleyebilsin (yazım hatalı girişte reddi yine göstersin).
             rejected.append({"code": entered_resolved or entered, "entered": entered, "reason": _why})
