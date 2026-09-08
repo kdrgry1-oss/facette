@@ -28,6 +28,7 @@ describe("checkout address isolation", () => {
   beforeEach(() => {
     mockUser = null;
     mockTotal = 100;
+    Object.assign(mockCartItems[0], {price: 100, listPrice: 100, campaignPct: 0});
     localStorage.clear();
     container = document.createElement("div");
     root = createRoot(container);
@@ -68,5 +69,34 @@ describe("checkout address isolation", () => {
     expect(container.textContent).not.toContain("PRIVATE_PREVIOUS_CUSTOMER");
     expect(container.textContent).not.toContain("PRIVATE_ADDRESS");
     expect(localStorage.getItem("facette_last_address")).toBeNull();
+  });
+
+  test.each([
+    [3790, 3790, 758, 303.2, 2691.36],
+    // Backend cap/scope can differ from the cached product badge: never recalculate it.
+    [3790, 3790, 400, 339, 2997.45],
+    // Embedded sale price stays separate from campaign discounts.
+    [4000, 3790, 0, 379, 3339.45],
+    // Campaign removed: cached 20% badge must not produce a phantom discount.
+    [3790, 3790, 0, 0, 3699.5],
+  ])('both summaries use authoritative discounts (%s/%s/%s/%s)', async (listPrice, total, launch, welcome, final) => {
+    mockTotal = total;
+    Object.assign(mockCartItems[0], {price: total, listPrice, campaignPct: 20});
+    const applied = [
+      {coupon_id: 'launch', code: 'LAUNCH', title: 'Lansman %20', discount: launch},
+      {coupon_id: 'welcome', code: 'WELCOME', title: 'Hoş geldin %10', discount: welcome},
+    ].filter(p => p.discount > 0);
+    axios.post.mockResolvedValue({data: {applied, total_discount: launch + welcome}});
+    await act(async () => root.render(<Checkout />));
+    const lower = container.querySelector('[data-testid="promotion-totals"]');
+    expect(lower.children).toHaveLength(applied.length);
+    applied.forEach((p, i) => {
+      expect(lower.children[i].textContent).toBe(`${p.title}-${p.discount.toFixed(2)} TL`);
+      expect(container.querySelector('[data-testid="applied-promotions"]').textContent)
+        .toContain(`${p.title}-${p.discount.toFixed(2)} ₺`);
+    });
+    expect(container.textContent).toContain(`${final.toFixed(2)} TL`);
+    expect(container.textContent).not.toContain('-682.20');
+    if (listPrice > total) expect(container.textContent).toContain('Ürün fiyat indirimi-210.00 TL');
   });
 });

@@ -6,7 +6,7 @@
  * eksik sistem maddeleri eklenir. Böylece yeni sürüm dokümantasyonu upsert
  * edilirken tenant'a özel içerik kaybolmaz.
  */
-export const TRAINING_CONTENT_VERSION = "2026.09.08.3";
+export const TRAINING_CONTENT_VERSION = "2026.09.08.4";
 
 export const TRAINING_UPDATES = [
   {
@@ -15,6 +15,18 @@ export const TRAINING_UPDATES = [
     icon: "Settings",
     intro: "Beyaz etiket ayarları, birleşik ekranlar, rapor tanımları ve salt-okunur kontroller için güncel başvuru.",
     items: [
+      {
+        key: "promotion-calculation-order-2026-09-08",
+        title: "Kampanya ve kupon indirim sırası",
+        path: "/admin/kampanyalar",
+        what: "Birleşen otomatik ürün kampanyaları önce, ilk sipariş/girilen kupon sonra, havale indirimi kalan tutara uygulanır. Üst ve alt ödeme özeti aynı kampanya motorunun tutarlarını gösterir.",
+        where: "Pazarlama → Kampanyalar; havale oranı Genel Ayarlar → Ödeme ayarları.",
+        how: [
+          "3.790 TL örneği: %20 lansman 758 TL; kalan 3.032 TL üzerinden %10 hoş geldin 303,20 TL; kalan 2.728,80 TL üzerinden %5 havale 136,44 TL. Net ürün tutarı 2.592,36 TL; 99 TL kargoyla toplam 2.691,36 TL.",
+          "Birleşebilirlik ve kampanya grubu kuralları korunur. Girilen kod birleşmeyen otomatik kampanyalara karşı seçim önceliğini korur; bu öncelik hesaplama sırasıyla aynı şey değildir.",
+          "Kampanya oranları, kapsamı ve aşama içindeki öncelik panelden değiştirilebilir. Ürünün indirimli satış fiyatı varsa liste fiyatıyla arasındaki fark 'Ürün fiyat indirimi' olarak ayrıca gösterilir.",
+        ],
+      },
       {
         key: "net-shipping-and-registration-2026-09-08",
         title: "İndirim sonrası ücretsiz kargo ve zorunlu ad-soyad",

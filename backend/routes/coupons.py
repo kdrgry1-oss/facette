@@ -1225,7 +1225,7 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
             # ikisiyle de eşleyebilsin (yazım hatalı girişte reddi yine göstersin).
             rejected.append({"code": entered_resolved or entered, "entered": entered, "reason": _why})
 
-    # 3) Sirala: GİRİLEN KOD ÖNCE -> priority -> discount.
+    # 3) SEÇİM önceliği: GİRİLEN KOD ÖNCE -> priority -> discount.
     # CANLI OLAY (havale/EFT siparişlerinde "kod geçersiz"): müşterinin yazdığı kod, daha yüksek
     # öncelikli/indirimli bir OTOMATİK kampanyayla (ödeme-yöntemi kampanyası, üye indirimi…)
     # birleşemeyince istiflemede SESSİZCE düşüyordu — ne applied'da ne rejected'da → müşteri
@@ -1250,20 +1250,35 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
             return True
         return not aw and not bw
 
-    applied = []
-    running = cart_total
+    selected = []
     used_groups = set()
     _excluded = set(excluded_ids or [])
     for cand in valid:
         if cand["c"]["id"] in _excluded:
             continue  # musteri bu kampanyayi X ile kaldirdi
-        if applied:
+        if selected:
             if not cand["combinable"]:
                 continue
-            if not all(_pair_ok(cand, a) for a in applied):
+            if not all(_pair_ok(cand, a) for a in selected):
                 continue
             if cand["stack_group"] and cand["stack_group"] in used_groups:
                 continue
+        selected.append(cand)
+        if cand["stack_group"]:
+            used_groups.add(cand["stack_group"])
+
+    # Hesap sırası seçim önceliğinden BAĞIMSIZDIR. Girilen kupon birleşmeyen bir
+    # otomatik kampanyaya yenilmez; ancak birleşen ürün kampanyası önce hesaplanır.
+    # Firma/kod/yüzde sabiti yok: otomatik kampanya -> ilk sipariş/girilen kupon
+    # -> yalnız kargo kampanyası. Her aşamada paneldeki priority korunur.
+    selected.sort(key=lambda a: (
+        2 if a["free_shipping"] and a["discount"] <= 0 else
+        1 if a["is_entered"] or a["c"].get("first_order_only") or not a["c"].get("auto_apply") else 0,
+        -a["priority"], -a["discount"], str(a["c"]["id"]),
+    ))
+    applied = []
+    running = cart_total
+    for cand in selected:
         scale = (running / cart_total) if cart_total > 0 else 0.0
         scaled_items = [{**it, "price": float(it.get("price", 0)) * scale} for it in items]
         d = _compute_discount(cand["c"], running, scaled_items)
@@ -1282,8 +1297,6 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
             continue
         applied.append({**cand, "applied_discount": round(d, 2)})
         running = round(running - d, 2)
-        if cand["stack_group"]:
-            used_groups.add(cand["stack_group"])
 
     # GÜVENLİK AĞI — ASLA SESSİZ DÜŞME: girilen kod geçerli (valid) olduğu hâlde istiflemede
     # uygulanamadıysa (müşteri X ile kaldırmadıysa) nedenini rejected'a yaz; frontend gösterir.

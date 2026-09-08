@@ -309,20 +309,11 @@ export default function Checkout() {
   const giftCardDeduction = giftCardApplied ? Math.min(Number(giftCardApplied.balance) || 0, preGiftTotal) : 0;
   const grandTotal = Math.max(0, Math.round((preGiftTotal - giftCardDeduction) * 100) / 100);
 
-  // Ürün-seviyesi indirim (sale_price + otomatik kampanya) — Sepet sayfasıyla BİREBİR aynı
-  // gösterim. Böylece kasada da her kalem indirimli birim fiyatıyla (üstü çizili liste +
-  // kırmızı indirimli) görünür; müşteri "indirimsiz fiyat görüyorum" yaşamaz. Ödeme tutarı
-  // (grandTotal) DEĞİŞMEZ — yalnız sunum: effSum - extraDisc === total - discount (kanıtlı).
+  // Yalnız ürün kartındaki sale_price farkı motorun dışında kalır. Kampanyaları
+  // cartLineView/campaignPct ile TEKRAR hesaplama: üst ve alt özet aynı sunucu
+  // sonucunu kullanmalı (kapsam, kaldırılan kampanya, global tavan dahil).
   const listSum = items.reduce((s, it) => s + cartLineView(it).listUnit * it.quantity, 0);
-  const effSum = items.reduce((s, it) => s + cartLineView(it).unit * it.quantity, 0);
-  const productDisc = Math.max(0, listSum - effSum);              // sale_price + otomatik kampanya
-  // Otomatik kampanya kısmı (birim: it.price → unit farkı) promo motoru `discount`ında ZATEN var;
-  // sale_price farkı ise motorda YOK (üründe gömülü). Bu yüzden extraDisc yalnız motor
-  // indiriminden KAMPANYA kısmını düşer → kupon/koşullu indirim çift sayılmaz, sale+kupon
-  // bileşiminde kupon kaybolmaz. Kanıt: listSum - productDisc - extraDisc === total - discount.
-  const campaignPortion = items.reduce(
-    (s, it) => s + Math.max(0, (Number(it.price) || 0) - cartLineView(it).unit) * it.quantity, 0);
-  const extraDisc = Math.max(0, discount - campaignPortion);      // kupon/koşullu kampanya
+  const productDisc = Math.max(0, listSum - total);
 
   // Seçili taksitin GERÇEK ödeme değerleri — özet "Toplam" ve "Ödeme Yap" butonu
   // peşin grandTotal'ı değil, seçilen taksitin totalPrice/installmentPrice'ını yansıtır.
@@ -1375,7 +1366,7 @@ export default function Checkout() {
                       <>
                         <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-green-700 mb-2">
                           <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3 3 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd" /></svg>
-                          En avantajlı indirim otomatik uygulandı
+                          İndirimler uygulandı
                         </div>
                         <div className="space-y-1">
                           {visiblePromotions.map((p, i) => (
@@ -1428,8 +1419,14 @@ export default function Checkout() {
                 {/* Totals */}
                 <div className="px-5 py-4 mt-3 border-t space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-gray-600">Ara Toplam</span><span>{listSum.toFixed(2)} TL</span></div>
-                  {productDisc > 0.001 && <div className="flex justify-between text-emerald-700"><span>Ürün İndirimi</span><span>-{productDisc.toFixed(2)} TL</span></div>}
-                  {/* NOT: alt "Kupon" satırı kupon/koşullu indirimi gösterir; ürün-içi indirim yukarıda ayrı. */}
+                  {productDisc > 0.001 && <div className="flex justify-between text-emerald-700"><span>Ürün fiyat indirimi</span><span>-{productDisc.toFixed(2)} TL</span></div>}
+                  <div data-testid="promotion-totals" className="space-y-2">
+                    {visiblePromotions.filter((p) => Number(p.discount) > 0).map((p, i) => (
+                      <div key={p.coupon_id || i} className="flex justify-between text-green-600 gap-2">
+                        <span>{p.title || p.code}</span><span className="shrink-0">-{Number(p.discount).toFixed(2)} TL</span>
+                      </div>
+                    ))}
+                  </div>
                   <div className="flex justify-between" data-testid="shipping-cost">
                     <span className="text-gray-600">Kargo Tutarı</span>
                     {shippingCost === 0
@@ -1440,7 +1437,6 @@ export default function Checkout() {
                     <span>Tahmini teslimat</span>
                     <span>{estimateDelivery()} <span className="text-gray-400">· 2-4 iş günü</span></span>
                   </div>
-                  {extraDisc > 0.001 && <div className="flex justify-between text-green-600"><span>Kupon{appliedCoupon?.code ? ` (${appliedCoupon.code})` : ""}</span><span>-{extraDisc.toFixed(2)} TL</span></div>}
                   {bankTransferDiscount > 0 && <div className="flex justify-between" style={{ color: "#dc2626" }}><span>Havale/EFT İndirimi (%{bankPct})</span><span>-{bankTransferDiscount.toFixed(2)} TL</span></div>}
                   {paymentMethodDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>{_payRule?.label || "Ödeme İndirimi"}</span><span>-{paymentMethodDiscount.toFixed(2)} TL</span></div>}
                   {memberGroupDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>Üye İndirimi{memberGroupName ? ` (${memberGroupName})` : ""} (%{memberDiscPct})</span><span>-{memberGroupDiscount.toFixed(2)} TL</span></div>}
