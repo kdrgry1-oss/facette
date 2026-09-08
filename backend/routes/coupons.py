@@ -180,6 +180,36 @@ async def edit_coupon_exceptions(payload: dict, current_user: dict = Depends(req
     return {"success": True, "emails": (doc or {}).get("emails") or []}
 
 
+async def migrate_welcome_coupon_sale_policy():
+    """TEK SEFERLİK migrasyon (işletme sahibi kararı, canlı denetim sonrası): hoş geldin kuponları
+    (HOSGELDIN10, HOSGELDIN) İNDİRİMLİ (sale_price) ürünlerde de uygulansın → skip_discounted=False.
+
+    Kök neden: katalogun %14'ü indirimli; skip_discounted=True olduğu için indirimli ürünlü sepette
+    kupon 0 veriyor ve "kupon çalışmıyor" şikâyetleri tekrarlıyordu (W11692 kanıtı).
+    İdempotent + işaretli: settings.id='migrations'.welcome_coupon_sale_ok_v1 yazıldıktan sonra bir
+    daha ÇALIŞMAZ — admin ileride kampanya formundan anahtarı değiştirirse restart geri çevirmez."""
+    try:
+        _flag = "welcome_coupon_sale_ok_v1"
+        _m = await db.settings.find_one({"id": "migrations"}, {"_id": 0, _flag: 1}) or {}
+        if _m.get(_flag):
+            return
+        res = await db.coupons.update_many(
+            {"code": {"$in": ["HOSGELDIN10", "HOSGELDIN"]}},
+            {"$set": {"skip_discounted": False, "updated_at": _utcnow()}},
+        )
+        await db.settings.update_one(
+            {"id": "migrations"},
+            {"$set": {_flag: True, f"{_flag}_at": _utcnow(), f"{_flag}_matched": res.matched_count},
+             "$setOnInsert": {"id": "migrations"}},
+            upsert=True,
+        )
+        invalidate_codes_cache()
+        logger.info(f"[migration] {_flag}: hoş geldin kuponlarında skip_discounted=False "
+                    f"(eşleşen {res.matched_count}, güncellenen {res.modified_count})")
+    except Exception as _e:
+        logger.warning(f"[migration] welcome_coupon_sale_ok_v1 hata: {_e}")
+
+
 async def seed_coupon_exceptions():
     """Başlangıçta ilk-sipariş istisna listesini garanti et (idempotent addToSet).
     Kadir'in talebiyle eklenen müşteri destek istisnası."""
