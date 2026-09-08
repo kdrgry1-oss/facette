@@ -384,6 +384,9 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       } catch { /* önizleme alınamazsa modal yine açılır */ }
       setWf({
         row, returnId, status: br.data?.status || "created", fault,
+        // Sunucunun karar gerçeği: gerçek approval/rejection nesnesi ya da kapanmış durum.
+        // Çıplak status="approved" (kalem onayı yok) decided=false döner → onaylanabilir.
+        decided: br.data?.decided, decision: br.data?.decision || null,
         preview, returnedNet,
         selIdx: isPartialSelection ? selIdx : [], selIdents,
         finalAmount: preview ? preview.auto_refund : (returnedNet ?? 0),
@@ -634,11 +637,18 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
   // sessiz durum düzeltmesi / pazaryeri senkronu siparişi 'onaylı' gösterirken kayıt 'created'
   // kalıyordu → pencere "Bu iade onaylanmış; tekrar işlem yapılamaz" deyip kalem onayını
   // engelliyordu (W11262). Kayıt 'created' ise karar verilebilir.
+  // Öncelik: sunucunun /open'da döndürdüğü `decided` (gerçek karar nesnesi var mı). Yoksa
+  // (eski backend) kayıt durumuna düşülür. Çıplak "approved" bayrağı → decided=false → aktif.
   const wfDecided = wf
-    ? (["approved", "refunded", "partial_refunded"].includes(wf.status)
-        ? "approved"
-        : (["rejected", "return_rejected"].includes(wf.status) ? "rejected" : null))
+    ? (typeof wf.decided === "boolean"
+        ? (wf.decided ? ((wf.decision?.kind === "rejected") ? "rejected" : "approved") : null)
+        : (["refunded", "partial_refunded"].includes(wf.status)
+            ? "approved"
+            : (["rejected", "return_rejected"].includes(wf.status) ? "rejected" : null)))
     : null;
+  const wfDecisionInfo = (wf && wf.decision && (wf.decision.by || wf.decision.at))
+    ? ` (${wf.decision.by || "?"}${wf.decision.at ? ", " + new Date(wf.decision.at).toLocaleString("tr-TR") : ""})`
+    : "";
 
   return (
     <div className={embedded ? "" : "p-4"}>
@@ -1318,7 +1328,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                       className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-not-allowed ${wfDecided === "rejected" ? "bg-rose-600 text-white opacity-80" : "bg-gray-200 text-gray-400 opacity-60"}`}>
                       {wfDecided === "rejected" && <XCircle size={14} />} {wfDecided === "rejected" ? "Reddedildi" : "Reddet"}
                     </button>
-                    <span className="text-[11px] text-gray-500">Bu iade {wfDecided === "approved" ? "onaylanmış" : "reddedilmiş"}; tekrar işlem yapılamaz.</span>
+                    <span className="text-[11px] text-gray-500">Bu iade {wfDecided === "approved" ? "onaylanmış" : "reddedilmiş"}{wfDecisionInfo}; tekrar işlem yapılamaz. Kalem/tutar değişikliği için listedeki "Düzenle"yi kullanın.</span>
                   </>
                 ) : (
                   <>

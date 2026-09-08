@@ -344,7 +344,11 @@ async def list_rooftr_return_orders(
         # customer_returns KAYDI esas alınır; sipariş durumu/damgası (sessiz durum düzeltmesi,
         # pazaryeri senkronu) tek başına kalem onayı SAYILMAZ. Panel "İade Onay" kilidini buna bağlar.
         r["record_status"] = _cr_status
-        r["items_approved"] = bool(_appr) or _cr_status in ("approved", "return_approved", "refunded", "partial_refunded")
+        # KARAR GERÇEĞİ: yalnız gerçek karar nesnesi (approval/rejection) ya da kapanmış durum
+        # (refunded/partial_refunded/cancelled) kilitler. ÇIPLAK "approved" bayrağı (köprü kaydı
+        # sipariş durumundan türetilirken ya da durum menüsünden yazılmış, kalem onayı YOK) kilitlemez.
+        _dec, _dkind, _, _ = _decision_of(cr)
+        r["items_approved"] = bool(_dec and _dkind == "approved")
         # KRİTİK: panel r["items"] = SİPARİŞİN TÜM kalemleri; customer_returns.items = GERÇEKTE
         # İADE EDİLEN kalemler (alt küme olabilir). "Tam onay" = iadenin TÜM kalemleri, siparişin
         # tümü DEĞİL. W10205: 2 kalemli siparişte yalnız M iade edildi; eski kod range(2) yazıp
@@ -948,6 +952,61 @@ async def export_rooftr_return_orders(
 # ============================================================================
 # BRIDGE — Ticimax iade siparişini zengin iade akışına (customer_returns) bağlar
 # ============================================================================
+def _decision_of(rec: dict):
+    """Bir customer_returns kaydının GERÇEKTEN karara bağlanıp bağlanmadığı.
+    Döner: (decided: bool, kind: 'approved'|'rejected'|'closed'|None, by, at).
+    Karar = approve_return/bulk-approve'un yazdığı `approval` nesnesi VEYA reject'in `rejection`
+    nesnesi VEYA kapanmış durum (refunded/partial_refunded/cancelled). Yalnız `status="approved"`
+    (karar nesnesi YOK — köprü kaydı sipariş durumundan türetilmiş ya da durum menüsünden yazılmış)
+    karar SAYILMAZ: kalem onayı yapılmamıştır, personel onaylayabilmelidir (W11262)."""
+    rec = rec or {}
+    _st = str(rec.get("status") or "")
+    _ap = rec.get("approval") or {}
+    _rj = rec.get("rejection") or {}
+    if _ap:
+        return True, "approved", _ap.get("by") or "", _ap.get("at") or ""
+    if _rj or _st in ("rejected", "return_rejected"):
+        return True, "rejected", _rj.get("by") or "", _rj.get("at") or ""
+    if _st in ("refunded", "partial_refunded", "cancelled"):
+        return True, "closed", "", (rec.get("refund_payment") or {}).get("at") or ""
+    return False, None, "", ""
+
+
+@router.get("/returns/diagnose")
+async def diagnose_rooftr_return(order_number: str, current_user: dict = Depends(require_admin)):
+    """TEŞHİS: bir siparişin iade durumunu tek bakışta — sipariş alanları + o siparişe ait TÜM
+    customer_returns kayıtları (mükerrer var mı, hangisi karara bağlı, kim/ne zaman). Panel
+    'zaten onaylanmış' derken kalem onayı yoksa nedeni buradan görülür."""
+    onum = (order_number or "").strip()
+    o = await db.orders.find_one({"order_number": onum}, {"_id": 0, "id": 1, "order_number": 1, "status": 1,
+                                                          "return_approved_at": 1, "return_request": 1,
+                                                          "refund_paid_at": 1, "platform": 1})
+    if not o:
+        raise HTTPException(status_code=404, detail=f"Sipariş bulunamadı: {onum}")
+    recs = []
+    async for cr in db.customer_returns.find({"order_id": o["id"]}, {"_id": 0}):
+        _dec, _kind, _by, _at = _decision_of(cr)
+        recs.append({
+            "id": cr.get("id"), "status": cr.get("status"), "source": cr.get("source"),
+            "created_at": cr.get("created_at"), "updated_at": cr.get("updated_at"),
+            "decided": _dec, "decision_kind": _kind, "decision_by": _by, "decision_at": _at,
+            "has_approval_obj": bool(cr.get("approval")), "has_rejection_obj": bool(cr.get("rejection")),
+            "approved_item_indexes": cr.get("approved_item_indexes"),
+            "approved_items": cr.get("approved_items"),
+            "items_count": len(cr.get("items") or []),
+            "has_gider_pusulasi": bool(cr.get("has_gider_pusulasi")), "gider_pusulasi_no": cr.get("gider_pusulasi_no"),
+            "refund_amount": cr.get("refund_amount"), "restocked": bool(cr.get("restocked_at") or cr.get("stock_restored")),
+        })
+    _open_pick = next((r for r in recs if r.get("status") != "expired"), None)
+    return {"order": o, "records": recs, "record_count": len(recs),
+            "duplicate": len([r for r in recs if r.get("status") != "expired"]) > 1,
+            "open_would_use": (_open_pick or {}).get("id"),
+            "verdict": ("MÜKERRER kayıt — liste ve pencere farklı kaydı görüyor olabilir" if len(recs) > 1
+                        else ("Karar nesnesi YOK ama status=approved → çıplak bayrak; artık onaylanabilir"
+                              if recs and recs[0]["status"] == "approved" and not recs[0]["has_approval_obj"]
+                              else ("Gerçek karar var" if recs and recs[0]["decided"] else "Kayıt karara bağlı değil / kayıt yok")))}
+
+
 @router.post("/returns/{order_id}/open")
 async def open_rooftr_return(order_id: str, current_user: dict = Depends(require_admin)):
     """Ticimax iade siparişinden, zengin iade akışı (onayla/reddet/gider/öde) için bir
@@ -965,7 +1024,7 @@ async def open_rooftr_return(order_id: str, current_user: dict = Depends(require
     # gider pusulası/iade akışları kalemleri bu kayıttan okur, boş kayıt kısmi seçimi bozar.
     existing = await db.customer_returns.find_one(
         {"order_id": order_id, "status": {"$ne": "expired"}},
-        {"_id": 0, "id": 1, "status": 1, "items": 1})
+        {"_id": 0, "id": 1, "status": 1, "items": 1, "approval": 1, "rejection": 1, "refund_payment": 1})
     if existing:
         if not (existing.get("items") or []):
             _src = order.get("items") or []
@@ -982,8 +1041,11 @@ async def open_rooftr_return(order_id: str, current_user: dict = Depends(require
             if _fix:
                 await db.customer_returns.update_one(
                     {"id": existing.get("id")}, {"$set": {"items": _fix}})
+        # decided/decision: pencere kilidi bunu esas alır (çıplak "approved" bayrağı kilitlemez).
+        _dec, _kind, _by, _at = _decision_of(existing)
         return {"success": True, "return_id": existing.get("id"),
-                "status": existing.get("status"), "created": False}
+                "status": existing.get("status"), "created": False,
+                "decided": _dec, "decision": {"kind": _kind, "by": _by, "at": _at}}
 
     # Sipariş kalemlerini customer_returns şemasına eşle
     src = order.get("items") or []
@@ -1020,4 +1082,5 @@ async def open_rooftr_return(order_id: str, current_user: dict = Depends(require
     await db.customer_returns.insert_one({**rec})
     await db.orders.update_one({"id": order_id},
                                {"$set": {"return_request.return_id": rid}})
-    return {"success": True, "return_id": rid, "status": cr_status, "created": True}
+    return {"success": True, "return_id": rid, "status": cr_status, "created": True,
+            "decided": False, "decision": {"kind": None, "by": "", "at": ""}}
