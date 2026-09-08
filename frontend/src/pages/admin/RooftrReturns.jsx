@@ -629,10 +629,15 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
   const wfCanAct = can("returns.approve") || can("returns.reject") || can("returns.expense_note") || can("returns.refund_pay");
 
   // Bu iade daha önce karara bağlandı mı? (modal'da Onayla/Reddet'i soluklaştırmak için)
+  // YALNIZ iade KAYDININ (customer_returns, /open'dan gelen wf.status) durumu esas alınır.
+  // Sipariş durumu (return_approved/refunded/return_rejected) TEK BAŞINA karar sayılmaz:
+  // sessiz durum düzeltmesi / pazaryeri senkronu siparişi 'onaylı' gösterirken kayıt 'created'
+  // kalıyordu → pencere "Bu iade onaylanmış; tekrar işlem yapılamaz" deyip kalem onayını
+  // engelliyordu (W11262). Kayıt 'created' ise karar verilebilir.
   const wfDecided = wf
-    ? ((wf.status === "approved" || ["return_approved", "refunded", "partial_refunded"].includes(wf.row.status))
+    ? (["approved", "refunded", "partial_refunded"].includes(wf.status)
         ? "approved"
-        : (wf.row.status === "return_rejected" ? "rejected" : null))
+        : (["rejected", "return_rejected"].includes(wf.status) ? "rejected" : null))
     : null;
 
   return (
