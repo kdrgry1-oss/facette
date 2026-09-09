@@ -6,7 +6,7 @@
  * eksik sistem maddeleri eklenir. Böylece yeni sürüm dokümantasyonu upsert
  * edilirken tenant'a özel içerik kaybolmaz.
  */
-export const TRAINING_CONTENT_VERSION = "2026.09.08.4";
+export const TRAINING_CONTENT_VERSION = "2026.09.09.1";
 
 export const TRAINING_UPDATES = [
   {
@@ -15,6 +15,21 @@ export const TRAINING_UPDATES = [
     icon: "Settings",
     intro: "Beyaz etiket ayarları, birleşik ekranlar, rapor tanımları ve salt-okunur kontroller için güncel başvuru.",
     items: [
+      {
+        key: "full-look-editor-2026-09-09",
+        title: "Full Look: kombin fotoğrafı ve ürünlerini birlikte yayınlama",
+        path: "/admin/sayfa-tasarimi?tab=full-look",
+        what: "Full Look sayfasında büyük kombin fotoğrafının yanında o görseldeki ürünler güncel fiyatlarıyla listelenir. Mobilde fotoğraf üstte, ürünler altta görünür.",
+        where: "Tasarım → Sayfa Tasarımı → Full Look Sayfası Düzenleme. Sayfa Tasarımı yetkisi gerekir.",
+        how: [
+          "Kombin Ekle'ye basın. Solda kaynak ürünü adı veya stok koduyla arayın; galerisindeki hangi fotoğrafı kullanacağınızı seçin. Fotoğraf kırpılmadan gösterilir.",
+          "Sağdaki aramayla görselde bulunan alt, üst ve aksesuarları ekleyin. En fazla 8 ürün seçilebilir; oklarla ürünleri ve kombinleri sıralayın.",
+          "Mobil/Masaüstü önizlemede görünümü kontrol edin. Yayında seçeneği kapalı kombinler taslak olarak saklanır. Değişiklikleri Kaydet'e basmadan hiçbir değişiklik müşteriye yansımaz.",
+          "Koleksiyonlar → Full Look veya /full-look üzerinden yayını kontrol edin. Kartlar ürün detayına gider; beden seçimi ve sepete ekleme normal ürün sayfasındadır.",
+          "Fiyatlar elle girilmez: mevcut ürün fiyatları ve geçerli ürün kampanyaları kullanılır. Kupon ve havale indirimleri sepet aşamasına aittir. Pasif/silinmiş/üyeye özel ürünler herkese açık görünümde listelenmez; kaynak fotoğrafı kaldırılan kombin gizlenir.",
+          "Başka bir kullanıcı aynı sayfayı kaydettiyse sürüm çakışması uyarısı çıkar. Taslağınız otomatik silinmez; yaptığınız değişiklikleri not alıp sayfayı yeniden yükleyerek güncel sürüme uygulayın.",
+        ],
+      },
       {
         key: "promotion-calculation-order-2026-09-08",
         title: "Kampanya ve kupon indirim sırası",

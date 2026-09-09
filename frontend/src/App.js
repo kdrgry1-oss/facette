@@ -12,6 +12,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import Home from "./pages/Home";
 const GizlilikPolitikasi = lazy(() => import("./pages/GizlilikPolitikasi"));
 const Category = lazy(() => import("./pages/Category"));
+const FullLook = lazy(() => import("./pages/FullLook"));
 const ProductDetail = lazy(() => import("./pages/ProductDetail"));
 const Cart = lazy(() => import("./pages/Cart"));
 const Checkout = lazy(() => import("./pages/Checkout"));
@@ -148,6 +149,8 @@ function App() {
                     Hedef, build zamanı REACT_APP_APP_TARGET ile belirlenir (native.js appTarget). */}
                 <Route path="/" element={isNative && appTarget === "admin" ? <Navigate to="/admin" replace /> : <Home />} />
                 <Route path="/kategori/:slug" element={<Category />} />
+                <Route path="/full-look" element={<FullLook />} />
+                <Route path="/kategori/full-look" element={<FullLook />} />
                 <Route path="/sepet" element={<Cart />} />
                 <Route path="/odeme" element={<Checkout />} />
                 <Route path="/arama" element={<Search />} />

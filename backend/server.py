@@ -788,6 +788,8 @@ api_router.include_router(orders_router)
 api_router.include_router(categories_router)
 api_router.include_router(banners_router)
 api_router.include_router(cms_router)
+from routes.full_look import router as full_look_router
+api_router.include_router(full_look_router)
 api_router.include_router(pages_router)
 # Iyzico endpoint'leri — integrations_router'ın catch-all /{marketplace} rotasından ÖNCE include edilmeli
 from routes.integrations_iyzico import router as iyzico_router

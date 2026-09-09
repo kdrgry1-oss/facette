@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import FullLookEditor from './FullLookEditor';
 import { Plus, Edit, Trash2, GripVertical, Upload, X, Eye, EyeOff, Copy, Undo2, Redo2, Save, Search, Monitor, Smartphone } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
@@ -202,6 +203,20 @@ function SortableBlockItem({ block, selected, onSelect, onEdit, onDelete, onTogg
 }
 
 export default function PageDesign() {
+  const initialFullLook = new URLSearchParams(window.location.search).get('tab') === 'full-look';
+  const [tab, setTab] = useState(initialFullLook ? 'full-look' : 'home');
+  const [visited, setVisited] = useState({ home: !initialFullLook, 'full-look': initialFullLook });
+  return <>
+    <div className="flex gap-2 border-b mb-4 pb-3" role="tablist" aria-label="Düzenlenecek sayfa">
+      {[['home', 'Ana Sayfa'], ['full-look', 'Full Look Sayfası Düzenleme']].map(([key, title]) =>
+        <button key={key} type="button" role="tab" aria-selected={tab === key} className={`px-4 py-2 rounded ${tab === key ? 'bg-black text-white' : 'bg-white text-gray-600'}`} onClick={() => { setTab(key); setVisited(v => ({ ...v, [key]: true })); }}>{title}</button>)}
+    </div>
+    <div hidden={tab !== 'home'}>{visited.home && <HomePageDesign />}</div>
+    <div hidden={tab !== 'full-look'}>{visited['full-look'] && <FullLookEditor />}</div>
+  </>;
+}
+
+function HomePageDesign() {
   const [blocks, setBlocks] = useState([]);
   const [savedBlocks, setSavedBlocks] = useState([]);
   const [history, setHistory] = useState([[]]);
