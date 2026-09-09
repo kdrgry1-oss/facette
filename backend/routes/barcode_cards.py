@@ -208,14 +208,45 @@ def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
     )
 
 
-def _product_cards_html(product: dict, sizes: list | None = None) -> str:
+def _parse_counts(raw) -> dict:
+    """Beden-başına adet: 'XS/S:2,M/L:3' (query) ya da {'XS/S': 2} (json) → {'XS/S': 2, ...}.
+    Anahtarlar büyük harf + kırpılmış; değer <0 → 0 (o beden basılmaz). Geçersiz girdi yok sayılır."""
+    out = {}
+    try:
+        if isinstance(raw, dict):
+            items = raw.items()
+        else:
+            items = []
+            for part in str(raw or "").split(","):
+                if ":" in part:
+                    k, v = part.rsplit(":", 1)   # beden içinde '/' olabilir (XS/S) → son ':' ayırır
+                    items.append((k, v))
+        for k, v in items:
+            key = str(k or "").strip().upper()
+            if not key:
+                continue
+            try:
+                n = int(float(v))
+            except Exception:
+                continue
+            out[key] = max(0, min(n, 500))
+    except Exception:
+        return {}
+    return out
+
+
+def _product_cards_html(product: dict, sizes: list | None = None, counts: dict | None = None) -> str:
     """
     Bir ürünün varyantları için kart HTML üretir. Varyant yoksa ürün
     seviyesinde tek kart üretilir (stock_code + barcode).
     `sizes` verilirse yalnız o bedenlerdeki varyantlar basılır
     (büyük/küçük harf ve boşluk duyarsız). Boş/None => tüm bedenler.
+    `counts` verilirse her beden kendi adedi kadar TEKRARLANIR (kullanıcı isteği:
+    "her beden için kaçar tane yazdıracağımızı girebilelim"); listede olmayan beden 1,
+    0 → o beden basılmaz. Sayfadaki 'Her barkoddan adet' bunun ÜZERİNE çarpan olarak çalışır.
     """
     variants = product.get("variants") or []
+    counts = counts or {}
     if not variants:
         # Varyant yoksa ürün seviyesinde tek kart (ana barkod)
         fake = {
@@ -224,13 +255,24 @@ def _product_cards_html(product: dict, sizes: list | None = None) -> str:
             "size": "",
             "color": "",
         }
-        return _card_html_for_variant(product, fake)
+        _n = counts.get("*", counts.get("", 1)) if counts else 1
+        return _card_html_for_variant(product, fake) * max(0, int(_n))
     if sizes:
         want = {str(s or "").strip().upper() for s in sizes if str(s or "").strip()}
         if want:
             variants = [v for v in variants
                         if str(v.get("size") or "").strip().upper() in want]
-    return "".join(_card_html_for_variant(product, v) for v in variants)
+    out = []
+    for v in variants:
+        _sz = str(v.get("size") or "").strip().upper()
+        _n = counts.get(_sz, counts.get("*", 1)) if counts else 1
+        try:
+            _n = max(0, int(_n))
+        except Exception:
+            _n = 1
+        if _n:
+            out.append(_card_html_for_variant(product, v) * _n)
+    return "".join(out)
 
 
 # ---------------------------------------------------------------------------
@@ -241,10 +283,12 @@ async def get_product_barcode_card(
     product_id: str,
     current_user: dict = Depends(require_permission("products.view")),
     sizes: str = Query(None, description="Virgülle ayrık beden filtresi (örn. 'S,M'). Boş = tüm bedenler."),
+    counts: str = Query(None, description="Beden-başına adet: 'XS/S:2,M/L:3'. Yoksa her beden 1."),
 ):
     """
     Tek ürün için yazdırılabilir barkod kartı sayfası döner.
-    Ürünün her varyantı için ayrı kart; `sizes` verilirse yalnız o bedenler.
+    Ürünün her varyantı için ayrı kart; `sizes` verilirse yalnız o bedenler;
+    `counts` verilirse her beden kendi adedi kadar tekrarlanır.
 
     Yetki Authorization başlığından doğrulanır. İstemci çıktıyı blob olarak açar;
     oturum anahtarı URL'ye yazılmaz.
@@ -254,7 +298,7 @@ async def get_product_barcode_card(
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
 
     _sizes = [s for s in (sizes or "").split(",") if s.strip()] or None
-    cards = _product_cards_html(product, sizes=_sizes)
+    cards = _product_cards_html(product, sizes=_sizes, counts=_parse_counts(counts))
     if not cards:
         raise HTTPException(status_code=404, detail="Seçilen bedenlerde varyant bulunamadı")
     html = _build_html(cards, title=f"{product.get('name', 'Ürün')} — Barkod Kartı")
@@ -287,7 +331,9 @@ async def get_bulk_barcode_cards(
     if not products:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
 
-    cards = "".join(_product_cards_html(p, sizes=_sizes) for p in products)
+    # Beden-başına adet: {"counts": {"XS/S": 2, "M/L": 3}} → her üründe o beden o kadar tekrarlanır.
+    _counts = _parse_counts(payload.get("counts"))
+    cards = "".join(_product_cards_html(p, sizes=_sizes, counts=_counts) for p in products)
     if not cards:
         raise HTTPException(status_code=404, detail="Seçilen bedenlerde varyant bulunamadı")
     html = _build_html(cards, title=f"{len(products)} Ürün — Barkod Kartları")

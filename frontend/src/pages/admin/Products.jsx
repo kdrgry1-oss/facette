@@ -1563,8 +1563,13 @@ export default function AdminProducts() {
    *   (giyim firmalarındaki gibi: ürün adı, stok kodu, GTIN barkod, beden, renk).
    *   BACKEND: GET /api/products/{id}/barcode-card
    */
-  const handlePrintBarcode = async (productId, sizes = null) => {
-    const q = sizes && sizes.length ? `?sizes=${encodeURIComponent(sizes.join(','))}` : '';
+  const handlePrintBarcode = async (productId, sizes = null, counts = null) => {
+    const params = [];
+    if (sizes && sizes.length) params.push(`sizes=${encodeURIComponent(sizes.join(','))}`);
+    // Beden-başına adet: {"XS/S": 2, "M/L": 3} → "XS/S:2,M/L:3" (backend her bedeni o kadar basar)
+    const cEntries = counts ? Object.entries(counts).filter(([, n]) => Number.isFinite(Number(n))) : [];
+    if (cEntries.length) params.push(`counts=${encodeURIComponent(cEntries.map(([s, n]) => `${s}:${Math.max(0, parseInt(n, 10) || 0)}`).join(','))}`);
+    const q = params.length ? `?${params.join('&')}` : '';
     try { await openAdminDocument(`/products/${productId}/barcode-card${q}`, 'width=820,height=1000'); }
     catch (err) { toast.error(err.message || "Barkod kartı açılamadı"); }
   };
@@ -1578,11 +1583,12 @@ export default function AdminProducts() {
     let sizeList = [];
     if (mode === 'single') {
       sizeList = [...new Set((product?.variants || []).map(v => (v.size || '').trim()).filter(Boolean))];
-      if (sizeList.length <= 1) { handlePrintBarcode(product.id); return; } // tek/0 beden → direkt yazdır
+      // Beden yoksa (varyantsız ürün) direkt yazdır; beden varsa (tek bile olsa) adet girilebilsin diye seçici açılır.
+      if (sizeList.length === 0) { handlePrintBarcode(product.id); return; }
     } else {
       const chosen = products.filter(p => selectedProducts.includes(p.id));
       sizeList = [...new Set(chosen.flatMap(p => (p.variants || []).map(v => (v.size || '').trim())).filter(Boolean))];
-      if (sizeList.length <= 1) { handleBulkPrintBarcodes(); return; }
+      if (sizeList.length === 0) { handleBulkPrintBarcodes(); return; }
     }
     // Bedenleri mantıklı sırala (XS→XXL, sonra sayısal/diğer alfabetik)
     const ORDER = ['XXS','XS','S','M','L','XL','XXL','3XL','4XL'];
@@ -1598,19 +1604,23 @@ export default function AdminProducts() {
       productId: product?.id || null,
       sizes: sizeList,
       selected: Object.fromEntries(sizeList.map(s => [s, true])),
+      // Beden-başına adet (kullanıcı isteği: "her beden için kaçar tane yazdıracağımızı girebilelim")
+      counts: Object.fromEntries(sizeList.map(s => [s, 1])),
     });
   };
 
   const confirmBarcodeSizePrint = () => {
     if (!barcodeSizeModal) return;
-    const picked = barcodeSizeModal.sizes.filter(s => barcodeSizeModal.selected[s]);
-    if (picked.length === 0) { toast.error("En az bir beden seçiniz"); return; }
+    const cnt = barcodeSizeModal.counts || {};
+    const picked = barcodeSizeModal.sizes.filter(s => barcodeSizeModal.selected[s] && (parseInt(cnt[s], 10) || 0) > 0);
+    if (picked.length === 0) { toast.error("En az bir beden seçip adet giriniz"); return; }
     const all = picked.length === barcodeSizeModal.sizes.length;
     const sizes = all ? null : picked; // hepsi seçiliyse filtre gönderme
+    const counts = Object.fromEntries(picked.map(s => [s, Math.max(1, parseInt(cnt[s], 10) || 1)]));
     if (barcodeSizeModal.mode === 'single') {
-      handlePrintBarcode(barcodeSizeModal.productId, sizes);
+      handlePrintBarcode(barcodeSizeModal.productId, sizes, counts);
     } else {
-      handleBulkPrintBarcodes(sizes);
+      handleBulkPrintBarcodes(sizes, counts);
     }
     setBarcodeSizeModal(null);
   };
@@ -1620,7 +1630,7 @@ export default function AdminProducts() {
    *   yazdırılabilir sayfada gösterir. A4'e sığacak şekilde 2-4 kart/satır.
    *   BACKEND: POST /api/products/barcode-cards/bulk (body: { ids: [...], sizes?: [...] })
    */
-  const handleBulkPrintBarcodes = async (sizes = null) => {
+  const handleBulkPrintBarcodes = async (sizes = null, counts = null) => {
     if (selectedProducts.length === 0) {
       toast.error("Lütfen ürün seçiniz");
       return;
@@ -1629,6 +1639,7 @@ export default function AdminProducts() {
       const token = localStorage.getItem('token');
       const body = { ids: selectedProducts };
       if (sizes && sizes.length) body.sizes = sizes;
+      if (counts && Object.keys(counts).length) body.counts = counts; // beden-başına adet
       const res = await axios.post(
         `${API}/products/barcode-cards/bulk`,
         body,
@@ -4746,32 +4757,59 @@ export default function AdminProducts() {
             <h3 className="text-sm font-semibold text-gray-800 mb-1">Barkod Yazdır — Beden Seçimi</h3>
             <p className="text-xs text-gray-500 mb-3">
               {barcodeSizeModal.mode === 'bulk'
-                ? `${selectedProducts.length} üründe bulunan bedenler. Yalnız işaretli bedenlerin kartları basılır.`
-                : 'Yalnız işaretli bedenlerin kartları basılır.'}
+                ? `${selectedProducts.length} üründe bulunan bedenler. İşaretli bedenler, yanındaki adet kadar basılır.`
+                : 'İşaretli bedenler, yanındaki adet kadar basılır.'}
             </p>
-            <label className="flex items-center gap-2 py-1.5 border-b border-gray-100 mb-1 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={barcodeSizeModal.sizes.every(s => barcodeSizeModal.selected[s])}
-                onChange={(e) => {
-                  const all = e.target.checked;
-                  setBarcodeSizeModal(m => ({ ...m, selected: Object.fromEntries(m.sizes.map(s => [s, all])) }));
-                }}
-                className="rounded border-gray-300"
-              />
-              <span className="text-sm font-medium text-gray-800">Tüm Bedenler</span>
-            </label>
-            <div className="max-h-52 overflow-y-auto grid grid-cols-3 gap-x-3">
+            <div className="flex items-center justify-between gap-2 py-1.5 border-b border-gray-100 mb-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={barcodeSizeModal.sizes.every(s => barcodeSizeModal.selected[s])}
+                  onChange={(e) => {
+                    const all = e.target.checked;
+                    setBarcodeSizeModal(m => ({ ...m, selected: Object.fromEntries(m.sizes.map(s => [s, all])) }));
+                  }}
+                  className="rounded border-gray-300"
+                />
+                <span className="text-sm font-medium text-gray-800">Tüm Bedenler</span>
+              </label>
+              {/* Hepsine aynı adet — tek hamlede doldur */}
+              <label className="flex items-center gap-1 text-xs text-gray-600">
+                Hepsine adet:
+                <input
+                  type="number" min="1" max="500" defaultValue={1}
+                  onChange={(e) => {
+                    const n = Math.max(1, parseInt(e.target.value, 10) || 1);
+                    setBarcodeSizeModal(m => ({ ...m, counts: Object.fromEntries(m.sizes.map(s => [s, n])) }));
+                  }}
+                  className="w-14 border border-gray-300 rounded px-1.5 py-0.5 text-sm"
+                />
+              </label>
+            </div>
+            <div className="max-h-60 overflow-y-auto grid grid-cols-2 gap-x-4">
               {barcodeSizeModal.sizes.map(s => (
-                <label key={s} className="flex items-center gap-2 py-1.5 cursor-pointer">
+                <div key={s} className="flex items-center justify-between gap-2 py-1.5">
+                  <label className="flex items-center gap-2 cursor-pointer flex-1">
+                    <input
+                      type="checkbox"
+                      checked={!!barcodeSizeModal.selected[s]}
+                      onChange={(e) => setBarcodeSizeModal(m => ({ ...m, selected: { ...m.selected, [s]: e.target.checked } }))}
+                      className="rounded border-gray-300"
+                    />
+                    <span className="text-sm text-gray-700">{s}</span>
+                  </label>
                   <input
-                    type="checkbox"
-                    checked={!!barcodeSizeModal.selected[s]}
-                    onChange={(e) => setBarcodeSizeModal(m => ({ ...m, selected: { ...m.selected, [s]: e.target.checked } }))}
-                    className="rounded border-gray-300"
+                    type="number" min="0" max="500"
+                    value={(barcodeSizeModal.counts || {})[s] ?? 1}
+                    disabled={!barcodeSizeModal.selected[s]}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setBarcodeSizeModal(m => ({ ...m, counts: { ...(m.counts || {}), [s]: v === '' ? '' : Math.max(0, parseInt(v, 10) || 0) } }));
+                    }}
+                    title={`${s} bedeninden kaç etiket`}
+                    className="w-16 border border-gray-300 rounded px-1.5 py-0.5 text-sm text-right disabled:opacity-40"
                   />
-                  <span className="text-sm text-gray-700">{s}</span>
-                </label>
+                </div>
               ))}
             </div>
             <div className="flex justify-end gap-2 mt-4">
