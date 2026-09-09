@@ -122,7 +122,7 @@ export default function FullLookEditor() {
           })}</ol>
         </section></div>
         <details open><summary>Kombin önizlemesi · {row.is_active ? 'Kaydedince yayınlanır' : 'Taslak — müşterilere gösterilmez'}</summary>
-          <div className={`full-look-editor-preview ${mobile ? 'is-mobile' : ''}`}><FullLookSections interactive={false} looks={[{ ...row, products: row.product_ids.map(pid => row.products?.find(p => p.id === pid)).filter(Boolean) }]} /></div>
+          <div className={`full-look-editor-preview ${mobile ? 'is-mobile' : ''}`}><FullLookSections startIndex={index} interactive={false} looks={[{ ...row, products: row.product_ids.map(pid => row.products?.find(p => p.id === pid)).filter(Boolean) }]} /></div>
         </details>
       </article>)}
     </fieldset>

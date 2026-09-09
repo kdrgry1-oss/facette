@@ -1,13 +1,13 @@
 import { priceView, fmtTL } from '../lib/price';
 import './fullLook.css';
 
-export default function FullLookSections({ looks = [], interactive = true }) {
+export default function FullLookSections({ looks = [], interactive = true, startIndex = 0 }) {
   return <div className="full-look-flow" data-testid="full-look-flow">
-    {looks.map((look, index) => <section className="full-look-section" key={look.id} aria-label={look.title || `Kombin ${index + 1}`}>
+    {looks.map((look, index) => <section className="full-look-section" key={look.id} aria-label={look.title || `Kombin ${startIndex + index + 1}`}>
       <div className="full-look-hero">
-        {look.image ? <img src={look.image} alt={look.title || `Kombin ${index + 1}`} loading={index ? 'lazy' : 'eager'} />
+        {look.image ? <img src={look.image} alt={look.title || `Kombin ${startIndex + index + 1}`} loading={startIndex + index ? 'lazy' : 'eager'} />
           : <div className="full-look-placeholder">Soldaki kombin fotoğrafını seçin</div>}
-        <span className="full-look-number">{String(index + 1).padStart(2, '0')}</span>
+        <span className="full-look-number">{String(startIndex + index + 1).padStart(2, '0')}</span>
       </div>
       <div className="full-look-selection">
         <div className="full-look-caption"><span>GÖRÜNÜMÜ TAMAMLA</span>{look.title && <h2>{look.title}</h2>}</div>
