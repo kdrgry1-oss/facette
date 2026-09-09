@@ -6,7 +6,7 @@
  * eksik sistem maddeleri eklenir. Böylece yeni sürüm dokümantasyonu upsert
  * edilirken tenant'a özel içerik kaybolmaz.
  */
-export const TRAINING_CONTENT_VERSION = "2026.09.09.1";
+export const TRAINING_CONTENT_VERSION = "2026.09.09.2";
 
 export const TRAINING_UPDATES = [
   {
@@ -15,6 +15,18 @@ export const TRAINING_UPDATES = [
     icon: "Settings",
     intro: "Beyaz etiket ayarları, birleşik ekranlar, rapor tanımları ve salt-okunur kontroller için güncel başvuru.",
     items: [
+      {
+        key: "full-look-mobile-2026-09-09",
+        title: "Full Look mobil görünümü",
+        path: "/admin/sayfa-tasarimi?tab=full-look",
+        what: "Mobilde kombin fotoğrafı tam genişlikte, parçalar altında iki sütunlu kartlarla gösterilir. Fotoğraf kırpılmaz; Parçaları keşfet bağlantısı ilgili ürün grubuna kaydırır.",
+        where: "Full Look düzenleyici → Mobil önizleme; müşteride Koleksiyonlar → Full Look.",
+        how: [
+          "Kaynak üründen seçilen aynı fotoğraf mobilde de kullanılır. Alt ve üstü birlikte gösteren bir fotoğraf seçin; yakın plan bir fotoğrafı sistem kendiliğinden tam boy fotoğrafa dönüştürmez.",
+          "İki ürün tek sıra, dört ürün iki sıra halinde görünür. Kartın tamamına dokunmak ürün detayını açar; fiyatlar katalogdan gelir.",
+          "Mobil önizleme düğmesi yalnız görünümü değiştirir. Ürün/kombin sırası masaüstüyle ortaktır; Yayında ve Kaydet kontrolleri her iki görünümü birlikte yönetir.",
+        ],
+      },
       {
         key: "full-look-editor-2026-09-09",
         title: "Full Look: kombin fotoğrafı ve ürünlerini birlikte yayınlama",

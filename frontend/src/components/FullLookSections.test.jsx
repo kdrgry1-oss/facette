@@ -9,7 +9,9 @@ test('renders successive looks, four linked cards and authoritative campaign pri
   await act(async () => root.render(<FullLookSections looks={[{ id: 'a', image: '/look.jpg', products }, { id: 'b', image: '/look2.jpg', products: [products[0]] }]} />));
   expect(container.querySelectorAll('.full-look-section')).toHaveLength(2);
   expect(container.querySelector('.full-look-products').children).toHaveLength(4);
-  expect(container.querySelector('a').getAttribute('href')).toBe('/urun/product-1');
+  expect(container.querySelector('a.full-look-product').getAttribute('href')).toBe('/urun/product-1');
+  expect(container.querySelector('.full-look-shop-link').getAttribute('href')).toBe('#look-products-a');
+  expect(container.querySelector('#look-products-a .full-look-caption-meta').textContent).toContain('4 PARÇA');
   expect(container.querySelector('.full-look-price').textContent).toBe('3200,00 TL2560,00 TL');
   expect(container.querySelectorAll('.full-look-hero img')[1].getAttribute('loading')).toBe('lazy');
   await act(async () => root.unmount());

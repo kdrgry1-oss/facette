@@ -8,9 +8,12 @@ export default function FullLookSections({ looks = [], interactive = true, start
         {look.image ? <img src={look.image} alt={look.title || `Kombin ${startIndex + index + 1}`} loading={startIndex + index ? 'lazy' : 'eager'} />
           : <div className="full-look-placeholder">Soldaki kombin fotoğrafını seçin</div>}
         <span className="full-look-number">{String(startIndex + index + 1).padStart(2, '0')}</span>
+        {!!look.products?.length && (interactive
+          ? <a className="full-look-shop-link" href={`#${encodeURIComponent(`look-products-${look.id}`)}`}>Parçaları keşfet <span aria-hidden="true">↓</span></a>
+          : <span className="full-look-shop-link">Parçaları keşfet <span aria-hidden="true">↓</span></span>)}
       </div>
-      <div className="full-look-selection">
-        <div className="full-look-caption"><span>GÖRÜNÜMÜ TAMAMLA</span>{look.title && <h2>{look.title}</h2>}</div>
+      <div className="full-look-selection" id={`look-products-${look.id}`}>
+        <div className="full-look-caption"><div className="full-look-caption-meta"><span>GÖRÜNÜMÜ TAMAMLA</span><span>{look.products?.length || 0} PARÇA</span></div>{look.title && <h2>{look.title}</h2>}</div>
         <div className="full-look-products">
           {(look.products || []).map(product => {
             const price = priceView(product);
@@ -18,7 +21,7 @@ export default function FullLookSections({ looks = [], interactive = true, start
               {product.images?.[0] ? <img src={product.images[0]} alt={product.name} loading="lazy" /> : <span>Görsel yok</span>}
             </div><h3>{product.name}</h3><p className="full-look-price">
               {price.hasDiscount && <del>{fmtTL(price.list)}</del>}<span>{fmtTL(price.display)}</span>
-            </p></>;
+            </p><span className="full-look-product-action">Ürünü incele <span aria-hidden="true">↗</span></span></>;
             return interactive ? <a className="full-look-product" key={product.id} href={`/urun/${encodeURIComponent(product.slug || product.id)}`}>{content}</a>
               : <div className="full-look-product" key={product.id}>{content}</div>;
           })}
