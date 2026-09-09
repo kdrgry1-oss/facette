@@ -2,6 +2,24 @@ import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+export async function adminDocumentError(error) {
+  const status = error?.response?.status;
+  let data = error?.response?.data;
+  // Axios returns error responses as Blob too when responseType is blob.
+  if (data && typeof data.text === "function") {
+    try { data = JSON.parse(await data.text()); } catch { data = null; }
+  }
+  const detail = typeof data?.detail === "string" ? data.detail : "";
+  if (status === 401) return "Oturumunuz sona ermiş. Lütfen yeniden giriş yapın.";
+  if (status === 403) return detail || "Bu belgeyi görüntülemek için yetkiniz yok.";
+  if (status === 404) return detail || "Sipariş veya belge bulunamadı.";
+  if (status === 429) return "Çok fazla belge isteği gönderildi. Biraz sonra tekrar deneyin.";
+  if (status >= 500) return `Belge hazırlanırken sunucu hatası oluştu (${status}).`;
+  if (status) return detail || `Belge alınamadı (HTTP ${status}).`;
+  if (error?.isAxiosError || error?.request) return "Belge sunucusuna erişilemedi. Bağlantıyı kontrol edip tekrar deneyin.";
+  return error?.message || "Belge alınamadı.";
+}
+
 export async function fetchAdminDocument(path) {
   // Accept only an API-relative path; never attach the bearer to external links.
   if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || /[?&]token=/i.test(path)) {
@@ -9,11 +27,34 @@ export async function fetchAdminDocument(path) {
   }
   const token = localStorage.getItem("token");
   if (!token) throw new Error("Lütfen yeniden giriş yapın");
-  const result = await axios.get(`${API}${path}`, {
-    headers: { Authorization: `Bearer ${token}`, "Cache-Control": "no-store" },
-    responseType: "blob",
-  });
-  return result.data;
+  try {
+    const result = await axios.get(`${API}${path}`, {
+      // Cache policy belongs to the RESPONSE (backend sends no-store/private).
+      // A request Cache-Control header triggers a CORS preflight rejected by our API.
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: "blob",
+    });
+    return result.data;
+  } catch (error) {
+    throw new Error(await adminDocumentError(error));
+  }
+}
+
+export async function fetchAdminDocumentTexts(ids, suffix) {
+  const results = await Promise.all(ids.map(async (id) => {
+    try {
+      const blob = await fetchAdminDocument(`/orders/${encodeURIComponent(id)}/${suffix}`);
+      const html = await blob.text();
+      if (!html.trim()) throw new Error("Sunucu boş belge döndürdü.");
+      return { id, html };
+    } catch (error) {
+      return { id, error: await adminDocumentError(error) };
+    }
+  }));
+  return {
+    htmls: results.filter(r => r.html).map(r => r.html),
+    failures: results.filter(r => r.error),
+  };
 }
 
 export async function openAdminDocument(path, features = "", print = false) {

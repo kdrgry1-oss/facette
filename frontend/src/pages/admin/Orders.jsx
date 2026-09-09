@@ -37,7 +37,7 @@ import OrderMarketplaceInfo from "../../components/admin/OrderMarketplaceInfo";
 import OrderPaymentDetail from "../../components/admin/OrderPaymentDetail";
 import { toast } from "sonner";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
-import { fetchAdminDocument, openAdminDocument } from "../../lib/adminDocuments";
+import { fetchAdminDocumentTexts, openAdminDocument } from "../../lib/adminDocuments";
 import InvoiceDocument from "../../components/admin/InvoiceDocument";
 import {
   Dialog,
@@ -654,22 +654,19 @@ export default function AdminOrders({ unpaidView = false }) {
       toast.error("Lütfen sipariş seçiniz");
       return;
     }
+    // Open synchronously: blocked popups must not fetch/stamp labels as printed.
+    const w = window.open('', '_blank');
+    if (!w) { toast.error("Açılır pencere engellendi — tarayıcı pop-up iznini açın"); return; }
+    w.opener = null;
     toast.loading("Kargo etiketleri hazırlanıyor...", { id: "bulklbl" });
     try {
-      const htmls = await Promise.all(
-        selectedOrders.map(async (id) => {
-          try {
-            const r = await fetchAdminDocument(`/orders/${id}/cargo-label`);
-            return await r.text();
-          } catch {
-            return "";
-          }
-        })
-      );
-      const valid = htmls.filter(Boolean);
+      const { htmls: valid, failures } = await fetchAdminDocumentTexts(selectedOrders, "cargo-label");
       toast.dismiss("bulklbl");
+      if (failures.length) {
+        toast.error(`${failures.length}/${selectedOrders.length} kargo etiketi alınamadı. ${failures[0].error}`, { duration: 10000 });
+      }
       if (!valid.length) {
-        toast.error("Yazdırılacak etiket bulunamadı");
+        w.close();
         return;
       }
       // HTML'i regex ile ayıklamak güvenli değildir. DOMParser ile parse et; yalnız
@@ -705,18 +702,14 @@ export default function AdminOrders({ unpaidView = false }) {
         `});` +
         `})();` +
         `</script></body></html>`;
-      const w = window.open('', '_blank');
-      if (!w) {
-        toast.error("Açılır pencere engellendi — tarayıcı pop-up iznini açın");
-        return;
-      }
       w.document.write(doc);
       w.document.close();
       // Etiket çekimleri backend'de "yazdırıldı" damgası bıraktı → kamyonlar sarı→yeşil.
       fetchOrders();
     } catch (e) {
+      w.close();
       toast.dismiss("bulklbl");
-      toast.error("Etiket yazdırma başarısız");
+      toast.error(`Etiket yazdırma başarısız: ${e.message || "Belge hazırlanamadı"}`);
     }
   };
 
@@ -776,16 +769,7 @@ export default function AdminOrders({ unpaidView = false }) {
     }
     toast.loading("Faturalar hazırlanıyor...", { id: "bulkinv" });
     try {
-      const htmls = await Promise.all(
-        selectedOrders.map(async (id) => {
-          try {
-            const r = await fetchAdminDocument(`/orders/${id}/invoice/print`);
-            return await r.text();
-          } catch {
-            return "";
-          }
-        })
-      );
+      const { htmls, failures } = await fetchAdminDocumentTexts(selectedOrders, "invoice/print");
       const sections = htmls
         .filter(Boolean)
         .map((html) => {
@@ -793,8 +777,10 @@ export default function AdminOrders({ unpaidView = false }) {
           return `<div class="page">${m ? m[1] : html}</div>`;
         });
       toast.dismiss("bulkinv");
+      if (failures.length) {
+        toast.error(`${failures.length}/${selectedOrders.length} fatura alınamadı. ${failures[0].error}`, { duration: 10000 });
+      }
       if (!sections.length) {
-        toast.error("Yazdırılacak fatura bulunamadı");
         return;
       }
       const doc = `<!doctype html><html lang="tr"><head><meta charset="utf-8"/>` +
