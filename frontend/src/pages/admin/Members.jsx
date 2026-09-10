@@ -115,7 +115,6 @@ export default function Members() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ email: "", first_name: "", last_name: "", phone: "", password: "" });
   // DENETİM FIX (#41): üye gruplarını yükle — detay modalında gruba atama için.
-  const [memberGroups, setMemberGroups] = useState([]);
 
   const load = async () => {
     setLoading(true);
@@ -143,20 +142,6 @@ export default function Members() {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [page, segment, source, sortBy, sortDir, dateField, dStart, dEnd]);
   useEffect(() => { loadStats(); }, []);
-  useEffect(() => {
-    axios.get(`${API}/admin/member-groups`, { headers: authHeaders() })
-      .then((r) => setMemberGroups(r.data?.items || []))
-      .catch(() => {});
-  }, []);
-
-  const assignGroup = async (memberId, groupId) => {
-    try {
-      await axios.put(`${API}/admin/members/${memberId}`, { group_id: groupId || null }, { headers: authHeaders() });
-      setDetail((d) => d ? { ...d, member: { ...d.member, group_id: groupId || null } } : d);
-      toast.success("Üye grubu güncellendi");
-    } catch (e) { toast.error(e?.response?.data?.detail || "Grup atanamadı"); }
-  };
-
   const openDetail = async (id) => {
     setDetailId(id);
     setDetail(null);
@@ -382,22 +367,6 @@ export default function Members() {
                     <div className="mt-2 flex gap-2 items-center">
                       <SegmentBadge seg={detail.member.segment} member={detail.member} />
                       <span className="text-xs text-gray-500">Katılım: {new Date(detail.member.created_at).toLocaleDateString("tr-TR")}</span>
-                    </div>
-                    {/* DENETİM FIX (#41): üye grubu atama — grubun indirimi checkout'ta uygulanır */}
-                    <div className="mt-2 flex items-center gap-2">
-                      <span className="text-xs text-gray-500">Üye Grubu:</span>
-                      <select
-                        value={detail.member.group_id || ""}
-                        onChange={(e) => assignGroup(detail.member.id, e.target.value)}
-                        className="text-xs border border-gray-200 rounded px-2 py-1 bg-white"
-                      >
-                        <option value="">— Grupsuz —</option>
-                        {memberGroups.map((g) => (
-                          <option key={g.id} value={g.id}>
-                            {g.name}{g.discount_percent ? ` (%${g.discount_percent})` : ""}
-                          </option>
-                        ))}
-                      </select>
                     </div>
                   </div>
                 </div>

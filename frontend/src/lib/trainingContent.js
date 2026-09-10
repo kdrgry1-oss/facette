@@ -361,11 +361,11 @@ export const TRAINING = [
         tips: ["Eksik ad-soyad bilgisi düzeltmesi bu ekrandan yapılır."],
       },
       {
-        title: "Üye Grupları (B2B) & Segmentler (RFM)",
-        path: "/admin/uye-gruplari",
-        what: "Toptan/bayi fiyat grupları ve RFM tabanlı müşteri segmentleri.",
-        where: "Üyeler → Üye Grupları / Müşteri Segmentleri.",
-        how: ["Grup oluştur, fiyat çarpanı/indirim tanımla; segmentleri kampanyada hedefle."],
+        title: "Müşteri Segmentleri (RFM)",
+        path: "/admin/musteri-segmentleri",
+        what: "RFM tabanlı müşteri segmentleri.",
+        where: "Üyeler → Müşteri Segmentleri.",
+        how: ["Segmentleri kampanyada hedefle."],
       },
       {
         title: "Müşteri Soruları & Destek Talepleri",

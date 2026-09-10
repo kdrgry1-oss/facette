@@ -41,7 +41,7 @@ import AbandonedCarts from "./pages/admin/AbandonedCarts";
 import { SalesReport, ProductsReport, StockReport, MembersReport } from "./pages/admin/Reports";
 import { SeoRedirects, SeoMeta } from "./pages/admin/SeoAdmin";
 import {
-  Brands, ProductTags, MemberGroups, Announcements, Popups,
+  Brands, ProductTags, Announcements, Popups,
   StockAlerts, HavaleNotifications, Tickets, ShippingPaymentRules,
   ExtraReports,
 } from "./pages/admin/CatalogExtras";
@@ -180,7 +180,6 @@ export default function AdminApp() {
         <Route path="seo/yonlendirmeler" element={<SeoRedirects />} />
         <Route path="markalar" element={<Brands />} />
         <Route path="etiketler" element={<ProductTags />} />
-        <Route path="uye-gruplari" element={<MemberGroups />} />
         <Route path="duyurular" element={<Announcements />} />
         <Route path="popuplar" element={<Popups />} />
         <Route path="stok-alarm" element={<StockAlerts />} />

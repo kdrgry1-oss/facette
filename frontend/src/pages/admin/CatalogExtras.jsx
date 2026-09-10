@@ -1,12 +1,12 @@
 /**
- * Catalog extras — 7 sayfa tek dosyada: Brands, Tags, MemberGroups,
+ * Catalog extras — tek dosyada: Brands, Tags,
  * Announcements, Popups, StockAlerts, HavaleNotifications, SupportTickets,
  * ShippingRules+PaymentDiscounts, CurrencyRates, ExtraReports.
  */
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit, RefreshCw, Send, Tag, Store, Users, BellRing, MessageSquare, CreditCard, Truck, Banknote, DollarSign } from "lucide-react";
+import { Plus, Trash2, Edit, RefreshCw, Send, Tag, Store, BellRing, MessageSquare, CreditCard, Truck, Banknote, DollarSign } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line } from "recharts";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -144,16 +144,6 @@ export function ProductTags() {
       { key: "text_color", label: "Yazı", type: "color", hidden_in_list: true },
       { key: "icon", label: "Icon (lucide)", hidden_in_list: true },
       { key: "sort_order", label: "Sıra", type: "number", hidden_in_list: true },
-    ]} />;
-}
-
-export function MemberGroups() {
-  return <SimpleCrudPage title="Üye Grupları (B2B/VIP)" icon={Users} endpoint="/admin/member-groups"
-    fields={[
-      { key: "name", label: "Grup Adı", required: true },
-      { key: "discount_percent", label: "İndirim %", type: "number" },
-      { key: "is_b2b", label: "B2B Grubu", type: "checkbox", hidden_in_list: true },
-      { key: "description", label: "Açıklama", type: "textarea", hidden_in_list: true },
     ]} />;
 }
 
