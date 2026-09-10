@@ -47,6 +47,21 @@ export default function EmailMarketing() {
   // Kampanya raporu: kimlere gitti + kimler alışveriş yaptı (UTM link + e-posta eşleşmesi)
   const [rep, setRep] = useState(null);
   const [repBusy, setRepBusy] = useState(false);
+  // "Almayanlara gönder": aynı içerik, yalnız bu kampanyayı almamış izinli alıcılara
+  const [missBusy, setMissBusy] = useState("");
+  const sendMissing = async (c) => {
+    setMissBusy(c.id);
+    try {
+      const m = await axios.get(`${API}/admin/email-marketing/campaigns/${c.id}/missing`, { headers: h() });
+      const d = m.data || {};
+      if (!d.missing) { toast.info("Bu kampanyayı almamış izinli alıcı yok."); return; }
+      if (!window.confirm(`"${c.subject}" içeriği, bu kampanyayı ALMAMIŞ ${d.missing} izinli alıcıya gönderilecek (kitle ${d.audience}, daha önce alan ${d.received} hariç). Onaylıyor musun?`)) return;
+      const r = await axios.post(`${API}/admin/email-marketing/campaigns/${c.id}/send-missing`, {}, { headers: h() });
+      toast.success(`${r.data?.missing || d.missing} alıcıya gönderim başlatıldı`);
+      load();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Gönderilemedi"); }
+    finally { setMissBusy(""); }
+  };
   const openReport = async (c) => {
     setRepBusy(true); setRep(null);
     try { const r = await axios.get(`${API}/admin/email-marketing/campaigns/${c.id}/report?days=14`, { headers: h() }); setRep(r.data); }
@@ -803,7 +818,15 @@ export default function EmailMarketing() {
                     <td className="text-right">{c.total || 0}</td>
                     <td className="text-right text-xs text-gray-400">{c.created_at ? new Date(c.created_at).toLocaleString("tr-TR") : ""}</td>
                     <td className="text-right">
-                      <button onClick={() => openReport(c)} disabled={repBusy} className="text-xs border rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-50" data-testid={`camp-report-${c.id}`}>Alıcılar & Dönüşüm</button>
+                      <div className="flex flex-col items-end gap-1">
+                        <button onClick={() => openReport(c)} disabled={repBusy} className="text-xs border rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-50" data-testid={`camp-report-${c.id}`}>Alıcılar & Dönüşüm</button>
+                        {!["queued", "sending", "syncing"].includes(c.status) && (
+                          <button onClick={() => sendMissing(c)} disabled={missBusy === c.id} className="text-xs border border-gray-900 rounded px-2 py-1 hover:bg-gray-900 hover:text-white disabled:opacity-50" data-testid={`camp-send-missing-${c.id}`}>
+                            {missBusy === c.id ? "Hesaplanıyor…" : "Almayanlara gönder"}
+                          </button>
+                        )}
+                        {c.resend_of && <span className="text-[10px] text-gray-400">almayanlara tekrar</span>}
+                      </div>
                     </td>
                   </tr>
                 ))}

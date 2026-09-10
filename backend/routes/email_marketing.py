@@ -15,6 +15,7 @@ ENDPOINTS:
   POST    /api/admin/email-marketing/test         — tek test maili
   GET     /api/admin/email-marketing/audience     — izinli kitle (bülten + İYS + profil) sayısı/kırılımı
   GET     /api/admin/email-marketing/diagnose?email= — bir adrese neden mail gitti/gitmedi
+  GET/POST /api/admin/email-marketing/campaigns/{id}/missing | /send-missing — almayanlara gönder
   POST    /api/admin/email-marketing/campaigns     — kampanya oluştur + arka planda gönder
   GET     /api/admin/email-marketing/campaigns     — kampanya geçmişi
   GET     /api/admin/email-marketing/suppressions — kara liste (bounce/şikâyet)
@@ -161,6 +162,23 @@ async def _campaign_audience() -> dict:
 
 async def _audience_count() -> int:
     return len((await _campaign_audience())["rows"])
+
+
+async def _sent_emails_of(campaign_ids: list) -> set:
+    """Verilen kampanyalarda fiilen gönderilmiş (SES 'sent' / Brevo 'submitted') adresler —
+    'almayanlara gönder' için hariç tutma kümesi."""
+    out = set()
+    ids = [c for c in (campaign_ids or []) if c]
+    if not ids:
+        return out
+    try:
+        async for x in db.email_campaign_sends.find({"campaign_id": {"$in": ids}, "status": {"$in": ["sent", "submitted"]}},
+                                                    {"_id": 0, "email": 1}):
+            if x.get("email"):
+                out.add(x["email"].strip().lower())
+    except Exception:
+        pass
+    return out
 
 
 async def _site_base() -> str:
@@ -520,7 +538,11 @@ async def _run_ses_campaign(campaign_id: str):
                 _already.add(_x["email"])
     except Exception:
         pass
-    await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {"total": len(_aud)}})
+    # "ALMAYANLARA GÖNDER": önceki kampanya(lar)da mail almış adresler bu kampanyada hariç.
+    _excl = await _sent_emails_of(camp.get("exclude_campaign_ids") or [])
+    _already |= _excl
+    await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
+        "total": sum(1 for r in _aud if (r.get("email") or "").strip().lower() not in _excl)}})
     for s in _aud:
         email = (s.get("email") or "").strip()
         if not email:
@@ -615,7 +637,9 @@ async def _run_brevo_campaign(campaign_id: str):
 
     suppressed = await _suppressed_set()
     rows = (await _campaign_audience())["rows"]   # bülten + İYS + profil izni (kara liste/RET hariç)
-    contacts = [row for row in rows if (row.get("email") or "").strip().lower() not in suppressed]
+    _excl = await _sent_emails_of(camp.get("exclude_campaign_ids") or [])   # almayanlara gönder
+    contacts = [row for row in rows if (row.get("email") or "").strip().lower() not in suppressed
+                and (row.get("email") or "").strip().lower() not in _excl]
     sync = await sync_brevo_contacts(cfg, contacts)
     if not sync.get("success"):
         await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
@@ -718,6 +742,54 @@ async def list_campaigns(limit: int = 50, current_user: dict = Depends(require_p
     limit = max(1, min(limit, 200))
     rows = await db.email_campaigns.find({}, {"_id": 0, "html": 0}).sort("created_at", -1).to_list(limit)
     return {"campaigns": rows}
+
+
+async def _missing_for(campaign_id: str) -> dict:
+    camp = await db.email_campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not camp:
+        raise HTTPException(status_code=404, detail="Kampanya bulunamadı")
+    if camp.get("status") in ("queued", "sending", "syncing"):
+        raise HTTPException(status_code=400, detail="Kampanya hâlâ gönderiliyor; bitince tekrar deneyin.")
+    # Aynı içeriğin daha önceki 'almayanlara gönder' turları da hariç tutulur (zincir).
+    chain = [campaign_id] + [c.get("id") for c in await db.email_campaigns.find(
+        {"$or": [{"resend_of": campaign_id}, {"exclude_campaign_ids": campaign_id}]}, {"_id": 0, "id": 1}).to_list(50)]
+    got = await _sent_emails_of(chain)
+    aud = (await _campaign_audience())["rows"]
+    missing = [r for r in aud if r["email"] not in got]
+    return {"campaign": camp, "chain": chain, "received": len(got), "audience": len(aud), "missing": missing}
+
+
+@admin_router.get("/campaigns/{campaign_id}/missing")
+async def campaign_missing(campaign_id: str, current_user: dict = Depends(require_permission("tasarim.email"))):
+    """Bu kampanyayı ALMAMIŞ izinli alıcı sayısı (kitle − gönderim logu)."""
+    m = await _missing_for(campaign_id)
+    return {"campaign_id": campaign_id, "subject": m["campaign"].get("subject"), "audience": m["audience"],
+            "received": m["received"], "missing": len(m["missing"]), "sample": [r["email"] for r in m["missing"][:10]]}
+
+
+@admin_router.post("/campaigns/{campaign_id}/send-missing")
+async def campaign_send_missing(campaign_id: str, current_user: dict = Depends(require_permission("tasarim.email"))):
+    """Aynı konu/içeriği YALNIZ daha önce almayan izinli alıcılara gönderir (yeni kampanya kaydı;
+    önceki alıcılar gönderim loguna göre hariç). Örn. 842'ye gitti, kitle 1250 → kalan 408'e gider."""
+    m = await _missing_for(campaign_id)
+    if not m["missing"]:
+        raise HTTPException(status_code=400, detail="Bu kampanyayı almamış izinli alıcı yok.")
+    src = m["campaign"]
+    if not (src.get("html") or "").strip():
+        raise HTTPException(status_code=400, detail="Kaynak kampanyanın içeriği yok.")
+    provider, cfg = await _selected_provider()
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Brevo ayarları eksik/pasif ve kullanılabilir SES yedeği yok.")
+    doc = {
+        "id": generate_id(), "subject": src.get("subject") or "", "html": src.get("html") or "",
+        "status": "queued", "provider": provider, "total": len(m["missing"]), "sent": 0, "failed": 0,
+        "resend_of": campaign_id, "exclude_campaign_ids": m["chain"],
+        "created_by": current_user.get("email", ""), "created_at": _now(),
+    }
+    await db.email_campaigns.insert_one(doc)
+    doc.pop("_id", None); doc.pop("html", None)
+    asyncio.create_task(_run_campaign(doc["id"]))
+    return {"success": True, "campaign": doc, "missing": len(m["missing"]), "excluded": m["received"]}
 
 
 # ── HAZIR KAMPANYA ŞABLONLARI (email_templates) + ÖNİZLEME ─────────────────────
