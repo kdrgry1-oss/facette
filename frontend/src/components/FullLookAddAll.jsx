@@ -95,7 +95,7 @@ export default function FullLookAddAll({ products = [] }) {
             <div key={r.p.id} className="py-6 flex gap-5 md:gap-7" data-testid={`fl-row-${r.p.id}`}>
               <Link to={href} className="block shrink-0 w-[112px] md:w-[150px] overflow-hidden" aria-label={r.p.name}>
                 {r.p.images?.[0]
-                  ? <img src={r.p.images[0]} alt={r.p.name} loading="lazy" className="block w-full aspect-[3/4] object-cover" />
+                  ? <img src={r.p.images[0]} alt={r.p.name} loading="lazy" className="block w-full h-auto" />
                   : <span className="block w-full aspect-[3/4] bg-white" />}
               </Link>
               <div className="min-w-0 flex-1">
