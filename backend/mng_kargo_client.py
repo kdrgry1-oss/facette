@@ -169,6 +169,128 @@ def list_operations() -> list:
         return [f"okunamadı: {str(e)[:80]}"]
 
 
+def _op_param_names(c, op_name: str) -> list:
+    """Bir SOAP operasyonunun giriş parametre adları (WSDL'den, çalışma anında)."""
+    try:
+        op = c.service._binding._operations[op_name]
+        body = op.input.body
+        elems = getattr(body.type, "elements", None) or []
+        return [name for name, _el in elems]
+    except Exception:
+        try:
+            sig = c.service._binding._operations[op_name].input.signature()
+            return [part.split(":")[0].strip() for part in str(sig).split(",") if part.strip()]
+        except Exception:
+            return []
+
+
+def _flatten_row(row) -> Dict:
+    """Bir gönderi satırını {normalize_key: str} sözlüğüne düzleştirir (iç dict'ler dahil)."""
+    out: Dict[str, str] = {}
+
+    def walk(o, prefix=""):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if isinstance(v, (dict, list)):
+                    walk(v, prefix)
+                elif v not in (None, ""):
+                    out.setdefault(_norm_key(k), str(v).strip())
+        elif isinstance(o, list):
+            for it in o:
+                walk(it, prefix)
+    walk(row)
+    return out
+
+
+def _largest_row_list(obj) -> list:
+    """Serialize edilmiş yanıtta en çok dict içeren listeyi (gönderi satırları) bulur."""
+    best: list = []
+
+    def walk(o):
+        nonlocal best
+        if isinstance(o, list):
+            dicts = [x for x in o if isinstance(x, dict)]
+            if len(dicts) > len(best):
+                best = dicts
+            for it in o:
+                walk(it)
+        elif isinstance(o, dict):
+            for v in o.values():
+                walk(v)
+    walk(obj)
+    return best
+
+
+def list_shipments_by_date(*, username: str, password: str, start, end) -> Dict:
+    """KargoBilgileriByTarih / FaturaSiparisListesiByTarih → tarih aralığındaki TÜM gönderiler.
+    Amaç: kuryenin bizim referansımız yerine kendi (RE-…) referansıyla açtığı paketleri alıcı
+    adına göre bulmak. Alan adları WSDL sürümüne göre değiştiği için parametreler ve satır
+    alanları çalışma anında sezgisel eşlenir. start/end: datetime.
+    Dönüş: {ok, method, rows:[{tracking, name, ref, date, mng_no, status, phone, raw_keys}], error}"""
+    c = _get_client()
+    from zeep.helpers import serialize_object
+    fmts = ["%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y-%m-%dT%H:%M:%S"]
+    errors = []
+    for op_name in ("KargoBilgileriByTarih", "FaturaSiparisListesiByTarih"):
+        names = _op_param_names(c, op_name)
+        if not names:
+            errors.append(f"{op_name}: parametreler okunamadı")
+            continue
+        for fmt in fmts:
+            kwargs = {}
+            date_slots = []
+            for n in names:
+                ln = n.lower()
+                if "kullanici" in ln or "user" in ln:
+                    kwargs[n] = username
+                elif "sifre" in ln or "pass" in ln:
+                    kwargs[n] = password
+                elif "tarih" in ln or "date" in ln:
+                    date_slots.append(n)
+                else:
+                    kwargs[n] = ""
+            if len(date_slots) >= 2:
+                # ilk = başlangıç, ikinci = bitiş (isimde bas/ilk/bit/son ipucu varsa ona göre)
+                ds = sorted(date_slots, key=lambda n: (0 if any(k in n.lower() for k in ("bas", "ilk", "start", "from")) else
+                                                        (2 if any(k in n.lower() for k in ("bit", "son", "end", "to")) else 1)))
+                kwargs[ds[0]] = start.strftime(fmt)
+                kwargs[ds[-1]] = end.strftime(fmt)
+            elif len(date_slots) == 1:
+                kwargs[date_slots[0]] = start.strftime(fmt)
+            try:
+                r = getattr(c.service, op_name)(**kwargs)
+                ser = serialize_object(r)
+                raw = str(ser)[:300]
+                rows_raw = _largest_row_list(ser)
+                if not rows_raw:
+                    # metin hata yanıtı olabilir → sonraki format/operasyon
+                    errors.append(f"{op_name}[{fmt}]: satır yok ({raw[:120]})")
+                    continue
+                rows = []
+                for rr in rows_raw:
+                    f = _flatten_row(rr)
+                    def pick(*preds):
+                        for k, v in f.items():
+                            if all(p in k for p in preds):
+                                return v
+                        return ""
+                    tracking = pick("gonderino") or pick("gonderi", "no") or pick("takipno") or pick("takip", "no") or pick("barkod")
+                    name = pick("alici", "ad") or pick("alici", "unvan") or pick("aliciadi") or pick("alici")
+                    ref = pick("referans") or pick("siparisno") or pick("siparis", "no")
+                    date = pick("kargo", "tarih") or pick("siparis", "tarih") or pick("tarih")
+                    rows.append({"tracking": tracking, "name": name, "ref": ref, "date": date,
+                                 "mng_no": pick("mngsiparisno") or pick("mng", "no"),
+                                 "status": pick("statu", "aciklama") or pick("statu") or pick("durum"),
+                                 "phone": pick("alici", "tel") or pick("telefon") or pick("tel"),
+                                 "raw_keys": sorted(f.keys())[:40]})
+                return {"ok": True, "method": op_name, "fmt": fmt, "params": names, "rows": rows,
+                        "error": "; ".join(errors)[:300]}
+            except Exception as e:
+                errors.append(f"{op_name}[{fmt}]: {str(e)[:100]}")
+                continue
+    return {"ok": False, "method": "", "rows": [], "error": "; ".join(errors)[:600]}
+
+
 def baglanti_test() -> Dict:
     """Test SOAP service availability."""
     try:

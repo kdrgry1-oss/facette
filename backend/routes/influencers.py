@@ -1385,6 +1385,69 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
     except Exception as e:
         logger.exception(f"[pr-track] tarama hatası: {e}")
         stats.update(status="error", last_error=str(e)[:200])
+    # KURYE REFERANSIYLA (RE-…) AÇILAN PAKETLER: MNG tarih-bazlı gönderi listesinden alıcı adına
+    # göre eşle. Bizim INF… referansımıza bağlı olmayan paketlerin takip no'su ancak buradan gelir.
+    try:
+        pend = await db.influencer_pr.find(
+            {"$or": [{"cargo_barcode": {"$nin": [None, ""]}}, {"cargo_tracking_no": {"$nin": [None, ""]}}],
+             "$and": [{"$or": [{"cargo_gonderi_no": {"$in": [None, ""]}}, {"cargo_gonderi_no": {"$exists": False}}]}],
+             "shipped_at": {"$gte": (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()}},
+            {"_id": 0, "id": 1, "influencer_id": 1, "influencer_name": 1, "shipped_at": 1}).to_list(500)
+        if pend and not stats.get("limit_hit"):
+            from mng_kargo_client import list_shipments_by_date as _by_date
+            _end = datetime.now(timezone.utc) + timedelta(days=1)
+            _start = _end - timedelta(days=31)
+            res = await _aio.to_thread(_by_date, username=user, password=pw, start=_start, end=_end)
+            bd = {"ok": bool(res.get("ok")), "method": res.get("method"), "fmt": res.get("fmt"), "params": res.get("params"),
+                  "rows": len(res.get("rows") or []), "error": (res.get("error") or "")[:300], "matched": 0,
+                  "sample_keys": ((res.get("rows") or [{}])[0].get("raw_keys") if res.get("rows") else None),
+                  "sample_row": None, "pending": len(pend), "at": datetime.now(timezone.utc).isoformat()}
+            if res.get("rows"):
+                r0 = dict(res["rows"][0]); r0.pop("raw_keys", None)
+                # PII: yalnız alan doluluğu (ad maskeli)
+                r0["name"] = (r0.get("name") or "")[:2] + "***" if r0.get("name") else ""
+                r0["phone"] = "***" if r0.get("phone") else ""
+                bd["sample_row"] = r0
+            if res.get("ok"):
+                inf_names = {}
+                ids = [c.get("influencer_id") for c in pend if c.get("influencer_id")]
+                if ids:
+                    async for i in db.influencers.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "full_name": 1}):
+                        inf_names[i["id"]] = i.get("name") or i.get("full_name") or ""
+                used = set()
+                for row in res["rows"]:
+                    trk = str(row.get("tracking") or "").strip()
+                    nm = str(row.get("name") or "").strip()
+                    if not trk or not nm or trk in used or "*" in nm:
+                        continue
+                    hits = [c for c in pend if any(_mng_name_match(n, nm) for n in
+                                                   [c.get("influencer_name") or "", inf_names.get(c.get("influencer_id") or "", "")] if n)]
+                    if not hits:
+                        continue
+                    def _dist(c, _d=row.get("date") or ""):
+                        try:
+                            dd = datetime.strptime(str(_d)[:10].replace("/", ".").replace("-", "."), "%d.%m.%Y") \
+                                if "." in str(_d)[:10] or "/" in str(_d)[:10] else datetime.fromisoformat(str(_d)[:19])
+                            sa = datetime.fromisoformat(str(c.get("shipped_at") or "")[:19])
+                            return abs((sa - dd).days)
+                        except Exception:
+                            return 9999
+                    hits.sort(key=_dist)
+                    c = hits[0]
+                    if _dist(c) > 20 and _dist(c) != 9999:
+                        continue
+                    used.add(trk)
+                    pend = [x for x in pend if x["id"] != c["id"]]
+                    await db.influencer_pr.update_one({"id": c["id"]}, {"$set": {
+                        "cargo_gonderi_no": trk, "cargo_tracking_url": f"https://kargotakip.dhlecommerce.com.tr/?takipNo={trk}",
+                        "cargo_mng_ref": str(row.get("ref") or ""), "cargo_last_status_text": str(row.get("status") or ""),
+                        "cargo_track_note": "MNG gönderi listesinden alıcı adıyla eşlendi", "cargo_track_error": "",
+                        "cargo_status_checked_at": datetime.now(timezone.utc).isoformat()}})
+                    bd["matched"] += 1
+                    stats["found"] += 1
+            stats["by_date"] = bd
+    except Exception as _bde:
+        stats["by_date"] = {"ok": False, "error": str(_bde)[:200]}
     # TEŞHİS: MNG WSDL operasyon listesi (tarih bazlı gönderi listesi var mı?) — günde bir yeter
     try:
         _prev = await db.settings.find_one({"id": _PR_TRACK_HEALTH_ID}, {"_id": 0, "mng_ops_at": 1})

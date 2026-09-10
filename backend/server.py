@@ -1008,7 +1008,7 @@ async def health():
     try:
         _pt = await db.settings.find_one({"id": "influencer_pr_track_health"},
                                          {"_id": 0, "status": 1, "last_finish_at": 1, "candidates": 1, "checked": 1,
-                                          "found": 1, "errors": 1, "mng_ops": 1, "mng_ops_at": 1}) or {}
+                                          "found": 1, "errors": 1, "mng_ops": 1, "mng_ops_at": 1, "by_date": 1, "nz_retro": 1}) or {}
     except Exception as _e:
         _pt = {"error": f"okunamadı: {str(_e)[:80]}"}
     return {"status": "healthy", "version": _sha or None, "havale_sweep": _hv or None,
