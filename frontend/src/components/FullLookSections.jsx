@@ -3,7 +3,7 @@ import './fullLook.css';
 
 // renderProduct: site tarafında standart ürün kartı (ProductCard) — indirim rozeti, sepet ikonu,
 // bedenler vb. site geneliyle aynı. Verilmezse (editör önizlemesi / test) sade kart çizilir.
-export default function FullLookSections({ looks = [], interactive = true, startIndex = 0, renderProduct = null }) {
+export default function FullLookSections({ looks = [], interactive = true, startIndex = 0, renderProduct = null, renderAfterProducts = null }) {
   return <div className="full-look-flow" data-testid="full-look-flow">
     {looks.map((look, index) => <section className="full-look-section" key={look.id} aria-label={look.title || `Kombin ${startIndex + index + 1}`}>
       <div className="full-look-hero">
@@ -28,6 +28,7 @@ export default function FullLookSections({ looks = [], interactive = true, start
           })}
         </div>
         {!look.products?.length && <p className="full-look-empty-products">Bu görseldeki ürünleri sağ tarafa ekleyin.</p>}
+        {renderAfterProducts && !!look.products?.length && renderAfterProducts(look)}
       </div>
     </section>)}
   </div>;
