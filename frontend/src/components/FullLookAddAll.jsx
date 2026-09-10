@@ -148,16 +148,19 @@ export default function FullLookAddAll({ products = [] }) {
 
       {/* Tüm kombini al — site geneliyle uyumlu sade özet: ince üst çizgi, büyük harf/aralıklı başlık, kare siyah düğme */}
       <div className="mt-8 pt-6 border-t border-stone-200" data-testid="full-look-summary">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
-            <div className="text-[12px] md:text-[13px] tracking-[0.2em] uppercase text-stone-900">Tüm Kombini Al</div>
+            {/* Başlık ile sağdaki ilk (liste) fiyat aynı satır hizasında: ikisi de 20px satır yüksekliği */}
+            <div className="text-[13px] leading-[20px] tracking-[0.2em] uppercase text-stone-900">Tüm Kombini Al</div>
             <div className="mt-1 text-[11px] tracking-[0.12em] uppercase text-stone-400">{addable.length} parça</div>
           </div>
-          {/* İlk (liste) fiyat üstte, indirimli toplam altında, rozet en altta — mockup düzeni */}
-          <div className="flex flex-col items-start md:items-end gap-1 md:text-right">
-            {listTotal > total + 0.5 && <del className="text-[13px] text-stone-400">{fmtTL(listTotal)}</del>}
-            <span className={`text-[22px] md:text-[24px] font-medium leading-none ${listTotal > total + 0.5 ? "text-red-700" : "text-stone-900"}`}>{fmtTL(total)}</span>
-            {totalPct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700">%{totalPct}</span>}
+          {/* İlk (liste) fiyat üstte; altında indirimli toplam ve hemen yanında %rozet */}
+          <div className="flex flex-col items-start md:items-end md:text-right">
+            <del className={`text-[13px] leading-[20px] text-stone-400 ${listTotal > total + 0.5 ? "" : "invisible"}`}>{fmtTL(listTotal)}</del>
+            <div className="mt-1 flex items-center gap-2">
+              <span className={`text-[22px] md:text-[24px] font-medium leading-none ${listTotal > total + 0.5 ? "text-red-700" : "text-stone-900"}`}>{fmtTL(total)}</span>
+              {totalPct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700">%{totalPct}</span>}
+            </div>
           </div>
         </div>
         <button type="button" onClick={addAll} disabled={!addable.length}
