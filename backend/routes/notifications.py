@@ -642,6 +642,26 @@ async def send_test_template(req: TestTemplateReq, current_user: dict = Depends(
     }
 
 
+@router.get("/coverage")
+async def notification_coverage(days: int = Query(90, ge=1, le=365), current_user: dict = Depends(require_admin)):
+    """Bildirim KAPSAM raporu (JSON): her bildirim tipi kodda nereden tetikleniyor (otomatik/elle/hiç),
+    son N günde SMS/e-posta gerçekten gitmiş mi (notification_logs), eksikler ve mükerrerler."""
+    from notification_coverage import live_counts, build_report
+    live = await live_counts(db, days=days)
+    return build_report(live)
+
+
+@router.get("/coverage-report")
+async def notification_coverage_report(days: int = Query(90, ge=1, le=365), print: int = Query(0),
+                                       current_user: dict = Depends(require_admin)):
+    """Aynı raporun YAZDIRILABİLİR (PDF) HTML sürümü — Admin → Bildirim Şablonları → Kapsam Raporu."""
+    from fastapi.responses import HTMLResponse
+    from notification_coverage import live_counts, build_report, render_html
+    live = await live_counts(db, days=days)
+    html = render_html(build_report(live), auto_print=bool(print))
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
 @router.get("/logs")
 async def list_logs(limit: int = Query(50, ge=1, le=500), current_user: dict = Depends(require_admin)):
     rows = (
