@@ -250,7 +250,7 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                 return ""
             rows.append({"tracking": pick("gonderino") or pick("gonderi", "no") or pick("takipno") or pick("barkod"),
                          "name": pick("aliciadi") or pick("alici", "ad") or pick("alici", "unvan") or pick("alici"),
-                         "ref": pick("siparisno") or pick("referans") or pick("siparis", "no"),
+                         "ref": f.get("siparisno") or f.get("referansno") or pick("referans") or pick("siparisno"),
                          "date": pick("gondericikis", "tarih") or pick("kargostatu", "tarih") or pick("siparistarihi") or pick("tarih"),
                          "mng_no": pick("mngsiparisno") or pick("mng", "no"),
                          "status": pick("statu", "aciklama") or pick("statu") or pick("durum"),
@@ -267,6 +267,7 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         date_slots = [n for n in names if "tarih" in n.lower() or "date" in n.lower()]
         base = {}
         cust_slot = ""
+        rapor_slot = ""
         for n in names:
             ln = n.lower()
             if n in date_slots:
@@ -280,6 +281,7 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                 base[n] = password
             elif "raportype" in ln or "rapor" in ln:
                 base[n] = "1"
+                rapor_slot = n
             elif "altfirma" in ln:
                 base[n] = "0"
             else:
@@ -288,6 +290,9 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         cust_candidates = [x for x in (customer_codes or []) if x] or [username]
         if not cust_slot:
             cust_candidates = [""]
+        # Rapor tipi bilinmiyor → boş sonuçta 0/1/2/3 sırayla denenir (müşteri no doğruysa)
+        rapor_variants = ["1", "0", "2", "3", ""] if rapor_slot else [""]
+        cust_candidates = [(cc, rv) for cc in cust_candidates for rv in rapor_variants]
         # Çağrı planı: iki tarih → (start,end); tek tarih → her gün ayrı
         if len(date_slots) >= 2:
             ds = sorted(date_slots, key=lambda n: (0 if any(k in n.lower() for k in ("bas", "ilk", "start", "from")) else
@@ -298,10 +303,13 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         else:
             plans = [{}]
         got_any = False
-        for cust in cust_candidates:
+        for cust, rv in cust_candidates:
           if cust_slot:
               base[cust_slot] = cust
-              d.setdefault("cust_tried", []).append(str(cust)[:6] + "…")
+          if rapor_slot:
+              base[rapor_slot] = rv
+          if cust_slot or rapor_slot:
+              d.setdefault("cust_tried", []).append(f"{str(cust)[:4]}…/rapor={rv}")
           if got_any:
               break
           for fmt in fmts:
@@ -342,6 +350,9 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                       d["error"] = errs[0][:200]
                   break
               d["error"] = (errs[0] if errs else "satır yok")[:200]
+              d.setdefault("errors_seen", [])
+              if errs and errs[0][:100] not in d["errors_seen"]:
+                  d["errors_seen"].append(errs[0][:100])
               # Kimlik hatası formatla ilgili değil → diğer formatı deneme
               if any("KULLANICI" in x.upper() or "SIFRE" in x.upper() for x in errs):
                   break

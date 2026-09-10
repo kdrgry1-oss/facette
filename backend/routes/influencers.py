@@ -1448,6 +1448,20 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                     bd["pending_name_hits"] = _hits
                     bd["pending_name_hits_with_tracking"] = _hits_trk
                     bd["pending_without_name"] = sum(1 for c in pend if not (c.get("influencer_name") or inf_names.get(c.get("influencer_id") or "", "")))
+                    # Ad normalizasyonu teşhisi (maskeli): ilk 3 bekleyen + aynı 4 harfle başlayan satır sayısı
+                    def _mask(n):
+                        n = _inf_norm(n)
+                        return (n[:3] + "*" * max(0, len(n) - 3)) + f" ({len(n.split())} kelime)"
+                    _ns = []
+                    for c in pend[:4]:
+                        n0 = c.get("influencer_name") or inf_names.get(c.get("influencer_id") or "", "")
+                        k4 = _inf_norm(n0)[:4]
+                        same = [r for r in _rows if _inf_norm(r.get("name") or "").startswith(k4)] if k4 else []
+                        _ns.append({"pending": _mask(n0), "rows_same_prefix": len(same),
+                                    "row_example": _mask(same[0].get("name") or "") if same else "",
+                                    "row_has_tracking": bool(same and same[0].get("tracking")),
+                                    "match": bool(same and any(_mng_name_match(n0, r.get("name") or "") for r in same))})
+                    bd["name_diag"] = _ns
                 except Exception as _de:
                     bd["diag_error"] = str(_de)[:120]
                 used = set()
