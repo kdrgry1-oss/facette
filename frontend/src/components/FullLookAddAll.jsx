@@ -92,10 +92,13 @@ export default function FullLookAddAll({ products = [] }) {
                 {r.p.color && <div className="mt-1 text-[13px] text-stone-500">{r.p.color}</div>}
                 {/* Fiyat satırı: solda fiyatlar, sağda "Beden Tablosu" (çizginin üstünde) */}
                 <div className="mt-3 flex items-end justify-between gap-3">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {/* Mobil: üstü çizili fiyat kendi satırında, altında indirimli fiyat + %rozet; masaüstü: yan yana */}
+                  <div className="flex flex-col items-start gap-y-1 md:flex-row md:flex-wrap md:items-center md:gap-x-3">
                     {r.price.hasDiscount && <del className="text-[13px] text-stone-400">{fmtTL(r.price.list)}</del>}
-                    <span className={`text-[18px] md:text-[20px] font-medium ${r.price.hasDiscount ? "text-red-700" : "text-stone-900"}`}>{fmtTL(r.price.display)}</span>
-                    {pct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700 rounded-sm">%{pct}</span>}
+                    <span className="flex items-center gap-2">
+                      <span className={`text-[18px] md:text-[20px] font-medium ${r.price.hasDiscount ? "text-red-700" : "text-stone-900"}`}>{fmtTL(r.price.display)}</span>
+                      {pct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700 rounded-sm">%{pct}</span>}
+                    </span>
                   </div>
                   {r.hasSizes && !r.soldOut && (
                     <button type="button" onClick={() => openChart(r)} className="text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap shrink-0" data-testid={`fl-size-chart-${r.p.id}`}>
@@ -108,8 +111,9 @@ export default function FullLookAddAll({ products = [] }) {
                     <span className="text-[11px] tracking-[0.1em] uppercase text-stone-400">Tükendi</span>
                   ) : (
                     <>
-                      {/* Bedenler solda tek satır; "Sepete Ekle" aynı satırda sağa yaslı (mobilde alta sağa iner) */}
-                      <div className="flex flex-wrap items-center gap-3">
+                      {/* Masaüstü: bedenler solda, "Sepete Ekle" aynı satırda sağda. Mobil: düğme bedenlerin altında,
+                          bedenlerle aynı sol hizada ve tam genişlikte. */}
+                      <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
                         {r.hasSizes ? (
                           <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 -mb-1 [scrollbar-width:none]" role="radiogroup" aria-label={`${r.p.name} beden`}>
                             {r.sizes.map((s) => {
@@ -131,7 +135,7 @@ export default function FullLookAddAll({ products = [] }) {
                           <span className="text-[11px] tracking-[0.1em] uppercase text-stone-400 inline-flex items-center gap-1"><Check size={12} /> Tek beden</span>
                         )}
                         <button type="button" onClick={() => addOne(r)}
-                          className="ml-auto inline-flex items-center justify-center bg-black text-white px-5 py-2.5 text-[11px] uppercase tracking-[0.2em] hover:bg-black/85 transition-colors"
+                          className="w-full md:w-auto md:ml-auto inline-flex items-center justify-center bg-black text-white px-5 py-3 md:py-2.5 text-[11px] uppercase tracking-[0.2em] hover:bg-black/85 transition-colors"
                           data-testid={`fl-add-one-${r.p.id}`}>
                           Sepete Ekle
                         </button>
