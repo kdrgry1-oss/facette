@@ -35,14 +35,14 @@ export default function EmailMarketing() {
   const [repBusy, setRepBusy] = useState(false);
   const openReport = async (c) => {
     setRepBusy(true); setRep(null);
-    try { const r = await axios.get(`${API}/email-marketing/campaigns/${c.id}/report?days=14`, auth()); setRep(r.data); }
+    try { const r = await axios.get(`${API}/admin/email-marketing/campaigns/${c.id}/report?days=14`, { headers: h() }); setRep(r.data); }
     catch (e) { toast.error(e.response?.data?.detail || "Rapor alınamadı"); }
     finally { setRepBusy(false); }
   };
   const downloadReport = async () => {
     if (!rep) return;
     try {
-      const r = await axios.get(`${API}/email-marketing/campaigns/${rep.campaign.id}/report.xlsx?days=14`, { ...auth(), responseType: "blob" });
+      const r = await axios.get(`${API}/admin/email-marketing/campaigns/${rep.campaign.id}/report.xlsx?days=14`, { headers: h(), responseType: "blob" });
       const url = URL.createObjectURL(r.data); const a = document.createElement("a");
       a.href = url; a.download = "kampanya-raporu.xlsx"; a.click(); URL.revokeObjectURL(url);
     } catch { toast.error("Excel oluşturulamadı"); }
