@@ -81,8 +81,8 @@ export default function FullLookAddAll({ products = [] }) {
           const href = `/urun/${encodeURIComponent(r.p.slug || r.p.id)}`;
           const pct = r.price.hasDiscount ? (Number(r.price.discountPct) || Math.round((1 - r.price.display / r.price.list) * 100)) : 0;
           return (
-            <div key={r.p.id} className="py-6 flex gap-5 md:gap-7" data-testid={`fl-row-${r.p.id}`}>
-              <Link to={href} className="block shrink-0 w-[112px] md:w-[150px] overflow-hidden" aria-label={r.p.name}>
+            <div key={r.p.id} className="py-6 flex gap-4 md:gap-7 min-w-0 max-w-full" data-testid={`fl-row-${r.p.id}`}>
+              <Link to={href} className="block shrink-0 w-[96px] sm:w-[112px] md:w-[150px] overflow-hidden" aria-label={r.p.name}>
                 {r.p.images?.[0]
                   ? <img src={typeof r.p.images[0] === "object" ? (r.p.images[0].url || "") : r.p.images[0]} alt={r.p.name} loading="lazy" className="block w-full h-auto" />
                   : <span className="block w-full aspect-[3/4] bg-white" />}
@@ -91,7 +91,8 @@ export default function FullLookAddAll({ products = [] }) {
                 <Link to={href} className="block text-[17px] md:text-[19px] leading-snug text-stone-900 hover:underline underline-offset-4">{r.p.name}</Link>
                 {r.p.color && <div className="mt-1 text-[13px] text-stone-500">{r.p.color}</div>}
                 {/* Fiyat satırı: solda fiyatlar, sağda "Beden Tablosu" (çizginin üstünde) */}
-                <div className="mt-3 flex items-end justify-between gap-3">
+                {/* Dar ekranda taşmasın: satır kırılabilir, "Beden Tablosu" gerekirse alt satıra sağa iner */}
+                <div className="mt-3 flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
                   {/* Mobil: üstü çizili fiyat kendi satırında, altında indirimli fiyat + %rozet; masaüstü: yan yana */}
                   <div className="flex flex-col items-start gap-y-1 md:flex-row md:flex-wrap md:items-center md:gap-x-3">
                     {r.price.hasDiscount && <del className="text-[13px] text-stone-400">{fmtTL(r.price.list)}</del>}
@@ -101,7 +102,7 @@ export default function FullLookAddAll({ products = [] }) {
                     </span>
                   </div>
                   {r.hasSizes && !r.soldOut && (
-                    <button type="button" onClick={() => openChart(r)} className="text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap shrink-0" data-testid={`fl-size-chart-${r.p.id}`}>
+                    <button type="button" onClick={() => openChart(r)} className="ml-auto text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap" data-testid={`fl-size-chart-${r.p.id}`}>
                       Beden Tablosu
                     </button>
                   )}
@@ -115,7 +116,7 @@ export default function FullLookAddAll({ products = [] }) {
                           bedenlerle aynı sol hizada ve tam genişlikte. */}
                       <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
                         {r.hasSizes ? (
-                          <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 -mb-1 [scrollbar-width:none]" role="radiogroup" aria-label={`${r.p.name} beden`}>
+                          <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 -mb-1 max-w-full [scrollbar-width:none]" role="radiogroup" aria-label={`${r.p.name} beden`}>
                             {r.sizes.map((s) => {
                               const active = sel[r.p.id] === s.size;
                               return (

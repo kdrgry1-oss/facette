@@ -36,7 +36,7 @@ a.full-look-product:focus-visible{outline:2px solid #292824;outline-offset:5px}
   .full-look-section:last-child{border-bottom:0}
   .full-look-hero>img{max-height:none;width:100%;height:auto;object-fit:contain}
   .full-look-hero{position:relative;top:auto}
-  .full-look-selection{padding:24px 16px 0}
+  .full-look-selection{padding:24px 16px 0;min-width:0;max-width:100%;overflow-x:hidden}
   .full-look-caption,.full-look-editor-preview .full-look-caption{padding:0 0 18px}
   .full-look-caption-meta{font-size:10px;letter-spacing:.13em;align-items:center}
   .full-look-caption h2{font-size:21px;line-height:1.4;margin-top:12px}
