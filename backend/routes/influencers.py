@@ -1292,7 +1292,7 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
             refs = list(dict.fromkeys(refs))
             if not refs:
                 continue
-            gonderi, statu_ac, got_ok, err_txt = "", "", False, ""
+            gonderi, statu_ac, got_ok, err_txt, mng_no = "", "", False, "", ""
             debug_parts = []
             for ref in refs:
                 try:
@@ -1307,6 +1307,8 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                 if info and info.get("ok"):
                     got_ok = True
                     statu_ac = (info.get("kargo_statu_aciklama") or "").strip() or statu_ac
+                    if (info.get("mng_siparis_no") or "").strip():
+                        mng_no = str(info.get("mng_siparis_no")).strip()
                     g = (info.get("gonderi_no") or "").strip()
                     debug_parts.append(
                         f"{ref}: {info.get('method') or '?'} statu={info.get('kargo_statu') or '0'} "
@@ -1325,6 +1327,14 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
             if got_ok:
                 upd["cargo_last_status_text"] = statu_ac
                 upd["cargo_track_error"] = ""
+                if mng_no:
+                    upd["cargo_mng_no"] = mng_no   # MNG iç sipariş no (takip no DEĞİL; panelde bilgi amaçlı)
+                if not gonderi:
+                    # İnsan-okur açıklama: MNG paketi şubede okutana kadar takip no atanmaz.
+                    upd["cargo_track_note"] = ("MNG kaydı var, paket henüz MNG tarafından okutulmadı; "
+                                               "takip no MNG şubede işleyince otomatik gelir.")
+            if gonderi:
+                upd["cargo_track_note"] = ""
             elif err_txt:
                 upd["cargo_track_error"] = err_txt
                 stats["last_error"] = err_txt

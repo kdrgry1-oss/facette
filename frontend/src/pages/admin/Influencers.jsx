@@ -564,11 +564,14 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
                         <Truck size={14} /><span className="font-mono text-[10px] font-bold text-gray-700 max-w-[92px] truncate">{trackNo}</span>
                       </a>
                     ) : (
-                      <span title={`Takip no otomatik çekilir (her saat tarama).${e.cargo_status_checked_at ? " Son kontrol: " + new Date(e.cargo_status_checked_at).toLocaleString("tr-TR") : " Henüz taranmadı."}${e.cargo_last_status_text ? " · " + e.cargo_last_status_text : ""}${e.cargo_track_error ? " · Hata: " + e.cargo_track_error : ""}${e.cargo_track_debug ? " · " + e.cargo_track_debug : ""}`}
+                      <span title={`Takip no otomatik çekilir (her saat tarama).${e.cargo_status_checked_at ? " Son kontrol: " + new Date(e.cargo_status_checked_at).toLocaleString("tr-TR") : " Henüz taranmadı."}${e.cargo_mng_no ? " · MNG sipariş no: " + e.cargo_mng_no + " (takip no değil)" : ""}${e.cargo_track_note ? " · " + e.cargo_track_note : ""}${e.cargo_last_status_text ? " · MNG durumu: " + e.cargo_last_status_text : ""}${e.cargo_track_error ? " · Hata: " + e.cargo_track_error : ""}${e.cargo_track_debug ? " · Teknik: " + e.cargo_track_debug : ""}`}
                         className={`inline-flex flex-wrap items-center gap-1 border rounded px-1.5 py-1 ${e.cargo_track_error ? "text-red-500 border-red-200 bg-red-50" : "text-gray-400 border-gray-200"}`}
-                        data-testid={`pr-track-pending-${e.id}`}><Truck size={14} /><span className="text-[10px] font-medium">{e.cargo_track_error ? "takip hatası" : "takip bekleniyor"}</span>
-                        {(e.cargo_last_status_text || e.cargo_track_error || e.cargo_track_debug) && (
-                          <span className="block w-full basis-full text-[9px] text-gray-400 font-normal normal-case max-w-[170px] truncate" title={e.cargo_track_debug || ""}>
+                        data-testid={`pr-track-pending-${e.id}`}><Truck size={14} /><span className="text-[10px] font-medium">{e.cargo_track_error ? "takip hatası" : (e.cargo_mng_no ? "MNG'de okutulmadı" : "takip bekleniyor")}</span>
+                        {e.cargo_mng_no && (
+                          <span className="text-[9px] font-mono text-gray-500 font-normal" title="MNG iç sipariş numarası — kargo takip no değil; takip no MNG paketi okutunca gelir">MNG {e.cargo_mng_no}</span>
+                        )}
+                        {(e.cargo_last_status_text || e.cargo_track_error || (!e.cargo_mng_no && e.cargo_track_debug)) && (
+                          <span className="block w-full basis-full text-[9px] text-gray-400 font-normal normal-case max-w-[170px] truncate" title={e.cargo_track_note || e.cargo_track_debug || ""}>
                             {(e.cargo_last_status_text || e.cargo_track_error || e.cargo_track_debug || "").slice(0, 70)}
                           </span>
                         )}</span>
