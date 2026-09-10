@@ -9,13 +9,11 @@ export default function FullLookSections({ looks = [], interactive = true, start
       <div className="full-look-hero">
         {look.image ? <img src={look.image} alt={look.title || `Kombin ${startIndex + index + 1}`} loading={startIndex + index ? 'lazy' : 'eager'} />
           : <div className="full-look-placeholder">Soldaki kombin fotoğrafını seçin</div>}
-        <span className="full-look-number">{String(startIndex + index + 1).padStart(2, '0')}</span>
-        {!!look.products?.length && (interactive
-          ? <a className="full-look-shop-link" href={`#${encodeURIComponent(`look-products-${look.id}`)}`}>Parçaları keşfet <span aria-hidden="true">↓</span></a>
-          : <span className="full-look-shop-link">Parçaları keşfet <span aria-hidden="true">↓</span></span>)}
       </div>
       <div className="full-look-selection" id={`look-products-${look.id}`}>
-        <div className="full-look-caption"><div className="full-look-caption-meta"><span>GÖRÜNÜMÜ TAMAMLA</span><span>{look.products?.length || 0} PARÇA</span></div>{look.title && <h2>{look.title}</h2>}</div>
+        {/* Kullanıcı isteği: görsel üstündeki "01" rozeti ve "Parçaları keşfet" kaldırıldı; "GÖRÜNÜMÜ TAMAMLA"
+            yerine aynı font/boyutta her kombinin ürünlerinin üstünde LOOK 01, LOOK 02 … */}
+        <div className="full-look-caption"><div className="full-look-caption-meta"><span className="full-look-label">LOOK {String(startIndex + index + 1).padStart(2, '0')}</span><span>{look.products?.length || 0} PARÇA</span></div>{look.title && <h2>{look.title}</h2>}</div>
         <div className={`full-look-products${renderProduct ? ' full-look-products--cards' : ''}`}>
           {(look.products || []).map((product, pi) => {
             if (renderProduct) return <div className="full-look-product-card" key={product.id}>{renderProduct(product, pi)}</div>;
