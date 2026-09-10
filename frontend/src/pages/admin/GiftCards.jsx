@@ -14,7 +14,7 @@ export default function GiftCards() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ value_type: "amount", amount: "", percent: "", max_amount: "", usage_limit: "1", kind: "gift", customer_email: "", note: "", expires_days: "" });
+  const [form, setForm] = useState({ code: "", value_type: "amount", amount: "", percent: "", max_amount: "", usage_limit: "1", kind: "gift", customer_email: "", note: "", expires_days: "" });
   const [creating, setCreating] = useState(false);
 
   const load = async () => {
@@ -37,6 +37,7 @@ export default function GiftCards() {
     setCreating(true);
     try {
       const { data } = await axios.post(`${API}/admin/gift-cards`, {
+        code: form.code.trim().toUpperCase(),
         value_type: form.value_type,
         amount: isPct ? 0 : amount,
         percent: isPct ? percent : 0,
@@ -50,7 +51,7 @@ export default function GiftCards() {
       toast.success(`Oluşturuldu: ${data.code}`);
       try { await navigator.clipboard.writeText(data.code); toast.info("Kod panoya kopyalandı"); } catch { /* pano izni yok */ }
       setShowForm(false);
-      setForm({ value_type: "amount", amount: "", percent: "", max_amount: "", usage_limit: "1", kind: "gift", customer_email: "", note: "", expires_days: "" });
+      setForm({ code: "", value_type: "amount", amount: "", percent: "", max_amount: "", usage_limit: "1", kind: "gift", customer_email: "", note: "", expires_days: "" });
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Oluşturulamadı"); }
     finally { setCreating(false); }
@@ -87,6 +88,11 @@ export default function GiftCards() {
 
       {showForm && (
         <div className="bg-white border rounded-xl p-4 grid sm:grid-cols-6 gap-3 items-end">
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1">Kod (ops.)</label>
+            <input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
+              placeholder="boş = otomatik (ör. YILBASI20)" className="w-full border rounded px-3 py-2 text-sm font-mono" data-testid="gift-card-code" />
+          </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1">Değer türü</label>
             <select value={form.value_type} onChange={(e) => setForm({ ...form, value_type: e.target.value })}

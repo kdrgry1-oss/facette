@@ -243,9 +243,22 @@ async def create_gift_card(payload: dict, current_user: dict = Depends(require_a
     if kind == "credit" and not email:
         raise HTTPException(status_code=400, detail="Mağaza kredisi için müşteri e-postası zorunlu")
     expires_days = int(payload.get("expires_days") or 0)
-    code = _gen_code()
-    while await db.gift_cards.find_one({"code": code}, {"_id": 1}):
+    # KOD: admin kendi belirleyebilir (ör. YILBASI20); boşsa otomatik üretilir.
+    import re as _re
+    custom = str(payload.get("code") or "").strip().upper().replace("İ", "I").replace("ı", "I")
+    if custom:
+        custom = _re.sub(r"\s+", "", custom)
+        if not _re.fullmatch(r"[A-Z0-9][A-Z0-9\-_]{2,31}", custom):
+            raise HTTPException(status_code=400, detail="Kod 3-32 karakter olmalı; harf, rakam, - ve _ kullanılabilir")
+        if await db.gift_cards.find_one({"code": custom}, {"_id": 1}):
+            raise HTTPException(status_code=400, detail="Bu kod zaten bir hediye çekinde kullanılıyor")
+        if await db.coupons.find_one({"code": {"$regex": f"^{_re.escape(custom)}$", "$options": "i"}}, {"_id": 1}):
+            raise HTTPException(status_code=400, detail="Bu kod bir kupon/kampanya kodu — hediye çeki kodu farklı olmalı")
+        code = custom
+    else:
         code = _gen_code()
+        while await db.gift_cards.find_one({"code": code}, {"_id": 1}):
+            code = _gen_code()
     doc = {
         "id": secrets.token_hex(8),
         "code": code,
