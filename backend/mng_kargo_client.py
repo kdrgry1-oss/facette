@@ -15,6 +15,7 @@ Kimlik bilgileri (GÜVENLİK: koda gömülmez):
 """
 import logging
 import warnings
+from datetime import datetime
 from typing import Dict, Optional
 
 warnings.filterwarnings("ignore")
@@ -258,7 +259,7 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                          "raw_keys": sorted(f.keys())[:40]})
         return rows
 
-    for op_name in ("KargoBilgileriByTarih", "FaturaSiparisListesiByTarih"):
+    for op_name in ("KargoBilgileriByTarih", "MusteriOzelRapor", "FaturaSiparisListesiByTarih"):
         names = _op_param_names(c, op_name)
         d = diag.setdefault(op_name, {"params": names, "error": "", "calls": 0, "rows": 0})
         if not names:
@@ -292,7 +293,10 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
             cust_candidates = [""]
         # Rapor tipi / alt firma bayrağı bilinmiyor → boş sonuçta kombinasyonlar sırayla denenir
         alt_slot = next((n for n in names if "altfirma" in n.lower()), "")
-        rapor_variants = ["1", "2", "3", "0", "G", "T", "D", "K", ""] if rapor_slot else [""]
+        if rapor_slot and "raporno" in rapor_slot.lower():
+            rapor_variants = [str(i) for i in range(1, 13)]          # MusteriOzelRapor: rapor no 1..12
+        else:
+            rapor_variants = ["1", "2", "3", "0", "G", "T", "D", "K", ""] if rapor_slot else [""]
         alt_variants = ["0", "1", "H", "E"] if alt_slot else [""]
         cust_candidates = [(cc, rv, av) for cc in dict.fromkeys(cust_candidates) for av in alt_variants for rv in rapor_variants]
         # Çağrı planı: iki tarih → (start,end); tek tarih → her gün ayrı
@@ -301,7 +305,12 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                                                     (2 if any(k in n.lower() for k in ("bit", "son", "end", "to")) else 1)))
             plans = [{ds[0]: start, ds[-1]: end}]
         elif len(date_slots) == 1:
-            plans = [{date_slots[0]: dt} for dt in (dates or [start])]
+            _dl = list(dates or [start])
+            # Parametre denemesi ilk planla yapılır → ilk plan GEÇMİŞ bir gün olsun (yarın boş döner)
+            _today0 = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            _past = [dt for dt in _dl if dt.replace(tzinfo=None) < _today0]
+            _dl = (_past[:1] + [dt for dt in _dl if dt not in _past[:1]]) if _past else _dl
+            plans = [{date_slots[0]: dt} for dt in _dl]
         else:
             plans = [{}]
         got_any = False
@@ -314,6 +323,7 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
               base[alt_slot] = av
           if cust_slot or rapor_slot:
               d.setdefault("cust_tried", []).append(f"{str(cust)[:4]}…/rapor={rv}/alt={av}")
+          _variant_tag = f"rapor={rv}/alt={av}"
           if got_any:
               break
           for fmt in (fmts[:1] if cust_slot else fmts):
@@ -334,6 +344,10 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                           errs.append(str(ser)[:140])
                   except Exception as e:
                       errs.append(str(e)[:120])
+              if errs:
+                  d.setdefault("by_variant", {})
+                  if len(d["by_variant"]) < 40:
+                      d["by_variant"][_variant_tag] = errs[0][:90]
               if rows_here:
                   # Kimlik denemesi (2 gün) başarılıysa kalan günleri de aynı kimlikle çek
                   if cust_slot and len(plans) > 1:
