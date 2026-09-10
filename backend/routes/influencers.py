@@ -1418,15 +1418,17 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                                        discover_rapor=_next)
             try:
                 _md = (res.get("diag") or {}).get("MusteriOzelRapor") or {}
-                _set = {"at": datetime.now(timezone.utc).isoformat(), "tried": sorted(_tried | set(_next)),
+                _timeouts = {k.split("/")[0].replace("rapor=", "") for k, v in (_md.get("by_variant") or {}).items() if "timed out" in str(v)}
+                _set = {"at": datetime.now(timezone.utc).isoformat(), "tried": sorted((_tried | set(_next)) - _timeouts),
                         "rapor_keys": {**(_disc.get("rapor_keys") or {}), **(_md.get("rapor_keys") or {})}}
                 if _md.get("rapor_no") and not _disc.get("rapor_no"):
                     _set["rapor_no"] = _md["rapor_no"]
                 if _md.get("rapor_no_tracking"):
                     _set["rapor_no_tracking"] = _md["rapor_no_tracking"]
                 await db.settings.update_one({"id": "mng_report_discovery_v2"}, {"$set": _set}, upsert=True)
+                _set["rapor_stats"] = {**(_disc.get("rapor_stats") or {}), **(_md.get("rapor_stats") or {})}
                 bd_disc = {"tried": _set["tried"], "rapor_no_tracking": _set.get("rapor_no_tracking") or _disc.get("rapor_no_tracking"),
-                           "rapor_keys": {k: {"rows": v.get("rows"), "has_tracking": v.get("has_tracking"), "keys": (v.get("keys") or [])[:14]} for k, v in _set["rapor_keys"].items()}}
+                           "rapor_stats": _set["rapor_stats"]}
             except Exception as _de2:
                 bd_disc = {"error": str(_de2)[:120]}
             bd = {"ok": bool(res.get("ok")), "method": res.get("method"), "diag": res.get("diag"), "discovery": bd_disc,

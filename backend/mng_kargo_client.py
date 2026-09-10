@@ -73,7 +73,14 @@ def _dhl_takip_url(no) -> str:
 
 
 def _norm_key(k) -> str:
-    return str(k).strip().lower().replace("_", "").replace(" ", "")
+    """Alan adını normalize eder: küçük harf, boşluk/alt çizgi/x0020 (XML boşluk kaçışı) atılır,
+    Türkçe karakterler ASCII'ye çevrilir, birleşik işaretler (i̇) kaldırılır → 'gönderi̇ no' = 'gonderino'."""
+    import unicodedata as _ud
+    t = str(k).strip().replace("_x0020_", "").replace("x0020", "").replace("_", "").replace(" ", "")
+    t = t.replace("İ", "i").replace("I", "i").replace("ı", "i").lower()
+    t = _ud.normalize("NFKD", t)
+    t = "".join(ch for ch in t if not _ud.combining(ch))
+    return t
 
 
 def _deep_find_fields(obj) -> Dict:
@@ -383,10 +390,32 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                       errs.append(str(e)[:120])
               if rows_here:
                   _keys = rows_here[0].get("raw_keys") or []
-                  _has_trk = any(rows_here[i].get("tracking") for i in range(min(50, len(rows_here))))
+                  _has_trk = any(rows_here[i].get("tracking") for i in range(min(200, len(rows_here))))
                   d.setdefault("by_variant", {})
                   d["by_variant"][_variant_tag] = f"{len(rows_here)} satır, takipNo={'VAR' if _has_trk else 'yok'}, alanlar: " + ",".join(_keys[:24])
-                  d.setdefault("rapor_keys", {})[rv] = {"rows": len(rows_here), "has_tracking": _has_trk, "keys": _keys[:40]}
+                  # PII'siz istatistik: gönderici çeşitliliği, 'facette' geçen satır, tarih aralığı, takip no'lu satır
+                  try:
+                      import unicodedata as _ud2
+                      def _nm(x):
+                          x = str(x or "").replace("ı", "i").replace("İ", "i").lower()
+                          return "".join(ch for ch in _ud2.normalize("NFKD", x) if not _ud2.combining(ch))
+                      _senders = {}
+                      for r in rows_here:
+                          sn = _nm(r.get("sender_name"))
+                          _senders[sn] = _senders.get(sn, 0) + 1
+                      _top = sorted(_senders.items(), key=lambda x: -x[1])[:3]
+                      _dates = sorted({str(r.get("date") or "")[:10] for r in rows_here if r.get("date")})
+                      d.setdefault("rapor_stats", {})[rv] = {
+                          "rows": len(rows_here), "senders_distinct": len(_senders),
+                          "senders_top": [f"{k[:3]}***({len(k)}) x{v}" for k, v in _top],
+                          "rows_facette": sum(v for k, v in _senders.items() if "facette" in k),
+                          "rows_with_tracking": sum(1 for r in rows_here if r.get("tracking")),
+                          "rows_with_name": sum(1 for r in rows_here if r.get("name")),
+                          "date_min": _dates[0] if _dates else "", "date_max": _dates[-1] if _dates else "",
+                          "keys": _keys[:60]}
+                  except Exception as _se:
+                      d.setdefault("rapor_stats", {})[rv] = {"error": str(_se)[:80]}
+                  d.setdefault("rapor_keys", {})[rv] = {"rows": len(rows_here), "has_tracking": _has_trk, "keys": _keys[:60]}
                   if _has_trk:
                       d["rapor_no_tracking"] = rv
                   elif rv != (preferred_rapor or "7"):
