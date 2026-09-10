@@ -290,9 +290,11 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         cust_candidates = [x for x in (customer_codes or []) if x] or [username]
         if not cust_slot:
             cust_candidates = [""]
-        # Rapor tipi bilinmiyor → boş sonuçta 0/1/2/3 sırayla denenir (müşteri no doğruysa)
-        rapor_variants = ["1", "0", "2", "3", ""] if rapor_slot else [""]
-        cust_candidates = [(cc, rv) for cc in cust_candidates for rv in rapor_variants]
+        # Rapor tipi / alt firma bayrağı bilinmiyor → boş sonuçta kombinasyonlar sırayla denenir
+        alt_slot = next((n for n in names if "altfirma" in n.lower()), "")
+        rapor_variants = ["1", "2", "3", "0", "G", "T", "D", "K", ""] if rapor_slot else [""]
+        alt_variants = ["0", "1", "H", "E"] if alt_slot else [""]
+        cust_candidates = [(cc, rv, av) for cc in dict.fromkeys(cust_candidates) for av in alt_variants for rv in rapor_variants]
         # Çağrı planı: iki tarih → (start,end); tek tarih → her gün ayrı
         if len(date_slots) >= 2:
             ds = sorted(date_slots, key=lambda n: (0 if any(k in n.lower() for k in ("bas", "ilk", "start", "from")) else
@@ -303,19 +305,21 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         else:
             plans = [{}]
         got_any = False
-        for cust, rv in cust_candidates:
+        for cust, rv, av in cust_candidates:
           if cust_slot:
               base[cust_slot] = cust
           if rapor_slot:
               base[rapor_slot] = rv
+          if alt_slot:
+              base[alt_slot] = av
           if cust_slot or rapor_slot:
-              d.setdefault("cust_tried", []).append(f"{str(cust)[:4]}…/rapor={rv}")
+              d.setdefault("cust_tried", []).append(f"{str(cust)[:4]}…/rapor={rv}/alt={av}")
           if got_any:
               break
-          for fmt in fmts:
+          for fmt in (fmts[:1] if cust_slot else fmts):
               errs = []
               rows_here = []
-              for plan in (plans[:2] if cust_slot else plans):   # kimlik denemesinde en çok 2 gün
+              for plan in (plans[:1] if cust_slot else plans):   # parametre denemesinde tek gün
                   kwargs = dict(base)
                   for k, dt in plan.items():
                       kwargs[k] = dt.strftime(fmt)
@@ -332,8 +336,8 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                       errs.append(str(e)[:120])
               if rows_here:
                   # Kimlik denemesi (2 gün) başarılıysa kalan günleri de aynı kimlikle çek
-                  if cust_slot and len(plans) > 2:
-                      for plan in plans[2:]:
+                  if cust_slot and len(plans) > 1:
+                      for plan in plans[1:]:
                           kwargs = dict(base)
                           for k, dt in plan.items():
                               kwargs[k] = dt.strftime(fmt)
@@ -358,6 +362,8 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                   break
         if got_any and not used_method:
             used_method = op_name
+    for extra_op in ("MusteriOzelRapor", "KargoBilgileriByReferans", "GonderiTeslimatProblemleri", "PaletSiparisListesi"):
+        diag[extra_op] = {"params": _op_param_names(c, extra_op), "calls": 0, "rows": 0, "error": "(çağrılmadı)"}
     # Aynı takip no birden çok operasyondan gelirse tekilleştir
     seen, uniq = set(), []
     for r in all_rows:
