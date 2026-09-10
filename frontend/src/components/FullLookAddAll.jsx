@@ -138,8 +138,7 @@ export default function FullLookAddAll({ products = [] }) {
           </div>
         </div>
         <button type="button" onClick={addAll} disabled={!addable.length}
-          className={`mt-5 w-full px-6 py-3.5 text-[11px] md:text-xs uppercase tracking-[0.2em] transition-colors ${
-            ready ? "bg-black text-white hover:bg-black/85" : "bg-stone-200 text-stone-500"}`}
+          className="mt-5 w-full px-6 py-3.5 text-[11px] md:text-xs uppercase tracking-[0.2em] bg-black text-white hover:bg-black/85 transition-colors disabled:opacity-40"
           data-testid="full-look-add-all-btn">
           Tüm Kombini Sepete Ekle
         </button>

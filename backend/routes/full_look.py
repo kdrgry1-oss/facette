@@ -39,15 +39,18 @@ async def _hydrate(doc, public=False):
     for row in rows:
         source = products.get(row.get('source_product_id'))
         cards = [products[pid] for pid in row.get('product_ids', []) if pid in products]
-        valid_image = source and row.get('image') in source.get('images', [])
-        # Removed/private source images and unpublished products cannot leak through saved content.
+        strict_image = bool(source) and row.get('image') in source.get('images', [])
+        # Yayın koşulu: kaynak ürün yayında (public sorguda süzüldü) + görsel var + en az bir görünür ürün.
+        # Görselin kaynak ürünün GÜNCEL galerisinde olması artık şart değil (galeri değişince kombin
+        # sessizce kaybolup "LOOK 02 çıkmıyor" oluyordu); görsel adresi kayıtta zaten doğrulanıyor.
+        valid_image = bool(source) and bool(row.get('image'))
         if public and (not valid_image or not cards):
             continue
         if public:
             result.append({'id': row['id'], 'title': row.get('title', ''), 'image': row['image'], 'products': cards})
         else:
             result.append({**row, 'source_product': source, 'products': cards,
-                           'warning': '' if valid_image and cards else 'Kaynak görseli ve ürünleri kontrol edin.'})
+                           'warning': '' if strict_image and cards else 'Kaynak görseli ve ürünleri kontrol edin.'})
     out = {'title': doc.get('title', 'Full Look'), 'description': doc.get('description', ''), 'looks': result}
     if not public:
         out.update(revision=doc.get('revision', 0), updated_at=doc.get('updated_at'))
