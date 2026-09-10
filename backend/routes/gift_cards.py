@@ -309,6 +309,58 @@ async def update_gift_card(card_id: str, payload: dict, current_user: dict = Dep
         upd["status"] = st
     if "note" in (payload or {}):
         upd["note"] = str(payload.get("note") or "")[:300]
+    # ── DÜZENLEME (kullanıcı isteği): kod, müşteri, tip, süre, yüzde/maks/hak, bakiye ──
+    import re as _re
+    cur = await db.gift_cards.find_one({"id": card_id}, {"_id": 0})
+    if not cur:
+        raise HTTPException(status_code=404, detail="Hediye çeki bulunamadı")
+    if "code" in (payload or {}):
+        custom = str(payload.get("code") or "").strip().upper().replace("İ", "I").replace("ı", "I")
+        custom = _re.sub(r"\s+", "", custom)
+        if custom and custom != cur.get("code"):
+            if not _re.fullmatch(r"[A-Z0-9][A-Z0-9\-_]{2,31}", custom):
+                raise HTTPException(status_code=400, detail="Kod 3-32 karakter olmalı; harf, rakam, - ve _ kullanılabilir")
+            if await db.gift_cards.find_one({"code": custom, "id": {"$ne": card_id}}, {"_id": 1}):
+                raise HTTPException(status_code=400, detail="Bu kod zaten bir hediye çekinde kullanılıyor")
+            if await db.coupons.find_one({"code": {"$regex": f"^{_re.escape(custom)}$", "$options": "i"}}, {"_id": 1}):
+                raise HTTPException(status_code=400, detail="Bu kod bir kupon/kampanya kodu — hediye çeki kodu farklı olmalı")
+            upd["code"] = custom
+    if "customer_email" in (payload or {}):
+        upd["customer_email"] = str(payload.get("customer_email") or "").strip().lower()
+    if "kind" in (payload or {}):
+        k = str(payload.get("kind") or "gift").lower()
+        if k in ("gift", "credit"):
+            if k == "credit" and not (upd.get("customer_email") or cur.get("customer_email")):
+                raise HTTPException(status_code=400, detail="Mağaza kredisi için müşteri e-postası zorunlu")
+            upd["kind"] = k
+    if "expires_days" in (payload or {}):
+        d = int(payload.get("expires_days") or 0)
+        upd["expires_at"] = (datetime.now(timezone.utc) + timedelta(days=d)).isoformat() if d > 0 else ""
+    if (cur.get("value_type") or "amount") == "percent":
+        if payload.get("percent") is not None:
+            pct = round(float(payload.get("percent") or 0), 2)
+            if pct <= 0 or pct > 100:
+                raise HTTPException(status_code=400, detail="Yüzde 1-100 arasında olmalı")
+            upd["percent"] = pct
+        if payload.get("max_amount") is not None:
+            upd["max_amount"] = max(0.0, round(float(payload.get("max_amount") or 0), 2))
+        if payload.get("usage_limit") is not None:
+            new_lim = max(1, min(int(payload.get("usage_limit") or 1), 100000))
+            old_lim = int(cur.get("usage_limit") or 1)
+            used = old_lim - int(cur.get("uses_left") if cur.get("uses_left") is not None else old_lim)
+            upd["usage_limit"] = new_lim
+            upd["uses_left"] = max(0, new_lim - used)
+            upd["status"] = upd.get("status") or ("active" if (new_lim - used) > 0 and cur.get("status") in ("active", "used") else cur.get("status"))
+    else:
+        if payload.get("set_balance") is not None:
+            nb = max(0.0, round(float(payload.get("set_balance") or 0), 2))
+            delta = round(nb - float(cur.get("balance") or 0), 2)
+            if delta:
+                await db.gift_cards.update_one(
+                    {"id": card_id},
+                    {"$set": {"balance": nb},
+                     "$push": {"transactions": {"type": "adjust", "amount": delta,
+                                                "by": current_user.get("email", ""), "at": _now_iso()}}})
     if payload.get("add_balance") is not None:
         delta = round(float(payload["add_balance"]), 2)
         if delta:
