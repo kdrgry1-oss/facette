@@ -1470,6 +1470,28 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                                 _hits_trk += 1
                     bd["pending_name_hits"] = _hits
                     bd["pending_name_hits_with_tracking"] = _hits_trk
+                    # Gönderici teşhisi: isim eşleşen satırların gönderici no/adı (firma kodu; kişi verisi değil),
+                    # yıldızlı (maskeli) gönderici adı sayısı, en sık gönderici no'lar
+                    _hd = []
+                    for c in pend[:19]:
+                        _nm = [n for n in [c.get("influencer_name") or "", inf_names.get(c.get("influencer_id") or "", "")] if n]
+                        for r in _rows:
+                            if any(_mng_name_match(n, str(r.get("name") or "")) for n in _nm):
+                                _sn = str(r.get("sender_name") or ""); 
+                                _hd.append({"pend": _inf_norm(_nm[0])[:3] + "***", "sender_no": str(r.get("sender_no") or "")[:12],
+                                            "sender_name": (_sn[:6] + "…" + f"({len(_sn)})"), "star": "*" in _sn,
+                                            "tracking": bool(r.get("tracking")), "mng_ref": bool(r.get("mng_ref")), "date": str(r.get("date") or "")[:10],
+                                            "ref": str(r.get("ref") or "")[:12]})
+                                if len(_hd) >= 8:
+                                    break
+                        if len(_hd) >= 8:
+                            break
+                    bd["hits_detail"] = _hd
+                    from collections import Counter as _C2
+                    bd["sender_star_rows"] = sum(1 for r in _rows if "*" in str(r.get("sender_name") or ""))
+                    bd["sender_no_top"] = _C2(str(r.get("sender_no") or "") for r in _rows).most_common(5)
+                    bd["sender_name_nostar_samples"] = [ (k[:8] + "…") for k, _ in _C2(str(r.get("sender_name") or "") for r in _rows if r.get("sender_name") and "*" not in str(r.get("sender_name"))).most_common(5)]
+                    bd["our_ids"] = [str(x)[:4] + "…" for x in (_cc + [user])]
                     bd["pending_without_name"] = sum(1 for c in pend if not (c.get("influencer_name") or inf_names.get(c.get("influencer_id") or "", "")))
                     # Ad normalizasyonu teşhisi (maskeli): ilk 3 bekleyen + aynı 4 harfle başlayan satır sayısı
                     def _mask(n):
