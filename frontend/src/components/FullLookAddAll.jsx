@@ -96,7 +96,7 @@ export default function FullLookAddAll({ products = [] }) {
                   <div className="flex flex-col items-start gap-y-1 md:flex-row md:flex-wrap md:items-center md:gap-x-3">
                     {r.price.hasDiscount && <del className="text-[13px] text-stone-400">{fmtTL(r.price.list)}</del>}
                     <span className="flex items-center gap-2">
-                      <span className={`text-[18px] md:text-[20px] font-medium ${r.price.hasDiscount ? "text-red-700" : "text-stone-900"}`}>{fmtTL(r.price.display)}</span>
+                      <span className={`text-[18px] md:text-[20px] font-medium whitespace-nowrap ${r.price.hasDiscount ? "text-red-700" : "text-stone-900"}`}>{fmtTL(r.price.display)}</span>
                       {pct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700 rounded-sm">%{pct}</span>}
                     </span>
                   </div>
