@@ -13,7 +13,7 @@ import {
   Plus, TrendingUp, CheckCircle, Trash2, X,
   Instagram, DollarSign, Truck, Share2, Search, Pencil, Calendar, Package,
   ClipboardList, ExternalLink, History, Filter, Download,
-  ChevronRight, ChevronDown, Barcode, Printer, FileText, StickyNote, Upload,
+  ChevronRight, ChevronDown, Barcode, Printer, FileText, StickyNote,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -248,28 +248,6 @@ function PRTrackTab() {
     finally { setScanning(false); }
   };
 
-  // MNG panel listesi (xlsx/csv) → alıcı adına göre takip no eşle (kurye RE-… referansıyla açtıysa)
-  const [importing, setImporting] = useState(false);
-  const importMngList = async (file) => {
-    if (!file) return;
-    setImporting(true);
-    const t = toast.loading("MNG listesi okunuyor…");
-    try {
-      const fd = new FormData(); fd.append("file", file); fd.append("apply", "0");
-      const pre = (await axios.post(`${API}/influencer-pr/import-mng-tracking`, fd, auth())).data || {};
-      const ms = pre.matches || [];
-      if (!ms.length) { toast.error(`Eşleşme yok. Okunan satır ${pre.rows ?? 0}, takip no'lu ${pre.parsed ?? 0}. Eşleşmeyen: ${(pre.unmatched || []).slice(0, 5).map((u) => u.names?.[0] || u.tracking).join(", ")}`, { id: t, duration: 12000 }); return; }
-      const lines = ms.slice(0, 25).map((m) => `${m.name} → ${m.tracking}${m.date ? " (" + m.date + ")" : ""}`).join("\n");
-      toast.dismiss(t);
-      if (!window.confirm(`${ms.length} eşleşme bulundu, takip no'lar yazılacak:\n\n${lines}${ms.length > 25 ? "\n…" : ""}\n\nEşleşmeyen satır: ${(pre.unmatched || []).length}. Onaylıyor musun?`)) return;
-      const fd2 = new FormData(); fd2.append("file", file); fd2.append("apply", "1");
-      const r = (await axios.post(`${API}/influencer-pr/import-mng-tracking`, fd2, auth())).data || {};
-      toast.success(`${r.applied ?? 0} kayda takip no yazıldı`);
-      load();
-    } catch (err) { toast.error(err.response?.data?.detail || "Liste işlenemedi", { id: t }); }
-    finally { setImporting(false); }
-  };
-
   // Excel'e aktar — ekrandaki AYNI filtreyle (durum/tarih/arama). Auth header gerektiği
   // için blob olarak çekip indiriyoruz (window.open header taşımaz).
   const exportXlsx = async () => {
@@ -371,11 +349,6 @@ function PRTrackTab() {
                 className="inline-flex items-center gap-2 border px-3 py-2 rounded-lg text-sm hover:bg-gray-50 ml-auto disabled:opacity-50">
           <Truck size={15} /> {scanning ? "Taranıyor…" : "Takip Tara"}
         </button>
-        <label title="MNG panelinden indirdiğin gönderi listesini (xlsx/csv) yükle; alıcı adına göre takip no'lar eşlenir. Kurye paketi kendi RE-… referansıyla açtıysa takip no ancak buradan gelir."
-               className={`inline-flex items-center gap-2 border px-3 py-2 rounded-lg text-sm hover:bg-gray-50 cursor-pointer ${importing ? "opacity-50 pointer-events-none" : ""}`} data-testid="pr-mng-import">
-          <Upload size={15} /> {importing ? "İşleniyor…" : "MNG Listesi Yükle"}
-          <input type="file" accept=".xlsx,.xls,.csv,.txt" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; importMngList(f); }} />
-        </label>
         <button onClick={exportXlsx} data-testid="pr-export-btn"
                 className="inline-flex items-center gap-2 border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">
           <Download size={15} /> Excel'e Aktar

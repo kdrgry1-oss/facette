@@ -1003,8 +1003,16 @@ async def health():
         _jobs = sorted(j.id for j in _sched.get_jobs())[:60] if _sched else []
     except Exception as _e:
         _jobs = [f"okunamadı: {str(_e)[:60]}"]
+    # Influencer kargo takip taraması sağlığı + MNG WSDL operasyon adları (PII yok) — teşhis.
+    _pt = {}
+    try:
+        _pt = await db.settings.find_one({"id": "influencer_pr_track_health"},
+                                         {"_id": 0, "status": 1, "last_finish_at": 1, "candidates": 1, "checked": 1,
+                                          "found": 1, "errors": 1, "mng_ops": 1, "mng_ops_at": 1}) or {}
+    except Exception as _e:
+        _pt = {"error": f"okunamadı: {str(_e)[:80]}"}
     return {"status": "healthy", "version": _sha or None, "havale_sweep": _hv or None,
-            "scheduler_jobs": _jobs}
+            "scheduler_jobs": _jobs, "pr_track": _pt or None}
 
 # Include API router
 app.include_router(api_router)

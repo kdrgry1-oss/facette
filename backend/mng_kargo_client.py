@@ -156,6 +156,19 @@ def _get_client():
     return _client_cache
 
 
+def list_operations() -> list:
+    """WSDL'deki TÜM operasyon adları (teşhis: tarih bazlı gönderi listesi var mı?)."""
+    try:
+        c = _get_client()
+        names = set()
+        for svc in c.wsdl.services.values():
+            for port in svc.ports.values():
+                names.update(getattr(port.binding, "_operations", {}).keys())
+        return sorted(names)
+    except Exception as e:
+        return [f"okunamadı: {str(e)[:80]}"]
+
+
 def baglanti_test() -> Dict:
     """Test SOAP service availability."""
     try:

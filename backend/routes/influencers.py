@@ -1360,6 +1360,15 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
     except Exception as e:
         logger.exception(f"[pr-track] tarama hatası: {e}")
         stats.update(status="error", last_error=str(e)[:200])
+    # TEŞHİS: MNG WSDL operasyon listesi (tarih bazlı gönderi listesi var mı?) — günde bir yeter
+    try:
+        _prev = await db.settings.find_one({"id": _PR_TRACK_HEALTH_ID}, {"_id": 0, "mng_ops_at": 1})
+        if not _prev or (str(_prev.get("mng_ops_at") or "") < (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()):
+            from mng_kargo_client import list_operations as _mng_ops
+            stats["mng_ops"] = await _aio.to_thread(_mng_ops)
+            stats["mng_ops_at"] = datetime.now(timezone.utc).isoformat()
+    except Exception as _oe:
+        stats["mng_ops"] = [f"hata: {str(_oe)[:80]}"]
     fin = datetime.now(timezone.utc)
     await _health(last_finish_at=fin.isoformat(),
                   duration_ms=int((fin - started).total_seconds() * 1000), interval_min=60)
