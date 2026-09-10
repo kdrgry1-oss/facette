@@ -10,7 +10,7 @@ Sipariş eşleştirme: orders.create_order, resolve_influencer_for_order() çağ
   1) attribution.aff_id (30 günlük çerez) → influencer
   2) Fallback: order.coupon_code, influencer'ın kuponuyla eşleşirse override.
 """
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Request, UploadFile, File, Form
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid as _uuid
@@ -1366,6 +1366,121 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
     logger.info(f"[pr-track] bitti — aday {stats['candidates']} · sorgulanan {stats['checked']} · "
                 f"takip no bulunan {stats['found']} · hata {stats['errors']}")
     return stats
+
+
+def _mng_rows_from_upload(data: bytes, filename: str, text: str) -> list:
+    """MNG panel listesi (xlsx/csv) ya da yapıştırılmış metin → satır listesi (hücre dizileri)."""
+    rows = []
+    fn = (filename or "").lower()
+    if data and (fn.endswith(".xlsx") or fn.endswith(".xlsm") or data[:2] == b"PK"):
+        import io as _io
+        import openpyxl
+        wb = openpyxl.load_workbook(_io.BytesIO(data), read_only=True, data_only=True)
+        for ws in wb.worksheets:
+            for r in ws.iter_rows(values_only=True):
+                cells = ["" if v is None else (v.strftime("%d.%m.%Y") if hasattr(v, "strftime") else str(v)).strip() for v in r]
+                if any(cells):
+                    rows.append(cells)
+    elif data:
+        txt = data.decode("utf-8-sig", errors="ignore")
+        text = (text or "") + "\n" + txt
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        sep = "\t" if "\t" in line else (";" if ";" in line else ",")
+        rows.append([c.strip().strip('"') for c in line.split(sep)])
+    return rows
+
+
+def _mng_parse_row(cells: list) -> dict:
+    """Satırdan takip no (10-14 hane), MNG referansı (RE-…), tarih ve isim adaylarını çıkar."""
+    import re as _re
+    out = {"tracking": "", "ref": "", "date": "", "names": []}
+    for c in cells:
+        c = str(c or "").strip()
+        if not c:
+            continue
+        if not out["tracking"] and _re.fullmatch(r"\d{10,14}", c):
+            out["tracking"] = c
+        elif not out["ref"] and _re.fullmatch(r"[A-Z]{1,3}-?\d{4,}", c):
+            out["ref"] = c
+        elif not out["date"] and _re.fullmatch(r"\d{2}[./-]\d{2}[./-]\d{4}.*", c):
+            out["date"] = c[:10]
+        elif "*" not in c and _re.search(r"[A-Za-zÇĞİÖŞÜçğıöşü]{2,}", c) and not _re.search(r"\d{4,}", c):
+            out["names"].append(c)
+    return out
+
+
+def _mng_name_match(pr_name: str, cell: str) -> bool:
+    a, b = _inf_norm(pr_name), _inf_norm(cell)
+    if not a or not b or len(a) < 4:
+        return False
+    if a == b:
+        return True
+    ta, tb = set(a.split()), set(b.split())
+    return len(ta) >= 2 and ta <= tb or (len(tb) >= 2 and tb <= ta)
+
+
+@router.post("/influencer-pr/import-mng-tracking")
+async def influencer_pr_import_mng_tracking(file: UploadFile = File(None), text: str = Form(""),
+                                            apply: str = Form("0"), current_user: dict = Depends(require_admin)):
+    """MNG panel gönderi listesini (xlsx/csv/yapıştırılmış metin) alıcı ADINA göre PR kayıtlarıyla eşler
+    ve takip no'yu yazar. Neden gerekli: kurye paketi bizim 'INF…' referansımız yerine kendi
+    'RE-…' referansıyla açtığında MNG bizim sorgumuza takip no döndürmez (panelde 'işlem yapılmadı'
+    kalır); MNG panelindeki liste ise gerçek takip no'yu içerir. apply=0 → yalnız önizleme."""
+    data = await file.read() if file is not None else b""
+    rows = _mng_rows_from_upload(data, getattr(file, "filename", "") or "", text or "")
+    parsed = [_mng_parse_row(r) for r in rows]
+    parsed = [p for p in parsed if p["tracking"] and p["names"]]
+    if not parsed:
+        raise HTTPException(status_code=400, detail="Listede takip no + alıcı adı içeren satır bulunamadı (xlsx/csv ya da panelden kopyalanan satırlar).")
+    # Adaylar: kargosu olan, gerçek takip no'su boş PR kayıtları (elle girilenler korunur)
+    cands = await db.influencer_pr.find(
+        {"$or": [{"cargo_barcode": {"$nin": [None, ""]}}, {"cargo_tracking_no": {"$nin": [None, ""]}}],
+         "$and": [{"$or": [{"cargo_gonderi_no": {"$in": [None, ""]}}, {"cargo_gonderi_no": {"$exists": False}}]}]},
+        {"_id": 0, "id": 1, "influencer_id": 1, "influencer_name": 1, "shipped_at": 1, "cargo_barcode": 1, "cargo_mng_no": 1}
+    ).to_list(2000)
+    inf_names = {}
+    ids = [c.get("influencer_id") for c in cands if c.get("influencer_id")]
+    if ids:
+        async for i in db.influencers.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "full_name": 1}):
+            inf_names[i["id"]] = i.get("name") or i.get("full_name") or ""
+    used_tracking, matches, unmatched = set(), [], []
+    for p in parsed:
+        hit = []
+        for c in cands:
+            names = [c.get("influencer_name") or "", inf_names.get(c.get("influencer_id") or "", "")]
+            if any(_mng_name_match(n, cell) for n in names if n for cell in p["names"]):
+                hit.append(c)
+        if not hit:
+            unmatched.append({"tracking": p["tracking"], "ref": p["ref"], "date": p["date"], "names": p["names"][:3]})
+            continue
+        # Aynı isimde birden çok bekleyen kayıt: gönderim tarihi liste tarihine en yakın olan
+        def _dist(c):
+            try:
+                d = datetime.strptime(p["date"].replace("/", ".").replace("-", "."), "%d.%m.%Y")
+                sa = datetime.fromisoformat(str(c.get("shipped_at") or "")[:19])
+                return abs((sa - d).days)
+            except Exception:
+                return 9999
+        hit.sort(key=_dist)
+        c = hit[0]
+        if p["tracking"] in used_tracking:
+            continue
+        used_tracking.add(p["tracking"])
+        cands = [x for x in cands if x["id"] != c["id"]]
+        matches.append({"pr_id": c["id"], "name": c.get("influencer_name") or inf_names.get(c.get("influencer_id") or "", ""),
+                        "tracking": p["tracking"], "ref": p["ref"], "date": p["date"], "shipped_at": c.get("shipped_at")})
+    applied = 0
+    if str(apply) in ("1", "true", "yes") and matches:
+        for m in matches:
+            await db.influencer_pr.update_one({"id": m["pr_id"]}, {"$set": {
+                "cargo_gonderi_no": m["tracking"], "cargo_tracking_url": f"https://kargotakip.dhlecommerce.com.tr/?takipNo={m['tracking']}",
+                "cargo_mng_ref": m["ref"], "cargo_track_note": "MNG listesinden eşlendi", "cargo_track_error": "",
+                "cargo_manual_tracking": True, "updated_at": _now_iso()}})
+            applied += 1
+    return {"rows": len(rows), "parsed": len(parsed), "matches": matches, "unmatched": unmatched, "applied": applied}
 
 
 @router.get("/influencer-pr/tracking-health")
