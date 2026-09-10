@@ -26,6 +26,7 @@ async def put_business_rules(payload: dict, current_user: dict = Depends(require
 # Storefront'un ihtiyaç duyduğu kurallar (checkout ücretleri, geri sayım, tatiller).
 # Public — hassas değil; müşteri tarafı bunları okuyup UI'da kullanır.
 _PUBLIC_KEYS = [
+    "order.havale_cancel_hours",  # müşteriye zaten söylenen süre (banka bilgi maili) — teşhis için açık
     "shipping.cod_fee", "shipping.same_day_cutoff", "shipping.work_days",
     "shipping.exclude_official_holidays",
     "payment.points_redeem_max_pct", "product.gift_wrap_price",
