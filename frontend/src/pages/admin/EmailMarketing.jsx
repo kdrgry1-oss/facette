@@ -30,6 +30,23 @@ export default function EmailMarketing() {
   const [camp, setCamp] = useState({ subject: "", html: "" });
   const [campTestTo, setCampTestTo] = useState(() => { try { return localStorage.getItem("emailTestTo") || ""; } catch { return ""; } });
   const [campaigns, setCampaigns] = useState([]);
+  // Kampanya raporu: kimlere gitti + kimler alışveriş yaptı (UTM link + e-posta eşleşmesi)
+  const [rep, setRep] = useState(null);
+  const [repBusy, setRepBusy] = useState(false);
+  const openReport = async (c) => {
+    setRepBusy(true); setRep(null);
+    try { const r = await axios.get(`${API}/email-marketing/campaigns/${c.id}/report?days=14`, auth()); setRep(r.data); }
+    catch (e) { toast.error(e.response?.data?.detail || "Rapor alınamadı"); }
+    finally { setRepBusy(false); }
+  };
+  const downloadReport = async () => {
+    if (!rep) return;
+    try {
+      const r = await axios.get(`${API}/email-marketing/campaigns/${rep.campaign.id}/report.xlsx?days=14`, { ...auth(), responseType: "blob" });
+      const url = URL.createObjectURL(r.data); const a = document.createElement("a");
+      a.href = url; a.download = "kampanya-raporu.xlsx"; a.click(); URL.revokeObjectURL(url);
+    } catch { toast.error("Excel oluşturulamadı"); }
+  };
   const [busy, setBusy] = useState("");
   const [templates, setTemplates] = useState([]);
   const [previewHtml, setPreviewHtml] = useState("");   // canlı önizleme (editörün altında)
@@ -713,7 +730,7 @@ export default function EmailMarketing() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-gray-500 border-b">
-                <th className="py-2">Konu</th><th>Sağlayıcı</th><th>Durum</th><th className="text-right">Gönderildi</th><th className="text-right">Hata</th><th className="text-right">Hedef</th><th className="text-right">Tarih</th>
+                <th className="py-2">Konu</th><th>Sağlayıcı</th><th>Durum</th><th className="text-right">Gönderildi</th><th className="text-right">Hata</th><th className="text-right">Hedef</th><th className="text-right">Tarih</th><th className="text-right">Rapor</th>
               </tr></thead>
               <tbody>
                 {campaigns.map((c) => (
@@ -736,10 +753,53 @@ export default function EmailMarketing() {
                     </td>
                     <td className="text-right">{c.total || 0}</td>
                     <td className="text-right text-xs text-gray-400">{c.created_at ? new Date(c.created_at).toLocaleString("tr-TR") : ""}</td>
+                    <td className="text-right">
+                      <button onClick={() => openReport(c)} disabled={repBusy} className="text-xs border rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-50" data-testid={`camp-report-${c.id}`}>Alıcılar & Dönüşüm</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {rep && (
+          <div className="mt-4 border rounded-xl p-4 bg-gray-50/60" data-testid="camp-report-panel">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div>
+                <div className="font-semibold text-sm">{rep.campaign.subject}</div>
+                <div className="text-[11px] text-gray-500">{rep.campaign.created_at ? new Date(rep.campaign.created_at).toLocaleString("tr-TR") : ""} · gönderimden sonraki {rep.window_days} gün içindeki siparişler</div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={downloadReport} className="text-xs border rounded px-3 py-1.5 hover:bg-white">Excel</button>
+                <button onClick={() => setRep(null)} className="text-xs border rounded px-3 py-1.5 hover:bg-white">Kapat</button>
+              </div>
+            </div>
+            {rep.note && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-3">{rep.note}</div>}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-3">
+              {[["Alıcı", rep.summary.recipients], ["Gönderilen", rep.summary.delivered_or_submitted],
+                ["Alışveriş yapan alıcı", rep.summary.buyers], ["Dönüşüm", `%${rep.summary.conversion_rate}`],
+                ["Sipariş adedi", rep.summary.buyer_orders], ["Ciro", `${Number(rep.summary.buyer_revenue).toLocaleString("tr-TR", { minimumFractionDigits: 2 })} TL`],
+                ["Maildeki linkten gelen sipariş", rep.summary.via_link_orders], ["Linkten gelen ciro", `${Number(rep.summary.via_link_revenue).toLocaleString("tr-TR", { minimumFractionDigits: 2 })} TL`]].map(([l, v]) => (
+                <div key={l} className="bg-white border rounded p-2"><div className="text-gray-500">{l}</div><div className="text-base font-bold">{v}</div></div>
+              ))}
+            </div>
+            <div className="overflow-auto max-h-80 bg-white border rounded">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500 sticky top-0"><tr><th className="text-left p-2">E-posta</th><th className="text-left p-2">Gönderim</th><th className="text-left p-2">Alışveriş</th><th className="text-left p-2">Sipariş</th></tr></thead>
+                <tbody>
+                  {rep.recipients.length === 0 ? (
+                    <tr><td colSpan={4} className="p-4 text-center text-gray-400">Alıcı kaydı yok</td></tr>
+                  ) : rep.recipients.map((r, i) => (
+                    <tr key={i} className={`border-t ${r.purchased ? "bg-emerald-50/60" : ""}`}>
+                      <td className="p-2 font-mono">{r.email}</td>
+                      <td className="p-2">{r.status === "failed" ? <span className="text-red-600" title={r.error}>hata</span> : r.status}</td>
+                      <td className="p-2">{r.purchased ? <span className="text-emerald-700 font-semibold">EVET</span> : "—"}</td>
+                      <td className="p-2">{r.orders.map((o) => `${o.order_number} (${Number(o.total).toFixed(2)} TL${o.via_link ? " · linkten" : ""})`).join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

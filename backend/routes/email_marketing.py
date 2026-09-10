@@ -328,6 +328,42 @@ def _wrap(subject: str, body_html: str, unsub_url: str) -> str:
         return content
 
 
+def _add_utm(html: str, campaign_id: str) -> str:
+    """Kampanya HTML'indeki facette.com.tr linklerine utm_source=email&utm_medium=newsletter&
+    utm_campaign=<kampanya id> ekler → müşteri tıklayıp sipariş verirse order.attribution.campaign
+    bu id'yi taşır (dönüşüm raporu). Abonelikten-çık / api linklerine dokunmaz."""
+    import re as _re
+    from urllib.parse import urlparse, urlencode, parse_qsl, urlunparse
+    if not html or not campaign_id:
+        return html
+
+    def _fix(m):
+        url = m.group(2)
+        try:
+            u = urlparse(url)
+        except Exception:
+            return m.group(0)
+        host = (u.hostname or "").lower()
+        if not host.endswith("facette.com.tr") or host.startswith("api.") or "/api/" in (u.path or ""):
+            return m.group(0)
+        q = dict(parse_qsl(u.query, keep_blank_values=True))
+        if "utm_campaign" in q:
+            return m.group(0)
+        q.update({"utm_source": "email", "utm_medium": "newsletter", "utm_campaign": campaign_id})
+        return f'{m.group(1)}{urlunparse(u._replace(query=urlencode(q)))}{m.group(3)}'
+    return _re.sub(r'(href\s*=\s*["\'])(https?://[^"\']+)(["\'])', _fix, html, flags=_re.IGNORECASE)
+
+
+async def _log_send(campaign_id: str, email: str, subscriber_id: str, status: str, error: str = "") -> None:
+    """Alıcı başına gönderim kaydı (db.email_campaign_sends) — 'kimlere gitti' listesi + dönüşüm eşlemesi."""
+    try:
+        await db.email_campaign_sends.insert_one({
+            "campaign_id": campaign_id, "email": (email or "").strip().lower(), "subscriber_id": subscriber_id or "",
+            "status": status, "error": (error or "")[:300], "at": _now()})
+    except Exception:
+        pass
+
+
 # ── Kampanyalar ───────────────────────────────────────────────────────────────
 async def _run_ses_campaign(campaign_id: str):
     """Arka plan: rıza vermiş aktif abonelere SES ile gönderir; sayaçları günceller."""
@@ -389,17 +425,20 @@ async def _run_ses_campaign(campaign_id: str):
         _subj = _render_tpl(subject, {"customer_name": _cn}) if _render_tpl else subject
         _body = _render_tpl(body, {"customer_name": _cn}) if _render_tpl else body
         unsub_url = f"{base}/api/email-marketing/unsubscribe?e={email}&t={s.get('id','')}"
-        html = _wrap(_subj, _body, unsub_url)
+        html = _add_utm(_wrap(_subj, _body, unsub_url), campaign_id)
         try:
             r = await send_ses_email(cfg, email, _subj, html, cfg.get("reply_to") or "")
             if r.get("success"):
                 sent += 1
+                await _log_send(campaign_id, email, s.get("id"), "sent")
             else:
                 failed += 1
+                await _log_send(campaign_id, email, s.get("id"), "failed", str(r.get("error") or ""))
                 if not error_sample:
                     error_sample = str(r.get("error") or "bilinmeyen hata")[:400]
         except Exception as e:
             failed += 1
+            await _log_send(campaign_id, email, s.get("id"), "failed", str(e))
             if not error_sample:
                 error_sample = str(e)[:400]
             logger.warning(f"[email-marketing] gönderim hata {email}: {e}")
@@ -474,7 +513,17 @@ async def _run_brevo_campaign(campaign_id: str):
     # için boş değer kullanır; şablonlarda nötr hitap tercih edilmesi önerilir.
     subject = str(camp.get("subject") or "").replace("{customer_name}", "{{ contact.FIRSTNAME }}")
     body = str(camp.get("html") or "").replace("{customer_name}", "{{ contact.FIRSTNAME }}")
-    html = _wrap(subject, body, "{{ unsubscribe }}")
+    html = _add_utm(_wrap(subject, body, "{{ unsubscribe }}"), campaign_id)
+    # Alıcı listesi (Brevo'ya iletilen kitle) — 'kimlere gitti' için yerel kayıt
+    try:
+        _docs = [{"campaign_id": campaign_id, "email": (c.get("email") or "").strip().lower(),
+                  "subscriber_id": c.get("id") or "", "status": "submitted", "error": "", "at": _now()}
+                 for c in contacts if (c.get("email") or "").strip()]
+        if _docs:
+            await db.email_campaign_sends.delete_many({"campaign_id": campaign_id})
+            await db.email_campaign_sends.insert_many(_docs)
+    except Exception:
+        pass
     result = await create_and_send_campaign(
         cfg,
         name=f"Facette · {camp.get('subject') or campaign_id} · {campaign_id[:8]}",
@@ -694,6 +743,122 @@ async def seed_email_templates() -> int:
         except Exception as e:
             logger.warning(f"[email-marketing] seed şablon eklenemedi {key}: {e}")
     return added
+
+
+_CONV_EXCLUDED = ["cancelled", "cancel_refunded", "payment_failed", "failed", "awaiting_payment", "pending",
+                  "returned", "refunded"]
+
+
+async def _campaign_report(campaign_id: str, days: int = 14) -> dict:
+    """Kampanya alıcıları + dönüşüm: (a) UTM ile gelen siparişler (attribution.campaign = kampanya id),
+    (b) alıcıların gönderimden sonra N gün içinde verdiği siparişler (e-posta eşleşmesi)."""
+    camp = await db.email_campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not camp:
+        raise HTTPException(status_code=404, detail="Kampanya bulunamadı")
+    sends = await db.email_campaign_sends.find({"campaign_id": campaign_id}, {"_id": 0}).sort("at", 1).to_list(None)
+    emails = sorted({x["email"] for x in sends if x.get("email")})
+    start = camp.get("started_at") or camp.get("created_at") or ""
+    end_dt = None
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        end_dt = (_dt.fromisoformat(str(start).replace("Z", "+00:00")) + _td(days=days)).isoformat()
+    except Exception:
+        end_dt = ""
+    utm_orders = await db.orders.find({"attribution.campaign": campaign_id, "status": {"$nin": _CONV_EXCLUDED}},
+                                      {"_id": 0, "id": 1, "order_number": 1, "created_at": 1, "total": 1, "status": 1,
+                                       "shipping_address.email": 1, "email": 1, "customer_email": 1}).to_list(2000)
+    by_email_orders: dict = {}
+    if emails and start:
+        q = {"created_at": {"$gte": start}, "status": {"$nin": _CONV_EXCLUDED},
+             "platform": {"$nin": ["trendyol", "hepsiburada", "amazon"]},
+             "$or": [{"shipping_address.email": {"$in": emails}}, {"email": {"$in": emails}}, {"customer_email": {"$in": emails}}]}
+        if end_dt:
+            q["created_at"]["$lte"] = end_dt
+        async for o in db.orders.find(q, {"_id": 0, "id": 1, "order_number": 1, "created_at": 1, "total": 1, "status": 1,
+                                          "shipping_address.email": 1, "email": 1, "customer_email": 1, "attribution.campaign": 1}):
+            em = ((o.get("shipping_address") or {}).get("email") or o.get("email") or o.get("customer_email") or "").strip().lower()
+            by_email_orders.setdefault(em, []).append(o)
+    rows = []
+    buyers = 0
+    rev = 0.0
+    for x in sends:
+        os_ = by_email_orders.get(x.get("email"), [])
+        if os_:
+            buyers += 1
+            rev += sum(float(o.get("total") or 0) for o in os_)
+        rows.append({"email": x.get("email"), "status": x.get("status"), "at": x.get("at"), "error": x.get("error") or "",
+                     "purchased": bool(os_), "orders": [{"order_number": o.get("order_number"), "total": o.get("total"),
+                                                         "created_at": o.get("created_at"), "status": o.get("status"),
+                                                         "via_link": (o.get("attribution") or {}).get("campaign") == campaign_id} for o in os_]})
+    utm_rev = sum(float(o.get("total") or 0) for o in utm_orders)
+    n_sent = sum(1 for x in sends if x.get("status") in ("sent", "submitted"))
+    return {
+        "campaign": {"id": campaign_id, "subject": camp.get("subject"), "status": camp.get("status"),
+                     "provider": camp.get("provider"), "created_at": camp.get("created_at"), "sent": camp.get("sent"),
+                     "total": camp.get("total")},
+        "window_days": days,
+        "summary": {"recipients": len(sends), "delivered_or_submitted": n_sent,
+                    "buyers": buyers, "buyer_orders": sum(len(v) for v in by_email_orders.values()),
+                    "buyer_revenue": round(rev, 2),
+                    "conversion_rate": round(100.0 * buyers / n_sent, 2) if n_sent else 0.0,
+                    "via_link_orders": len(utm_orders), "via_link_revenue": round(utm_rev, 2)},
+        "via_link_orders": [{"order_number": o.get("order_number"), "total": o.get("total"), "created_at": o.get("created_at"),
+                             "status": o.get("status")} for o in utm_orders],
+        "recipients": rows,
+        "note": ("Bu kampanya için alıcı kaydı yok (alıcı başına kayıt bu tarihten sonraki kampanyalarda tutulur); "
+                 "yalnız link (UTM) dönüşümleri gösterilir." if not sends else ""),
+    }
+
+
+@admin_router.get("/campaigns/{campaign_id}/report")
+async def campaign_report(campaign_id: str, days: int = 14,
+                          current_user: dict = Depends(require_permission("tasarim.email"))):
+    """Kampanya raporu: kimlere gitti + kimler alışveriş yaptı (UTM link ve e-posta eşleşmesi)."""
+    return await _campaign_report(campaign_id, max(1, min(days, 90)))
+
+
+@admin_router.get("/campaigns/{campaign_id}/report.xlsx")
+async def campaign_report_xlsx(campaign_id: str, days: int = 14,
+                               current_user: dict = Depends(require_permission("tasarim.email"))):
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    from fastapi.responses import StreamingResponse
+    rep = await _campaign_report(campaign_id, max(1, min(days, 90)))
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Alıcılar"
+    ws.append(["E-posta", "Gönderim", "Tarih", "Alışveriş yaptı", "Sipariş no", "Tutar", "Sipariş tarihi", "Linkten geldi"])
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="111111")
+    for r in rep["recipients"]:
+        if r["orders"]:
+            for o in r["orders"]:
+                ws.append([r["email"], r["status"], str(r["at"] or "")[:16].replace("T", " "), "Evet", o["order_number"],
+                           o["total"], str(o["created_at"] or "")[:16].replace("T", " "), "Evet" if o["via_link"] else ""])
+        else:
+            ws.append([r["email"], r["status"], str(r["at"] or "")[:16].replace("T", " "), "", "", "", "", ""])
+    for i, w in enumerate([32, 12, 17, 14, 14, 12, 17, 12], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    s2 = wb.create_sheet("Özet")
+    sm = rep["summary"]
+    for k, v in [("Kampanya", rep["campaign"]["subject"]), ("Alıcı", sm["recipients"]), ("Gönderilen", sm["delivered_or_submitted"]),
+                 (f"Alışveriş yapan alıcı ({rep['window_days']} gün)", sm["buyers"]), ("Sipariş adedi", sm["buyer_orders"]),
+                 ("Ciro (TL)", sm["buyer_revenue"]), ("Dönüşüm oranı (%)", sm["conversion_rate"]),
+                 ("Maildeki linkten gelen sipariş", sm["via_link_orders"]), ("Linkten gelen ciro (TL)", sm["via_link_revenue"])]:
+        s2.append([k, v])
+    s2.column_dimensions["A"].width = 38
+    s2.column_dimensions["B"].width = 40
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f"attachment; filename=kampanya-raporu-{campaign_id[:8]}.xlsx",
+                                      "Cache-Control": "no-store"})
 
 
 @admin_router.get("/templates")
