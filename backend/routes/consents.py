@@ -5,6 +5,7 @@ Kaynaklar (birleştirilir; alıcı+kanal başına EN SON kayıt geçerli):
   • db.iys_consents          — sipariş/üyelik/OTP akışlarından İYS izin kayıtları
                                (channels: MESAJ=SMS, EPOSTA=e-posta; status: ONAY / RET)
   • db.newsletter_subscribers — site altı bülten aboneliği (e-posta; consent=True, active)
+  • db.users.accepts_marketing — üye profili pazarlama tercihi (Hesabım / admin / sipariş izni)
   • db.email_suppressions    — bounce/şikâyet kara listesi (e-posta izni fiilen geçersiz)
 
 GET  /admin/consents?channel=email|sms&status=onay|ret&q=&page=&limit=
@@ -61,6 +62,17 @@ async def _collect() -> dict:
         _put("email", em, {"at": at, "status": st, "source": _SRC_TR.get(str(s.get("source") or "footer"), str(s.get("source") or "")),
                           "origin": "Bülten aboneliği", "email": em, "phone": "", "recipient": em,
                           "order_id": "", "user_id": None, "reported": True})
+
+    # Üye profili pazarlama tercihi (Hesabım / admin üye kartı / sipariş izniyle True olur).
+    # Kampanya kitlesiyle (email_marketing._campaign_audience) aynı kaynak — liste ile gönderim tutarlı.
+    async for u in db.users.find({"accepts_marketing": True, "email": {"$exists": True, "$ne": ""}},
+                                 {"_id": 0, "email": 1, "marketing_consent_at": 1, "created_at": 1, "id": 1}):
+        em = (u.get("email") or "").strip().lower()
+        if not em:
+            continue
+        at = u.get("marketing_consent_at") or u.get("created_at") or ""
+        _put("email", em, {"at": at, "status": "onay", "source": _SRC_TR["account"], "origin": "Üye profili",
+                          "email": em, "phone": "", "recipient": em, "order_id": "", "user_id": u.get("id"), "reported": True})
 
     suppressed = set()
     async for x in db.email_suppressions.find({}, {"_id": 0, "email": 1, "reason": 1}):
