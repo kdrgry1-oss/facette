@@ -26,6 +26,20 @@ export default function EmailMarketing() {
   const [canEditSettings, setCanEditSettings] = useState(false);
   const [readyProvider, setReadyProvider] = useState("");
   const [aud, setAud] = useState({ total: 0, eligible: 0 });
+  // Adres teşhisi: "bu adrese neden mail gitti/gitmedi?"
+  const [diagEmail, setDiagEmail] = useState("");
+  const [diag, setDiag] = useState(null);
+  const [diagBusy, setDiagBusy] = useState(false);
+  const runDiag = async () => {
+    const em = diagEmail.trim();
+    if (!em) return;
+    setDiagBusy(true);
+    try {
+      const r = await axios.get(`${API}/admin/email-marketing/diagnose?email=${encodeURIComponent(em)}`, { headers: h() });
+      setDiag(r.data);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Sorgulanamadı"); }
+    finally { setDiagBusy(false); }
+  };
   const [testTo, setTestTo] = useState("");
   const [camp, setCamp] = useState({ subject: "", html: "" });
   const [campTestTo, setCampTestTo] = useState(() => { try { return localStorage.getItem("emailTestTo") || ""; } catch { return ""; } });
@@ -359,7 +373,7 @@ export default function EmailMarketing() {
 
   const sendCampaign = async () => {
     if (!camp.subject.trim() || !camp.html.trim()) { toast.error("Konu ve içerik zorunlu"); return; }
-    if (!window.confirm(`${aud.eligible} rıza vermiş aboneye "${camp.subject}" kampanyası gönderilecek. Onaylıyor musun?`)) return;
+    if (!window.confirm(`${aud.eligible} e-posta izinli alıcıya "${camp.subject}" kampanyası gönderilecek. Onaylıyor musun?`)) return;
     setBusy("campaign");
     try {
       const r = await axios.post(`${API}/admin/email-marketing/campaigns`, camp, { headers: h() });
@@ -410,15 +424,50 @@ export default function EmailMarketing() {
       </div>
 
       {/* Kitle */}
-      <div className="bg-white border rounded-xl p-4 flex items-center gap-4">
-        <Users size={20} className="text-gray-500" />
-        <div className="flex-1">
-          <p className="text-sm font-semibold">{aud.eligible} rıza vermiş aktif abone</p>
-          <p className="text-xs text-gray-500">Toplam {aud.total} kayıt · yalnız KVKK/İYS onaylı ve aktif olanlara gönderilir</p>
+      <div className="bg-white border rounded-xl p-4 space-y-3" data-testid="email-audience-card">
+        <div className="flex items-center gap-4">
+          <Users size={20} className="text-gray-500" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold">{aud.eligible} e-posta izinli alıcı</p>
+            <p className="text-xs text-gray-500">
+              Bülten aboneliği {aud.breakdown?.newsletter ?? "–"} · ödeme sayfası / üyelik (İYS) izni {aud.breakdown?.iys ?? "–"} · profil tercihi {aud.breakdown?.profile ?? "–"}
+              {aud.suppressed ? ` · kara liste ${aud.suppressed}` : ""}{aud.breakdown?.ret ? ` · vazgeçen ${aud.breakdown.ret}` : ""}
+            </p>
+          </div>
+          <span className={`text-xs px-2 py-1 rounded-full font-semibold ${configured ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+            {configured ? `${(readyProvider || "brevo").toUpperCase()} hazır` : "Sağlayıcı ayarı eksik"}
+          </span>
         </div>
-        <span className={`text-xs px-2 py-1 rounded-full font-semibold ${configured ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-          {configured ? `${(readyProvider || "brevo").toUpperCase()} hazır` : "Sağlayıcı ayarı eksik"}
-        </span>
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+          <input value={diagEmail} onChange={(e) => setDiagEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && runDiag()}
+            placeholder="Bu adrese mail gitti mi? e-posta yaz…" className="border rounded-lg px-3 py-1.5 text-sm w-72" data-testid="email-diagnose-input" />
+          <button onClick={runDiag} disabled={diagBusy} className="text-xs border rounded-lg px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50" data-testid="email-diagnose-btn">
+            {diagBusy ? "Sorgulanıyor…" : "Sorgula"}
+          </button>
+          {diag && <button onClick={() => setDiag(null)} className="text-xs text-gray-400 hover:text-gray-600">kapat</button>}
+        </div>
+        {diag && (
+          <div className="text-xs space-y-2 bg-gray-50 rounded-lg p-3" data-testid="email-diagnose-result">
+            <div className={`font-semibold ${diag.in_audience ? "text-emerald-700" : "text-red-600"}`}>{diag.email}: {diag.reason}</div>
+            <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-gray-600">
+              <div>Bülten aboneliği: {diag.newsletter ? `${diag.newsletter.consent && diag.newsletter.active !== false ? "AKTİF" : "PASİF"} (${diag.newsletter.source || "footer"})` : "kayıt yok"}</div>
+              <div>Profil pazarlama tercihi: {diag.user ? (diag.user.accepts_marketing ? "EVET" : "hayır") : "üye değil"}</div>
+              <div>İYS e-posta izni: {diag.iys?.length ? diag.iys.map((x) => `${x.status || "ONAY"} (${x.source || ""} ${String(x.consent_date || x.created_at || "").slice(0, 10)})`).slice(0, 3).join(", ") : "kayıt yok"}</div>
+              <div>Kara liste: {diag.suppressed ? `EVET (${diag.suppressed.reason || ""})` : "hayır"}</div>
+            </div>
+            <div>
+              <div className="font-semibold text-gray-700 mt-1">Kampanya gönderimleri (alıcı kaydı olanlar)</div>
+              {diag.sends?.length ? diag.sends.map((x, i) => (
+                <div key={i}>{String(x.at || "").slice(0, 16).replace("T", " ")} · {x.subject || x.campaign_id} · <b>{x.status}</b>{x.error ? ` · ${x.error}` : ""}</div>
+              )) : <div className="text-gray-500">Bu adrese kayıtlı gönderim yok.</div>}
+              {diag.older_campaigns_without_log?.length > 0 && (
+                <div className="text-gray-500 mt-1">
+                  Alıcı kaydı tutulmayan eski kampanyalar ({diag.older_campaigns_without_log.length}): o dönemde kitle YALNIZ bülten aboneleriydi; bu adres bülten abonesi değilse mail gitmemiştir.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Brevo + yedek SES ayarları */}
@@ -710,7 +759,7 @@ export default function EmailMarketing() {
             </button>
           </div>
           <button onClick={sendCampaign} disabled={busy === "campaign" || !configured} className="inline-flex items-center gap-2 bg-black text-white px-5 py-2 rounded-lg text-sm font-bold hover:bg-gray-800 disabled:opacity-50">
-            <Send size={15} /> {aud.eligible} aboneye gönder
+            <Send size={15} /> {aud.eligible} alıcıya gönder
           </button>
         </div>
         <p className="text-[11px] text-gray-400 text-right">

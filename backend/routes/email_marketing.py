@@ -13,7 +13,8 @@ eklenir; çıkanlara İYS'ye RET bildirilir.
 ENDPOINTS:
   GET/PUT /api/admin/email-marketing/settings     — Brevo + yedek SES ayarları
   POST    /api/admin/email-marketing/test         — tek test maili
-  GET     /api/admin/email-marketing/audience     — rıza vermiş aktif abone sayısı
+  GET     /api/admin/email-marketing/audience     — izinli kitle (bülten + İYS + profil) sayısı/kırılımı
+  GET     /api/admin/email-marketing/diagnose?email= — bir adrese neden mail gitti/gitmedi
   POST    /api/admin/email-marketing/campaigns     — kampanya oluştur + arka planda gönder
   GET     /api/admin/email-marketing/campaigns     — kampanya geçmişi
   GET     /api/admin/email-marketing/suppressions — kara liste (bounce/şikâyet)
@@ -93,6 +94,73 @@ async def _suppressed_set() -> set:
     except Exception:
         logger.error("[email-marketing] suppression listesi okunamadı; gönderim engellendi")
         raise HTTPException(status_code=503, detail="Gönderim engelleme listesi okunamadı; işlem durduruldu.") from None
+
+
+def _unsub_token(email: str) -> str:
+    """Abone kaydı OLMAYAN alıcılar (sipariş/üyelik izni) için abonelikten-çık jetonu:
+    e-postaya bağlı HMAC (JWT_SECRET) — link tahmin edilemez, adres dışarıdan çıkarılamaz."""
+    import hashlib, hmac
+    try:
+        from .deps import JWT_SECRET as _sec
+    except Exception:
+        _sec = "facette"
+    return "u" + hmac.new(str(_sec).encode(), (email or "").strip().lower().encode(), hashlib.sha256).hexdigest()[:28]
+
+
+async def _campaign_audience() -> dict:
+    """KAMPANYA KİTLESİ — e-posta ticari ileti izni olan HERKES (tek yerde hesaplanır):
+      • db.newsletter_subscribers  aktif + consent=True  (site altı bülten)
+      • db.iys_consents            EPOSTA / ONAY (ödeme sayfası, üyelik, hesabım) — alıcı başına EN SON karar
+      • db.users.accepts_marketing (profil tercihi; sipariş izniyle de True olur)
+    Çıkarılanlar: kara liste (bounce/şikâyet) + en son kararı RET olanlar (abonelikten çıkış / İYS RET).
+    Eskiden YALNIZ bülten aboneleri alınıyordu; ödeme sayfasında izin veren müşterilere mail gitmiyordu.
+    Dönüş: {"rows": [ {email,id,name,origin} ... e-posta sırasında ], "breakdown": {...}, "suppressed": n}"""
+    from .consents import _collect as _consents_latest
+    latest = await _consents_latest()
+    suppressed = await _suppressed_set()
+    rows: dict = {}
+    breakdown = {"newsletter": 0, "iys": 0, "profile": 0, "ret": 0, "suppressed": 0}
+
+    def _decision(email: str) -> str:
+        rec = latest.get(("email", email))
+        if not rec:
+            return ""
+        return "ret" if rec.get("suppressed") else (rec.get("status") or "")
+
+    async for s in db.newsletter_subscribers.find({"active": {"$ne": False}, "consent": True},
+                                                  {"_id": 0, "email": 1, "id": 1, "name": 1, "first_name": 1, "full_name": 1}):
+        em = (s.get("email") or "").strip().lower()
+        if em and em not in rows:
+            rows[em] = {"email": em, "id": s.get("id") or "", "origin": "bülten",
+                        "name": (s.get("name") or s.get("first_name") or s.get("full_name") or "").strip()}
+    for (ch, em), rec in latest.items():
+        if ch != "email" or rec.get("status") != "onay" or em in rows:
+            continue
+        rows[em] = {"email": em, "id": "", "origin": "iys", "name": ""}
+    async for u in db.users.find({"accepts_marketing": True, "email": {"$exists": True, "$ne": ""}},
+                                 {"_id": 0, "email": 1, "first_name": 1, "name": 1}):
+        em = (u.get("email") or "").strip().lower()
+        if em and em not in rows:
+            rows[em] = {"email": em, "id": "", "origin": "profil",
+                        "name": (u.get("first_name") or u.get("name") or "").strip()}
+    out = []
+    for em in sorted(rows):
+        r = rows[em]
+        if em in suppressed:
+            breakdown["suppressed"] += 1
+            continue
+        if _decision(em) == "ret":
+            breakdown["ret"] += 1
+            continue
+        if not r["id"]:
+            r["id"] = _unsub_token(em)
+        breakdown["newsletter" if r["origin"] == "bülten" else ("iys" if r["origin"] == "iys" else "profile")] += 1
+        out.append(r)
+    return {"rows": out, "breakdown": breakdown, "suppressed": len(suppressed)}
+
+
+async def _audience_count() -> int:
+    return len((await _campaign_audience())["rows"])
 
 
 async def _site_base() -> str:
@@ -273,15 +341,54 @@ async def send_test(payload: dict, current_user: dict = Depends(require_permissi
 
 @admin_router.get("/audience")
 async def audience(current_user: dict = Depends(require_permission("tasarim.email"))):
-    """Ticari e-posta gönderilebilecek kitle = aktif + açık rıza (consent)."""
+    """Ticari e-posta gönderilebilecek kitle = bülten + sipariş/üyelik (İYS) + profil izni − kara liste/RET."""
     total = await db.newsletter_subscribers.count_documents({})
-    eligible = await db.newsletter_subscribers.count_documents({"active": {"$ne": False}, "consent": True})
-    # Kara liste (bounce/şikâyet) sayısı — panelde görünsün ki gönderim sağlığı izlenebilsin.
-    try:
-        suppressed = await db.email_suppressions.count_documents({})
-    except Exception:
-        suppressed = 0
-    return {"total": total, "eligible": eligible, "suppressed": suppressed}
+    a = await _campaign_audience()
+    return {"total": total, "eligible": len(a["rows"]), "suppressed": a["suppressed"], "breakdown": a["breakdown"]}
+
+
+@admin_router.get("/diagnose")
+async def diagnose_recipient(email: str = "", current_user: dict = Depends(require_permission("tasarim.email"))):
+    """Bir adrese NEDEN mail gitti/gitmedi: bülten kaydı, İYS izinleri, profil tercihi, kara liste,
+    kampanya kitlesinde olup olmadığı ve son kampanya gönderim kayıtları."""
+    em = (email or "").strip().lower()
+    if not em or "@" not in em:
+        raise HTTPException(status_code=400, detail="Geçerli bir e-posta girin.")
+    sub = await db.newsletter_subscribers.find_one({"email": em}, {"_id": 0})
+    iys = await db.iys_consents.find({"email": em, "channels": "EPOSTA"},
+                                     {"_id": 0, "status": 1, "source": 1, "created_at": 1, "consent_date": 1, "order_id": 1, "reported": 1}
+                                     ).sort("created_at", -1).to_list(20)
+    user = await db.users.find_one({"email": em}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "accepts_marketing": 1, "marketing_consent_at": 1})
+    supp = await db.email_suppressions.find_one({"email": em}, {"_id": 0})
+    a = await _campaign_audience()
+    in_aud = next((r for r in a["rows"] if r["email"] == em), None)
+    sends = await db.email_campaign_sends.find({"email": em}, {"_id": 0}).sort("at", -1).to_list(20)
+    camp_ids = sorted({x.get("campaign_id") for x in sends if x.get("campaign_id")})
+    camps = {}
+    if camp_ids:
+        async for c in db.email_campaigns.find({"id": {"$in": camp_ids}}, {"_id": 0, "id": 1, "subject": 1, "started_at": 1, "provider": 1}):
+            camps[c["id"]] = c
+    for x in sends:
+        c = camps.get(x.get("campaign_id")) or {}
+        x["subject"] = c.get("subject") or ""
+        x["provider"] = c.get("provider") or ""
+    # Alıcı logu olmayan (eski) kampanyalar — o dönemde kitle YALNIZ bülten aboneleriydi
+    older = await db.email_campaigns.find({"id": {"$nin": camp_ids}, "status": {"$nin": ["queued", "sending", "syncing"]}},
+                                          {"_id": 0, "id": 1, "subject": 1, "started_at": 1, "status": 1, "sent": 1, "failed": 1}
+                                          ).sort("created_at", -1).to_list(10)
+    if supp:
+        reason = f"Kara listede ({supp.get('reason') or 'bounce/şikâyet'}) — bu adrese hiçbir kampanya gönderilmez."
+    elif in_aud:
+        reason = f"Kampanya kitlesinde ({in_aud['origin']} izni). Bundan sonraki kampanyalar bu adrese gider."
+    elif sub and (sub.get("active") is False or not sub.get("consent")):
+        reason = "Bülten aboneliği pasif / rıza yok (abonelikten çıkmış olabilir)."
+    elif iys and str(iys[0].get("status") or "").upper() == "RET":
+        reason = "En son İYS kararı RET — ticari e-posta gönderilmez."
+    else:
+        reason = "Bu adres için e-posta izni kaydı yok (bülten / ödeme sayfası / profil). Mail gönderilemez."
+    return {"email": em, "in_audience": bool(in_aud), "origin": (in_aud or {}).get("origin"), "reason": reason,
+            "newsletter": sub, "iys": iys, "user": user, "suppressed": supp, "sends": sends,
+            "older_campaigns_without_log": older}
 
 
 def _is_full_html_document(html: str) -> bool:
@@ -399,17 +506,29 @@ async def _run_ses_campaign(campaign_id: str):
     except Exception:
         _render_tpl = None
 
-    _q = {"active": {"$ne": False}, "consent": True}
-    if _resume:
-        _q["id"] = {"$gt": _resume}          # kaldığı yerden (id sırası deterministik)
-    cur = db.newsletter_subscribers.find(
-        _q, {"_id": 0, "email": 1, "id": 1, "name": 1, "first_name": 1, "full_name": 1}).sort("id", 1)
-    async for s in cur:
+    # KİTLE: bülten + İYS (ödeme/üyelik) + profil izni — tek helper (_campaign_audience).
+    _aud = (await _campaign_audience())["rows"]
+    # Eski biçim cursor (abone id) → e-postaya çevir; cursor artık e-posta (deterministik sıra).
+    if _resume and "@" not in _resume:
+        _old = await db.newsletter_subscribers.find_one({"id": _resume}, {"_id": 0, "email": 1})
+        _resume = ((_old or {}).get("email") or "").strip().lower()
+    # Yarıda kesilme güvencesi: bu kampanyada zaten gönderilmiş adreslere ikinci kez gitmez.
+    _already = set()
+    try:
+        async for _x in db.email_campaign_sends.find({"campaign_id": campaign_id, "status": "sent"}, {"_id": 0, "email": 1}):
+            if _x.get("email"):
+                _already.add(_x["email"])
+    except Exception:
+        pass
+    await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {"total": len(_aud)}})
+    for s in _aud:
         email = (s.get("email") or "").strip()
         if not email:
             continue
+        if _resume and email.lower() <= _resume:
+            continue
         # Kara listedeki adrese ASLA gönderme (SES itibarını korur).
-        if email.lower() in suppressed:
+        if email.lower() in suppressed or email.lower() in _already:
             skipped += 1
             continue
         n += 1
@@ -458,7 +577,7 @@ async def _run_ses_campaign(campaign_id: str):
                 _reason = f"İlk {n} gönderimin tümü başarısız — gönderim durduruldu. Örnek: {_err[:160]}"
             await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
                 "status": "failed", "sent": sent, "failed": failed, "skipped": skipped,
-                "total_processed": n, "cursor": s.get("id") or "", "finished_at": _now(),
+                "total_processed": n, "cursor": email.lower(), "finished_at": _now(),
                 "error_sample": error_sample, "error": _reason, "aborted": True}})
             logger.warning(f"[email-marketing] kampanya {campaign_id} ERKEN DURDURULDU: {_reason}")
             return
@@ -467,10 +586,10 @@ async def _run_ses_campaign(campaign_id: str):
         if n % 20 == 0:
             await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
                 "sent": sent, "failed": failed, "skipped": skipped, "error_sample": error_sample,
-                "total_processed": n, "cursor": s.get("id") or ""}})
+                "total_processed": n, "cursor": email.lower()}})
         else:
             await db.email_campaigns.update_one({"id": campaign_id},
-                                                {"$set": {"cursor": s.get("id") or ""}})
+                                                {"$set": {"cursor": email.lower()}})
         await asyncio.sleep(0.05)  # SES kota dostu nazik hız
     await db.email_campaigns.update_one({"id": campaign_id}, {"$set": {
         "status": "sent", "sent": sent, "failed": failed, "skipped": skipped,
@@ -495,10 +614,7 @@ async def _run_brevo_campaign(campaign_id: str):
     }})
 
     suppressed = await _suppressed_set()
-    rows = await db.newsletter_subscribers.find(
-        {"active": {"$ne": False}, "consent": True},
-        {"_id": 0, "email": 1, "id": 1, "name": 1, "first_name": 1, "full_name": 1},
-    ).to_list(100000)
+    rows = (await _campaign_audience())["rows"]   # bülten + İYS + profil izni (kara liste/RET hariç)
     contacts = [row for row in rows if (row.get("email") or "").strip().lower() not in suppressed]
     sync = await sync_brevo_contacts(cfg, contacts)
     if not sync.get("success"):
@@ -582,9 +698,9 @@ async def create_campaign(payload: dict, current_user: dict = Depends(require_pe
     provider, cfg = await _selected_provider()
     if not cfg:
         raise HTTPException(status_code=400, detail="Brevo ayarları eksik/pasif ve kullanılabilir SES yedeği yok.")
-    eligible = await db.newsletter_subscribers.count_documents({"active": {"$ne": False}, "consent": True})
+    eligible = await _audience_count()
     if eligible == 0:
-        raise HTTPException(status_code=400, detail="Rıza vermiş aktif abone yok.")
+        raise HTTPException(status_code=400, detail="E-posta izni olan alıcı yok.")
     doc = {
         "id": generate_id(), "subject": subject, "html": html,
         "status": "queued", "provider": provider, "total": eligible, "sent": 0, "failed": 0,
@@ -1141,19 +1257,26 @@ async def unsubscribe(e: str = "", t: str = ""):
     sub = None
     # DENETİM SEC-4 F17: token (t) ZORUNLU — eskiden yalnız e-posta ile herkes başkasını
     # abonelikten çıkarabiliyordu. Kampanya linkleri zaten &t=<id> içeriyor.
+    ok = False
     if email and t:
         sub = await db.newsletter_subscribers.find_one({"email": email, "id": t})
-    if sub:
-        await db.newsletter_subscribers.update_one({"id": sub["id"]}, {"$set": {
+        # Abone kaydı olmayan alıcılar (sipariş/üyelik izni) e-postaya bağlı HMAC jetonla çıkar.
+        ok = bool(sub) or (t == _unsub_token(email))
+    if ok:
+        await db.newsletter_subscribers.update_many({"email": email}, {"$set": {
             "active": False, "unsubscribed_at": _now(),
         }})
-        # İYS'ye RET bildir (best-effort)
+        try:
+            await db.users.update_many({"email": email}, {"$set": {"accepts_marketing": False, "marketing_unsubscribed_at": _now()}})
+        except Exception:
+            pass
+        # İYS'ye RET bildir (best-effort) — kitle hesabında "en son karar" RET sayılır
         try:
             from .iys import record_consent
             await record_consent(recipient_email=email, recipient_phone="", channels=["EPOSTA"], status="RET", source="HS_WEB")
         except Exception:
             pass
-    msg = "Abonelikten çıkarıldınız. Artık pazarlama e-postası almayacaksınız." if sub \
+    msg = "Abonelikten çıkarıldınız. Artık pazarlama e-postası almayacaksınız." if ok \
         else "Kayıt bulunamadı veya zaten çıkış yapılmış."
     html = f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
