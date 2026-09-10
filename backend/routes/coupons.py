@@ -58,7 +58,9 @@ async def list_coupons(
     active_only: bool = False,
     current_user: dict = Depends(require_admin),
 ):
-    q: dict = {}
+    # Kuponlar sayfası yalnız KOD BAZLI kuponları listeler; otomatik kampanyalar (auto_apply /
+    # AUTO- kodlu) Pazarlama → Kampanyalar'da yönetilir (kullanıcı isteği: ikisi karışmasın).
+    q: dict = {"auto_apply": {"$ne": True}, "code": {"$not": {"$regex": "^AUTO-"}}}
     if search:
         q["$or"] = [{"code": {"$regex": search, "$options": "i"}}, {"title": {"$regex": search, "$options": "i"}}]
     if active_only:
@@ -109,9 +111,12 @@ async def create_coupon(payload: dict, current_user: dict = Depends(require_perm
         "get_discount": float(payload.get("get_discount", 0) or 0),
         # --- Madde 4 motor alanları ---
         "priority": int(payload.get("priority", 0) or 0),
-        "combinable": bool(payload.get("combinable", False)),
+        # BİRLEŞME KURALI (kullanıcı isteği): yeni kupon VARSAYILAN olarak TÜM kampanyalarla
+        # birleşir; admin yalnız ENGELLENECEK kampanyaları seçer (not_combinable_with).
+        "combinable": bool(payload.get("combinable", True)),
         "stack_group": (payload.get("stack_group") or "").strip() or None,
-        "combinable_with": payload.get("combinable_with") or [],
+        "combinable_with": payload.get("combinable_with") or [],  # eski izin listesi (artık kullanılmıyor)
+        "not_combinable_with": [str(x) for x in (payload.get("not_combinable_with") or []) if x],
         "payment_methods": payload.get("payment_methods") or [],  # bos=tum yontemler; dolu=sadece secililer
         "created_at": _utcnow(),
         "created_by": current_user.get("email", ""),
@@ -129,10 +134,12 @@ async def update_coupon(cid: str, payload: dict, current_user: dict = Depends(re
         "categories", "products", "usage_limit", "usage_limit_per_user",
         "start_at", "end_at", "is_active", "first_order_only", "free_shipping", "auto_apply",
         "min_quantity", "buy_quantity", "free_quantity", "get_discount", "bundle_price",
-        "priority", "combinable", "stack_group", "combinable_with", "payment_methods",
+        "priority", "combinable", "stack_group", "combinable_with", "not_combinable_with", "payment_methods",
         "skip_discounted",
     )
     update = {k: v for k, v in payload.items() if k in allowed}
+    if "not_combinable_with" in update:
+        update["not_combinable_with"] = [str(x) for x in (update.get("not_combinable_with") or []) if x]
     update["updated_at"] = _utcnow()
     res = await db.coupons.update_one({"id": cid}, {"$set": update})
     if res.matched_count == 0:
@@ -178,6 +185,60 @@ async def edit_coupon_exceptions(payload: dict, current_user: dict = Depends(req
     _EXEMPT_CACHE["at"] = 0.0  # cache'i hemen tazele
     doc = await db.settings.find_one({"id": "coupon_first_order_exceptions"}, {"_id": 0, "emails": 1})
     return {"success": True, "emails": (doc or {}).get("emails") or []}
+
+
+async def migrate_coupon_stacking_default():
+    """TEK SEFERLİK migrasyon (kullanıcı kararı): kupon/kampanya birleşmesi VARSAYILAN AÇIK.
+      - combinable=False olan tüm kayıtlar → True (unutulan/seçilmeyen kuponlar artık birleşir).
+      - Eski 'combinable_with' İZİN listesi olan kayıtlar: bilinçli seçim korunur → izin listesinde
+        OLMAYAN mevcut kayıtlar 'not_combinable_with' ENGEL listesine yazılır.
+    Sonuç settings.id='migrations'.coupon_stacking_default_v1 altında saklanır (etkilenen kodlar)."""
+    try:
+        _flag = "coupon_stacking_default_v1"
+        _m = await db.settings.find_one({"id": "migrations"}, {"_id": 0, _flag: 1}) or {}
+        if _m.get(_flag):
+            return
+        allc = await db.coupons.find({}, {"_id": 0, "id": 1, "code": 1, "combinable": 1, "combinable_with": 1,
+                                          "not_combinable_with": 1}).to_list(2000)
+        all_ids = {str(c.get("id")) for c in allc if c.get("id")}
+        flipped, converted = [], []
+        for c in allc:
+            upd = {}
+            if c.get("combinable") is False:
+                upd["combinable"] = True
+                flipped.append(c.get("code") or c.get("id"))
+            allow = [str(x) for x in (c.get("combinable_with") or []) if x]
+            if allow and not c.get("not_combinable_with"):
+                deny = sorted(all_ids - set(allow) - {str(c.get("id"))})
+                upd["not_combinable_with"] = deny
+                upd["combinable_with_legacy"] = allow
+                upd["combinable_with"] = []
+                converted.append(c.get("code") or c.get("id"))
+            if upd:
+                upd["updated_at"] = _utcnow()
+                await db.coupons.update_one({"id": c.get("id")}, {"$set": upd})
+        await db.settings.update_one(
+            {"id": "migrations"},
+            {"$set": {_flag: True, f"{_flag}_at": _utcnow(),
+                      f"{_flag}_flipped": flipped, f"{_flag}_converted": converted},
+             "$setOnInsert": {"id": "migrations"}},
+            upsert=True,
+        )
+        invalidate_codes_cache()
+        logger.info(f"[kupon] birleşme varsayılanı migrasyonu: combinable→True {len(flipped)} kayıt "
+                    f"{flipped}; izin→engel listesi {len(converted)} kayıt {converted}")
+    except Exception as e:
+        logger.warning(f"[kupon] migrate_coupon_stacking_default hata: {e}")
+
+
+@admin_router.get("/stacking-migration")
+async def coupon_stacking_migration_status(current_user: dict = Depends(require_admin)):
+    """Birleşme varsayılanı migrasyonunun sonucu (hangi kuponlar birleşir yapıldı / hangileri engel listesine çevrildi)."""
+    _flag = "coupon_stacking_default_v1"
+    m = await db.settings.find_one({"id": "migrations"}, {"_id": 0}) or {}
+    return {"applied": bool(m.get(_flag)), "at": m.get(f"{_flag}_at"),
+            "combinable_made_true": m.get(f"{_flag}_flipped") or [],
+            "allow_list_converted_to_block_list": m.get(f"{_flag}_converted") or []}
 
 
 async def migrate_welcome_coupon_sale_policy():
@@ -875,13 +936,15 @@ def _coupon_to_campaign(c: dict) -> dict:
         "get_discount": c.get("get_discount") or 0,
         "max_discount": c.get("max_discount") or 0,
         "priority": c.get("priority", 0),
-        "combinable": bool(c.get("combinable", False)),
+        "combinable": bool(c.get("combinable", True)),
         "stack_group": c.get("stack_group") or "",
         "categories": c.get("categories") or [],
         "products": c.get("products") or [],
         "excluded_products": c.get("excluded_products") or [],
         "excluded_products_raw": c.get("excluded_products_raw") or "",
         "combinable_with": c.get("combinable_with") or [],
+        "not_combinable_with": c.get("not_combinable_with") or [],
+        "title": c.get("title") or "",
         "payment_methods": c.get("payment_methods") or [],
         "skip_discounted": bool(c.get("skip_discounted", True)),
     }
@@ -922,9 +985,10 @@ def _campaign_to_coupon_fields(payload: dict) -> dict:
         "auto_apply": bool(payload.get("auto_apply", False)),
         # --- Madde 4 motor alanları ---
         "priority": int(payload.get("priority", 0) or 0),
-        "combinable": bool(payload.get("combinable", False)),
+        "combinable": bool(payload.get("combinable", True)),
         "stack_group": (payload.get("stack_group") or "").strip() or None,
         "combinable_with": payload.get("combinable_with") or [],
+        "not_combinable_with": [str(x) for x in (payload.get("not_combinable_with") or []) if x],
         "payment_methods": payload.get("payment_methods") or [],
         # İndirimli fiyatı (sale_price) olan ürünlere kampanya uygulansın mı? Varsayılan True = uygulama.
         "skip_discounted": bool(payload.get("skip_discounted", True)),
@@ -946,9 +1010,13 @@ async def _excluded_fields_from_payload(payload: dict):
 
 
 @campaigns_router.get("")
-async def list_campaigns(current_user: dict = Depends(require_admin)):
-    """Kampanya listesi — frontend düz dizi bekler (res.data)."""
-    items = await db.coupons.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+async def list_campaigns(include_coupons: int = Query(0), current_user: dict = Depends(require_admin)):
+    """Kampanya listesi — frontend düz dizi bekler (res.data).
+    Varsayılan: yalnız OTOMATİK kampanyalar (auto_apply / AUTO- kodlu). Kod bazlı kuponlar
+    Kuponlar sayfasındadır (kullanıcı isteği: kupon kodları kampanyalara düşmesin).
+    include_coupons=1 → hepsi (engelleme seçicileri için)."""
+    q = {} if include_coupons else {"$or": [{"auto_apply": True}, {"code": {"$regex": "^AUTO-"}}]}
+    items = await db.coupons.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     out = []
     for c in items:
         c["redeemed_count"] = await db.coupon_redemptions.count_documents({"coupon_id": c.get("id")})
@@ -1196,9 +1264,10 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
             valid.append({
                 "c": c, "discount": ev["discount"], "free_shipping": ev.get("free_shipping", False),
                 "priority": int(c.get("priority", 0) or 0),
-                "combinable": bool(c.get("combinable", False)),
+                "combinable": bool(c.get("combinable", True)),
                 "stack_group": c.get("stack_group") or "",
                 "combinable_with": c.get("combinable_with") or [],
+                "not_combinable_with": [str(x) for x in (c.get("not_combinable_with") or [])],
                 "is_entered": cid == entered_id,
             })
         elif cid == entered_id:
@@ -1236,19 +1305,19 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
 
     # 4) Stack uygula (IKILI/pairwise combinable kapisi + stack_group + kalan tabana ardisik)
     def _pair_ok(a, b):
-        # İkisi de combinable olmalı. Eşleşme kuralı (birleşme boşluğu düzeltmesi):
-        #   1) Taraflardan biri diğerini combinable_with'te AÇIKÇA listelediyse → birleşir
-        #      (admin tek tarafta "X ile birleşir" seçtiğinde eskiden KARŞILIKLI şart aranıyor,
-        #       kampanya sessizce düşüyordu).
-        #   2) İki liste de boşsa → "her şeyle birleşir" → birleşir.
-        #   3) Aksi hâlde (bir taraf kısıtlı ve karşı tarafı listelemiyor) → birleşmez.
+        # BİRLEŞME KURALI (kullanıcı isteği — "yeni kupon otomatik tüm kampanyalarla çalışsın,
+        # engelleyeceklerimi kuponun içinden seçeyim"):
+        #   1) İkisi de birleştirilebilir olmalı (combinable=False → münhasır).
+        #   2) Taraflardan biri diğerini ENGEL listesinde (not_combinable_with) tutuyorsa → birleşmez.
+        #   3) Aksi hâlde → birleşir. (Eski 'combinable_with' izin listesi migrasyonla engel
+        #      listesine çevrildi; artık okunmaz.)
         if not (a["combinable"] and b["combinable"]):
             return False
-        aw = a.get("combinable_with") or []
-        bw = b.get("combinable_with") or []
-        if b["c"]["id"] in aw or a["c"]["id"] in bw:
-            return True
-        return not aw and not bw
+        an = a.get("not_combinable_with") or []
+        bn = b.get("not_combinable_with") or []
+        if str(b["c"]["id"]) in an or str(a["c"]["id"]) in bn:
+            return False
+        return True
 
     selected = []
     used_groups = set()

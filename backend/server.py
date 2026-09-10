@@ -412,11 +412,13 @@ async def lifespan(app: FastAPI):
     # Kupon ilk-sipariş istisna listesi (müşteri destek istisnası) — idempotent seed.
     try:
         import asyncio as _asyncio
-        from routes.coupons import seed_coupon_exceptions, migrate_welcome_coupon_sale_policy
+        from routes.coupons import seed_coupon_exceptions, migrate_welcome_coupon_sale_policy, migrate_coupon_stacking_default
         _asyncio.create_task(seed_coupon_exceptions())
         # İşletme sahibi kararı (canlı denetim): hoş geldin kuponları indirimli ürünlerde de
         # geçsin — tek seferlik, işaretli migrasyon (bkz. coupons.migrate_welcome_coupon_sale_policy).
         _asyncio.create_task(migrate_welcome_coupon_sale_policy())
+        # Kupon birleşme varsayılanı: hepsiyle birleşir, engellenenler kuponun içinden seçilir (tek seferlik).
+        _asyncio.create_task(migrate_coupon_stacking_default())
     except Exception as e:
         logger.warning(f"Coupon exception seed start warning: {e}")
 
