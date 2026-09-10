@@ -380,7 +380,7 @@ function PRTrackTab() {
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500 text-left">
               <tr>
                 {["Influencer", "İş Birliği", "İletişim", "Ürün", "Beden", "Gönderim Tarihi",
-                  "Paylaştı", "Not", "İşlemler"].map((h, i) => (
+                  "Paylaştı", "İşlemler"].map((h, i) => (
                   <th key={i} className="px-2 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -400,7 +400,6 @@ function PRTrackTab() {
                     <option value="hayir">Paylaşmayan</option>
                   </select>
                 </th>
-                <th className="px-1.5 py-1.5"><FTxt v={colF.not} onCh={(v) => setF("not", v)} ph="Not…" /></th>
                 <th className="px-1.5 py-1.5 text-right">
                   {anyColF && <button onClick={clearF} className="text-[11px] text-gray-500 hover:text-black underline whitespace-nowrap">Temizle</button>}
                 </th>
@@ -408,7 +407,7 @@ function PRTrackTab() {
             </thead>
             <tbody>
               {fEntries.length === 0 && (
-                <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400 text-sm">
+                <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-400 text-sm">
                   Filtrelerle eşleşen kayıt yok. {anyColF && <button onClick={clearF} className="underline hover:text-black">Temizle</button>}
                 </td></tr>
               )}
@@ -546,32 +545,6 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
             </div>
           ) : <span className="text-[11px] text-gray-400">—</span>}
         </td>
-        {/* Not — ikon + hover'da popup; tıklayınca düzenleme kutusu (uzun notlar tabloyu bozmasın) */}
-        <td className={td}>
-          {noteEdit ? (
-            <input type="text" autoFocus defaultValue={e.note || ""}
-              onBlur={(ev) => { saveField("note", ev.target.value); setNoteEdit(false); }}
-              onKeyDown={(ev) => { if (ev.key === "Enter") ev.currentTarget.blur(); else if (ev.key === "Escape") setNoteEdit(false); }}
-              placeholder="Not…"
-              className="border rounded px-1.5 py-1 text-xs w-[130px] focus:outline-none focus:border-black" data-testid={`pr-note-${e.id}`} />
-          ) : e.note ? (
-            <div className="relative group inline-block">
-              <button onClick={() => setNoteEdit(true)} title="Notu düzenle" data-testid={`pr-note-icon-${e.id}`}
-                className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100">
-                <StickyNote size={14} />
-              </button>
-              <div className="pointer-events-none absolute z-30 left-1/2 -translate-x-1/2 bottom-full mb-1.5 hidden group-hover:block
-                            w-max max-w-[240px] bg-gray-900 text-white text-[11px] leading-snug rounded-lg px-2.5 py-1.5 shadow-xl whitespace-pre-wrap text-left normal-case">
-                {e.note}
-              </div>
-            </div>
-          ) : (
-            <button onClick={() => setNoteEdit(true)} title="Not ekle"
-              className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-black border border-dashed border-gray-300 rounded px-2 py-1">
-              <StickyNote size={12} /> not
-            </button>
-          )}
-        </td>
         {/* İşlemler: Barkod Çıkart / Düzenle / Sil (+ Geçmiş) */}
         <td className={`${td} whitespace-nowrap`}>
           <div className="flex items-center gap-1">
@@ -618,12 +591,31 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
             )}
             <button onClick={onEdit} title="Düzenle" className="text-gray-400 hover:text-black p-1" data-testid={`pr-edit-${e.id}`}><Pencil size={13} /></button>
             <button onClick={onDelete} title="Sil" className="text-gray-400 hover:text-red-600 p-1" data-testid={`pr-del-${e.id}`}><Trash2 size={13} /></button>
+            {/* Not — sütun kaldırıldı; not girilmişse işlemlerin EN SAĞINDA ikon (hover: metin, tık: düzenle) */}
+            {noteEdit ? (
+              <input type="text" autoFocus defaultValue={e.note || ""}
+                onBlur={(ev) => { saveField("note", ev.target.value); setNoteEdit(false); }}
+                onKeyDown={(ev) => { if (ev.key === "Enter") ev.currentTarget.blur(); else if (ev.key === "Escape") setNoteEdit(false); }}
+                placeholder="Not…"
+                className="border rounded px-1.5 py-1 text-xs w-[150px] focus:outline-none focus:border-black" data-testid={`pr-note-${e.id}`} />
+            ) : e.note ? (
+              <div className="relative group inline-block">
+                <button onClick={() => setNoteEdit(true)} title="Not girili — düzenlemek için tıkla" data-testid={`pr-note-icon-${e.id}`}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100">
+                  <StickyNote size={14} />
+                </button>
+                <div className="pointer-events-none absolute z-30 right-0 bottom-full mb-1.5 hidden group-hover:block
+                              w-max max-w-[260px] bg-gray-900 text-white text-[11px] leading-snug rounded-lg px-2.5 py-1.5 shadow-xl whitespace-pre-wrap text-left normal-case">
+                  {e.note}
+                </div>
+              </div>
+            ) : null}
           </div>
         </td>
       </tr>
       {open && (
         <tr className="bg-gray-50/70 border-t" data-testid={`pr-detail-${e.id}`}>
-          <td colSpan={9} className="px-4 py-3">
+          <td colSpan={8} className="px-4 py-3">
             <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
               <div><span className="text-gray-400">Kullanıcı Adı: </span><span className="font-medium text-gray-900">{uname}</span></div>
               <div><span className="text-gray-400">Influencer Türü: </span><span className="font-medium text-gray-900">{e.influencer_turu || "—"}</span></div>
