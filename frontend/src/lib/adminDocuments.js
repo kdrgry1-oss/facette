@@ -62,9 +62,24 @@ export async function openAdminDocument(path, features = "", print = false) {
   if (!popup) throw new Error("Yazdırma penceresi engellendi. Açılır pencerelere izin verin.");
   popup.opener = null;
   try {
-    const blob = await fetchAdminDocument(path);
+    let blob = await fetchAdminDocument(path);
+    if (print) {
+      // Belge blob: URL'den açılır → sunucu şablonlarının `?print=1` kontrolü (location.search)
+      // BOŞ kalır ve popup.onload da belge değişince güvenilir tetiklenmez; yazdırma diyaloğu
+      // hiç açılmıyordu. Yazdırma tetikleyicisini belgenin İÇİNE gömüyoruz (tek sefer, guard'lı).
+      const type = (blob.type || "").toLowerCase();
+      if (!type || type.includes("html")) {
+        const html = await blob.text();
+        const trigger = "<script>(function(){if(window.__fcPrint)return;window.__fcPrint=1;"
+          + "var go=function(){setTimeout(function(){try{window.focus();window.print();}catch(e){}},300);};"
+          + "if(document.readyState==='complete')go();else window.addEventListener('load',go);})();</script>";
+        const merged = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, trigger + "</body>") : html + trigger;
+        blob = new Blob([merged], { type: "text/html;charset=utf-8" });
+      } else {
+        popup.onload = () => popup.print();
+      }
+    }
     const url = URL.createObjectURL(blob);
-    if (print) popup.onload = () => popup.print();
     popup.location.replace(url);
     // Revoke after the document has had time to load, without retaining PII URLs forever.
     setTimeout(() => URL.revokeObjectURL(url), 300000);

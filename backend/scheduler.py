@@ -719,6 +719,11 @@ async def _run_hepsiburada_auto_orders_pull():
                     if (existing.get("status") in ("cancelled", "returned", "refunded")
                             and data.get("status") not in ("cancelled", "returned", "refunded")):
                         _update.pop("status", None)
+                    # Açık-sipariş listesi kargo alanlarını taşımaz — BOŞ gelen kargo alanı
+                    # paket ucundan yazılmış mevcut takip no'yu EZMESİN.
+                    for _ck in ("cargo_tracking_number", "cargo_provider_name", "cargo_tracking_link"):
+                        if not _update.get(_ck):
+                            _update.pop(_ck, None)
                     await _db.orders.update_one(
                         {"_id": existing["_id"]},
                         {"$set": _update})
@@ -740,6 +745,25 @@ async def _run_hepsiburada_auto_orders_pull():
                 marketplace="hepsiburada", action="order_pull", status="success",
                 direction="inbound",
                 message=f"[cron] HB otomatik çekim: {imported} yeni, {updated} güncellendi")
+
+        # KARGO TAKİP NO — açık-sipariş listesi kargolananları DÜŞÜRÜR; takip barkodu paket
+        # uçlarından gelir. Her 10 dk'da bir (2 dk'lık her turda değil) son 3 günün paketleri
+        # taranır ve eşleşen siparişlere yazılır (integrations_hepsiburada.hb_sync_cargo_tracking).
+        global _HB_LAST_CARGO_SYNC
+        try:
+            _HB_LAST_CARGO_SYNC
+        except NameError:
+            _HB_LAST_CARGO_SYNC = None
+        _now = datetime.now(timezone.utc)
+        if (_HB_LAST_CARGO_SYNC is None) or (_now - _HB_LAST_CARGO_SYNC) >= timedelta(minutes=10):
+            _HB_LAST_CARGO_SYNC = _now
+            try:
+                from routes.integrations_hepsiburada import hb_sync_cargo_tracking
+                _cs = await _aio.wait_for(hb_sync_cargo_tracking(client, days=3), timeout=150)
+                if _cs.get("orders_updated") or _cs.get("errors"):
+                    logger.info(f"[scheduler] HB kargo takip senkron: {_cs}")
+            except Exception as _ce:
+                logger.warning(f"[scheduler] HB kargo takip senkron hatası: {_ce}")
     except Exception as e:
         logger.exception(f"[scheduler] hepsiburada auto orders pull failed: {e}")
 
@@ -1817,59 +1841,9 @@ async def _dhl_cargo_poll_tick():
             processed += 1
             await asyncio.sleep(0.25)
 
-        # ── Influencer PR gönderileri de OTOMATİK takip no çeker (Siparişler ile aynı MNG oturumu).
-        #    PR kargosunun MNG sipariş no'su = cargo_tracking_no (INF…). gonderi_no doldukça yazılır;
-        #    böylece "takip çek" butonuna basmaya gerek kalmaz. ──
-        try:
-            _pr_cut = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
-            pr_q = {
-                "cargo_tracking_no": {"$nin": [None, ""]},
-                "$and": [
-                    {"$or": [{"cargo_gonderi_no": {"$in": [None, ""]}},
-                             {"cargo_gonderi_no": {"$exists": False}}]},
-                    {"$or": [{"shipped_at": {"$gt": _pr_cut}}, {"shipped_at": {"$exists": False}}]},
-                ],
-            }
-            async for pr in db.influencer_pr.find(
-                    pr_q, {"_id": 0, "id": 1, "cargo_tracking_no": 1, "cargo_barcode": 1}).limit(80):
-                # Referans adayları: MNG sipariş no (INF…) önce, sonra barkod (bazı gönderilerde
-                # gerçek takip no barkod referansından döner).
-                _refs = [r for r in [str(pr.get("cargo_tracking_no") or "").strip(),
-                                     str(pr.get("cargo_barcode") or "").strip()] if r]
-                _refs = list(dict.fromkeys(_refs))
-                if not _refs:
-                    continue
-                pg, pac, got_ok = "", "", False
-                for _ref in _refs:
-                    try:
-                        pinfo = await asyncio.to_thread(
-                            get_mng_shipment_status, username=user, password=pw, siparis_no=_ref)
-                    except Exception as _pe:
-                        logger.warning(f"[scheduler][dhl][pr] status err {_ref}: {_pe}")
-                        n_errors += 1
-                        await asyncio.sleep(0.2)
-                        continue
-                    if pinfo and pinfo.get("ok"):
-                        got_ok = True
-                        pac = (pinfo.get("kargo_statu_aciklama") or "").strip() or pac
-                        _g = (pinfo.get("gonderi_no") or "").strip()
-                        if _g:
-                            pg = _g
-                            break
-                    await asyncio.sleep(0.2)
-                if not got_ok:
-                    continue
-                pupd = {"cargo_last_status_text": pac,
-                        "cargo_status_checked_at": datetime.now(timezone.utc).isoformat()}
-                if pg:
-                    pupd["cargo_gonderi_no"] = pg
-                    pupd["cargo_tracking_url"] = f"https://kargotakip.dhlecommerce.com.tr/?takipNo={pg}"
-                await db.influencer_pr.update_one({"id": pr["id"]}, {"$set": pupd})
-                if pg:
-                    processed += 1
-                await asyncio.sleep(0.2)
-        except Exception as _pe:
-            logger.warning(f"[scheduler][dhl][pr] pr poll err: {_pe}")
+        # Influencer PR gönderilerinin takip no'su AYRI saatlik işte çekilir
+        # (_influencer_pr_tracking_tick) — site-sipariş taraması hata verse/limite takılsa
+        # bile PR taraması etkilenmez.
 
         _final_status = "ok"
     except Exception as e:
@@ -1888,6 +1862,19 @@ async def _dhl_cargo_poll_tick():
     )
     logger.info(f"[scheduler][dhl] tick bitti — {processed} site siparisi sorgulandi "
                 f"(shipped={n_shipped} delivered={n_delivered} err={n_errors})")
+
+
+async def _influencer_pr_tracking_tick():
+    """Her SAAT: influencer PR gönderilerinin DHL/MNG gerçek takip no'sunu otomatik çeker
+    (routes.influencers.auto_refresh_pr_tracking). Panelde 'takip çek' butonu yok; kayıt
+    kargolandıktan sonra takip no oluşunca kendiliğinden görünür."""
+    try:
+        from routes.influencers import auto_refresh_pr_tracking
+        st = await asyncio.wait_for(auto_refresh_pr_tracking(), timeout=600)
+        if st.get("found") or st.get("errors"):
+            logger.info(f"[scheduler][pr-track] {st}")
+    except Exception as e:
+        logger.exception(f"[scheduler][pr-track] tick failed: {e}")
 
 
 async def _return_cargo_poll_tick():
@@ -2845,6 +2832,16 @@ def start_scheduler():
         minutes=30,
         id="dhl_cargo_poll",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Influencer PR kargo takip no — her SAAT otomatik (ilk tur 2 dk sonra)
+    _add(
+        _influencer_pr_tracking_tick,
+        "interval",
+        minutes=60,
+        id="influencer_pr_tracking_hourly",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
         max_instances=1,
         coalesce=True,
     )

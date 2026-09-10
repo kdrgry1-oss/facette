@@ -395,6 +395,181 @@ def _hb_created_at(o):
     if isinstance(d, str) and len(d) >= 10 and "-" in d:
         return d
     return datetime.now(timezone.utc).isoformat()
+
+
+_HB_CARGO_KEYS = frozenset({"ordernumber", "orderno", "ordernum", "orderid"})
+
+
+def _hb_deep_find_any(obj, norm_keys, depth=0):
+    """Nested dict/list içinde adı (küçük harf, ayraçsız) norm_keys'te olan ilk dolu değeri döner."""
+    if depth > 5 or obj is None:
+        return ""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if str(k).replace("_", "").replace("-", "").lower() in norm_keys and v not in (None, "", [], {}):
+                return v
+        for v in obj.values():
+            if isinstance(v, (dict, list)):
+                r = _hb_deep_find_any(v, norm_keys, depth + 1)
+                if r not in (None, ""):
+                    return r
+    elif isinstance(obj, list):
+        for it in obj[:50]:
+            r = _hb_deep_find_any(it, norm_keys, depth + 1)
+            if r not in (None, ""):
+                return r
+    return ""
+
+
+def _hb_package_row_cargo(r: dict) -> dict:
+    """Paket satırından (packages / shipped / delivered uçları) kargo bilgisini çıkarır:
+    {tracking, company, package_no, order_numbers:[...]}. HB bu uçlarda büyük/küçük harfli
+    farklı alan adları kullanır (Barcode/barcode, CargoCompany/cargoCompany, OrderNumbers/items[].orderNumber)."""
+    if not isinstance(r, dict):
+        return {}
+    tracking = str(_hb_g(r, "cargoTrackingNumber", "CargoTrackingNumber", "trackingNumber", "TrackingNumber",
+                         "Barcode", "barcode", "cargoBarcode") or "").strip()
+    company = _hb_g(r, "CargoCompany", "cargoCompany", "cargoProviderName", "cargoCompanyName", "CargoCompanyName")
+    if isinstance(company, dict):
+        company = _hb_g(company, "name", "Name", "shortName", "ShortName")
+    company = str(company or "").strip()
+    pkg = str(_hb_g(r, "PackageNumber", "packageNumber", "packageId") or "").strip()
+    link = str(_hb_g(r, "cargoTrackingUrl", "CargoTrackingUrl", "trackingUrl", "cargoTrackingLink") or "").strip()
+    nums = []
+    _ons = r.get("OrderNumbers") if isinstance(r.get("OrderNumbers"), list) else (
+        r.get("orderNumbers") if isinstance(r.get("orderNumbers"), list) else [])
+    nums.extend(str(x or "").strip() for x in _ons)
+    for k in ("items", "lineItems", "details", "orderItems", "Items"):
+        v = r.get(k)
+        if isinstance(v, list):
+            for it in v:
+                if isinstance(it, dict):
+                    n = _hb_g(it, "orderNumber", "OrderNumber", "orderNo", "orderId")
+                    if n:
+                        nums.append(str(n).strip())
+    n0 = _hb_g(r, "orderNumber", "OrderNumber", "orderNo")
+    if n0:
+        nums.append(str(n0).strip())
+    if not nums:
+        v = _hb_deep_find_any(r, _HB_CARGO_KEYS)
+        if v and not isinstance(v, (dict, list)):
+            nums.append(str(v).strip())
+    nums = [n for n in dict.fromkeys(nums) if n and n != "?"]
+    return {"tracking": tracking, "company": company, "package_no": pkg, "link": link, "order_numbers": nums}
+
+
+async def hb_sync_cargo_tracking(client, days: int = 3, log: bool = True) -> dict:
+    """Hepsiburada siparişlerine KARGO TAKİP NO'sunu OTOMATİK yazar.
+
+    Kök neden: 2 dk'lık sipariş cron'u yalnız AÇIK (Open/Unpacked) siparişleri çeker; sipariş
+    paketlenip kargoya verilince bu listeden DÜŞER ve takip barkodu yalnız paket uçlarında
+    (/packages, /packages/shipped) görünür — bu uçlar daha önce yalnız manuel backfill'de
+    taranıyordu. Bu fonksiyon o uçları son `days` günde tarar, eşleşen siparişlere
+    cargo_tracking_number / cargo_provider_name / hb_package_number yazar (dolu olanı EZMEZ,
+    yalnız boşsa ya da HB farklı bir barkod döndürdüyse günceller).
+    """
+    import asyncio as _aio
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    now_ = _dt.now(_tz.utc)
+    stats = {"rows": 0, "with_tracking": 0, "orders_matched": 0, "orders_updated": 0, "errors": 0, "sources": []}
+    seen_pkgs = set()
+
+    async def _apply(cg: dict, source: str):
+        if not cg or not cg.get("order_numbers"):
+            return
+        if not (cg.get("tracking") or cg.get("package_no")):
+            return
+        stats["with_tracking"] += 1
+        key = (cg.get("package_no") or cg.get("tracking"), tuple(cg["order_numbers"]))
+        if key in seen_pkgs:
+            return
+        seen_pkgs.add(key)
+        nums = list({*cg["order_numbers"],
+                     *[(x if x.upper().startswith("HB") else f"HB{x}") for x in cg["order_numbers"]]})
+        cur = db.orders.find({"platform": "hepsiburada",
+                              "$or": [{"order_number": {"$in": nums}},
+                                      {"hepsiburada_order_number": {"$in": cg["order_numbers"]}}]},
+                             {"_id": 1, "cargo_tracking_number": 1, "cargo_provider_name": 1,
+                              "hb_package_number": 1, "cargo_tracking_link": 1})
+        async for o in cur:
+            stats["orders_matched"] += 1
+            _set = {}
+            tr = cg.get("tracking") or ""
+            if tr and (o.get("cargo_tracking_number") or "") != tr:
+                _set["cargo_tracking_number"] = tr
+            if cg.get("company") and not o.get("cargo_provider_name"):
+                _set["cargo_provider_name"] = cg["company"]
+            if cg.get("package_no") and (o.get("hb_package_number") or "") != cg["package_no"]:
+                _set["hb_package_number"] = cg["package_no"]
+            if cg.get("link") and not o.get("cargo_tracking_link"):
+                _set["cargo_tracking_link"] = cg["link"]
+            if _set:
+                _set["cargo_source"] = f"hepsiburada:{source}"
+                _set["cargo_synced_at"] = now_.isoformat()
+                _set["updated_at"] = now_.isoformat()
+                await db.orders.update_one({"_id": o["_id"]}, {"$set": _set})
+                stats["orders_updated"] += 1
+
+    _pb = (now_ - _td(days=days)).strftime("%Y-%m-%d %H:%M")
+    _pe = (now_ + _td(hours=1)).strftime("%Y-%m-%d %H:%M")
+    # (1) Güncel paket listesi (paketlenmiş — kargo barkodu paketleme anında oluşur)
+    for label, fn, dated in (("packages", client.get_packages, False),
+                             ("shipped", client.get_packages_shipped, True)):
+        try:
+            off = 0
+            for _pg in range(6):
+                if dated:
+                    resp = await _aio.to_thread(fn, off, 50, _pb, _pe)
+                else:
+                    resp = await _aio.to_thread(fn, off, 100)
+                if isinstance(resp, dict) and str(resp.get("success", "")).lower() == "false":
+                    raise RuntimeError(str(resp.get("message") or "success=false"))
+                rows = _hb_normalize_lines(resp) or []
+                if not rows:
+                    break
+                for r in rows:
+                    stats["rows"] += 1
+                    await _apply(_hb_package_row_cargo(r), label)
+                page = 50 if dated else 100
+                if len(rows) < page:
+                    break
+                off += page
+            stats["sources"].append(label)
+        except Exception as e:
+            stats["errors"] += 1
+            if log:
+                try:
+                    await log_integration_event("hepsiburada", "cargo_sync", label, "", "error",
+                                                f"HB kargo takip taraması ({label}): {str(e)[:200]}")
+                except Exception:
+                    pass
+        await _aio.sleep(0.2)
+    if log and stats["orders_updated"]:
+        try:
+            await log_integration_event(
+                "hepsiburada", "cargo_sync", "job", "", "success",
+                f"HB kargo takip: {stats['orders_updated']} siparişe takip no yazıldı "
+                f"(paket satırı {stats['rows']}, takip nolu {stats['with_tracking']}, eşleşen {stats['orders_matched']})")
+        except Exception:
+            pass
+    return stats
+
+
+@router.post("/hepsiburada/cargo-sync")
+async def hb_cargo_sync_now(payload: Optional[dict] = Body(default=None),
+                            current_user: dict = Depends(require_admin)):
+    """Hepsiburada kargo takip numaralarını ŞİMDİ çek (cron her 10 dk'da bir aynı işi yapar).
+    body: {"days": 3}"""
+    import asyncio as _aio
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    days = max(1, min(int((payload or {}).get("days") or 3), 30))
+    stats = await _aio.wait_for(hb_sync_cargo_tracking(client, days=days), timeout=120)
+    return {"success": True, **stats}
+
+
 async def _hb_enrich_items(order_data):
     """HB kalemlerini FACETTE ürünleriyle eşler: görsel + FACETTE product_id + barkod (stok düşümü için) + ad/varyant.
     Eşleşmeyen kalem dokunulmadan kalır (matched=False işaretlenir)."""
@@ -3189,6 +3364,10 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
                         if forced_status == "cancelled":
                             upd.setdefault("cancelled_at", datetime.now(timezone.utc).isoformat())
                             upd.setdefault("cancel_source", "hepsiburada_backfill")
+                    # Boş gelen kargo alanı, paket ucundan yazılmış takip no'yu ezmesin.
+                    for _ck in ("cargo_tracking_number", "cargo_provider_name", "cargo_tracking_link"):
+                        if not upd.get(_ck):
+                            upd.pop(_ck, None)
                     await db.orders.update_one({"_id": existing["_id"]}, {"$set": upd})
                     updated += 1
                 else:

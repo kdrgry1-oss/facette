@@ -1225,6 +1225,139 @@ async def refresh_pr_tracking(entry_id: str, current_user: dict = Depends(requir
             "tracking_url": track_url, "status_text": statu_ac}
 
 
+_PR_TRACK_HEALTH_ID = "influencer_pr_track_health"
+
+
+async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
+    """SAATLİK OTOMATİK TARAMA (scheduler): takip no'su henüz oluşmamış PR gönderilerinin
+    gerçek DHL/MNG gönderi no'sunu çeker ve kayda yazar ("takip çek" butonu kaldırıldı).
+
+    Aday: kargo barkodu ya da MNG sipariş no'su (INF…) olan, cargo_gonderi_no'su BOŞ,
+    son 60 günde kargolanmış kayıtlar. Referans sırası: MNG sipariş no → barkod.
+    Sonuç settings.influencer_pr_track_health'e yazılır (son çalışma/sayaçlar/hata);
+    her kayda cargo_status_checked_at (+ cargo_last_status_text / cargo_track_error) işlenir.
+    MNG günlük sorgu limiti mesajı görülürse tarama o tur için durur (boşa sorgu yok)."""
+    import asyncio as _aio
+    started = datetime.now(timezone.utc)
+    stats = {"status": "running", "last_run_at": started.isoformat(), "candidates": 0,
+             "checked": 0, "found": 0, "errors": 0, "limit_hit": False, "last_error": ""}
+
+    async def _health(**extra):
+        try:
+            doc = dict(stats)
+            doc.update(extra)
+            doc["id"] = _PR_TRACK_HEALTH_ID
+            doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+            await db.settings.update_one({"id": _PR_TRACK_HEALTH_ID}, {"$set": doc}, upsert=True)
+        except Exception as _he:
+            logger.warning(f"[pr-track] health write err: {_he}")
+
+    try:
+        from .orders import _get_mng_settings
+        from mng_kargo_client import get_mng_shipment_status
+    except Exception as ex:
+        stats.update(status="error", last_error=f"Kargo modülü yüklenemedi: {ex}")
+        await _health(last_finish_at=datetime.now(timezone.utc).isoformat())
+        return stats
+    s = await _get_mng_settings()
+    if not s.get("is_active") or not s.get("username"):
+        stats.update(status="inactive", last_error="MNG/DHL kargo entegrasyonu aktif değil")
+        await _health(last_finish_at=datetime.now(timezone.utc).isoformat())
+        return stats
+    user, pw = s["username"], s["password"]
+
+    cut = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+    q = {
+        "$and": [
+            {"$or": [{"cargo_tracking_no": {"$nin": [None, ""]}},
+                     {"cargo_barcode": {"$nin": [None, ""]}}]},
+            {"$or": [{"cargo_gonderi_no": {"$in": [None, ""]}},
+                     {"cargo_gonderi_no": {"$exists": False}}]},
+            {"$or": [{"shipped_at": {"$gt": cut}}, {"shipped_at": {"$in": [None, ""]}},
+                     {"shipped_at": {"$exists": False}}]},
+        ],
+    }
+    try:
+        stats["candidates"] = await db.influencer_pr.count_documents(q)
+    except Exception:
+        pass
+    await _health()
+
+    _limit_kw = ("günlük sorgu", "gunluk sorgu", "sorgu limit", "sorgulama sinir", "sorgulama sınır")
+    try:
+        async for pr in db.influencer_pr.find(
+                q, {"_id": 0, "id": 1, "cargo_tracking_no": 1, "cargo_barcode": 1}).limit(limit):
+            refs = [r for r in [str(pr.get("cargo_tracking_no") or "").strip(),
+                                str(pr.get("cargo_barcode") or "").strip()] if r]
+            refs = list(dict.fromkeys(refs))
+            if not refs:
+                continue
+            gonderi, statu_ac, got_ok, err_txt = "", "", False, ""
+            for ref in refs:
+                try:
+                    info = await _aio.to_thread(
+                        get_mng_shipment_status, username=user, password=pw, siparis_no=ref)
+                except Exception as pe:
+                    err_txt = str(pe)[:200]
+                    stats["errors"] += 1
+                    await _aio.sleep(0.2)
+                    continue
+                if info and info.get("ok"):
+                    got_ok = True
+                    statu_ac = (info.get("kargo_statu_aciklama") or "").strip() or statu_ac
+                    g = (info.get("gonderi_no") or "").strip()
+                    if g:
+                        gonderi = g
+                        break
+                else:
+                    err_txt = str((info or {}).get("error") or "")[:200]
+                await _aio.sleep(0.2)
+            stats["checked"] += 1
+            now_iso = datetime.now(timezone.utc).isoformat()
+            upd = {"cargo_status_checked_at": now_iso}
+            if got_ok:
+                upd["cargo_last_status_text"] = statu_ac
+                upd["cargo_track_error"] = ""
+            elif err_txt:
+                upd["cargo_track_error"] = err_txt
+                stats["last_error"] = err_txt
+            if gonderi:
+                upd["cargo_gonderi_no"] = gonderi
+                upd["cargo_tracking_url"] = f"https://kargotakip.dhlecommerce.com.tr/?takipNo={gonderi}"
+                stats["found"] += 1
+            await db.influencer_pr.update_one({"id": pr["id"]}, {"$set": upd})
+            if err_txt and any(k in err_txt.lower() for k in _limit_kw):
+                stats["limit_hit"] = True
+                break
+            await _aio.sleep(0.2)
+        stats["status"] = "ok" if not stats["limit_hit"] else "limit"
+    except Exception as e:
+        logger.exception(f"[pr-track] tarama hatası: {e}")
+        stats.update(status="error", last_error=str(e)[:200])
+    fin = datetime.now(timezone.utc)
+    await _health(last_finish_at=fin.isoformat(),
+                  duration_ms=int((fin - started).total_seconds() * 1000), interval_min=60)
+    logger.info(f"[pr-track] bitti — aday {stats['candidates']} · sorgulanan {stats['checked']} · "
+                f"takip no bulunan {stats['found']} · hata {stats['errors']}")
+    return stats
+
+
+@router.get("/influencer-pr/tracking-health")
+async def influencer_pr_tracking_health(current_user: dict = Depends(require_admin)):
+    """Saatlik otomatik takip taramasının sağlık bilgisi (son çalışma, sayaçlar, son hata)."""
+    h = await db.settings.find_one({"id": _PR_TRACK_HEALTH_ID}, {"_id": 0}) or {}
+    if not h:
+        h = {"status": "unknown"}
+    return h
+
+
+@router.post("/influencer-pr/tracking-scan")
+async def influencer_pr_tracking_scan(current_user: dict = Depends(require_admin)):
+    """Otomatik takip taramasını ŞİMDİ çalıştır (saatlik cron ile aynı iş)."""
+    import asyncio as _aio
+    return await _aio.wait_for(auto_refresh_pr_tracking(), timeout=240)
+
+
 @router.get("/influencer-pr/{entry_id}/cargo-label")
 async def influencer_pr_cargo_label(entry_id: str, current_user: dict = Depends(require_admin)):
     """Influencer PR gönderisinin YAZDIRILABİLİR kargo etiketi — sipariş etiketiyle AYNI şablon

@@ -261,20 +261,6 @@ function PRTrackTab() {
     }
   };
 
-  // Kargo takip no ÇEK — Siparişler'deki mantık: MNG/DHL e-Commerce'den gerçek gönderi_no'yu getirir.
-  const trackPR = async (e) => {
-    if (!e.cargo_tracking_no) return toast.error("Önce kargoya verin (barkod çıkart).");
-    const t = toast.loading("Kargo takip no sorgulanıyor…");
-    try {
-      const r = await axios.post(`${API}/influencer-pr/${e.id}/refresh-tracking`, {}, auth());
-      if (r.data?.gonderi_no) toast.success(`Takip no alındı: ${r.data.gonderi_no}`, { id: t });
-      else toast(r.data?.message || "Kargo firması henüz takip no üretmedi.", { id: t });
-      load();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Takip sorgulanamadı", { id: t });
-    }
-  };
-
   // İstemci-taraflı sütun filtreleri (yüklü kayıtlar üzerinde) — İş Birliği/Platform/Ürün/Beden/
   // Durum/Paylaştı/Not. Üst arama+tarih+durum sunucudan; bunlar ekrandaki tabloyu daraltır.
   const _plat = (e) => e.platform || (e.instagram ? "İnstagram" : e.tiktok ? "Tiktok" : "");
@@ -402,7 +388,6 @@ function PRTrackTab() {
                        onEdit={() => { setEditTarget(e); setShowForm(true); }}
                        onDelete={() => del(e.id)}
                        onShip={() => shipPR(e)}
-                       onTrack={() => trackPR(e)}
                        onPatch={patchEntry}
                        onItemShared={patchItemShared}
                        onHistory={() => e.influencer_id && setHistoryFor({ id: e.influencer_id, name: e.influencer_name })} />
@@ -456,7 +441,7 @@ function PRThumb({ src, name }) {
 
 // Gönderi Takibi satırı (Excel düzeni): görünür sütunlar + çoklu ürün kalemleri +
 // detaya-basınca (expand) profil alanları + inline düzenlenebilir Paylaşma Tarihi/Not/İletişim Tarihi.
-function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onItemShared }) {
+function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }) {
   const [open, setOpen] = useState(false);
   const [noteEdit, setNoteEdit] = useState(false);
   const st = prStatusMeta(e.status);
@@ -585,12 +570,12 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
                         <Truck size={14} /><span className="font-mono text-[10px] font-bold text-gray-700 max-w-[92px] truncate">{trackNo}</span>
                       </a>
                     ) : (
-                      <button onClick={onTrack} title="Kargo takip no çek (MNG/DHL e-Commerce)"
-                        className="inline-flex items-center gap-1 text-amber-600 hover:text-amber-700 border border-amber-200 rounded px-1.5 py-1"
-                        data-testid={`pr-track-${e.id}`}><Truck size={14} /><span className="text-[10px] font-medium">takip çek</span></button>
+                      <span title={`Takip no otomatik çekilir (her saat tarama).${e.cargo_status_checked_at ? " Son kontrol: " + new Date(e.cargo_status_checked_at).toLocaleString("tr-TR") : " Henüz taranmadı."}${e.cargo_last_status_text ? " · " + e.cargo_last_status_text : ""}${e.cargo_track_error ? " · Hata: " + e.cargo_track_error : ""}`}
+                        className={`inline-flex items-center gap-1 border rounded px-1.5 py-1 ${e.cargo_track_error ? "text-red-500 border-red-200 bg-red-50" : "text-gray-400 border-gray-200"}`}
+                        data-testid={`pr-track-pending-${e.id}`}><Truck size={14} /><span className="text-[10px] font-medium">takip bekleniyor</span></span>
                     )}
                     <button
-                      onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/cargo-label?print=1`, "width=420,height=640").catch((err) => toast.error(err.message)); }}
+                      onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/cargo-label`, "width=420,height=640", true).catch((err) => toast.error(err.message)); }}
                       title="Kargo etiketini yazdır"
                       className="inline-flex items-center text-gray-600 hover:text-black border border-gray-200 rounded px-1.5 py-1"
                       data-testid={`pr-print-${e.id}`}><Printer size={14} /></button>
@@ -602,7 +587,7 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
             )}
             {(e.products || []).length > 0 && (
               <button
-                onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/irsaliye?print=1`).catch((err) => toast.error(err.message)); }}
+                onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/irsaliye`, "", true).catch((err) => toast.error(err.message)); }}
                 title="Sevk irsaliyesi (PDF) — gönderilen ürünler"
                 className="inline-flex items-center text-gray-600 hover:text-black border border-gray-200 rounded px-1.5 py-1"
                 data-testid={`pr-irsaliye-${e.id}`}><FileText size={14} /></button>
@@ -629,7 +614,7 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onTrack, onPatch, onIte
               <div><span className="text-gray-400">Follow-up: </span><span className="text-gray-900">{e.follow_up || "—"}</span></div>
               {e.adres && <div className="w-full"><span className="text-gray-400">Adres: </span><span className="text-gray-900">{e.adres}</span></div>}
               {e.cargo_barcode && <div className="w-full flex items-center gap-2"><span><span className="text-gray-400">Kargo barkodu: </span><span className="font-mono text-gray-800">{e.cargo_barcode}</span>{e.cargo_tracking_no ? <span className="text-gray-400"> · Takip: {e.cargo_tracking_no}</span> : null}</span>
-                <button onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/cargo-label?print=1`, "width=420,height=640").catch((err) => toast.error(err.message)); }}
+                <button onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/cargo-label`, "width=420,height=640", true).catch((err) => toast.error(err.message)); }}
                   className="inline-flex items-center gap-1 text-[11px] text-gray-600 hover:text-black border border-gray-300 rounded px-2 py-0.5" title="Kargo etiketini yazdır">
                   <Printer size={12} /> Etiketi Yazdır
                 </button></div>}
