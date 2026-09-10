@@ -1408,13 +1408,13 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                     pass
             _days = sorted(_days, reverse=True)[:14]
             _cc = [str(s.get("customer_code") or "").strip()] if str(s.get("customer_code") or "").strip().isdigit() else []
-            _disc = await db.settings.find_one({"id": "mng_report_discovery"}, {"_id": 0}) or {}
+            _disc = await db.settings.find_one({"id": "mng_report_discovery_v2"}, {"_id": 0}) or {}
             res = await _aio.to_thread(_by_date, username=user, password=pw, start=_start, end=_end, dates=_days,
                                        customer_codes=_cc + [user], preferred_rapor=str(_disc.get("rapor_no") or ""))
             try:
                 _rn = ((res.get("diag") or {}).get("MusteriOzelRapor") or {}).get("rapor_no")
                 if _rn and _rn != _disc.get("rapor_no"):
-                    await db.settings.update_one({"id": "mng_report_discovery"}, {"$set": {"rapor_no": _rn, "at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+                    await db.settings.update_one({"id": "mng_report_discovery_v2"}, {"$set": {"rapor_no": _rn, "at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
             except Exception:
                 pass
             bd = {"ok": bool(res.get("ok")), "method": res.get("method"), "diag": res.get("diag"),
