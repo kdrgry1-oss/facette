@@ -830,14 +830,25 @@ async def _run_hepsiburada_auto_orders_pull():
             _HB_LAST_CARGO_SYNC
         except NameError:
             _HB_LAST_CARGO_SYNC = None
+        global _HB_LAST_CARGO_DEEP
+        try:
+            _HB_LAST_CARGO_DEEP
+        except NameError:
+            _HB_LAST_CARGO_DEEP = None
         _now = datetime.now(timezone.utc)
         if (_HB_LAST_CARGO_SYNC is None) or (_now - _HB_LAST_CARGO_SYNC) >= timedelta(minutes=10):
             _HB_LAST_CARGO_SYNC = _now
+            # Günde 1 kez DERİN tarama (30 gün + sipariş-detayı yedeği) — kaçan/eski siparişler için.
+            _deep = (_HB_LAST_CARGO_DEEP is None) or (_now - _HB_LAST_CARGO_DEEP) >= timedelta(hours=24)
             try:
                 from routes.integrations_hepsiburada import hb_sync_cargo_tracking
-                _cs = await _aio.wait_for(hb_sync_cargo_tracking(client, days=3), timeout=150)
-                if _cs.get("orders_updated") or _cs.get("errors"):
-                    logger.info(f"[scheduler] HB kargo takip senkron: {_cs}")
+                if _deep:
+                    _HB_LAST_CARGO_DEEP = _now
+                    _cs = await _aio.wait_for(hb_sync_cargo_tracking(client, days=30, detail_fallback_limit=120), timeout=600)
+                else:
+                    _cs = await _aio.wait_for(hb_sync_cargo_tracking(client, days=3), timeout=150)
+                if _cs.get("orders_updated") or _cs.get("detail_updated") or _cs.get("errors"):
+                    logger.info(f"[scheduler] HB kargo takip senkron{' (derin)' if _deep else ''}: {_cs}")
             except Exception as _ce:
                 logger.warning(f"[scheduler] HB kargo takip senkron hatası: {_ce}")
     except Exception as e:

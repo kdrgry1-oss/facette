@@ -458,7 +458,8 @@ def _hb_package_row_cargo(r: dict) -> dict:
     return {"tracking": tracking, "company": company, "package_no": pkg, "link": link, "order_numbers": nums}
 
 
-async def hb_sync_cargo_tracking(client, days: int = 3, log: bool = True) -> dict:
+async def hb_sync_cargo_tracking(client, days: int = 3, log: bool = True,
+                                 detail_fallback_limit: int = 0, detail_days: int = 90) -> dict:
     """Hepsiburada siparişlerine KARGO TAKİP NO'sunu OTOMATİK yazar.
 
     Kök neden: 2 dk'lık sipariş cron'u yalnız AÇIK (Open/Unpacked) siparişleri çeker; sipariş
@@ -513,8 +514,11 @@ async def hb_sync_cargo_tracking(client, days: int = 3, log: bool = True) -> dic
     _pb = (now_ - _td(days=days)).strftime("%Y-%m-%d %H:%M")
     _pe = (now_ + _td(hours=1)).strftime("%Y-%m-%d %H:%M")
     # (1) Güncel paket listesi (paketlenmiş — kargo barkodu paketleme anında oluşur)
+    # (2) Kargoya verilenler ve (3) TESLİM edilenler — eski siparişler /shipped listesinden
+    #     düşüp /delivered'a geçer; eskilerin takip no'su oradan gelir (HB ~1 aylık veri tutar).
     for label, fn, dated in (("packages", client.get_packages, False),
-                             ("shipped", client.get_packages_shipped, True)):
+                             ("shipped", client.get_packages_shipped, True),
+                             ("delivered", client.get_packages_delivered, True)):
         try:
             off = 0
             for _pg in range(6):
@@ -544,12 +548,57 @@ async def hb_sync_cargo_tracking(client, days: int = 3, log: bool = True) -> dic
                 except Exception:
                     pass
         await _aio.sleep(0.2)
-    if log and stats["orders_updated"]:
+    # (4) SİPARİŞ DETAYI YEDEĞİ: hâlâ takip no'su olmayan HB siparişleri için tek tek sipariş
+    #     detayı çekilir (ordernumber ucu) — HB kargo bilgisini sipariş/kalem üstünde veriyorsa yazılır.
+    if detail_fallback_limit > 0:
+        stats["detail_checked"] = stats["detail_updated"] = 0
+        _dcut = (now_ - _td(days=detail_days)).isoformat()
+        cur = db.orders.find({"platform": "hepsiburada",
+                              "status": {"$nin": ["cancelled", "returned", "refunded"]},
+                              "created_at": {"$gt": _dcut},
+                              "$or": [{"cargo_tracking_number": {"$in": [None, ""]}},
+                                      {"cargo_tracking_number": {"$exists": False}}]},
+                             {"_id": 1, "order_number": 1, "hepsiburada_order_number": 1}).sort("created_at", -1).limit(detail_fallback_limit)
+        async for o in cur:
+            raw_no = str(o.get("hepsiburada_order_number") or "").strip() or str(o.get("order_number") or "")[2:]
+            if not raw_no:
+                continue
+            stats["detail_checked"] += 1
+            try:
+                resp = await _aio.to_thread(client.get_order_by_number, raw_no)
+                grouped = _hb_orders_from_response(resp)
+                for g in grouped:
+                    m = map_hepsiburada_order(g)
+                    _set = {}
+                    if m.get("cargo_tracking_number"):
+                        _set["cargo_tracking_number"] = m["cargo_tracking_number"]
+                    if m.get("cargo_provider_name"):
+                        _set["cargo_provider_name"] = m["cargo_provider_name"]
+                    if m.get("cargo_tracking_link"):
+                        _set["cargo_tracking_link"] = m["cargo_tracking_link"]
+                    if _set:
+                        _set["cargo_source"] = "hepsiburada:order_detail"
+                        _set["cargo_synced_at"] = now_.isoformat()
+                        await db.orders.update_one({"_id": o["_id"]}, {"$set": _set})
+                        stats["detail_updated"] += 1
+                        break
+            except Exception as e:
+                stats["errors"] += 1
+                if log:
+                    try:
+                        await log_integration_event("hepsiburada", "cargo_sync", "order_detail", raw_no, "error",
+                                                    f"Sipariş detayından kargo çekilemedi {raw_no}: {str(e)[:160]}")
+                    except Exception:
+                        pass
+            await _aio.sleep(0.15)
+    if log and (stats["orders_updated"] or stats.get("detail_updated")):
         try:
             await log_integration_event(
                 "hepsiburada", "cargo_sync", "job", "", "success",
                 f"HB kargo takip: {stats['orders_updated']} siparişe takip no yazıldı "
-                f"(paket satırı {stats['rows']}, takip nolu {stats['with_tracking']}, eşleşen {stats['orders_matched']})")
+                f"(paket satırı {stats['rows']}, takip nolu {stats['with_tracking']}, eşleşen {stats['orders_matched']}"
+                + (f", sipariş detayından {stats.get('detail_updated', 0)}/{stats.get('detail_checked', 0)}" if detail_fallback_limit else "")
+                + f", son {days} gün)")
         except Exception:
             pass
     return stats
@@ -566,8 +615,34 @@ async def hb_cargo_sync_now(payload: Optional[dict] = Body(default=None),
     if err:
         raise HTTPException(status_code=400, detail=err)
     days = max(1, min(int((payload or {}).get("days") or 3), 30))
-    stats = await _aio.wait_for(hb_sync_cargo_tracking(client, days=days), timeout=120)
+    deep = int((payload or {}).get("detail_fallback") or 0)
+    stats = await _aio.wait_for(hb_sync_cargo_tracking(client, days=days, detail_fallback_limit=min(deep, 300)), timeout=280)
     return {"success": True, **stats}
+
+
+async def hb_cargo_backfill_once():
+    """TEK SEFERLİK (bayraklı): mevcut HB siparişlerinin kargo takip no'ları — son 30 günün
+    paket/kargolanan/teslim uçları + takip no'su olmayan son 90 günlük siparişler için sipariş
+    detayı yedeği. Sonrası cron (10 dk: 3 gün · günde 1: 30 gün) otomatik sürdürür."""
+    import asyncio as _aio
+    try:
+        flag = await db.settings.find_one({"id": "migrations"}, {"_id": 0, "hb_cargo_backfill_v1": 1}) or {}
+        if flag.get("hb_cargo_backfill_v1"):
+            return
+        from .category_mapping import _get_hb_client
+        client, err = await _get_hb_client()
+        if err:
+            return
+        stats = await _aio.wait_for(hb_sync_cargo_tracking(client, days=30, detail_fallback_limit=300), timeout=900)
+        await db.settings.update_one({"id": "migrations"},
+                                     {"$set": {"hb_cargo_backfill_v1": True,
+                                               "hb_cargo_backfill_v1_at": datetime.now(timezone.utc).isoformat(),
+                                               "hb_cargo_backfill_v1_stats": stats},
+                                      "$setOnInsert": {"id": "migrations"}}, upsert=True)
+        await log_integration_event("hepsiburada", "cargo_sync", "backfill", "", "success",
+                                    f"HB kargo takip geçmiş çekimi (tek seferlik): {stats}")
+    except Exception as e:
+        logger.warning(f"[hb] cargo backfill once hata: {e}")
 
 
 async def _hb_enrich_items(order_data):

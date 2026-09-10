@@ -419,6 +419,12 @@ async def lifespan(app: FastAPI):
         _asyncio.create_task(migrate_welcome_coupon_sale_policy())
         # Kupon birleşme varsayılanı: hepsiyle birleşir, engellenenler kuponun içinden seçilir (tek seferlik).
         _asyncio.create_task(migrate_coupon_stacking_default())
+        # Hepsiburada: mevcut siparişlerin kargo takip no'ları (tek seferlik geçmiş çekimi, bayraklı)
+        try:
+            from routes.integrations_hepsiburada import hb_cargo_backfill_once
+            _asyncio.create_task(hb_cargo_backfill_once())
+        except Exception as _hbe:
+            logger.warning(f"[hb] cargo backfill task kurulamadı: {_hbe}")
     except Exception as e:
         logger.warning(f"Coupon exception seed start warning: {e}")
 
