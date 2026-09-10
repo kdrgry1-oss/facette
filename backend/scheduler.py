@@ -18,18 +18,28 @@ HAVALE_METHOD_RX = {"$regex": r"^(transfer|havale|bank_transfer|eft|havale_eft|b
                     "$options": "i"}
 
 
+# Geçmişe dönük alt sınır (kullanıcı kararı): 1 Haziran 2026'dan itibaren tüm ödenmemiş havale
+# siparişleri kural kapsamında; daha eskilere dokunulmaz.
+HAVALE_SWEEP_SINCE = "2026-06-01"
+# Kapsam (kullanıcı kararı): 'Ödeme Bildirimi' (payment_notified) durumundakiler de — personel
+# 72 saat içinde ödemeyi ONAYLAMADIYSA — otomatik iptal edilir.
+HAVALE_UNPAID_STATUSES = ["pending", "awaiting_payment", "payment_notified"]
+
+
 def havale_unpaid_query(cutoff_dt):
-    """Süresi dolmuş ÖDENMEMİŞ havale/EFT siparişleri (geçmişe dönük dahil).
+    """Süresi dolmuş ÖDENMEMİŞ/ONAYLANMAMIŞ havale/EFT siparişleri (geçmişe dönük dahil).
     created_at hem ISO string hem datetime olarak saklanmış olabilir → ikisini de yakala;
-    payment_method varyantları büyük/küçük harften bağımsız. payment_notified (dekont bildirilmiş)
-    HARİÇ — admin kontrol etsin."""
+    payment_method varyantları büyük/küçük harften bağımsız."""
+    from datetime import datetime as _dt
     cutoff_iso = cutoff_dt.isoformat()
+    since_dt = _dt.fromisoformat(HAVALE_SWEEP_SINCE).replace(tzinfo=timezone.utc)
     return {
         "payment_status": {"$nin": ["paid", "expired", "refunded"]},
-        "status": {"$in": ["pending", "awaiting_payment"]},
+        "status": {"$in": HAVALE_UNPAID_STATUSES},
         "payment_method": HAVALE_METHOD_RX,
         "platform": {"$nin": ["trendyol", "hepsiburada", "amazon", "n11", "etsy"]},
-        "$or": [{"created_at": {"$lt": cutoff_iso}}, {"created_at": {"$lt": cutoff_dt}}],
+        "$or": [{"created_at": {"$lt": cutoff_iso, "$gte": HAVALE_SWEEP_SINCE}},
+                {"created_at": {"$lt": cutoff_dt, "$gte": since_dt}}],
     }
 
 
@@ -59,11 +69,13 @@ async def auto_cancel_unpaid_havale_orders(limit: int = 0):
                 res = await db.orders.update_one(
                     {"id": order["id"],
                      "payment_status": {"$nin": ["paid", "expired", "refunded"]},
-                     "status": {"$in": ["pending", "awaiting_payment"]}},
+                     "status": {"$in": HAVALE_UNPAID_STATUSES}},
                     {"$set": {
                         "status": "cancelled",
                         "payment_status": "expired",
-                        "cancel_reason": "72 saat içinde havale ödemesi yapılmadı (otomatik iptal)",
+                        "cancel_reason": (f"{_hrs} saat içinde havale ödemesi onaylanmadı (otomatik iptal)"
+                                          if order.get("status") == "payment_notified"
+                                          else f"{_hrs} saat içinde havale ödemesi yapılmadı (otomatik iptal)"),
                         "auto_cancelled": True,
                         "cancelled_at": datetime.now(timezone.utc).isoformat(),
                         "updated_at": datetime.now(timezone.utc).isoformat(),

@@ -907,9 +907,8 @@ async def payment_trace(
 
 @router.get("/admin/havale-sweep")
 async def havale_sweep_preview(current_user: dict = Depends(require_admin)):
-    """Havale/EFT 72 saat kuralı — ÖNİZLEME: kuralı aşmış, ödenmemiş, dekont bildirilmemiş
-    bekleyen siparişler (iptal edilecekler) + dekont bildirilmiş olduğu için otomatik iptal
-    edilmeyenler (admin kararı)."""
+    """Havale/EFT 72 saat kuralı — ÖNİZLEME: kuralı aşmış, ödenmemiş/onaylanmamış (Ödeme Bildirimi
+    dahil) bekleyen havale siparişleri (1 Haziran 2026'dan itibaren) — iptal edilecekler."""
     import business_rules as _BR
     from scheduler import havale_unpaid_query, HAVALE_METHOD_RX
     hrs = int(await _BR.get_rule(db, "order.havale_cancel_hours", 72) or 72)
@@ -917,11 +916,7 @@ async def havale_sweep_preview(current_user: dict = Depends(require_admin)):
     proj = {"_id": 0, "id": 1, "order_number": 1, "created_at": 1, "status": 1, "payment_status": 1,
             "payment_method": 1, "total": 1, "shipping_address.first_name": 1, "shipping_address.last_name": 1}
     due = [o async for o in db.orders.find(havale_unpaid_query(cutoff_dt), proj).sort("created_at", 1).limit(500)]
-    notified = [o async for o in db.orders.find({
-        "status": "payment_notified", "payment_status": {"$nin": ["paid", "expired", "refunded"]},
-        "payment_method": HAVALE_METHOD_RX,
-        "$or": [{"created_at": {"$lt": cutoff_dt.isoformat()}}, {"created_at": {"$lt": cutoff_dt}}],
-    }, proj).sort("created_at", 1).limit(200)]
+    notified = [o for o in due if o.get("status") == "payment_notified"]
     def _row(o):
         sa = o.get("shipping_address") or {}
         return {"order_number": o.get("order_number"), "created_at": str(o.get("created_at"))[:16],
@@ -930,7 +925,8 @@ async def havale_sweep_preview(current_user: dict = Depends(require_admin)):
                 "customer": f"{sa.get('first_name', '')} {sa.get('last_name', '')}".strip()}
     return {"rule_hours": hrs, "cutoff": cutoff_dt.isoformat(),
             "will_cancel": [_row(o) for o in due], "will_cancel_count": len(due),
-            "payment_notified_skipped": [_row(o) for o in notified], "payment_notified_count": len(notified)}
+            "payment_notified_included": [_row(o) for o in notified], "payment_notified_count": len(notified),
+            "since": "2026-06-01"}
 
 
 @router.post("/admin/havale-sweep")
