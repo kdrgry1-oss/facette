@@ -28,47 +28,28 @@ export default function FullLookAddAll({ products = [] }) {
     return { p, sizes, inStock, hasSizes: sizes.length > 0, soldOut: totalStock <= 0, price: priceView(p) };
   }), [products]);
 
+  // Seçim = "sepete eklenmiş gibi": müşteri bedene tıkladıkça parça seçilir, alttaki toplam yalnız
+  // seçilen parçaları toplar; başlangıçta hiçbir şey seçili değil, toplam görünmez.
+  // sel: { [productId]: size }  — bedensiz ürün için "*" (tek beden) değeri.
   const [sel, setSel] = useState({});
-  useEffect(() => {
-    // Tek stoklu beden varsa otomatik seç
-    const next = {};
-    for (const r of rows) {
-      if (r.hasSizes && r.inStock.length === 1) next[r.p.id] = r.inStock[0].size;
-    }
-    setSel((prev) => ({ ...next, ...prev }));
-  }, [rows]);
+  useEffect(() => { setSel({}); }, [rows]);
 
   if (!rows.length) return null;
 
-  const addable = rows.filter((r) => !r.soldOut);
-  const missing = addable.filter((r) => r.hasSizes && !sel[r.p.id]);
-  const ready = addable.length > 0 && missing.length === 0;
-  const total = addable.reduce((a, r) => a + (Number(r.price.display) || 0), 0);
-  const listTotal = addable.reduce((a, r) => a + (Number(r.price.list) || 0), 0);
+  const toggle = (r, size) => setSel((prev) => (prev[r.p.id] === size ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== r.p.id)) : { ...prev, [r.p.id]: size }));
+  const selected = rows.filter((r) => !r.soldOut && sel[r.p.id]);
+  const ready = selected.length > 0;
+  const total = selected.reduce((a, r) => a + (Number(r.price.display) || 0), 0);
+  const listTotal = selected.reduce((a, r) => a + (Number(r.price.list) || 0), 0);
   const totalPct = listTotal > 0 && listTotal > total + 0.5 ? Math.round((1 - total / listTotal) * 100) : 0;
-
-  // Tek parça: seçili beden (ya da bedensiz/tek bedenli) ile o ürünü sepete ekle
-  const addOne = (r) => {
-    if (r.soldOut) return;
-    if (r.hasSizes) {
-      const sz = sel[r.p.id];
-      const sv = sz ? r.sizes.find((x) => x.size === sz) : null;
-      if (!sv || sv.stock <= 0) { toast.error(`${r.p.name} için beden seçin`); return; }
-      addItem(r.p, sv.variant);
-    } else {
-      addItem(r.p);
-    }
-    toast.success(`${r.p.name} sepete eklendi`);
-    try { setIsOpen(true); } catch { /* çekmece yoksa */ }
-  };
 
   const addAll = () => {
     if (!ready) {
-      toast.error(missing.length ? `Beden seçin: ${missing.map((r) => r.p.name).join(", ")}` : "Bu kombinde stokta ürün yok");
+      toast.error("Önce beden seçin");
       return;
     }
     let n = 0;
-    for (const r of addable) {
+    for (const r of selected) {
       if (r.hasSizes) {
         const s = r.sizes.find((x) => x.size === sel[r.p.id]);
         if (!s || s.stock <= 0) continue;
@@ -117,7 +98,7 @@ export default function FullLookAddAll({ products = [] }) {
                           const active = sel[r.p.id] === s.size;
                           return (
                             <button key={s.size} type="button" disabled={s.stock <= 0}
-                              onClick={() => setSel((prev) => ({ ...prev, [r.p.id]: s.size }))}
+                              onClick={() => toggle(r, s.size)}
                               className={`shrink-0 min-w-[42px] md:min-w-[56px] px-2 md:px-3 py-2 text-[12px] md:text-[13px] border transition-colors ${
                                 active ? "bg-stone-900 text-white border-stone-900"
                                   : s.stock <= 0 ? "border-stone-200 text-stone-300 line-through cursor-not-allowed"
@@ -130,13 +111,11 @@ export default function FullLookAddAll({ products = [] }) {
                       </div>
                     </>
                   ) : (
-                    <span className="text-[11px] tracking-[0.1em] uppercase text-stone-400 inline-flex items-center gap-1"><Check size={12} /> Tek beden</span>
-                  )}
-                  {!r.soldOut && (
-                    <button type="button" onClick={() => addOne(r)}
-                      className="mt-4 inline-flex items-center justify-center bg-black text-white px-5 py-2.5 text-[11px] uppercase tracking-[0.2em] hover:bg-black/85 transition-colors"
-                      data-testid={`fl-add-one-${r.p.id}`}>
-                      Sepete Ekle
+                    <button type="button" onClick={() => toggle(r, "*")}
+                      className={`inline-flex items-center gap-1.5 px-3 py-2 text-[12px] md:text-[13px] border transition-colors ${
+                        sel[r.p.id] ? "bg-stone-900 text-white border-stone-900" : "border-stone-200 bg-white text-stone-800 hover:border-stone-900"}`}
+                      aria-pressed={!!sel[r.p.id]} data-testid={`fl-size-${r.p.id}-tek`}>
+                      <Check size={12} /> Tek beden
                     </button>
                   )}
                 </div>
@@ -152,21 +131,25 @@ export default function FullLookAddAll({ products = [] }) {
           <div className="min-w-0">
             {/* Başlık ile sağdaki ilk (liste) fiyat aynı satır hizasında: ikisi de 20px satır yüksekliği */}
             <div className="text-[13px] leading-[20px] tracking-[0.2em] uppercase text-stone-900">Tüm Kombini Al</div>
-            <div className="mt-1 text-[11px] tracking-[0.12em] uppercase text-stone-400">{addable.length} parça</div>
-          </div>
-          {/* İlk (liste) fiyat üstte; altında indirimli toplam ve hemen yanında %rozet */}
-          <div className="flex flex-col items-start md:items-end md:text-right">
-            <del className={`text-[13px] leading-[20px] text-stone-400 ${listTotal > total + 0.5 ? "" : "invisible"}`}>{fmtTL(listTotal)}</del>
-            <div className="mt-1 flex items-center gap-2">
-              <span className={`text-[22px] md:text-[24px] font-medium leading-none ${listTotal > total + 0.5 ? "text-red-700" : "text-stone-900"}`}>{fmtTL(total)}</span>
-              {totalPct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700">%{totalPct}</span>}
+            <div className="mt-1 text-[11px] tracking-[0.12em] uppercase text-stone-400">
+              {ready ? `${selected.length} parça seçildi` : "Beden seçtikçe parçalar buraya eklenir"}
             </div>
           </div>
+          {/* Toplam yalnız seçilen parçalar için; hiçbir beden seçilmediyse gösterilmez */}
+          {ready && (
+            <div className="flex flex-col items-start md:items-end md:text-right" data-testid="full-look-total">
+              <del className={`text-[13px] leading-[20px] text-stone-400 ${listTotal > total + 0.5 ? "" : "invisible"}`}>{fmtTL(listTotal)}</del>
+              <div className="mt-1 flex items-center gap-2">
+                <span className={`text-[22px] md:text-[24px] font-medium leading-none ${listTotal > total + 0.5 ? "text-red-700" : "text-stone-900"}`}>{fmtTL(total)}</span>
+                {totalPct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700">%{totalPct}</span>}
+              </div>
+            </div>
+          )}
         </div>
-        <button type="button" onClick={addAll} disabled={!addable.length}
+        <button type="button" onClick={addAll} disabled={!ready}
           className="mt-5 w-full px-6 py-3.5 text-[11px] md:text-xs uppercase tracking-[0.2em] bg-black text-white hover:bg-black/85 transition-colors disabled:opacity-40"
           data-testid="full-look-add-all-btn">
-          Tüm Kombini Sepete Ekle
+          {ready ? `Sepete Ekle · ${selected.length} parça` : "Sepete Ekle"}
         </button>
       </div>
     </div>
