@@ -1546,6 +1546,13 @@ async def influencer_pr_cargo_label(entry_id: str, current_user: dict = Depends(
     bc = (e.get("cargo_barcode") or "").strip()
     if not bc:
         raise HTTPException(status_code=400, detail="Bu gönderi için kargo barkodu yok — önce 'Barkod Çıkart' ile kargoya verin.")
+    # SİPARİŞ ETİKETİYLE AYNI KURAL: barkod çubukları = MNG'ye verdiğimiz SİPARİŞ REFERANSI
+    # (siparişte W10047, burada INF…). Kurye terminali referansı okutunca paketi bizim kayda bağlar
+    # ve takip no otomatik gelir. Eskiden çubuklar MNG iç no'yu (1803461455) kodluyordu; terminal
+    # bunu referans olarak bulamayınca kurye kendi RE-… irsaliyesini açıyor, takip no bize gelmiyordu.
+    ref = (e.get("cargo_tracking_no") or "").strip()
+    if ref.upper().startswith("INF"):
+        bc = ref
     inf = await db.influencers.find_one({"id": e.get("influencer_id")}, {"_id": 0}) or {}
     addr = inf.get("shipping_address") or {}
     rname = (addr.get("full_name") or inf.get("name") or e.get("influencer_name") or "Alıcı").strip()
