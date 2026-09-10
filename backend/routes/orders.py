@@ -923,7 +923,8 @@ async def havale_sweep_preview(current_user: dict = Depends(require_admin)):
                 "status": o.get("status"), "payment_status": o.get("payment_status"),
                 "payment_method": o.get("payment_method"), "total": o.get("total"),
                 "customer": f"{sa.get('first_name', '')} {sa.get('last_name', '')}".strip()}
-    return {"rule_hours": hrs, "cutoff": cutoff_dt.isoformat(),
+    health = await db.settings.find_one({"id": "havale_sweep_health"}, {"_id": 0}) or {}
+    return {"rule_hours": hrs, "cutoff": cutoff_dt.isoformat(), "sweep_health": health,
             "will_cancel": [_row(o) for o in due], "will_cancel_count": len(due),
             "payment_notified_included": [_row(o) for o in notified], "payment_notified_count": len(notified),
             "since": "2026-06-01"}

@@ -51,11 +51,18 @@ async def auto_cancel_unpaid_havale_orders(limit: int = 0):
     import business_rules as _BR
 
     cancelled = 0
+    _started = datetime.now(timezone.utc)
+    _matched = 0
+    _err = ""
     try:
         # AYAR: süre admin panelinden (İşletme Kuralları) yönetilir; varsayılan 72 saat.
         _hrs = int(await _BR.get_rule(db, "order.havale_cancel_hours", 72) or 72)
         cutoff_dt = datetime.now(timezone.utc) - timedelta(hours=_hrs)
         query = havale_unpaid_query(cutoff_dt)
+        try:
+            _matched = await db.orders.count_documents(query)
+        except Exception:
+            _matched = -1
         cur = db.orders.find(query, {"_id": 0})
         if limit:
             cur = cur.limit(limit)
@@ -122,7 +129,18 @@ async def auto_cancel_unpaid_havale_orders(limit: int = 0):
         if cancelled:
             logger.info(f"[scheduler] Auto-cancelled {cancelled} unpaid havale orders (>{_hrs}h)")
     except Exception as e:
+        _err = str(e)[:300]
         logger.exception(f"[scheduler] auto_cancel_unpaid_havale_orders failed: {e}")
+    # Sağlık kaydı (teşhis): son çalışma, eşleşen aday, iptal edilen, hata → önizleme ucunda görünür.
+    try:
+        await db.settings.update_one(
+            {"id": "havale_sweep_health"},
+            {"$set": {"id": "havale_sweep_health", "last_run_at": _started.isoformat(),
+                      "last_finish_at": datetime.now(timezone.utc).isoformat(),
+                      "matched": _matched, "cancelled": cancelled, "error": _err}},
+            upsert=True)
+    except Exception:
+        pass
     return cancelled
 
 

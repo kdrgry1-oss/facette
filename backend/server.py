@@ -984,7 +984,9 @@ async def root():
 # Health check
 @api_router.get("/health")
 async def health():
-    return {"status": "healthy"}
+    # Deploy teşhisi: hangi commit çalışıyor (Railway RAILWAY_GIT_COMMIT_SHA sağlar).
+    _sha = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or os.environ.get("GIT_SHA") or "")[:12]
+    return {"status": "healthy", "version": _sha or None}
 
 # Include API router
 app.include_router(api_router)
