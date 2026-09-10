@@ -1407,10 +1407,11 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                 except Exception:
                     pass
             _days = sorted(_days, reverse=True)[:14]
-            _cc = [str(s.get("customer_code") or "").strip()] if str(s.get("customer_code") or "").strip().isdigit() else []
-            _disc = await db.settings.find_one({"id": "mng_report_discovery_v2"}, {"_id": 0}) or {}
+            _cc = [x for x in [str(s.get("customer_code") or "").strip()] if x and x != user]
+            _disc = await db.settings.find_one({"id": "mng_report_discovery_v3"}, {"_id": 0}) or {}
             _tried = set(str(x) for x in (_disc.get("tried") or []))
-            _pool = [str(x) for x in ([10, 12, 13] + list(range(16, 31)))]
+            # 12 (fatura/gönderi detay) alan adı normalizasyonu düzeltildikten sonra yeniden denenir
+            _pool = [str(x) for x in ([12, 17, 18, 19, 20, 10, 13] + list(range(21, 31)))]
             _next = [] if _disc.get("rapor_no_tracking") else [x for x in _pool if x not in _tried][:2]
             res = await _aio.to_thread(_by_date, username=user, password=pw, start=_start, end=_end, dates=_days,
                                        customer_codes=_cc + [user],
@@ -1425,7 +1426,7 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                     _set["rapor_no"] = _md["rapor_no"]
                 if _md.get("rapor_no_tracking"):
                     _set["rapor_no_tracking"] = _md["rapor_no_tracking"]
-                await db.settings.update_one({"id": "mng_report_discovery_v2"}, {"$set": _set}, upsert=True)
+                await db.settings.update_one({"id": "mng_report_discovery_v3"}, {"$set": _set}, upsert=True)
                 _set["rapor_stats"] = {**(_disc.get("rapor_stats") or {}), **(_md.get("rapor_stats") or {})}
                 bd_disc = {"tried": _set["tried"], "rapor_no_tracking": _set.get("rapor_no_tracking") or _disc.get("rapor_no_tracking"),
                            "rapor_stats": _set["rapor_stats"]}
