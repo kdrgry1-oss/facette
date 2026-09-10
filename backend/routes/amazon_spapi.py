@@ -740,8 +740,12 @@ def _amazon_image_url(u: str) -> str:
         host = pu.hostname or ""
         is_webp = pu.path.lower().endswith(".webp")
         if host == "cdn.facette.com.tr" or is_webp:
+            # Amazon ERROR 20015 ("dosya türü desteklenmiyor"): uzantısız ?src= URL'i reddediliyordu →
+            # .jpg UZANTILI proxy yolu (/api/upload/jpeg/<b64>.jpg). İçerik yine JPEG'e çevrilir.
+            import base64
             base = _public_base() or "https://api.facette.com.tr"
-            return f"{base}/api/upload/to-jpeg?src={quote(u, safe='')}"
+            tok = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
+            return f"{base}/api/upload/jpeg/{tok}.jpg"
     except Exception:
         pass
     return u
@@ -1790,11 +1794,17 @@ async def amazon_listing_report(product_id: str = Query(None), barcode: str = Qu
         parent_cands = {code, f"{p0.get('id')}-P"} - {None, ""}
         for pc in sorted(parent_cands):
             skus.append(("parent?", pc))
+        current = set()
         for pp in products:
             for v in (pp.get("variants") or []):
                 sk = _amazon_seller_sku(v, pp)
                 if sk:
+                    current.add(sk)
                     skus.append((f"child:{pp.get('name')}|{v.get('size')}|{v.get('color') or ''}", sk))
+        # ESKİ FORMAT (mükerrer) SKU adayları: renk parçası olmadan stok_kodu-beden (WARNING 8801 —
+        # "başka bir SKU aynı varyasyon özelliklerine sahip" → bedenler ana ürüne bağlanamıyor).
+        for lg in _amazon_legacy_sku_candidates(products, code, current, parent_cands):
+            skus.append(("legacy-duplicate?", lg))
         # Görsel çekilebilirlik testi (Amazon görselleri kendi botuyla indirir; Cloudflare bot
         # kuralı 403 verirse görsel HİÇ aktarılmaz) — ilk 3 görsel.
         imgs = _product_images(p0, (p0.get("variants") or [{}])[0])[:3]
@@ -1836,6 +1846,73 @@ async def amazon_listing_report(product_id: str = Query(None), barcode: str = Qu
                       "with_issues": sum(1 for l in out["listings"] if l.get("issues")),
                       "with_images": sum(1 for l in out["listings"] if l.get("image_count"))}
     return out
+
+
+def _amazon_legacy_sku_candidates(products: list, code: str, current: set, parent_cands: set) -> list:
+    """Eski SKU biçimleri: '<stokkodu>-<beden>' ve '<barkod>' (renk parçasız). Güncel SKU setinde ve
+    ana ürün adaylarında OLMAYANLAR döner — Amazon'da bulunursa mükerrerdir (silinmeli)."""
+    out = []
+    for pp in products:
+        for v in (pp.get("variants") or []):
+            size = str(v.get("size") or "").strip()
+            cands = []
+            if code and size:
+                cands.append(f"{code}-{size}")
+            vcode = str(v.get("stock_code") or "").strip()
+            if vcode and size and vcode != code:
+                cands.append(f"{vcode}-{size}")
+            if v.get("barcode"):
+                cands.append(str(v.get("barcode")).strip())
+            for c in cands:
+                if c and c not in current and c not in parent_cands and c not in out:
+                    out.append(c)
+    return out[:80]
+
+
+@router.post("/listing-cleanup")
+async def amazon_listing_cleanup(payload: dict = Body(default={}), current_user: dict = Depends(require_admin)):
+    """Amazon'daki ESKİ/MÜKERRER çocuk SKU'ları (renk parçasız 'stokkodu-beden' vb.) tespit eder ve
+    confirm=true ile SİLER (DELETE listing). Ana ürün SKU'su ve güncel SKU'lar ASLA silinmez.
+    body: {"barcode": "...", | "product_id": "...", "confirm": false}"""
+    import asyncio as _aio
+    seller = await _require_seller_id()
+    _, _, mp = await get_valid_access_token()
+    p = None
+    if payload.get("product_id"):
+        p = await db.products.find_one({"id": payload["product_id"]}, {"_id": 0})
+    elif payload.get("barcode"):
+        bc = str(payload["barcode"]).strip()
+        p = await db.products.find_one({"$or": [{"barcode": bc}, {"variants.barcode": bc}]}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı (barkod / product_id)")
+    from .integrations_common import _resolve_stock_code as _rsc
+    code = _rsc(p)
+    products = [p]
+    if code:
+        sibs = await db.products.find(amazon_sibling_query([code]), {"_id": 0}).to_list(50)
+        if sibs:
+            products = sibs
+    parent_cands = {code, f"{p.get('id')}-P"} - {None, ""}
+    current = {_amazon_seller_sku(v, pp) for pp in products for v in (pp.get("variants") or []) if _amazon_seller_sku(v, pp)}
+    found, deleted, errors = [], [], []
+    for sk in _amazon_legacy_sku_candidates(products, code, current, parent_cands):
+        r = await _spapi_get(f"/listings/2021-08-01/items/{seller}/{sk}", {"marketplaceIds": mp, "includedData": "summaries"})
+        if not r["ok"]:
+            continue
+        s0 = ((r["data"] or {}).get("summaries") or [{}])[0]
+        found.append({"sku": sk, "asin": s0.get("asin"), "status": s0.get("status")})
+        if payload.get("confirm"):
+            d = await _spapi_send("DELETE", f"/listings/2021-08-01/items/{seller}/{sk}", None, {"marketplaceIds": mp})
+            if d.get("ok"):
+                deleted.append(sk)
+            else:
+                errors.append({"sku": sk, "http": d.get("status"), "error": str(d.get("data"))[:200]})
+        await _aio.sleep(0.3)
+    return {"stock_code": code, "current_skus": sorted(current), "parent_skus": sorted(parent_cands),
+            "legacy_found": found, "deleted": deleted, "errors": errors,
+            "dry_run": not payload.get("confirm"), "write_enabled": bool(ALLOW_WRITE),
+            "note": ("Silme için confirm=true gönderin." if not payload.get("confirm") else
+                     "Silinen SKU'lar Amazon'da birkaç dakika içinde kalkar; ardından 'Ürün Aktar' ile yeniden senkron yapın.")}
 
 
 def _summarize_listing(item: dict, mp: str) -> dict:

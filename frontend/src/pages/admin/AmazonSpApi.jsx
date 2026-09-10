@@ -176,6 +176,21 @@ export default function AmazonSpApi({ embedded = false }) {
   const [repQ, setRepQ] = useState("");
   const [rep, setRep] = useState(null);
   const [repLoading, setRepLoading] = useState(false);
+  const [cleanLoading, setCleanLoading] = useState(false);
+  const runCleanup = async (confirm) => {
+    const q = (repQ || "").trim();
+    if (!/^\d{8,14}$/.test(q)) { toast.error("Temizlik için ürünün BARKODUNU girin"); return; }
+    if (confirm && !(await window.appConfirm("Amazon'daki ESKİ/MÜKERRER çocuk SKU'lar silinecek (ana ürün ve güncel SKU'lar korunur). Devam?"))) return;
+    setCleanLoading(true);
+    try {
+      const r = await axios.post(`${API}/amazon/spapi/listing-cleanup`, { barcode: q, confirm: !!confirm }, auth());
+      const d = r.data || {};
+      if (confirm) toast.success(`Silinen: ${d.deleted?.length || 0} · hata: ${d.errors?.length || 0}${d.write_enabled === false ? " (yazma kapalı: dry-run)" : ""}`);
+      else toast(`Mükerrer SKU: ${d.legacy_found?.length || 0}`);
+      setRep((prev) => ({ ...(prev || {}), cleanup: d }));
+    } catch (e) { toast.error(e.response?.data?.detail || "Temizlik hatası"); }
+    finally { setCleanLoading(false); }
+  };
   const runListingReport = async () => {
     const q = (repQ || "").trim();
     if (!q) { toast.error("Barkod, SKU veya ASIN gir"); return; }
@@ -378,6 +393,16 @@ export default function AmazonSpApi({ embedded = false }) {
               </div>
             )}
             {(rep.notes || []).map((n, i) => <div key={i} className="text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">{n}</div>)}
+            {(rep.listings || []).some((l) => l.role === "legacy-duplicate?" && l.found !== false) && (
+              <div className="text-red-800 bg-red-50 border border-red-200 rounded px-2 py-2 flex flex-wrap items-center gap-2">
+                <span><b>Mükerrer eski SKU'lar bulundu</b> (renk parçasız "stokkodu-beden"): Amazon bedenleri ana ürüne bağlayamıyor (WARNING 8801). Bunlar silinmeli.</span>
+                <button onClick={() => runCleanup(false)} disabled={cleanLoading} className="border border-red-300 rounded px-2 py-1 text-[11px] hover:bg-red-100 disabled:opacity-50">Önizle</button>
+                <button onClick={() => runCleanup(true)} disabled={cleanLoading} className="bg-red-600 text-white rounded px-2 py-1 text-[11px] hover:bg-red-700 disabled:opacity-50">{cleanLoading ? "..." : "Eski SKU'ları Amazon'dan sil"}</button>
+              </div>
+            )}
+            {rep.cleanup && (
+              <pre className="text-[10.5px] bg-gray-900 text-green-200 p-2 rounded overflow-auto max-h-48">{JSON.stringify(rep.cleanup, null, 2)}</pre>
+            )}
             {(rep.image_fetch_check || []).length > 0 && (
               <div className="border rounded p-2">
                 <div className="font-semibold mb-1">Görsel erişim testi</div>
@@ -396,7 +421,7 @@ export default function AmazonSpApi({ embedded = false }) {
                 </tr></thead>
                 <tbody>
                   {(rep.listings || []).map((l, i) => (
-                    <tr key={i} className={`border-b align-top ${l.found === false ? "bg-gray-50 text-gray-400" : (l.issues?.length ? "bg-red-50/60" : "")}`}>
+                    <tr key={i} className={`border-b align-top ${l.found === false ? "bg-gray-50 text-gray-400" : (l.role === "legacy-duplicate?" ? "bg-red-100" : (l.issues?.length ? "bg-red-50/60" : ""))}`}>
                       <td className="py-1 pr-2 font-mono">{l.sku}</td>
                       <td className="py-1 pr-2">{l.role || "-"}</td>
                       <td className="py-1 pr-2">{l.found === false ? `yok (HTTP ${l.http})` : (l.status?.join ? l.status.join(", ") : String(l.status || ""))}</td>

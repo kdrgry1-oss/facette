@@ -264,6 +264,20 @@ async def _serve(path: str, w: int = 0, q: int = 90):
 _JPEG_ALLOWED_HOSTS = {"cdn.facette.com.tr", "static.ticimax.cloud"}
 
 
+@router.get("/jpeg/{token}.jpg")
+async def image_to_jpeg_ext(token: str, w: int = 2000):
+    """Amazon media_location için .jpg UZANTILI proxy: /api/upload/jpeg/<urlsafe-b64(src)>.jpg.
+    Amazon (ERROR 20015) dosya türünü URL/uzantı + içerikten doğrular; uzantısız
+    ?src= biçimi reddediliyordu. Aynı SSRF/boyut korumalarıyla to-jpeg'e delege eder."""
+    import base64
+    try:
+        pad = "=" * (-len(token) % 4)
+        src = base64.urlsafe_b64decode((token + pad).encode()).decode("utf-8")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Geçersiz görsel anahtarı")
+    return await image_to_jpeg(src, w)
+
+
 @router.get("/to-jpeg")
 async def image_to_jpeg(src: str, w: int = 2000):
     """src (yalnız izinli CDN host) görselini tam çözünürlükte JPEG'e çevirip döndürür.
