@@ -135,19 +135,27 @@ async def redeem_gift_card_for_order(code: str, order: dict, payable_total: floa
     return {"ok": False, "amount": 0.0, "code": code, "error": "Hediye çeki şu an kullanılamadı, tekrar deneyin"}
 
 
-async def refund_gift_card_once(order: dict) -> float:
-    """Sipariş iptalinde bakiye iadesi — İDEMPOTENT (sipariş bayrağı atomik kilit)."""
+async def refund_gift_card_once(order: dict, unpersisted: bool = False) -> float:
+    """Sipariş iptalinde bakiye/hak iadesi — İDEMPOTENT (sipariş bayrağı atomik kilit).
+    unpersisted=True: sipariş HENÜZ veritabanına yazılmadı (create_order 409 tutar-uyuşmazlığı
+    geri alması) — kilit siparişte aranmaz, rezerve doğrudan geri verilir. (KÖK NEDEN: eskiden
+    409'da kilit 'modified_count=0' dönüp iade HİÇ yapılmıyor, çekin hakkı/bakiyesi kayboluyordu.)"""
     gc = order.get("gift_card") or {}
     amount = round(float(gc.get("amount") or 0), 2)
     code = (gc.get("code") or "").strip().upper()
     if amount <= 0 or not code:
         return 0.0
-    lock = await db.orders.update_one(
-        {"id": order.get("id"), "gift_card.refunded": {"$ne": True}},
-        {"$set": {"gift_card.refunded": True, "gift_card.refunded_at": _now_iso()}},
-    )
-    if not lock.modified_count:
-        return 0.0  # zaten iade edilmiş
+    if unpersisted:
+        if gc.get("refunded"):
+            return 0.0
+        gc["refunded"] = True
+    else:
+        lock = await db.orders.update_one(
+            {"id": order.get("id"), "gift_card.refunded": {"$ne": True}},
+            {"$set": {"gift_card.refunded": True, "gift_card.refunded_at": _now_iso()}},
+        )
+        if not lock.modified_count:
+            return 0.0  # zaten iade edilmiş
     card = await db.gift_cards.find_one({"code": code}, {"_id": 0, "value_type": 1})
     if (card or {}).get("value_type") == "percent":
         # Yüzde çeki: bakiye yok → kullanım hakkı geri verilir, çek yeniden aktif olur.

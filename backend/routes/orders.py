@@ -1597,12 +1597,13 @@ async def create_order(
         if _enforce_match:
             # Rezerve edilen bakiyeleri (puan / hediye çeki) geri ver — sipariş açılmıyor.
             try:
+                # Sipariş HENÜZ yazılmadı → unpersisted=True (aksi halde kilit bulunamayıp iade atlanıyordu)
                 if order.get("points_used"):
                     from .loyalty import refund_points_once
-                    await refund_points_once(order)
+                    await refund_points_once(order, unpersisted=True)
                 if order.get("gift_card"):
                     from .gift_cards import refund_gift_card_once
-                    await refund_gift_card_once(order)
+                    await refund_gift_card_once(order, unpersisted=True)
             except Exception as _rb_err:
                 logger.error(f"[TUTAR-UYUSMAZLIGI] bakiye geri alınamadı: {_rb_err}")
             # Sunucunun hesapladığı tutar mesaja YAZILIR: (a) müşteri neyi onaylayacağını görür,

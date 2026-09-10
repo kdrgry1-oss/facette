@@ -98,17 +98,23 @@ async def spend_points_for_order(user_id: str, order: dict, payable_total: float
     return {"ok": False, "points": 0.0, "error": "Puan şu an kullanılamadı, tekrar deneyin"}
 
 
-async def refund_points_once(order: dict) -> float:
-    """Sipariş iptalinde kullanılan puanın idempotent iadesi (atomik bayrak kilidi)."""
+async def refund_points_once(order: dict, unpersisted: bool = False) -> float:
+    """Sipariş iptalinde kullanılan puanın idempotent iadesi (atomik bayrak kilidi).
+    unpersisted=True: sipariş henüz DB'de yok (create_order 409 geri alması) → kilit aranmaz."""
     used = round(float(order.get("points_used") or 0), 2)
     uid = order.get("user_id")
     if used <= 0 or not uid:
         return 0.0
-    lock = await db.orders.update_one(
-        {"id": order.get("id"), "points_used": {"$gt": 0}, "points_refunded": {"$ne": True}},
-        {"$set": {"points_refunded": True}})
-    if not lock.modified_count:
-        return 0.0
+    if unpersisted:
+        if order.get("points_refunded"):
+            return 0.0
+        order["points_refunded"] = True
+    else:
+        lock = await db.orders.update_one(
+            {"id": order.get("id"), "points_used": {"$gt": 0}, "points_refunded": {"$ne": True}},
+            {"$set": {"points_refunded": True}})
+        if not lock.modified_count:
+            return 0.0
     await db.users.update_one({"id": uid}, {"$inc": {"loyalty_points": used}})
     await db.loyalty_transactions.insert_one({
         "user_id": uid, "type": "refund", "points": used,
