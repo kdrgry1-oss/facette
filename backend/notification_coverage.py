@@ -171,6 +171,15 @@ _MODE_TR = {"auto": "OTOMATİK", "manual": "ELLE", "none": "TETİKLENMİYOR"}
 _MODE_CLS = {"auto": "ok", "manual": "warn", "none": "bad"}
 
 
+def default_sms_texts() -> dict:
+    """routes/notifications._DEFAULT_TEMPLATES → {event: sms metni} (statik kopya için)."""
+    try:
+        from routes.notifications import _DEFAULT_TEMPLATES
+        return {k[0]: v for k, v in _DEFAULT_TEMPLATES.items() if k[1] == "sms" and v}
+    except Exception:
+        return {}
+
+
 async def live_counts(db, days: int = 90) -> dict:
     """notification_logs → {event: {channel: {status: n}}} + şablon aktiflik {event: {channel: enabled}}"""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -190,18 +199,26 @@ async def live_counts(db, days: int = 90) -> dict:
     except Exception:
         pass
     tpl: dict = {}
+    texts: dict = {}   # {event: {"sms": body, "email_subject": subject}}
     try:
-        async for t in db.notification_templates.find({}, {"_id": 0, "event": 1, "channel": 1, "enabled": 1}):
-            tpl.setdefault(str(t.get("event") or ""), {})[str(t.get("channel") or "")] = bool(t.get("enabled", True))
+        async for t in db.notification_templates.find({}, {"_id": 0, "event": 1, "channel": 1, "enabled": 1, "body": 1, "subject": 1}):
+            ev, ch = str(t.get("event") or ""), str(t.get("channel") or "")
+            tpl.setdefault(ev, {})[ch] = bool(t.get("enabled", True))
+            if ch == "sms":
+                texts.setdefault(ev, {})["sms"] = str(t.get("body") or "")
+            elif ch == "email":
+                texts.setdefault(ev, {})["email_subject"] = str(t.get("subject") or "")
     except Exception:
         pass
-    return {"since": since, "days": days, "counts": out, "templates": tpl}
+    return {"since": since, "days": days, "counts": out, "templates": tpl, "texts": texts}
 
 
 def build_report(live: dict | None = None, title: str = "Bildirim Kapsam Raporu") -> dict:
     """Envanter + (varsa) canlı sayaçları birleştirir; JSON + HTML döner."""
     counts = (live or {}).get("counts") or {}
     tpls = (live or {}).get("templates") or {}
+    texts = (live or {}).get("texts") or {}
+    defaults = default_sms_texts()
     rows = []
     for ev in COVERAGE:
         c = counts.get(ev["key"], {})
@@ -214,6 +231,10 @@ def build_report(live: dict | None = None, title: str = "Bildirim Kapsam Raporu"
         row["email"] = {"success": _n("email", "success"), "failed": _n("email", "failed"), "skipped": _n("email", "skipped"),
                         "last": (c.get("email") or {}).get("_last", ""), "enabled": (tpls.get(ev["key"]) or {}).get("email")}
         row["fired"] = (row["sms"]["success"] + row["email"]["success"]) > 0
+        _t = texts.get(ev["key"]) or {}
+        row["sms_text"] = _t.get("sms") or defaults.get(ev["key"]) or ""
+        row["sms_text_source"] = "panel" if _t.get("sms") else ("varsayılan" if defaults.get(ev["key"]) else "")
+        row["email_subject"] = _t.get("email_subject") or ""
         rows.append(row)
     unknown = sorted(k for k in counts.keys() if k and k not in {e["key"] for e in COVERAGE})
     return {"title": title, "generated_at": datetime.now(timezone.utc).isoformat(), "live": bool(live),
@@ -251,11 +272,18 @@ def render_html(rep: dict, auto_print: bool = False) -> str:
         fired = ""
         if live:
             fired = ("<span class='pill ok'>LOGDA VAR</span>" if r["fired"] else "<span class='pill bad'>LOGDA YOK</span>")
+        if r.get("sms_text"):
+            sms_txt = (f"<div class='smsbox'>{e(r['sms_text'])}</div>"
+                       f"<div class='muted small'>kaynak: {e(r['sms_text_source'])}"
+                       + (f" · e-posta konusu: {e(r['email_subject'])}" if r.get("email_subject") else "") + "</div>")
+        else:
+            sms_txt = "<span class='muted'>SMS şablonu yok</span>" + (f"<div class='muted small'>e-posta konusu: {e(r['email_subject'])}</div>" if r.get("email_subject") else "")
         trs.append(
             f"<tr><td><b>{e(r['name'])}</b><div class='muted mono'>{e(r['key'])}</div>"
             f"<div class='muted small'>{e(r['channels_cfg'])}</div></td>"
             f"<td class='c'><span class='pill {cls}'>{r['mode_tr']}</span><div style='margin-top:4px'>{fired}</div></td>"
             f"<td><ul>{trig}</ul>{note}</td>"
+            f"<td class='smscol'>{sms_txt}</td>"
             f"{cell(r['sms'], live)}{cell(r['email'], live)}</tr>")
     gaps = "".join(f"<li>{e(g)}</li>" for g in rep["gaps"])
     dups = "".join(f"<li>{e(d)}</li>" for d in rep["duplicates"])
@@ -278,6 +306,7 @@ ul{{margin:0;padding-left:16px}} li{{margin:2px 0}}
 .pill{{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;border:1px solid}}
 .pill.ok{{background:#ecfdf5;color:#047857;border-color:#a7f3d0}} .pill.warn{{background:#fffbeb;color:#b45309;border-color:#fde68a}} .pill.bad{{background:#fef2f2;color:#b91c1c;border-color:#fecaca}}
 .okc{{color:#047857}} .badc{{color:#b91c1c;font-weight:700}}
+.smsbox{{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;background:#f6f6f4;border:1px solid #e3e3df;padding:5px 6px;white-space:pre-wrap;word-break:break-word}}
 .note{{margin-top:5px;padding:5px 7px;background:#fffbeb;border-left:3px solid #f59e0b;font-size:11px}}
 .sum{{display:flex;gap:12px;margin:10px 0}} .sum div{{border:1px solid #ddd;padding:8px 12px;border-radius:6px}} .sum b{{font-size:18px;display:block}}
 @media print{{ body{{padding:10mm}} h2{{page-break-after:avoid}} tr{{page-break-inside:avoid}} @page{{size:A4 landscape;margin:10mm}} }}
@@ -286,7 +315,7 @@ ul{{margin:0;padding-left:16px}} li{{margin:2px 0}}
 <div class="muted">FACETTE · oluşturma: {e(rep['generated_at'][:16].replace('T',' '))} UTC · {e(live_note)}</div>
 <div class="sum"><div><b>{len(rep['rows'])}</b>bildirim tipi</div><div><b class="okc">{n_auto}</b>otomatik tetiklenen</div><div><b style="color:#b45309">{n_man}</b>yalnız elle</div><div><b class="badc">{n_none}</b>hiç tetiklenmeyen / şablonu kullanılmayan</div></div>
 <h2>1) Bildirim tipleri — nereden tetikleniyor, gidiyor mu?</h2>
-<table><thead><tr><th style="width:22%">Bildirim</th><th style="width:9%">Tetik</th><th>Nerede / nasıl tetiklenir</th><th style="width:13%">SMS (log)</th><th style="width:13%">E-posta (log)</th></tr></thead>
+<table><thead><tr><th style="width:17%">Bildirim</th><th style="width:8%">Tetik</th><th style="width:27%">Nerede / nasıl tetiklenir</th><th style="width:26%">SMS metni</th><th style="width:11%">SMS (log)</th><th style="width:11%">E-posta (log)</th></tr></thead>
 <tbody>{''.join(trs)}</tbody></table>
 {unl_html}
 <h2>2) Mükerrer / çakışan tanımlar</h2><ul>{dups}</ul>
