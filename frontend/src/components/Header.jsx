@@ -474,8 +474,7 @@ export default function Header({ hideMenu = false, announcement = null, announce
                       {_isFullLook(col.title) && <span aria-hidden="true" className="block w-7 h-px bg-black/25 mb-3" />}
                       <Link
                         to={col.link}
-                        style={_isFullLook(col.title) ? { fontWeight: 700 } : undefined}
-                        className={`block py-1 text-sm text-gray-700 hover:text-black transition-colors${_isDowntownCode(col.title) ? " italic" : ""}${_isFullLook(col.title) ? " text-black tracking-[0.08em]" : ""}`}
+                        className={`block py-1 text-sm text-gray-700 hover:text-black transition-colors${_isDowntownCode(col.title) ? " italic" : ""}${_isFullLook(col.title) ? " nav-full-look text-black tracking-[0.08em]" : ""}`}
                         onClick={() => setActiveMenu(null)}
                         onMouseEnter={() => setHoveredCategory(col.slug)}
                       >
@@ -578,10 +577,11 @@ export default function Header({ hideMenu = false, announcement = null, announce
                             {/* Alt kategorisi olmayan kolon (ör. koleksiyon) normal satır linki olarak ALT ALTA */}
                             <Link
                               to={col.link}
-                              style={_isFullLook(col.title) ? { fontWeight: 700 } : undefined}
-                              className={`${col.items.length
-                                ? "block text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5 hover:underline"
-                                : "block py-1.5 text-[13px] font-light text-black/75"}${_isDowntownCode(col.title) ? " italic" : ""}${_isFullLook(col.title) ? " !text-black tracking-[0.08em]" : ""}`}
+                              className={_isFullLook(col.title)
+                                ? "nav-full-look block py-1.5 text-[13px] text-black tracking-[0.08em]"
+                                : `${col.items.length
+                                  ? "block text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5 hover:underline"
+                                  : "block py-1.5 text-[13px] font-light text-black/75"}${_isDowntownCode(col.title) ? " italic" : ""}`}
                               onClick={() => setMobileMenuOpen(false)}
                             >
                               {col.title}
