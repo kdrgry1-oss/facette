@@ -63,8 +63,8 @@ export default function CustomerSegments() {
 
   const exportCsv = () => {
     if (!filtered.length) return;
-    const header = ["Email", "Ad", "Telefon", "Segment", "R", "F", "M", "RFM", "Sipariş", "Toplam Harcama", "Son Sipariş", "Recency (gün)"];
-    const rows = filtered.map((i) => [i.email, i.name || "", i.phone || "", i.segment, i.r, i.f, i.m, i.rfm, i.order_count, i.total_spent, i.last_order, i.recency_days]);
+    const header = ["Email", "Ad", "Telefon", "Segment", "R", "F", "M", "RFM", "Sipariş", "Net Harcama", "İade Düşülen", "Son Sipariş", "Recency (gün)"];
+    const rows = filtered.map((i) => [i.email, i.name || "", i.phone || "", i.segment, i.r, i.f, i.m, i.rfm, i.order_count, i.total_spent, i.returns_deducted ?? 0, i.last_order, i.recency_days]);
     const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
     const a = document.createElement("a");
@@ -159,15 +159,16 @@ export default function CustomerSegments() {
               <th>Ad</th>
               <th>R</th><th>F</th><th>M</th>
               <th>Sipariş</th>
-              <th>Toplam Harcama</th>
+              <th title="NET: iptal/tam iade/ödenmemiş siparişler sayılmaz, kısmi iade tutarı düşülmüştür">Net Harcama</th>
+              <th title="Sayılan siparişlerden düşülen onaylı iade tutarı">İade Düşülen</th>
               <th>Son Sipariş</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} className="text-center py-8 text-gray-400">Yükleniyor...</td></tr>
+              <tr><td colSpan={10} className="text-center py-8 text-gray-400">Yükleniyor...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={9} className="text-center py-10 text-gray-400">Kayıt yok</td></tr>
+              <tr><td colSpan={10} className="text-center py-10 text-gray-400">Kayıt yok</td></tr>
             ) : (
               filtered.slice(0, 300).map((i, idx) => {
                 const meta = SEGMENT_META[i.segment] || SEGMENT_META["Standart"];
@@ -185,6 +186,7 @@ export default function CustomerSegments() {
                     <td><span className="font-mono text-xs font-bold">{i.m}</span></td>
                     <td className="text-sm font-semibold">{i.order_count}</td>
                     <td className="text-sm font-bold text-green-700">{i.total_spent?.toFixed(2)} ₺</td>
+                    <td className="text-xs text-red-600">{i.returns_deducted > 0 ? `−${i.returns_deducted.toFixed(2)} ₺` : "—"}</td>
                     <td className="text-[11px] text-gray-500">
                       {i.last_order ? `${new Date(i.last_order).toLocaleDateString("tr-TR")} (${i.recency_days}g)` : "-"}
                     </td>

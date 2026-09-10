@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Users, Search, UserPlus, Eye, Mail, Phone, ShoppingCart, TrendingUp,
   Crown, Star, UserCheck, UserX, X, Trash2, Edit,
-  RotateCcw, Ban,
+  RotateCcw, Ban, Download,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, Tooltip as RTooltip, ResponsiveContainer } from "recharts";
 
@@ -133,6 +133,27 @@ export default function Members() {
     finally { setLoading(false); }
   };
 
+  // Excel: ekrandaki filtre + sıralama ile TÜM sayfalar (segment, net sipariş/harcama, iade, kaynak…)
+  const [exporting, setExporting] = useState(false);
+  const exportMembersXlsx = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ sort: sortBy, dir: sortDir, date_field: dateField });
+      if (search) params.set("search", search);
+      if (segment) params.set("segment", segment);
+      if (source) params.set("source", source);
+      if (dStart) params.set("start", dStart);
+      if (dEnd) params.set("end", dEnd);
+      const r = await axios.get(`${API}/admin/members/export.xlsx?${params}`, { headers: authHeaders(), responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = `uyeler-${new Date().toISOString().slice(0, 10)}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Excel indirildi");
+    } catch (e) { toast.error("Excel oluşturulamadı"); }
+    finally { setExporting(false); }
+  };
+
   const loadStats = async () => {
     try {
       const { data } = await axios.get(`${API}/admin/members/stats`, { headers: authHeaders() });
@@ -205,13 +226,24 @@ export default function Members() {
           <h1 className="text-2xl font-bold flex items-center gap-2"><Users className="text-slate-700" /> Üyeler</h1>
           <p className="text-sm text-gray-500 mt-1">Kayıtlı üyeleri yönetin, segmentlere ayırın ve kaynaklarını görün.</p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          data-testid="add-member-btn"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
-        >
-          <UserPlus size={16} /> Yeni Üye
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportMembersXlsx}
+            disabled={exporting}
+            data-testid="export-members-btn"
+            title="Ekrandaki filtre/sıralamayla üye listesini Excel indir (segment, net sipariş/harcama, iade, kaynak…)"
+            className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium disabled:opacity-50"
+          >
+            <Download size={16} /> {exporting ? "Hazırlanıyor…" : "Excel"}
+          </button>
+          <button
+            onClick={() => setShowCreate(true)}
+            data-testid="add-member-btn"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
+          >
+            <UserPlus size={16} /> Yeni Üye
+          </button>
+        </div>
       </div>
 
       {/* Stats */}

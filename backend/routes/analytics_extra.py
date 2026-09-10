@@ -69,14 +69,26 @@ async def rfm_analysis(
               "VIP" segmentine öncelikli teslimat teklifleri üretir.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
+    # NET CİRO (kullanıcı isteği): iptal/tam iade/ödenmemiş siparişler sayılmaz; KISMİ iadeli
+    # sipariş (partial_refunded vb.) sayılır ama onaylanan iade tutarı (customer_returns.refund_amount)
+    # harcamadan düşülür → segment (VIP vb.) iptal-iade düştükten sonraki tutarla belirlenir.
+    _RET_OK = ["approved", "return_approved", "refunded", "partial_refunded", "completed"]
     pipeline = [
         {"$match": {"created_at": {"$gte": cutoff},
                     "status": {"$nin": [
                         "cancelled", "cancel_refunded",
-                        "awaiting_payment", "payment_failed", "pending", "payment_notified",
+                        "awaiting_payment", "payment_failed", "failed", "pending", "payment_notified",
                         "return_requested", "return_approved", "return_in_transit",
-                        "returned", "refunded", "partial_refunded"]}}},
+                        "returned", "refunded"]},
+                    "payment_status": {"$nin": ["expired", "failed", "refunded"]}}},
         {"$match": merge_match({})},  # ticimax_history ÇİFT kayıtları hariç
+        {"$lookup": {"from": "customer_returns", "localField": "id", "foreignField": "order_id", "as": "_rets"}},
+        {"$addFields": {"_net": {"$max": [0, {"$subtract": [
+            {"$ifNull": ["$total", {"$ifNull": ["$total_amount", 0]}]},
+            {"$sum": {"$map": {
+                "input": {"$filter": {"input": "$_rets", "as": "r",
+                                      "cond": {"$in": [{"$ifNull": ["$$r.status", ""]}, _RET_OK]}}},
+                "as": "r", "in": {"$ifNull": ["$$r.refund_amount", 0]}}}}]}]}}},
         {"$group": {
             "_id": {"$ifNull": ["$customer_email",
                                 {"$ifNull": ["$user_email",
@@ -84,7 +96,8 @@ async def rfm_analysis(
                                                           "$shipping_address.email"]}]}]},
             "last_order": {"$max": "$created_at"},
             "order_count": {"$sum": 1},
-            "total_spent": {"$sum": {"$ifNull": ["$total", "$total_amount"]}},
+            "total_spent": {"$sum": "$_net"},
+            "gross_spent": {"$sum": {"$ifNull": ["$total", {"$ifNull": ["$total_amount", 0]}]}},
             "name": {"$last": {"$ifNull": ["$customer_name",
                                            {"$ifNull": ["$shipping_address.full_name",
                                                         "$shipping_address.name"]}]}},
@@ -143,6 +156,8 @@ async def rfm_analysis(
             "recency_days": r["recency_days"],
             "order_count": r["order_count"],
             "total_spent": round(r["total_spent"] or 0, 2),
+            "gross_spent": round(r.get("gross_spent") or 0, 2),
+            "returns_deducted": round((r.get("gross_spent") or 0) - (r["total_spent"] or 0), 2),
             "r": R, "f": F, "m": M,
             "rfm": f"{R}{F}{M}",
             "segment": seg,
@@ -153,6 +168,8 @@ async def rfm_analysis(
         "total": len(items),
         "segments": seg_counts,
         "items": items,
+        "net_basis": True,
+        "note": "Tutarlar NET: iptal/tam iade/ödenmemiş siparişler sayılmaz, kısmi iade tutarı düşülür.",
     }
 
 

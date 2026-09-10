@@ -36,16 +36,46 @@ def _member_order_match(user: dict) -> dict:
     return {"$or": ors}
 
 
+# NET CİRO KURALI (kullanıcı isteği): üye istatistikleri / segment (VIP vb.) İPTAL ve İADE
+# DÜŞÜLDÜKTEN SONRA hesaplanır. Sayılmayan sipariş durumları: iptal, tam iade, ödemesi
+# gelmemiş/başarısız ve iade sürecindeki siparişler. Sayılan siparişte KISMİ iade varsa
+# (partial_refunded vb.) onaylanmış iade kaydının tutarı (customer_returns.refund_amount)
+# harcamadan düşülür (tam-iade siparişi zaten sayılmadığı için çift düşüm yok).
+_NON_REVENUE_STATUSES = [
+    "cancelled", "cancel_refunded", "returned", "refunded",
+    "awaiting_payment", "payment_failed", "failed", "payment_notified",
+    "return_requested", "return_approved", "return_in_transit",
+]
+_NON_REVENUE_PAYMENT = ["expired", "failed", "refunded"]
+_RETURN_COUNTED_STATUSES = ["approved", "return_approved", "refunded", "partial_refunded", "completed"]
+
+
+def _revenue_order_match() -> dict:
+    return {"status": {"$nin": _NON_REVENUE_STATUSES},
+            "payment_status": {"$nin": _NON_REVENUE_PAYMENT}}
+
+
+def _segment_for(net_spent: float, orders: int) -> str:
+    return "vip" if net_spent >= 5000 else ("returning" if orders >= 2 else ("new" if orders == 1 else "prospect"))
+
+
 async def _annotate(user: dict) -> dict:
     uid = user.get("id")
     # Aggregate order stats
+    # NET: iptal/iade/ödenmemiş siparişler sayılmaz; sayılan siparişteki kısmi iade tutarı düşülür.
     pipeline = [
-        {"$match": {"$and": [_member_order_match(user), {"status": {"$ne": "cancelled"}}]}},
+        {"$match": {"$and": [_member_order_match(user), _revenue_order_match()]}},
+        {"$lookup": {"from": "customer_returns", "localField": "id", "foreignField": "order_id", "as": "_rets"}},
+        {"$addFields": {"_ret_amt": {"$sum": {"$map": {
+            "input": {"$filter": {"input": "$_rets", "as": "r",
+                                  "cond": {"$in": [{"$ifNull": ["$$r.status", ""]}, _RETURN_COUNTED_STATUSES]}}},
+            "as": "r", "in": {"$ifNull": ["$$r.refund_amount", 0]}}}}}},
         {
             "$group": {
                 "_id": None,
                 "orders": {"$sum": 1},
-                "total_spent": {"$sum": {"$ifNull": ["$total", 0]}},
+                "gross": {"$sum": {"$ifNull": ["$total", 0]}},
+                "ret_amt": {"$sum": "$_ret_amt"},
                 "last_order_at": {"$max": "$created_at"},
             }
         },
@@ -53,20 +83,15 @@ async def _annotate(user: dict) -> dict:
     agg = None
     async for row in db.orders.aggregate(pipeline):
         agg = row
+    _gross = float(agg["gross"]) if agg else 0.0
+    _ret = float(agg.get("ret_amt") or 0) if agg else 0.0
     user["orders_count"] = int(agg["orders"]) if agg else 0
-    user["total_spent"] = round(float(agg["total_spent"]), 2) if agg else 0.0
+    user["gross_spent"] = round(_gross, 2)
+    user["total_spent"] = round(max(0.0, _gross - _ret), 2)
     user["last_order_at"] = agg.get("last_order_at") if agg else None
 
-    # Segment
-    spent = user["total_spent"]
-    if spent >= 5000:
-        user["segment"] = "vip"
-    elif user["orders_count"] >= 2:
-        user["segment"] = "returning"
-    elif user["orders_count"] == 1:
-        user["segment"] = "new"
-    else:
-        user["segment"] = "prospect"
+    # Segment — NET harcamaya göre (iptal/iade düşülmüş)
+    user["segment"] = _segment_for(user["total_spent"], user["orders_count"])
     return user
 
 
@@ -161,8 +186,9 @@ async def _refresh_member_stats() -> dict:
     user_id ile eşleşen (kayıtlı üye) sipariş­leri baz alır — liste/segment görünümü için hızlı ve
     yeterli. Misafir-email-only siparişler hariç (üye 360 detayı tam eşleşmeyi ayrıca yapar)."""
     from pymongo import UpdateOne
+    # NET: iptal/iade/ödenmemiş siparişler sayılmaz (bkz. _revenue_order_match).
     pipeline = [
-        {"$match": {"user_id": {"$ne": None}, "status": {"$ne": "cancelled"}}},
+        {"$match": {"user_id": {"$ne": None}, **_revenue_order_match()}},
         {"$group": {"_id": "$user_id", "o": {"$sum": 1},
                     "t": {"$sum": {"$ifNull": ["$total", 0]}}, "last": {"$max": "$created_at"}}},
     ]
@@ -170,28 +196,44 @@ async def _refresh_member_stats() -> dict:
     # (İade kaydı yalnız siparişi olan üyede olur → orders döngüsünde eşleşir; 0'a düşen üye de
     #  orders döngüsünde güncellenir çünkü siparişi vardır.)
     ret_map: dict = {}
+    # Sayılan (kısmi iadeli) siparişlerdeki onaylı iade tutarı → NET harcamadan düşülür.
+    ded_map: dict = {}
     try:
         async for row in db.customer_returns.aggregate([
             {"$lookup": {"from": "orders", "localField": "order_id",
                          "foreignField": "id", "as": "o"}},
             {"$unwind": "$o"},
             {"$match": {"o.user_id": {"$ne": None}}},
+            {"$addFields": {
+                "_counted_order": {"$and": [
+                    {"$not": [{"$in": [{"$ifNull": ["$o.status", ""]}, _NON_REVENUE_STATUSES]}]},
+                    {"$not": [{"$in": [{"$ifNull": ["$o.payment_status", ""]}, _NON_REVENUE_PAYMENT]}]},
+                ]},
+                "_approved": {"$in": [{"$ifNull": ["$status", ""]}, _RETURN_COUNTED_STATUSES]},
+            }},
             {"$group": {"_id": "$o.user_id", "rn": {"$sum": 1},
-                        "ra": {"$sum": {"$ifNull": ["$refund_amount", 0]}}}},
+                        "ra": {"$sum": {"$ifNull": ["$refund_amount", 0]}},
+                        "ded": {"$sum": {"$cond": [{"$and": ["$_counted_order", "$_approved"]},
+                                                   {"$ifNull": ["$refund_amount", 0]}, 0]}}}},
         ], allowDiskUse=True):
             ret_map[row["_id"]] = (int(row.get("rn") or 0), round(float(row.get("ra") or 0), 2))
+            ded_map[row["_id"]] = round(float(row.get("ded") or 0), 2)
     except Exception as e:
         logger.warning(f"[members] iade önbelleği hesaplanamadı: {e}")
 
     ops, n = [], 0
+    seen_users: set = set()
     _now = datetime.now(timezone.utc).isoformat()
     async for row in db.orders.aggregate(pipeline, allowDiskUse=True):
         o = int(row.get("o") or 0)
-        t = round(float(row.get("t") or 0), 2)
-        seg = "vip" if t >= 5000 else ("returning" if o >= 2 else ("new" if o == 1 else "prospect"))
+        gross = round(float(row.get("t") or 0), 2)
+        t = round(max(0.0, gross - ded_map.get(row["_id"], 0.0)), 2)  # NET (kısmi iade düşülmüş)
+        seg = _segment_for(t, o)
         rn, ra = ret_map.get(row["_id"], (0, 0.0))
+        seen_users.add(row["_id"])
         ops.append(UpdateOne({"id": row["_id"]}, {"$set": {
-            "cached_orders": o, "cached_spent": t, "cached_last_order": row.get("last"),
+            "cached_orders": o, "cached_spent": t, "cached_gross_spent": gross,
+            "cached_last_order": row.get("last"),
             "cached_segment": seg, "cached_returns": rn, "cached_returns_amount": ra,
             "stats_refreshed_at": _now}}))
         if len(ops) >= 500:
@@ -201,6 +243,16 @@ async def _refresh_member_stats() -> dict:
     if ops:
         await db.users.bulk_write(ops, ordered=False)
         n += len(ops)
+    # Tüm siparişleri iptal/iade olan üye artık gelir sorgusunda görünmez → eski önbelleği
+    # (ör. vip) sıfırla ki segment de net ciroyu yansıtsın.
+    try:
+        _stale = await db.users.update_many(
+            {"cached_orders": {"$gt": 0}, "id": {"$nin": list(seen_users)}},
+            {"$set": {"cached_orders": 0, "cached_spent": 0, "cached_gross_spent": 0,
+                      "cached_segment": "prospect", "stats_refreshed_at": _now}})
+        n += int(_stale.modified_count or 0)
+    except Exception as e:
+        logger.warning(f"[members] eski önbellek sıfırlama hatası: {e}")
     return {"updated": n, "at": _now}
 
 
@@ -208,6 +260,113 @@ async def _refresh_member_stats() -> dict:
 async def refresh_stats(current_user: dict = Depends(require_admin)):
     """Üye sipariş istatistiklerini (cached_*) yeniden hesapla — liste/segment/stats bundan okur."""
     return await _refresh_member_stats()
+
+
+_SEGMENT_TR = {"vip": "VIP", "returning": "Tekrar Alan", "new": "Yeni", "prospect": "Potansiyel"}
+
+
+@router.get("/export.xlsx")
+async def export_members_xlsx(
+    search: Optional[str] = None,
+    segment: Optional[str] = None,
+    source: Optional[str] = None,
+    sort: Optional[str] = "created",
+    dir: Optional[str] = "desc",
+    date_field: Optional[str] = "created",
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Üye listesini (ekrandaki filtre/sıralamayla) Excel'e verir: ad, e-posta, telefon, SEGMENT,
+    NET sipariş/harcama (iptal-iade düşülmüş), brüt harcama, iade sayısı/tutarı, son sipariş,
+    katılım, kaynak. Tutarlar önbellekten (cached_*) — güncel için önce 'İstatistikleri Yenile'."""
+    import io
+    from fastapi.responses import StreamingResponse
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    query: dict = {"is_admin": {"$ne": True}}
+    if search:
+        import re as _re
+        _s = _re.escape(str(search).strip())
+        query["$or"] = [{"email": {"$regex": _s, "$options": "i"}},
+                        {"first_name": {"$regex": _s, "$options": "i"}},
+                        {"last_name": {"$regex": _s, "$options": "i"}},
+                        {"phone": {"$regex": _s, "$options": "i"}}]
+    if source:
+        query["acquisition_source"] = source
+    _dfld = "cached_last_order" if (date_field == "last_order") else "created_at"
+    if start or end:
+        _dq = {}
+        if start:
+            _dq["$gte"] = start
+        if end:
+            _dq["$lte"] = end if len(end) > 10 else end + "T23:59:59"
+        query[_dfld] = _dq
+    if segment:
+        seg_match = ({"$or": [{"cached_segment": "prospect"}, {"cached_segment": {"$exists": False}}]}
+                     if segment == "prospect" else {"cached_segment": segment})
+        query = {"$and": [query, seg_match]}
+    _sort_map = {"name": "first_name", "orders": "cached_orders", "spent": "cached_spent",
+                 "last_order": "cached_last_order", "created": "created_at",
+                 "segment": "cached_segment", "source": "acquisition_source", "returns": "cached_returns"}
+    _sf = _sort_map.get((sort or "created"), "created_at")
+    _dir = -1 if (dir or "desc").lower() != "asc" else 1
+
+    def _d(v):
+        v = str(v or "")
+        return v[:10] if len(v) >= 10 else v
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Üyeler"
+    headers = ["Ad", "Soyad", "E-posta", "Telefon", "Segment", "Sipariş (net)", "Harcama (net) ₺",
+               "Brüt Harcama ₺", "İade Sayısı", "İade Tutarı ₺", "Son Sipariş", "Katılım", "Kaynak",
+               "E-posta İzni", "SMS İzni", "Aktif"]
+    ws.append(headers)
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="111111")
+        c.alignment = Alignment(vertical="center")
+    n = 0
+    async for u in db.users.find(query, {"_id": 0, "password": 0}).sort([(_sf, _dir), ("_id", 1)]).limit(50000):
+        seg = u.get("cached_segment") or "prospect"
+        ws.append([
+            u.get("first_name") or "", u.get("last_name") or "", u.get("email") or "",
+            u.get("phone") or "", _SEGMENT_TR.get(seg, seg),
+            int(u.get("cached_orders") or 0), round(float(u.get("cached_spent") or 0), 2),
+            round(float(u.get("cached_gross_spent") if u.get("cached_gross_spent") is not None else (u.get("cached_spent") or 0)), 2),
+            int(u.get("cached_returns") or 0), round(float(u.get("cached_returns_amount") or 0), 2),
+            _d(u.get("cached_last_order")), _d(u.get("created_at")),
+            u.get("acquisition_source") or "",
+            "Evet" if u.get("email_marketing_consent") or u.get("kvkk_email") or u.get("newsletter") else "",
+            "Evet" if u.get("sms_marketing_consent") or u.get("kvkk_sms") else "",
+            "Hayır" if u.get("is_active") is False else "Evet",
+        ])
+        n += 1
+    widths = [14, 14, 30, 16, 12, 12, 16, 16, 12, 14, 12, 12, 14, 12, 10, 8]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    for row in ws.iter_rows(min_row=2, min_col=7, max_col=8):
+        for c in row:
+            c.number_format = "#,##0.00"
+    for row in ws.iter_rows(min_row=2, min_col=10, max_col=10):
+        for c in row:
+            c.number_format = "#,##0.00"
+    ws2 = wb.create_sheet("Not")
+    ws2.append(["Segment ve harcama NET hesaplanır: iptal, tam iade ve ödemesi gelmemiş siparişler sayılmaz;"])
+    ws2.append(["kısmi iadeli siparişte onaylanan iade tutarı harcamadan düşülür. VIP eşiği: net ≥ 5.000 ₺."])
+    ws2.append([f"Kayıt: {n} · Oluşturma: {datetime.now(timezone.utc).isoformat()[:16].replace('T', ' ')} UTC"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"uyeler-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}.xlsx"
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}", "Cache-Control": "no-store"})
 
 
 @router.get("/stats")
