@@ -1740,6 +1740,127 @@ async def spapi_products_preview(q: str = Query(...), current_user: dict = Depen
 # Fiyatı YAZMAK için Pricing rolü GEREKMEZ (Pricing rolü sadece rakip/Buy Box fiyatı OKUMAK için).
 # İlk fazda ALLOW_WRITE=0 → dry-run; canlı yazma env ile açılır.
 
+@router.get("/listing-report")
+async def amazon_listing_report(product_id: str = Query(None), barcode: str = Query(None),
+                                sku: str = Query(None), asin: str = Query(None),
+                                current_user: dict = Depends(require_admin)):
+    """TEŞHİS: Amazon'daki CANLI listeleme durumu — ürünün (ya da SKU / ASIN'in) her SKU'su için
+    Amazon'un döndürdüğü durum, ASIN, issues[] (neden görsel/beden/varyant düşmüş), gönderilen
+    görsel/beden/renk/varyasyon alanları + görsel URL'lerinin Amazon botu tarafından çekilebilirliği
+    (Cloudflare 403 tespiti). Salt-okunur."""
+    import asyncio as _aio
+    seller = await _require_seller_id()
+    _, _, mp = await get_valid_access_token()
+    inc = "summaries,issues,attributes"
+    out = {"seller": seller, "marketplace_id": mp, "listings": [], "image_fetch_check": [], "notes": []}
+
+    # ── Ürün(ler)i çöz ──
+    products = []
+    if product_id:
+        p = await db.products.find_one({"id": product_id}, {"_id": 0})
+        if p:
+            products = [p]
+    elif barcode:
+        p = await db.products.find_one({"$or": [{"barcode": barcode}, {"variants.barcode": barcode}]}, {"_id": 0})
+        if p:
+            products = [p]
+    skus = []
+    if sku:
+        skus.append(("manual", sku))
+    if asin and not products and not sku:
+        # ASIN → SKU araması (searchListingsItems)
+        r = await _spapi_get(f"/listings/2021-08-01/items/{seller}",
+                             {"marketplaceIds": mp, "identifiers": asin, "identifiersType": "ASIN",
+                              "includedData": inc, "pageSize": 20})
+        if r["ok"]:
+            for it in ((r["data"] or {}).get("items") or []):
+                skus.append(("asin-search", it.get("sku")))
+                out["listings"].append(_summarize_listing(it, mp))
+            out["notes"].append(f"ASIN aramasıyla {len(skus)} SKU bulundu")
+        else:
+            out["notes"].append(f"ASIN araması başarısız (HTTP {r['status']}): {str(r['data'])[:200]}")
+    if products:
+        from .integrations_common import _resolve_stock_code as _rsc
+        p0 = products[0]
+        code = _rsc(p0)
+        if code:
+            sibs = await db.products.find(amazon_sibling_query([code]), {"_id": 0}).to_list(50)
+            if sibs:
+                products = sibs
+        parent_cands = {code, f"{p0.get('id')}-P"} - {None, ""}
+        for pc in sorted(parent_cands):
+            skus.append(("parent?", pc))
+        for pp in products:
+            for v in (pp.get("variants") or []):
+                sk = _amazon_seller_sku(v, pp)
+                if sk:
+                    skus.append((f"child:{pp.get('name')}|{v.get('size')}|{v.get('color') or ''}", sk))
+        # Görsel çekilebilirlik testi (Amazon görselleri kendi botuyla indirir; Cloudflare bot
+        # kuralı 403 verirse görsel HİÇ aktarılmaz) — ilk 3 görsel.
+        imgs = _product_images(p0, (p0.get("variants") or [{}])[0])[:3]
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as c:
+            for u in imgs:
+                row = {"url": u}
+                for label, ua in (("amazonbot", "Amazonbot/0.1 (+https://developer.amazon.com/support/amazonbot)"),
+                                  ("generic", "Mozilla/5.0 (compatible; ImageFetcher/1.0)")):
+                    try:
+                        rr = await c.get(u, headers={"User-Agent": ua})
+                        row[label] = {"status": rr.status_code, "content_type": rr.headers.get("content-type", ""),
+                                      "bytes": len(rr.content)}
+                    except Exception as e:
+                        row[label] = {"error": str(e)[:120]}
+                out["image_fetch_check"].append(row)
+        if any((r.get("amazonbot") or {}).get("status") == 403 for r in out["image_fetch_check"]):
+            out["notes"].append("GÖRSEL ENGELİ: Amazon'un görsel botu görsel URL'lerinden 403 alıyor (Cloudflare bot kuralı). "
+                                "Cloudflare → Security → WAF'ta cdn.facette.com.tr ve api.facette.com.tr/api/upload/to-jpeg için "
+                                "'Skip' kuralı (User-Agent contains 'Amazon') gerekir; aksi halde görseller aktarılmaz.")
+    # ── Her SKU için canlı listeleme ──
+    seen = set()
+    for label, sk in skus:
+        if not sk or sk in seen:
+            continue
+        seen.add(sk)
+        if label == "asin-search":
+            continue  # zaten eklendi
+        r = await _spapi_get(f"/listings/2021-08-01/items/{seller}/{sk}", {"marketplaceIds": mp, "includedData": inc})
+        if r["ok"]:
+            row = _summarize_listing(r["data"] or {}, mp)
+            row["role"] = label
+            out["listings"].append(row)
+        else:
+            out["listings"].append({"sku": sk, "role": label, "found": False, "http": r["status"],
+                                    "error": str((r["data"] or {}).get("errors") or r["data"])[:200]})
+        await _aio.sleep(0.25)
+    n_found = sum(1 for l in out["listings"] if l.get("found", True))
+    out["summary"] = {"skus_checked": len(seen), "found_on_amazon": n_found,
+                      "with_issues": sum(1 for l in out["listings"] if l.get("issues")),
+                      "with_images": sum(1 for l in out["listings"] if l.get("image_count"))}
+    return out
+
+
+def _summarize_listing(item: dict, mp: str) -> dict:
+    """Listings Items API yanıtını teşhis satırına indirger."""
+    sums = item.get("summaries") or []
+    s0 = sums[0] if sums else {}
+    attrs = item.get("attributes") or {}
+    def _val(k):
+        v = attrs.get(k) or []
+        return (v[0] or {}).get("value") if v and isinstance(v[0], dict) else None
+    imgs = [k for k in attrs.keys() if k == "main_product_image_locator" or k.startswith("other_product_image_locator")]
+    rel = (attrs.get("child_parent_sku_relationship") or [{}])[0]
+    return {
+        "sku": item.get("sku"), "found": True,
+        "asin": s0.get("asin"), "status": s0.get("status"), "item_name": s0.get("itemName"),
+        "product_type": s0.get("productType"),
+        "parentage": _val("parentage_level"), "variation_theme": ((attrs.get("variation_theme") or [{}])[0]).get("name"),
+        "parent_sku": rel.get("parent_sku"),
+        "size": _val("size"), "color": _val("color"),
+        "image_count": len(imgs), "main_image": (attrs.get("main_product_image_locator") or [{}])[0].get("media_location"),
+        "issues": [{"code": i.get("code"), "severity": i.get("severity"), "message": i.get("message"),
+                    "attributes": i.get("attributeNames")} for i in (item.get("issues") or [])],
+    }
+
+
 @router.get("/write-status")
 async def spapi_write_status(current_user: dict = Depends(require_admin)):
     """Yazma modu açık mı (canlı) yoksa dry-run mu — panelde göstermek için."""

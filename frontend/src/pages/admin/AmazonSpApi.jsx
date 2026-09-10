@@ -172,6 +172,24 @@ export default function AmazonSpApi({ embedded = false }) {
   const [prevQ, setPrevQ] = useState("");
   const [prev, setPrev] = useState(null);
   const [prevLoading, setPrevLoading] = useState(false);
+  // Listeleme teşhisi: Amazon'daki CANLI durum (issues, görsel/beden/varyasyon, görsel-erişim testi)
+  const [repQ, setRepQ] = useState("");
+  const [rep, setRep] = useState(null);
+  const [repLoading, setRepLoading] = useState(false);
+  const runListingReport = async () => {
+    const q = (repQ || "").trim();
+    if (!q) { toast.error("Barkod, SKU veya ASIN gir"); return; }
+    setRepLoading(true); setRep(null);
+    try {
+      const isAsin = /^B0[A-Z0-9]{8}$/i.test(q);
+      const isBarcode = /^\d{8,14}$/.test(q);
+      const param = isAsin ? `asin=${encodeURIComponent(q.toUpperCase())}` : (isBarcode ? `barcode=${encodeURIComponent(q)}` : `sku=${encodeURIComponent(q)}`);
+      const r = await axios.get(`${API}/amazon/spapi/listing-report?${param}`, auth());
+      setRep(r.data);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Teşhis hatası");
+    } finally { setRepLoading(false); }
+  };
   const runPreview = async () => {
     const q = (prevQ || "").trim();
     if (!q) { toast.error("Ürün adı/barkod gir"); return; }
@@ -331,6 +349,69 @@ export default function AmazonSpApi({ embedded = false }) {
           match_report'ta <b>matched:false</b> ise Amazon SellerSKU'n Facette stok kodu/barkoduyla eşleşmiyor →
           bu yüzden resim/stok gelmiyor. Sonucu bana gönder, eşlemeyi ona göre kurayım.
         </p>
+      </div>
+
+      {/* Listeleme Teşhisi — Amazon'daki canlı durum */}
+      <div className="bg-white border rounded-lg p-4 mt-4" data-testid="amazon-listing-report">
+        <h3 className="font-semibold text-sm mb-1">🩺 Listeleme Teşhisi (Amazon'da ne var, ne düşmüş?)</h3>
+        <p className="text-[11px] text-gray-500 mb-2">
+          Barkod (ürünün tüm bedenleri/renkleri), SellerSKU ya da ASIN (ör. B0HGWPMF29) gir → Amazon'un her SKU için döndürdüğü
+          durum, ASIN, <b>hata/uyarılar</b>, gönderilen görsel sayısı, beden/renk/varyasyon alanları ve görsellerin Amazon botu
+          tarafından çekilebilirliği (Cloudflare 403) gösterilir. Salt-okunur.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={repQ} onChange={(e) => setRepQ(e.target.value)} placeholder="barkod / SKU / ASIN"
+            className="border rounded-lg px-3 py-2 text-sm w-72 max-w-full" />
+          <button onClick={runListingReport} disabled={repLoading || !status?.connected}
+            className="inline-flex items-center gap-2 bg-rose-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-rose-700 disabled:opacity-50">
+            {repLoading ? "Sorgulanıyor..." : "Teşhis Et"}
+          </button>
+        </div>
+        {rep && (
+          <div className="mt-3 text-xs space-y-2">
+            {rep.summary && (
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <span><b>SKU:</b> {rep.summary.skus_checked}</span>
+                <span><b>Amazon'da bulunan:</b> {rep.summary.found_on_amazon}</span>
+                <span><b>Hatalı:</b> {rep.summary.with_issues}</span>
+                <span><b>Görselli:</b> {rep.summary.with_images}</span>
+              </div>
+            )}
+            {(rep.notes || []).map((n, i) => <div key={i} className="text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">{n}</div>)}
+            {(rep.image_fetch_check || []).length > 0 && (
+              <div className="border rounded p-2">
+                <div className="font-semibold mb-1">Görsel erişim testi</div>
+                {rep.image_fetch_check.map((r, i) => (
+                  <div key={i} className="font-mono text-[10.5px] break-all">
+                    {r.url} → Amazonbot: <b className={r.amazonbot?.status === 200 ? "text-green-700" : "text-red-600"}>{r.amazonbot?.status || r.amazonbot?.error}</b> · genel: {r.generic?.status || r.generic?.error}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead><tr className="text-left text-gray-500 border-b">
+                  <th className="py-1 pr-2">SKU</th><th className="py-1 pr-2">Rol</th><th className="py-1 pr-2">Amazon</th><th className="py-1 pr-2">ASIN</th>
+                  <th className="py-1 pr-2">Varyasyon</th><th className="py-1 pr-2">Beden / Renk</th><th className="py-1 pr-2">Görsel</th><th className="py-1">Hata / Uyarı</th>
+                </tr></thead>
+                <tbody>
+                  {(rep.listings || []).map((l, i) => (
+                    <tr key={i} className={`border-b align-top ${l.found === false ? "bg-gray-50 text-gray-400" : (l.issues?.length ? "bg-red-50/60" : "")}`}>
+                      <td className="py-1 pr-2 font-mono">{l.sku}</td>
+                      <td className="py-1 pr-2">{l.role || "-"}</td>
+                      <td className="py-1 pr-2">{l.found === false ? `yok (HTTP ${l.http})` : (l.status?.join ? l.status.join(", ") : String(l.status || ""))}</td>
+                      <td className="py-1 pr-2 font-mono">{l.asin || "-"}</td>
+                      <td className="py-1 pr-2">{l.parentage || "-"}{l.variation_theme ? ` · ${l.variation_theme}` : ""}{l.parent_sku ? ` · üst: ${l.parent_sku}` : ""}</td>
+                      <td className="py-1 pr-2">{l.size || "-"} / {l.color || "-"}</td>
+                      <td className="py-1 pr-2">{l.image_count ?? "-"}</td>
+                      <td className="py-1">{(l.issues || []).map((it, j) => <div key={j}><b>{it.severity}</b> {it.code}: {it.message}{it.attributes?.length ? ` [${it.attributes.join(", ")}]` : ""}</div>)}{l.error ? <span className="text-gray-500">{l.error}</span> : null}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Ürün Aktarım Önizleme (dry-run) */}
