@@ -1177,6 +1177,11 @@ async def ship_pr_entry(entry_id: str, current_user: dict = Depends(require_admi
     upd = {"campaign_id": cid, "cargo_barcode": _bc,
            "cargo_tracking_no": cg.get("tracking_no") or "", "shipped_at": _now_iso(),
            "status": "gonderildi", "updated_at": _now_iso(), "products": _stamped}
+    if cg.get("mng_no"):
+        upd["cargo_mng_no"] = cg["mng_no"]
+    if cg.get("gonderi_no"):   # NZ takip barkodu anında geldiyse rozet hemen yeşil link
+        upd.update({"cargo_gonderi_no": cg["gonderi_no"], "cargo_tracking_url": cg.get("tracking_url") or "",
+                    "cargo_track_note": "", "cargo_track_error": ""})
     await db.influencer_pr.update_one({"id": entry_id}, {"$set": upd})
     return {"success": True, "cargo_barcode": upd["cargo_barcode"],
             "tracking_no": upd["cargo_tracking_no"], "shipped_at": upd["shipped_at"]}
@@ -1295,7 +1300,7 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
     _limit_kw = ("günlük sorgu", "gunluk sorgu", "sorgu limit", "sorgulama sinir", "sorgulama sınır")
     try:
         async for pr in db.influencer_pr.find(
-                q, {"_id": 0, "id": 1, "cargo_tracking_no": 1, "cargo_barcode": 1}).limit(limit):
+                q, {"_id": 0, "id": 1, "cargo_tracking_no": 1, "cargo_barcode": 1, "shipped_at": 1}).limit(limit):
             refs = [r for r in [str(pr.get("cargo_tracking_no") or "").strip(),
                                 str(pr.get("cargo_barcode") or "").strip()] if r]
             refs = list(dict.fromkeys(refs))
@@ -1331,6 +1336,26 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                 await _aio.sleep(0.2)
             stats["checked"] += 1
             now_iso = datetime.now(timezone.utc).isoformat()
+            # GERİYE DÖNÜK: son 24 saatte oluşturulmuş, etiketi MNG iç no'lu (NZ'siz) kayıtlara
+            # Siparişler'deki gibi MNGGonderiBarkod ile NZ takip barkodu al → etiket yeniden basılınca
+            # kurye doğru barkodu okutur. (Daha eski kayıtlar kuryeye verilmiş olabilir; dokunma.)
+            if not gonderi and got_ok:
+                try:
+                    _sa = str(pr.get("shipped_at") or "")[:19]
+                    _fresh = bool(_sa) and (datetime.now(timezone.utc) - datetime.fromisoformat(_sa).replace(tzinfo=timezone.utc)) <= timedelta(hours=24)
+                    _ref = str(pr.get("cargo_tracking_no") or "").strip()
+                    if _fresh and _ref.startswith("INF"):
+                        from mng_kargo_client import get_mng_barcode_immediately as _nz
+                        _b = await _aio.to_thread(_nz, username=user, password=pw, siparis_no=_ref, urun_bedeli=0, kapida_tahsilat=False)
+                        _nzb = ((_b or {}).get("barkod") or (_b or {}).get("gonderi_no") or "").strip() if (_b or {}).get("ok") else ""
+                        debug_parts.append(f"NZ: {_nzb or ((_b or {}).get('hata') or '-')}"[:120])
+                        if _nzb:
+                            gonderi = _nzb
+                            stats["nz_retro"] = stats.get("nz_retro", 0) + 1
+                            await db.influencer_pr.update_one({"id": pr["id"]}, {"$set": {"cargo_barcode": _nzb, "cargo_track_note": "NZ takip barkodu alındı — etiketi yeniden yazdırın"}})
+                            await db.influencer_campaigns.update_many({"cargo_tracking_no": _ref}, {"$set": {"cargo_barcode": _nzb, "cargo_gonderi_no": _nzb}})
+                except Exception as _ne:
+                    debug_parts.append(f"NZ hata: {str(_ne)[:80]}")
             upd = {"cargo_status_checked_at": now_iso,
                    "cargo_track_debug": " | ".join(debug_parts)[:400]}
             if got_ok:
@@ -1976,7 +2001,7 @@ async def create_campaign_cargo(campaign_id: str, current_user: dict = Depends(r
         logger.warning(f"[influencer] MNG create_shipment exception (kampanya={campaign_id}, ilce={ilce}): {e}")
         raise HTTPException(status_code=400, detail=f"MNG kargo hatası: {e}")
 
-    barkod = (res.get("barkod") or "").strip()
+    mng_no = (res.get("barkod") or "").strip()   # MNG iç sipariş no (takip no DEĞİL)
     if not res.get("ok"):
         _hata = str(res.get("hata") or "")
         # E005/"ZATEN VAR": kayıt MNG'de zaten oluşmuş (önceki denemede) — hata değil,
@@ -1984,25 +2009,35 @@ async def create_campaign_cargo(campaign_id: str, current_user: dict = Depends(r
         if not (("ZATEN VAR" in _hata.upper()) or ("E005" in _hata.upper())):
             logger.warning(f"[influencer] MNG kargo başarısız (kampanya={campaign_id}, ilce={ilce}): {_hata or res}")
             raise HTTPException(status_code=400, detail=f"Kargo oluşturulamadı: {_hata or res}")
-    # Barkod boşsa (SiparisGirisi barkodu doğrudan vermez) gerçek MNG barkodunu ayrı çağrıyla
-    # dene; yine olmazsa sipariş no'ya düş (etiket sipariş no'yu kodlar → barkod ASLA boş kalmaz).
-    if not barkod:
-        try:
-            from mng_kargo_client import get_mng_barcode_immediately
-            _b = await run_in_threadpool(
-                lambda: get_mng_barcode_immediately(username=username, password=password, siparis_no=siparis_no))
-            if _b.get("ok") and (_b.get("barkod") or "").strip():
-                barkod = _b["barkod"].strip()
-        except Exception as _be:
-            logger.warning(f"[influencer] MNG barkod çekme başarısız {siparis_no}: {_be}")
-    if not barkod:
-        barkod = siparis_no
+    # SİPARİŞLER İLE AYNI ADIM: MNGGonderiBarkod → anında NZ formatlı GERÇEK takip barkodu.
+    # Etikete bu basılır; kurye bunu okutunca paket bizim kayda bağlanır ve takip no hazır olur.
+    # (Eskiden etikete MNG iç sipariş no basılıyordu → kurye tanımayıp kendi RE-… irsaliyesini
+    # açıyor, takip no hiç gelmiyordu.)
+    nz_barkod, nz_gonderi = "", ""
+    try:
+        from mng_kargo_client import get_mng_barcode_immediately
+        _b = await run_in_threadpool(
+            lambda: get_mng_barcode_immediately(username=username, password=password, siparis_no=siparis_no,
+                                                urun_bedeli=0, kapida_tahsilat=False))
+        if _b.get("ok"):
+            nz_barkod = (_b.get("barkod") or "").strip()
+            nz_gonderi = (_b.get("gonderi_no") or "").strip()
+            logger.info(f"[influencer] MNG NZ barkod {siparis_no}: {nz_barkod} (gonderi_no={nz_gonderi})")
+        else:
+            logger.info(f"[influencer] MNGGonderiBarkod başarısız {siparis_no}: {_b.get('hata')}")
+    except Exception as _be:
+        logger.warning(f"[influencer] MNG barkod çekme başarısız {siparis_no}: {_be}")
+    real_tracking = nz_barkod or nz_gonderi
+    barkod = real_tracking or mng_no or siparis_no   # etiket barkodu: NZ > MNG no > referans
 
     await db.influencer_campaigns.update_one(
         {"id": campaign_id},
         {"$set": {
             "cargo_status": "created",
             "cargo_barcode": barkod,
+            "cargo_mng_no": mng_no,
+            "cargo_gonderi_no": real_tracking,
+            "cargo_tracking_url": (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={real_tracking}" if real_tracking else ""),
             "cargo_tracking_no": siparis_no,
             "status": "shipped" if camp.get("status") == "draft" else camp.get("status"),
             "sent_at": camp.get("sent_at") or _now_iso(),   # gönderim tarihi (kargoya verildi)
@@ -2013,10 +2048,12 @@ async def create_campaign_cargo(campaign_id: str, current_user: dict = Depends(r
     # SMS bildirimi (influencer'a)
     sms_res = await _send_direct_sms(
         phone,
-        f"Merhaba {inf.get('name','')}, Facette numune gonderiniz hazirlandi. Takip: {siparis_no}",
+        f"Merhaba {inf.get('name','')}, Facette numune gonderiniz hazirlandi. Takip: {real_tracking or siparis_no}",
     )
 
-    return {"success": True, "cargo_barcode": barkod, "tracking_no": siparis_no, "sms": sms_res}
+    return {"success": True, "cargo_barcode": barkod, "tracking_no": siparis_no, "sms": sms_res,
+            "gonderi_no": real_tracking, "mng_no": mng_no,
+            "tracking_url": (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={real_tracking}" if real_tracking else "")}
 
 
 @router.post("/influencers/cargo-webhook")
