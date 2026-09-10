@@ -14,30 +14,42 @@ logger = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
 
 
-async def auto_cancel_unpaid_havale_orders():
-    """Cancel havale/transfer orders that remain unpaid after 72 hours and restock."""
+HAVALE_METHOD_RX = {"$regex": r"^(transfer|havale|bank_transfer|eft|havale_eft|banka_havale|bank|banka|havale/eft|havale_or_eft)$",
+                    "$options": "i"}
+
+
+def havale_unpaid_query(cutoff_dt):
+    """Süresi dolmuş ÖDENMEMİŞ havale/EFT siparişleri (geçmişe dönük dahil).
+    created_at hem ISO string hem datetime olarak saklanmış olabilir → ikisini de yakala;
+    payment_method varyantları büyük/küçük harften bağımsız. payment_notified (dekont bildirilmiş)
+    HARİÇ — admin kontrol etsin."""
+    cutoff_iso = cutoff_dt.isoformat()
+    return {
+        "payment_status": {"$nin": ["paid", "expired", "refunded"]},
+        "status": {"$in": ["pending", "awaiting_payment"]},
+        "payment_method": HAVALE_METHOD_RX,
+        "platform": {"$nin": ["trendyol", "hepsiburada", "amazon", "n11", "etsy"]},
+        "$or": [{"created_at": {"$lt": cutoff_iso}}, {"created_at": {"$lt": cutoff_dt}}],
+    }
+
+
+async def auto_cancel_unpaid_havale_orders(limit: int = 0):
+    """Cancel havale/transfer orders that remain unpaid after 72 hours and restock.
+    Geçmişe dönük çalışır: kuralı aşan TÜM bekleyen havale siparişleri (kaç günlük olursa olsun)."""
     from routes.deps import db  # lazy import
     from routes.orders import _restock_order_once
     import business_rules as _BR
 
+    cancelled = 0
     try:
         # AYAR: süre admin panelinden (İşletme Kuralları) yönetilir; varsayılan 72 saat.
         _hrs = int(await _BR.get_rule(db, "order.havale_cancel_hours", 72) or 72)
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=_hrs)).isoformat()
-        # Accept both payment_method names.
-        # ÖNEMLİ: Havale siparişleri "awaiting_payment" durumunda bekler (create_order öyle set eder);
-        # eski sorgu yalnız pending/confirmed'e bakıyordu → awaiting_payment havaleler HİÇ iptal
-        # edilmiyordu. Güvenli kapsam: DEKONT BİLDİRİLMEMİŞ (payment_notified HARİÇ) ve ödemesi
-        # ONAYLANMAMIŞ (paid değil) havaleler 72 saatte iptal edilir. payment_notified (müşteri
-        # dekont iletmiş) otomatik iptal EDİLMEZ — admin kontrol etsin (yanlışlıkla ödeyeni iptal etme).
-        query = {
-            "payment_status": {"$nin": ["paid", "expired", "refunded"]},
-            "status": {"$in": ["pending", "awaiting_payment"]},
-            "payment_method": {"$in": ["transfer", "havale", "bank_transfer", "eft", "havale_eft", "banka_havale"]},
-            "created_at": {"$lt": cutoff},
-        }
-        cancelled = 0
-        async for order in db.orders.find(query, {"_id": 0}):
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(hours=_hrs)
+        query = havale_unpaid_query(cutoff_dt)
+        cur = db.orders.find(query, {"_id": 0})
+        if limit:
+            cur = cur.limit(limit)
+        async for order in cur:
             try:
                 # O16: Önce durumu güncelle, SONRA idempotent iade yap.
                 # TOCTOU koruması (D1 fix): sorgu ile update arasında müşteri ödemiş/dekont
@@ -96,9 +108,10 @@ async def auto_cancel_unpaid_havale_orders():
             except Exception as e_item:
                 logger.error(f"Failed to cancel order {order.get('order_number')}: {e_item}")
         if cancelled:
-            logger.info(f"[scheduler] Auto-cancelled {cancelled} unpaid havale orders (>72h)")
+            logger.info(f"[scheduler] Auto-cancelled {cancelled} unpaid havale orders (>{_hrs}h)")
     except Exception as e:
         logger.exception(f"[scheduler] auto_cancel_unpaid_havale_orders failed: {e}")
+    return cancelled
 
 
 async def auto_cancel_unpaid_card_orders():
