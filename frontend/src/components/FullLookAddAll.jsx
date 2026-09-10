@@ -90,24 +90,24 @@ export default function FullLookAddAll({ products = [] }) {
               <div className="min-w-0 flex-1">
                 <Link to={href} className="block text-[17px] md:text-[19px] leading-snug text-stone-900 hover:underline underline-offset-4">{r.p.name}</Link>
                 {r.p.color && <div className="mt-1 text-[13px] text-stone-500">{r.p.color}</div>}
-                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-                  {r.price.hasDiscount && <del className="text-[13px] text-stone-400">{fmtTL(r.price.list)}</del>}
-                  <span className={`text-[18px] md:text-[20px] font-medium ${r.price.hasDiscount ? "text-red-700" : "text-stone-900"}`}>{fmtTL(r.price.display)}</span>
-                  {pct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700 rounded-sm">%{pct}</span>}
+                {/* Fiyat satırı: solda fiyatlar, sağda "Beden Tablosu" (çizginin üstünde) */}
+                <div className="mt-3 flex items-end justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {r.price.hasDiscount && <del className="text-[13px] text-stone-400">{fmtTL(r.price.list)}</del>}
+                    <span className={`text-[18px] md:text-[20px] font-medium ${r.price.hasDiscount ? "text-red-700" : "text-stone-900"}`}>{fmtTL(r.price.display)}</span>
+                    {pct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700 rounded-sm">%{pct}</span>}
+                  </div>
+                  {r.hasSizes && !r.soldOut && (
+                    <button type="button" onClick={() => openChart(r)} className="text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap shrink-0" data-testid={`fl-size-chart-${r.p.id}`}>
+                      Beden Tablosu
+                    </button>
+                  )}
                 </div>
-                <div className="mt-4 pt-4 border-t border-stone-200">
+                <div className="mt-3 pt-3 border-t border-stone-200">
                   {r.soldOut ? (
                     <span className="text-[11px] tracking-[0.1em] uppercase text-stone-400">Tükendi</span>
                   ) : (
                     <>
-                      <div className="flex items-center justify-between gap-3 mb-2">
-                        <span className="text-[13px] text-stone-500">Beden</span>
-                        {r.hasSizes && (
-                          <button type="button" onClick={() => openChart(r)} className="text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap" data-testid={`fl-size-chart-${r.p.id}`}>
-                            Beden Tablosu
-                          </button>
-                        )}
-                      </div>
                       {/* Bedenler solda tek satır; "Sepete Ekle" aynı satırda sağa yaslı (mobilde alta sağa iner) */}
                       <div className="flex flex-wrap items-center gap-3">
                         {r.hasSizes ? (
