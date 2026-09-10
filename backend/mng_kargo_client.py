@@ -170,6 +170,23 @@ def list_operations() -> list:
         return [f"okunamadı: {str(e)[:80]}"]
 
 
+_client_long_cache = None
+
+
+def _get_client_long():
+    """Uzun süren rapor operasyonları için (MusteriOzelRapor) 90 sn zaman aşımı olan istemci."""
+    global _client_long_cache
+    if _client_long_cache is None:
+        from zeep import Client, Settings
+        from zeep.transports import Transport
+        _client_long_cache = Client(
+            WSDL_URL,
+            settings=Settings(strict=False, xml_huge_tree=True),
+            transport=Transport(timeout=30, operation_timeout=90),
+        )
+    return _client_long_cache
+
+
 def _op_param_names(c, op_name: str) -> list:
     """Bir SOAP operasyonunun giriş parametre adları (WSDL'den, çalışma anında)."""
     try:
@@ -296,7 +313,9 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         alt_slot = next((n for n in names if "altfirma" in n.lower()), "")
         if rapor_slot and "raporno" in rapor_slot.lower():
             # MusteriOzelRapor: rapor no keşfi (1 = şube listesi çıktı; gönderi listesi hangisi?)
-            rapor_variants = [preferred_rapor] if preferred_rapor else [str(i) for i in range(2, 21)]
+            # 1 = şube listesi, 15 = sipariş listesi (takip no yok), 2-6/8/9/11 tanımsız; 7/10/12/13 zaman aşımı
+            # (büyük rapor → gönderi listesi olabilir) → uzun zaman aşımı + kısa aralıkla önce onlar denenir.
+            rapor_variants = [preferred_rapor] if preferred_rapor else (["7", "10", "12", "13"] + [str(i) for i in range(16, 31)])
         else:
             rapor_variants = ["1", "2"] if rapor_slot else [""]     # KargoBilgileriByTarih: hep boş döndü → az dene
         alt_variants = ["0"] if alt_slot else [""]
@@ -305,7 +324,9 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         if len(date_slots) >= 2:
             ds = sorted(date_slots, key=lambda n: (0 if any(k in n.lower() for k in ("bas", "ilk", "start", "from")) else
                                                     (2 if any(k in n.lower() for k in ("bit", "son", "end", "to")) else 1)))
-            plans = [{ds[0]: start, ds[-1]: end}]
+            # Rapor keşfi sırasında (rapor no bilinmiyor) kısa aralık: 8 gün; bilinince tam aralık
+            _st = start if (preferred_rapor or "raporno" not in (rapor_slot or "").lower()) else max(start, end - __import__("datetime").timedelta(days=8))
+            plans = [{ds[0]: _st, ds[-1]: end}]
         elif len(date_slots) == 1:
             _dl = list(dates or [start])
             # Parametre denemesi ilk planla yapılır → ilk plan GEÇMİŞ bir gün olsun (yarın boş döner)
@@ -337,7 +358,8 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                       kwargs[k] = dt.strftime(fmt)
                   try:
                       d["calls"] += 1
-                      r = getattr(c.service, op_name)(**kwargs)
+                      _cl = _get_client_long() if op_name == "MusteriOzelRapor" else c
+                      r = getattr(_cl.service, op_name)(**kwargs)
                       ser = serialize_object(r)
                       rows = _parse_rows(ser)
                       if rows:
@@ -346,7 +368,7 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                           errs.append(str(ser)[:140])
                   except Exception as e:
                       errs.append(str(e)[:120])
-              if rows_here and not any(("gonderi" in k or "alici" in k or "takip" in k) for k in (rows_here[0].get("raw_keys") or [])):
+              if rows_here and not any(("gonderino" in k or "takipno" in k or "kargono" in k or "barkod" in k) for k in (rows_here[0].get("raw_keys") or [])):
                   # Satır var ama gönderi/alıcı alanı yok (örn. şube listesi) → bu rapor gönderi listesi değil
                   d.setdefault("by_variant", {})
                   d["by_variant"][_variant_tag] = f"{len(rows_here)} satır, alanlar: " + ",".join((rows_here[0].get("raw_keys") or [])[:8])
