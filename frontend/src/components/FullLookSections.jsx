@@ -1,7 +1,9 @@
 import { priceView, fmtTL } from '../lib/price';
 import './fullLook.css';
 
-export default function FullLookSections({ looks = [], interactive = true, startIndex = 0 }) {
+// renderProduct: site tarafında standart ürün kartı (ProductCard) — indirim rozeti, sepet ikonu,
+// bedenler vb. site geneliyle aynı. Verilmezse (editör önizlemesi / test) sade kart çizilir.
+export default function FullLookSections({ looks = [], interactive = true, startIndex = 0, renderProduct = null }) {
   return <div className="full-look-flow" data-testid="full-look-flow">
     {looks.map((look, index) => <section className="full-look-section" key={look.id} aria-label={look.title || `Kombin ${startIndex + index + 1}`}>
       <div className="full-look-hero">
@@ -14,8 +16,9 @@ export default function FullLookSections({ looks = [], interactive = true, start
       </div>
       <div className="full-look-selection" id={`look-products-${look.id}`}>
         <div className="full-look-caption"><div className="full-look-caption-meta"><span>GÖRÜNÜMÜ TAMAMLA</span><span>{look.products?.length || 0} PARÇA</span></div>{look.title && <h2>{look.title}</h2>}</div>
-        <div className="full-look-products">
-          {(look.products || []).map(product => {
+        <div className={`full-look-products${renderProduct ? ' full-look-products--cards' : ''}`}>
+          {(look.products || []).map((product, pi) => {
+            if (renderProduct) return <div className="full-look-product-card" key={product.id}>{renderProduct(product, pi)}</div>;
             const price = priceView(product);
             const content = <><div className="full-look-product-image">
               {product.images?.[0] ? <img src={product.images[0]} alt={product.name} loading="lazy" /> : <span>Görsel yok</span>}

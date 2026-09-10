@@ -3,6 +3,7 @@ import axios from 'axios';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import FullLookSections from '../components/FullLookSections';
+import ProductCard from '../components/ProductCard';
 import { applyRuntimeSeo, setCategorySeo } from '../lib/seo';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -27,6 +28,6 @@ export default function FullLook() {
     {error ? <div className="p-12 text-center" role="alert"><p>Kombinler şu an yüklenemedi.</p><button className="underline mt-4" onClick={() => setRetry(r => r + 1)}>Tekrar dene</button></div>
       : !data ? <p className="p-12 text-center" role="status">Kombinler yükleniyor…</p>
       : !data.looks?.length ? <p className="p-12 text-center text-stone-500">Yeni kombin seçkimiz yakında burada.</p>
-      : <FullLookSections looks={data.looks} />}
+      : <FullLookSections looks={data.looks} renderProduct={(p, i) => <ProductCard product={p} listName="full-look" index={i} />} />}
   </main><Footer /></div>;
 }

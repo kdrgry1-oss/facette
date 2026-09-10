@@ -48,3 +48,6 @@ a.full-look-product:focus-visible{outline:2px solid #292824;outline-offset:5px}
   .full-look-product-action{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #e7e5e0;padding:10px 0 0;margin-top:12px;font-size:11px;color:#605e57}
 }
 @media(prefers-reduced-motion:reduce){.full-look-product-image img{transition:none}}
+/* Site standart ürün kartı (ProductCard) ile: kart kendi görsel/fiyat/rozet/beden düzenini getirir */
+.full-look-products--cards{gap:28px 16px;align-items:start}
+.full-look-product-card{min-width:0}

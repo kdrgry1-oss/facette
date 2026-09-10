@@ -61,5 +61,9 @@ def clean_full_look(payload):
 
 
 def full_look_projection():
+    # Site genelindeki ürün kartı (ProductCard) ile AYNI görünüm için varyant/stok/renk/rozet
+    # alanları da gelir (kullanıcı isteği: indirim rozeti, sepet ikonu, bedenler vb.).
     return {k: 1 for k in ('id', 'name', 'slug', 'images', 'price', 'sale_price',
-                           'category_id', 'category_ids', 'is_active', 'is_deleted')}
+                           'category_id', 'category_ids', 'is_active', 'is_deleted',
+                           'variants', 'stock', 'color', 'colors', 'stock_code', 'created_at',
+                           'is_new', 'badge', 'tags', 'brand', 'campaign_discount_percent')}
