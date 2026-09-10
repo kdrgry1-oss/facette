@@ -221,7 +221,7 @@ def _largest_row_list(obj) -> list:
     return best
 
 
-def list_shipments_by_date(*, username: str, password: str, start, end, dates=None) -> Dict:
+def list_shipments_by_date(*, username: str, password: str, start, end, dates=None, customer_codes=None) -> Dict:
     """KargoBilgileriByTarih / FaturaSiparisListesiByTarih → gönderi listesi.
     Amaç: kuryenin bizim referansımız yerine kendi (RE-…) referansıyla açtığı paketleri alıcı
     adına göre bulmak. Alan adları WSDL sürümüne göre değiştiği için parametreler ve satır
@@ -266,16 +266,28 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
             continue
         date_slots = [n for n in names if "tarih" in n.lower() or "date" in n.lower()]
         base = {}
+        cust_slot = ""
         for n in names:
             ln = n.lower()
             if n in date_slots:
                 continue
-            if "kullanici" in ln or "user" in ln:
+            if "musteri" in ln and "no" in ln:
+                cust_slot = n
+                base[n] = ""
+            elif "kullanici" in ln or "user" in ln:
                 base[n] = username
             elif "sifre" in ln or "pass" in ln:
                 base[n] = password
+            elif "raportype" in ln or "rapor" in ln:
+                base[n] = "1"
+            elif "altfirma" in ln:
+                base[n] = "0"
             else:
                 base[n] = ""
+        # pMusteriNo isteyen operasyon: müşteri kodu adayları (ayarlardaki kod, kullanıcı adı)
+        cust_candidates = [x for x in (customer_codes or []) if x] or [username]
+        if not cust_slot:
+            cust_candidates = [""]
         # Çağrı planı: iki tarih → (start,end); tek tarih → her gün ayrı
         if len(date_slots) >= 2:
             ds = sorted(date_slots, key=lambda n: (0 if any(k in n.lower() for k in ("bas", "ilk", "start", "from")) else
@@ -286,36 +298,53 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         else:
             plans = [{}]
         got_any = False
-        for fmt in fmts:
-            errs = []
-            rows_here = []
-            for plan in plans:
-                kwargs = dict(base)
-                for k, dt in plan.items():
-                    kwargs[k] = dt.strftime(fmt)
-                try:
-                    d["calls"] += 1
-                    r = getattr(c.service, op_name)(**kwargs)
-                    ser = serialize_object(r)
-                    rows = _parse_rows(ser)
-                    if rows:
-                        rows_here.extend(rows)
-                    else:
-                        errs.append(str(ser)[:140])
-                except Exception as e:
-                    errs.append(str(e)[:120])
-            if rows_here:
-                all_rows.extend(rows_here)
-                d["rows"] += len(rows_here)
-                d["fmt"] = fmt
-                got_any = True
-                if errs:
-                    d["error"] = errs[0][:200]
-                break
-            d["error"] = (errs[0] if errs else "satır yok")[:200]
-            # Kimlik hatası formatla ilgili değil → diğer formatı deneme
-            if any("KULLANICI" in x.upper() or "SIFRE" in x.upper() for x in errs):
-                break
+        for cust in cust_candidates:
+          if cust_slot:
+              base[cust_slot] = cust
+              d.setdefault("cust_tried", []).append(str(cust)[:6] + "…")
+          if got_any:
+              break
+          for fmt in fmts:
+              errs = []
+              rows_here = []
+              for plan in (plans[:2] if cust_slot else plans):   # kimlik denemesinde en çok 2 gün
+                  kwargs = dict(base)
+                  for k, dt in plan.items():
+                      kwargs[k] = dt.strftime(fmt)
+                  try:
+                      d["calls"] += 1
+                      r = getattr(c.service, op_name)(**kwargs)
+                      ser = serialize_object(r)
+                      rows = _parse_rows(ser)
+                      if rows:
+                          rows_here.extend(rows)
+                      else:
+                          errs.append(str(ser)[:140])
+                  except Exception as e:
+                      errs.append(str(e)[:120])
+              if rows_here:
+                  # Kimlik denemesi (2 gün) başarılıysa kalan günleri de aynı kimlikle çek
+                  if cust_slot and len(plans) > 2:
+                      for plan in plans[2:]:
+                          kwargs = dict(base)
+                          for k, dt in plan.items():
+                              kwargs[k] = dt.strftime(fmt)
+                          try:
+                              d["calls"] += 1
+                              rows_here.extend(_parse_rows(serialize_object(getattr(c.service, op_name)(**kwargs))))
+                          except Exception as e:
+                              errs.append(str(e)[:120])
+                  all_rows.extend(rows_here)
+                  d["rows"] += len(rows_here)
+                  d["fmt"] = fmt
+                  got_any = True
+                  if errs:
+                      d["error"] = errs[0][:200]
+                  break
+              d["error"] = (errs[0] if errs else "satır yok")[:200]
+              # Kimlik hatası formatla ilgili değil → diğer formatı deneme
+              if any("KULLANICI" in x.upper() or "SIFRE" in x.upper() for x in errs):
+                  break
         if got_any and not used_method:
             used_method = op_name
     # Aynı takip no birden çok operasyondan gelirse tekilleştir

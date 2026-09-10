@@ -1407,7 +1407,9 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                 except Exception:
                     pass
             _days = sorted(_days, reverse=True)[:14]
-            res = await _aio.to_thread(_by_date, username=user, password=pw, start=_start, end=_end, dates=_days)
+            _cc = [str(s.get("customer_code") or "").strip()] if str(s.get("customer_code") or "").strip().isdigit() else []
+            res = await _aio.to_thread(_by_date, username=user, password=pw, start=_start, end=_end, dates=_days,
+                                       customer_codes=_cc + [user])
             bd = {"ok": bool(res.get("ok")), "method": res.get("method"), "diag": res.get("diag"),
                   "days": [d.strftime("%d.%m") for d in _days],
                   "rows": len(res.get("rows") or []), "error": (res.get("error") or "")[:400], "matched": 0,
@@ -1425,6 +1427,29 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                 if ids:
                     async for i in db.influencers.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "full_name": 1}):
                         inf_names[i["id"]] = i.get("name") or i.get("full_name") or ""
+                # TEŞHİS (PII'siz): listede takip no'lu satır sayısı, referans tipleri, ad eşleşme sayısı
+                try:
+                    from collections import Counter as _Ctr
+                    _rows = res.get("rows") or []
+                    bd["rows_with_tracking"] = sum(1 for r in _rows if r.get("tracking"))
+                    def _rk(ref):
+                        ref = str(ref or "")
+                        return "RE-" if ref.upper().startswith("RE") else ("INF" if ref.upper().startswith("INF") else
+                               ("W" if ref.upper().startswith(("W", "IW")) else ("num" if ref.isdigit() else ("boş" if not ref else "diğer"))))
+                    bd["ref_kinds"] = dict(_Ctr(_rk(r.get("ref")) for r in _rows))
+                    _hits = 0; _hits_trk = 0
+                    for c in pend:
+                        _nm = [n for n in [c.get("influencer_name") or "", inf_names.get(c.get("influencer_id") or "", "")] if n]
+                        _m = [r for r in _rows if any(_mng_name_match(n, str(r.get("name") or "")) for n in _nm)]
+                        if _m:
+                            _hits += 1
+                            if any(r.get("tracking") for r in _m):
+                                _hits_trk += 1
+                    bd["pending_name_hits"] = _hits
+                    bd["pending_name_hits_with_tracking"] = _hits_trk
+                    bd["pending_without_name"] = sum(1 for c in pend if not (c.get("influencer_name") or inf_names.get(c.get("influencer_id") or "", "")))
+                except Exception as _de:
+                    bd["diag_error"] = str(_de)[:120]
                 used = set()
                 for row in res["rows"]:
                     trk = str(row.get("tracking") or "").strip()
