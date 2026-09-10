@@ -1330,7 +1330,7 @@ export default function Checkout() {
               </section>
 
               {/* 4) Hediye */}
-              <section data-testid="gift-options-section">
+              <section data-testid="gift-options-section" className="border border-stone-200 rounded-xl p-4 md:p-5 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
                 <Step n={sBase + 3} title="Hediye Seçenekleri" icon={Gift} hint="opsiyonel" />
                 <div className="space-y-3">
                   {/* Sadeleştirildi (Zara/Mango): tek satır onay; not yalnızca paket seçilince görünür. */}

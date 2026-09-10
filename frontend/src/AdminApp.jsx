@@ -52,7 +52,6 @@ import Influencers from "./pages/admin/Influencers";
 import AmazonAdmin from "./pages/admin/AmazonAdmin";
 import PaymentTrace from "./pages/admin/PaymentTrace";
 import ReportsAdvanced from "./pages/admin/ReportsAdvanced";
-import ProfitabilityAnalysis from "./pages/admin/ProfitabilityAnalysis";
 import ReportsInsights from "./pages/admin/ReportsInsights";
 import XmlFeeds from "./pages/admin/XmlFeeds";
 import MarketplaceHub from "./pages/admin/MarketplaceHub";
@@ -71,7 +70,6 @@ import IysAdmin from "./pages/admin/IysAdmin";
 import ReportsExtended from "./pages/admin/ReportsExtended";
 import MobileApp from "./pages/admin/MobileApp";
 import AIAssistant from "./pages/admin/AIAssistant";
-import MarketplaceProfit from "./pages/admin/MarketplaceProfit";
 import Themes from "./pages/admin/Themes";
 import RooftrExcelUpload from "./pages/admin/RooftrExcelUpload";
 import ActivityHistory from "./pages/admin/ActivityHistory";
@@ -152,7 +150,6 @@ export default function AdminApp() {
         <Route path="iys" element={<IysAdmin />} />
         <Route path="mobil-uygulama" element={<MobileApp />} />
         <Route path="ai-asistan" element={<AIAssistant />} />
-        <Route path="pazaryeri-karlilik" element={<MarketplaceProfit />} />
         <Route path="trendyol-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
         <Route path="trendyol-loglar" element={<TrendyolLogs />} />
         <Route path="barkod-sorunlari" element={<BarcodeIssues />} />
@@ -170,7 +167,6 @@ export default function AdminApp() {
         <Route path="hediye-cekleri" element={<GiftCards />} />
         <Route path="yorumlar" element={<ProductReviews />} />
         <Route path="terkedilmis-sepet" element={<AbandonedCarts />} />
-        <Route path="raporlar/karlilik" element={<ProfitabilityAnalysis />} />
         <Route path="raporlar/karar-kurulu" element={<Navigate to="/admin/raporlar/urun" replace />} />
         <Route path="raporlar/satis" element={<SalesReport />} />
         <Route path="raporlar/urun" element={<ProductsReport />} />

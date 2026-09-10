@@ -238,16 +238,6 @@ export const TRAINING = [
         tips: ["Koleksiyon ayrımı stok kodunun başındaki FcFw/FCss ön ekinden gelir."],
       },
       {
-        title: "Kârlılık Analizi & Pazaryeri Karlılık",
-        path: "/admin/raporlar/karlilik",
-        what: "Kategori × pazaryeri net kâr: komisyon, kargo, reklam, KDV, kurumlar vergisi dahil.",
-        where: "Raporlar → Kârlılık Analizi / Pazaryeri Karlılık.",
-        how: [
-          "Komisyon/hizmet/reklam oranlarını ayar kartından gir (aylık reklam bütçesi tarih aralığına orantılanır).",
-          "Net kârı kanal ve kategori bazında oku.",
-        ],
-      },
-      {
         title: "Stok Raporu / Kâr & Stok Değer",
         path: "/admin/raporlar/stok",
         what: "Varyant bazında güncel stok ve stok değerlemesi.",

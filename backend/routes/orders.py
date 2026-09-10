@@ -905,6 +905,73 @@ async def payment_trace(
     }
 
 
+@router.get("/{order_id}/customer-history")
+async def order_customer_history(order_id: str, current_user: dict = Depends(require_admin)):
+    """Sipariş detayı için: AYNI MÜŞTERİNİN diğer siparişleri (üye id / e-posta / telefon eşleşmesi)
+    ve hangilerini iptal ettiği/iade ettiği. Panelde eski 'Sipariş Kaynağı' + 'Müşteri Yolculuğu'
+    bloklarının yerini alır. En yeni 60 sipariş + özet sayaçlar."""
+    import re as _re
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    ship = order.get("shipping_address") or {}
+    ors = []
+    if order.get("user_id"):
+        ors.append({"user_id": order["user_id"]})
+    emails = {str(x or "").strip().lower() for x in (
+        ship.get("email"), order.get("email"), order.get("customer_email"),
+        (order.get("billing_address") or {}).get("email"))}
+    emails.discard("")
+    for em in emails:
+        rx = {"$regex": f"^{_re.escape(em)}$", "$options": "i"}
+        ors += [{"shipping_address.email": rx}, {"email": rx}, {"customer_email": rx}]
+    phones = set()
+    for ph in (ship.get("phone"), order.get("phone"), order.get("customer_phone")):
+        d = _re.sub(r"\D", "", str(ph or ""))
+        if len(d) >= 10:
+            phones.add(d[-10:])
+    for d in phones:
+        rx = {"$regex": f"{d}$"}
+        ors += [{"shipping_address.phone": rx}, {"phone": rx}]
+    if not ors:
+        return {"orders": [], "summary": {"total": 0}, "match": "none"}
+    _cancel_like = {"cancelled", "cancel_refunded"}
+    _return_like = {"returned", "refunded", "partial_refunded", "return_requested", "return_approved", "return_in_transit"}
+    proj = {"_id": 0, "id": 1, "order_number": 1, "created_at": 1, "status": 1, "payment_status": 1,
+            "payment_method": 1, "total": 1, "platform": 1, "marketplace": 1, "items": 1,
+            "cancel_reason": 1, "cancelled_at": 1, "auto_cancelled": 1, "cancel_source": 1,
+            "cancelled_by": 1, "return_request": 1, "user_id": 1, "partial_cancelled": 1}
+    rows = []
+    async for o in db.orders.find({"$or": ors, "id": {"$ne": order_id}}, proj).sort("created_at", -1).limit(60):
+        st = str(o.get("status") or "")
+        rows.append({
+            "id": o.get("id"), "order_number": o.get("order_number"), "created_at": o.get("created_at"),
+            "status": st, "payment_status": o.get("payment_status"), "payment_method": o.get("payment_method"),
+            "total": _round2(o.get("total") or 0), "platform": o.get("platform") or o.get("marketplace") or "site",
+            "items_count": sum(int((it or {}).get("quantity") or 1) for it in (o.get("items") or [])),
+            "item_names": [str((it or {}).get("name") or (it or {}).get("product_name") or "") for it in (o.get("items") or [])][:4],
+            "cancelled": st in _cancel_like,
+            "cancel_reason": o.get("cancel_reason") or "",
+            "cancelled_at": o.get("cancelled_at") or "",
+            "auto_cancelled": bool(o.get("auto_cancelled")),
+            "cancel_source": o.get("cancel_source") or ("otomatik" if o.get("auto_cancelled") else ""),
+            "partial_cancelled": bool(o.get("partial_cancelled")),
+            "returned": st in _return_like,
+            "return_status": (o.get("return_request") or {}).get("status") or "",
+            "same_member": bool(order.get("user_id")) and o.get("user_id") == order.get("user_id"),
+        })
+    n_cancel = sum(1 for r in rows if r["cancelled"])
+    n_ret = sum(1 for r in rows if r["returned"])
+    n_ok = sum(1 for r in rows if not r["cancelled"] and not r["returned"] and r["status"] not in ("awaiting_payment", "payment_failed", "failed", "pending"))
+    return {
+        "orders": rows,
+        "summary": {"total": len(rows), "cancelled": n_cancel, "returned": n_ret, "completed": n_ok,
+                    "net_spent": _round2(sum(r["total"] for r in rows if not r["cancelled"] and not r["returned"]
+                                             and r["status"] not in ("awaiting_payment", "payment_failed", "failed", "pending")))},
+        "match": {"user_id": bool(order.get("user_id")), "emails": sorted(emails), "phones": len(phones)},
+    }
+
+
 @router.get("/{order_id}")
 async def get_order(
     order_id: str,
