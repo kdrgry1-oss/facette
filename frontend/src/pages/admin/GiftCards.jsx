@@ -14,7 +14,7 @@ export default function GiftCards() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ amount: "", kind: "gift", customer_email: "", note: "", expires_days: "" });
+  const [form, setForm] = useState({ value_type: "amount", amount: "", percent: "", max_amount: "", usage_limit: "1", kind: "gift", customer_email: "", note: "", expires_days: "" });
   const [creating, setCreating] = useState(false);
 
   const load = async () => {
@@ -28,13 +28,21 @@ export default function GiftCards() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
   const create = async () => {
+    const isPct = form.value_type === "percent";
     const amount = Number(form.amount);
-    if (!amount || amount <= 0) { toast.error("Geçerli tutar girin"); return; }
+    const percent = Number(form.percent);
+    if (!isPct && (!amount || amount <= 0)) { toast.error("Geçerli tutar girin"); return; }
+    if (isPct && (!percent || percent <= 0 || percent > 100)) { toast.error("Yüzde 1-100 arasında olmalı"); return; }
     if (form.kind === "credit" && !form.customer_email.trim()) { toast.error("Mağaza kredisi için müşteri e-postası zorunlu"); return; }
     setCreating(true);
     try {
       const { data } = await axios.post(`${API}/admin/gift-cards`, {
-        amount, kind: form.kind,
+        value_type: form.value_type,
+        amount: isPct ? 0 : amount,
+        percent: isPct ? percent : 0,
+        max_amount: isPct ? (Number(form.max_amount) || 0) : 0,
+        usage_limit: isPct ? (Number(form.usage_limit) || 1) : 1,
+        kind: form.kind,
         customer_email: form.customer_email.trim(),
         note: form.note.trim(),
         expires_days: Number(form.expires_days) || 0,
@@ -42,7 +50,7 @@ export default function GiftCards() {
       toast.success(`Oluşturuldu: ${data.code}`);
       try { await navigator.clipboard.writeText(data.code); toast.info("Kod panoya kopyalandı"); } catch { /* pano izni yok */ }
       setShowForm(false);
-      setForm({ amount: "", kind: "gift", customer_email: "", note: "", expires_days: "" });
+      setForm({ value_type: "amount", amount: "", percent: "", max_amount: "", usage_limit: "1", kind: "gift", customer_email: "", note: "", expires_days: "" });
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Oluşturulamadı"); }
     finally { setCreating(false); }
@@ -78,12 +86,40 @@ export default function GiftCards() {
       </div>
 
       {showForm && (
-        <div className="bg-white border rounded-xl p-4 grid sm:grid-cols-5 gap-3 items-end">
+        <div className="bg-white border rounded-xl p-4 grid sm:grid-cols-6 gap-3 items-end">
           <div>
-            <label className="block text-xs font-bold text-gray-500 mb-1">Tutar (TL)</label>
-            <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
-              placeholder="500" className="w-full border rounded px-3 py-2 text-sm" data-testid="gift-card-amount" />
+            <label className="block text-xs font-bold text-gray-500 mb-1">Değer türü</label>
+            <select value={form.value_type} onChange={(e) => setForm({ ...form, value_type: e.target.value })}
+              className="w-full border rounded px-3 py-2 text-sm" data-testid="gift-card-value-type">
+              <option value="amount">Tutar (TL bakiye)</option>
+              <option value="percent">Yüzde (%) indirim</option>
+            </select>
           </div>
+          {form.value_type === "percent" ? (
+            <>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Yüzde (%)</label>
+                <input type="number" min="1" max="100" value={form.percent} onChange={(e) => setForm({ ...form, percent: e.target.value })}
+                  placeholder="20" className="w-full border rounded px-3 py-2 text-sm" data-testid="gift-card-percent" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Maks. indirim (TL, ops.)</label>
+                <input type="number" value={form.max_amount} onChange={(e) => setForm({ ...form, max_amount: e.target.value })}
+                  placeholder="0 = sınırsız" className="w-full border rounded px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Kullanım hakkı</label>
+                <input type="number" min="1" value={form.usage_limit} onChange={(e) => setForm({ ...form, usage_limit: e.target.value })}
+                  placeholder="1" className="w-full border rounded px-3 py-2 text-sm" />
+              </div>
+            </>
+          ) : (
+            <div>
+              <label className="block text-xs font-bold text-gray-500 mb-1">Tutar (TL)</label>
+              <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                placeholder="500" className="w-full border rounded px-3 py-2 text-sm" data-testid="gift-card-amount" />
+            </div>
+          )}
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1">Tip</label>
             <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}
@@ -148,16 +184,26 @@ export default function GiftCards() {
                     <button onClick={() => copy(c.code)} className="text-gray-400 hover:text-black" title="Kopyala"><Copy size={12} /></button>
                   </span>
                 </td>
-                <td className="p-3">{c.kind === "credit" ? "Mağaza kredisi" : "Hediye çeki"}</td>
+                <td className="p-3">{c.kind === "credit" ? "Mağaza kredisi" : "Hediye çeki"}{c.value_type === "percent" ? <span className="ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">%{Number(c.percent)}</span> : null}</td>
                 <td className="p-3 text-right tabular-nums">
-                  <b className={Number(c.balance) > 0 ? "text-emerald-700" : "text-gray-400"}>{Number(c.balance).toFixed(2)}</b>
-                  <span className="text-gray-400"> / {Number(c.initial_amount).toFixed(2)} TL</span>
+                  {c.value_type === "percent" ? (
+                    <>
+                      <b className={Number(c.uses_left) > 0 ? "text-emerald-700" : "text-gray-400"}>%{Number(c.percent)}</b>
+                      {Number(c.max_amount) > 0 && <span className="text-gray-400"> (maks {Number(c.max_amount).toFixed(0)} TL)</span>}
+                      <div className="text-[10px] text-gray-400">kalan hak {Number(c.uses_left ?? 0)} / {Number(c.usage_limit ?? 1)}{Number(c.used_total) > 0 ? ` · kullanılan ${Number(c.used_total).toFixed(2)} TL` : ""}</div>
+                    </>
+                  ) : (
+                    <>
+                      <b className={Number(c.balance) > 0 ? "text-emerald-700" : "text-gray-400"}>{Number(c.balance).toFixed(2)}</b>
+                      <span className="text-gray-400"> / {Number(c.initial_amount).toFixed(2)} TL</span>
+                    </>
+                  )}
                 </td>
                 <td className="p-3 text-xs">{c.customer_email || "—"}</td>
                 <td className="p-3">
                   <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
                     c.status === "active" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-600 border-red-200"}`}>
-                    {c.status === "active" ? "Aktif" : "Pasif"}
+                    {c.status === "active" ? "Aktif" : (c.status === "used" ? "Kullanıldı" : "Pasif")}
                   </span>
                   {c.expires_at && <div className="text-[10px] text-gray-400 mt-0.5">Son: {c.expires_at.slice(0, 10)}</div>}
                 </td>

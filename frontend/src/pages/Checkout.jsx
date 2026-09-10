@@ -306,7 +306,13 @@ export default function Checkout() {
   const preGiftTotal = Math.max(0, total + shippingCost - discount - bankTransferDiscount - paymentMethodDiscount - memberGroupDiscount - pointsDeduction + giftWrapTotal + codFee);
   // C2 Hediye çeki: tüm indirimlerden SONRA, ödenecek tutardan düşer (sunucu-otoriter;
   // burada yalnız gösterim). Bakiye kısmi kullanılır, kalan çekte kalır.
-  const giftCardDeduction = giftCardApplied ? Math.min(Number(giftCardApplied.balance) || 0, preGiftTotal) : 0;
+  // Hediye çeki: TL bakiye → min(bakiye, tutar); YÜZDE çeki → tutar × % (maks. tutar tavanlı). Sunucu yine kendi hesaplar.
+  const giftCardDeduction = giftCardApplied
+    ? (giftCardApplied.value_type === "percent"
+        ? Math.min(Math.round(preGiftTotal * (Number(giftCardApplied.percent) || 0)) / 100,
+                   Number(giftCardApplied.max_amount) > 0 ? Number(giftCardApplied.max_amount) : Infinity, preGiftTotal)
+        : Math.min(Number(giftCardApplied.balance) || 0, preGiftTotal))
+    : 0;
   const grandTotal = Math.max(0, Math.round((preGiftTotal - giftCardDeduction) * 100) / 100);
 
   // Yalnız ürün kartındaki sale_price farkı motorun dışında kalır. Kampanyaları
@@ -640,8 +646,11 @@ export default function Checkout() {
           code, email: shippingAddress.email || user?.email || "",
         });
         if (data?.valid) {
-          setGiftCardApplied({ code, balance: Number(data.balance) || 0, kind: data.kind || "gift" });
-          toast.success(`Hediye çeki uygulandı — bakiye: ${(Number(data.balance) || 0).toFixed(2)} TL`);
+          setGiftCardApplied({ code, balance: Number(data.balance) || 0, kind: data.kind || "gift",
+                               value_type: data.value_type || "amount", percent: Number(data.percent) || 0, max_amount: Number(data.max_amount) || 0 });
+          toast.success(data.value_type === "percent"
+            ? `Hediye çeki uygulandı — %${Number(data.percent) || 0} indirim${Number(data.max_amount) > 0 ? ` (en fazla ${Number(data.max_amount).toFixed(0)} TL)` : ""}`
+            : `Hediye çeki uygulandı — bakiye: ${(Number(data.balance) || 0).toFixed(2)} TL`);
           return;
         }
       } catch { /* sessiz */ }
@@ -1393,7 +1402,7 @@ export default function Checkout() {
                   {bizRules["giftcard.enabled"] !== false && giftCardApplied && (
                     <div className="mb-2 flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded px-3 py-2 text-xs" data-testid="gift-card-applied">
                       <span className="text-emerald-800">
-                        🎁 {giftCardApplied.kind === "credit" ? "Mağaza kredisi" : "Hediye çeki"} <b>{giftCardApplied.code}</b> — bakiye {Number(giftCardApplied.balance).toFixed(2)} TL
+                        🎁 {giftCardApplied.kind === "credit" ? "Mağaza kredisi" : "Hediye çeki"} <b>{giftCardApplied.code}</b> — {giftCardApplied.value_type === "percent" ? `%${giftCardApplied.percent} indirim${giftCardApplied.max_amount > 0 ? ` (en fazla ${Number(giftCardApplied.max_amount).toFixed(0)} TL)` : ""}` : `bakiye ${Number(giftCardApplied.balance).toFixed(2)} TL`}
                       </span>
                       <button type="button" onClick={() => setGiftCardApplied(null)}
                         className="text-emerald-700 underline" data-testid="remove-gift-card-btn">Kaldır</button>
