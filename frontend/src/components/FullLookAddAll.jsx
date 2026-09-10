@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ShoppingBag, Check } from "lucide-react";
+import { Check } from "lucide-react";
 import { toast } from "sonner";
 import { useCart } from "../context/CartContext";
 import { priceView, fmtTL } from "../lib/price";
@@ -78,10 +78,10 @@ export default function FullLookAddAll({ products = [] }) {
           const pct = r.price.hasDiscount ? (Number(r.price.discountPct) || Math.round((1 - r.price.display / r.price.list) * 100)) : 0;
           return (
             <div key={r.p.id} className="py-6 flex gap-5 md:gap-7" data-testid={`fl-row-${r.p.id}`}>
-              <Link to={href} className="block shrink-0 w-[112px] md:w-[150px] bg-[#f4f3f0] overflow-hidden" aria-label={r.p.name}>
+              <Link to={href} className="block shrink-0 w-[112px] md:w-[150px] overflow-hidden" aria-label={r.p.name}>
                 {r.p.images?.[0]
-                  ? <img src={r.p.images[0]} alt={r.p.name} loading="lazy" className="w-full aspect-[3/4] object-contain" />
-                  : <span className="block w-full aspect-[3/4]" />}
+                  ? <img src={r.p.images[0]} alt={r.p.name} loading="lazy" className="block w-full aspect-[3/4] object-cover" />
+                  : <span className="block w-full aspect-[3/4] bg-white" />}
               </Link>
               <div className="min-w-0 flex-1">
                 <Link to={href} className="block text-[17px] md:text-[19px] leading-snug text-stone-900 hover:underline underline-offset-4">{r.p.name}</Link>
@@ -124,29 +124,25 @@ export default function FullLookAddAll({ products = [] }) {
         })}
       </div>
 
-      {/* Tüm kombini al — özet kutusu */}
-      <div className="mt-6 bg-[#f4f3f0] rounded-md p-5 md:p-6" data-testid="full-look-summary">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="w-9 h-9 rounded-full bg-stone-900 text-white inline-flex items-center justify-center shrink-0"><Check size={16} /></span>
-            <span className="text-[15px] md:text-[17px] tracking-[0.16em] uppercase text-stone-900">Tüm Kombini Al</span>
-            <span className="text-[11px] tracking-[0.1em] uppercase px-2.5 py-1 bg-white/80 text-stone-600 rounded-sm">{addable.length} parça</span>
+      {/* Tüm kombini al — site geneliyle uyumlu sade özet: ince üst çizgi, büyük harf/aralıklı başlık, kare siyah düğme */}
+      <div className="mt-8 pt-6 border-t border-stone-200" data-testid="full-look-summary">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="min-w-0">
+            <div className="text-[12px] md:text-[13px] tracking-[0.2em] uppercase text-stone-900">Tüm Kombini Al</div>
+            <div className="mt-1 text-[11px] tracking-[0.12em] uppercase text-stone-400">{addable.length} parça</div>
           </div>
-          <div className="text-right">
-            {listTotal > total + 0.5 && <div className="text-[13px] text-stone-400"><del>{fmtTL(listTotal)}</del></div>}
-            <div className="text-[22px] md:text-[26px] font-medium text-stone-900 leading-tight">{fmtTL(total)}</div>
-            {totalPct > 0 && <span className="inline-block mt-1 text-[12px] px-2 py-0.5 bg-red-50 text-red-700 rounded-sm">%{totalPct}</span>}
+          <div className="flex items-baseline gap-3 md:justify-end md:text-right">
+            {listTotal > total + 0.5 && <del className="text-[13px] text-stone-400">{fmtTL(listTotal)}</del>}
+            <span className={`text-[20px] md:text-[22px] font-medium leading-none ${listTotal > total + 0.5 ? "text-red-700" : "text-stone-900"}`}>{fmtTL(total)}</span>
+            {totalPct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700">%{totalPct}</span>}
           </div>
         </div>
         <button type="button" onClick={addAll} disabled={!addable.length}
-          className={`mt-5 w-full inline-flex items-center justify-center gap-3 px-6 py-4 text-[13px] tracking-[0.2em] uppercase rounded-md transition-colors ${
-            ready ? "bg-stone-900 text-white hover:bg-stone-700" : "bg-stone-300 text-stone-600"}`}
+          className={`mt-5 w-full px-6 py-3.5 text-[11px] md:text-xs uppercase tracking-[0.2em] transition-colors ${
+            ready ? "bg-black text-white hover:bg-black/85" : "bg-stone-200 text-stone-500"}`}
           data-testid="full-look-add-all-btn">
-          <ShoppingBag size={16} /> Tüm Kombini Sepete Ekle
+          Tüm Kombini Sepete Ekle
         </button>
-        {!ready && missing.length > 0 && (
-          <div className="mt-2 text-[12px] text-stone-500">Devam etmek için beden seçin: {missing.map((r) => r.p.name).join(", ")}</div>
-        )}
       </div>
     </div>
   );
