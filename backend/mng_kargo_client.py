@@ -267,10 +267,16 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                     if all(p in k for p in preds):
                         return v
                 return ""
-            rows.append({"tracking": pick("gonderino") or pick("gonderi", "no") or pick("takipno") or pick("barkod"),
-                         "name": pick("aliciadi") or pick("alici", "ad") or pick("alici", "unvan") or pick("alici"),
-                         "ref": f.get("siparisno") or f.get("referansno") or pick("referans") or pick("siparisno"),
-                         "date": pick("gondericikis", "tarih") or pick("kargostatu", "tarih") or pick("siparistarihi") or pick("tarih"),
+            import re as _re
+            _trk = pick("gonderino") or pick("gonderi", "no") or pick("takipno") or pick("barkod")
+            _mng_ref = ""
+            if _trk and not _re.fullmatch(r"\d{10,14}", _trk.strip()):
+                # "RE - 329844" gibi MNG gönderi referansı → takip no DEĞİL; ayrı sakla
+                _mng_ref, _trk = _trk.strip(), ""
+            rows.append({"tracking": _trk, "mng_ref": _mng_ref,
+                         "name": pick("aliciadi") or pick("almusteriadi") or pick("alici", "ad") or pick("alici", "unvan") or pick("alicimusteri") or pick("alici"),
+                         "ref": f.get("siparisno") or f.get("referansno") or pick("referans") or pick("siparisno") or pick("rfanlasmano"),
+                         "date": pick("gondericikis", "tarih") or pick("gonderitarihi") or pick("kargostatu", "tarih") or pick("siparistarihi") or pick("tarih"),
                          "mng_no": pick("mngsiparisno") or pick("mng", "no"),
                          "status": pick("statu", "aciklama") or pick("statu") or pick("durum"),
                          "phone": pick("telcep") or pick("alici", "tel") or pick("tel"),
@@ -325,7 +331,9 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
             ds = sorted(date_slots, key=lambda n: (0 if any(k in n.lower() for k in ("bas", "ilk", "start", "from")) else
                                                     (2 if any(k in n.lower() for k in ("bit", "son", "end", "to")) else 1)))
             # Rapor keşfi sırasında (rapor no bilinmiyor) kısa aralık: 8 gün; bilinince tam aralık
-            _st = start if (preferred_rapor or "raporno" not in (rapor_slot or "").lower()) else max(start, end - __import__("datetime").timedelta(days=8))
+            _is_rapor = "raporno" in (rapor_slot or "").lower()
+            # MusteriOzelRapor çok büyük (8 günde 55 bin satır) → her zaman kısa pencere (bekleyen günler)
+            _st = start if not _is_rapor else max(start, end - __import__("datetime").timedelta(days=(10 if preferred_rapor else 8)))
             plans = [{ds[0]: _st, ds[-1]: end}]
         elif len(date_slots) == 1:
             _dl = list(dates or [start])
@@ -420,6 +428,68 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         uniq.append(r)
     return {"ok": bool(uniq), "method": used_method, "rows": uniq, "diag": diag,
             "error": "; ".join(f"{k}: {v.get('error')}" for k, v in diag.items() if v.get("error"))[:500]}
+
+
+def resolve_mng_ref(*, username: str, password: str, mng_ref: str, customer_codes=None) -> Dict:
+    """MNG gönderi referansından ("RE - 329844") 12 haneli kargo takip/barkod no'sunu bulmaya çalışır.
+    Denenen: KargoBilgileriByReferans(pGonderiNo=…), KargoTakipByReferans(pReferansId=…), FaturaSiparisListesi(pSiparisNo=…).
+    Dönüş: {ok, tracking, method, tried:[…], keys:[…]}"""
+    import re as _re
+    c = _get_client()
+    from zeep.helpers import serialize_object
+    raw = str(mng_ref or "").strip()
+    digits = _re.sub(r"\D", "", raw)
+    variants = list(dict.fromkeys([raw, raw.replace(" ", ""), raw.replace(" - ", "-"), digits]))
+    tried = []
+    keys_seen = []
+
+    def _find_tracking(ser) -> str:
+        f = _flatten_row(ser if isinstance(ser, (dict, list)) else {"v": ser})
+        for k, v in f.items():
+            if v and _re.fullmatch(r"\d{10,14}", str(v).strip()) and any(t in k for t in ("barkod", "takip", "gonderino", "kargono", "gonderi")):
+                return str(v).strip()
+        # alan adı uymasa da 12 haneli tek değer varsa onu al
+        cands = [str(v).strip() for v in f.values() if v and _re.fullmatch(r"\d{12}", str(v).strip())]
+        return cands[0] if len(set(cands)) == 1 else ""
+
+    for op_name in ("KargoBilgileriByReferans", "KargoTakipByReferans", "FaturaSiparisListesi"):
+        names = _op_param_names(c, op_name)
+        if not names:
+            continue
+        for v in variants:
+            if not v:
+                continue
+            for cust in ([x for x in (customer_codes or []) if x] or [username]):
+                kwargs = {}
+                for n in names:
+                    ln = n.lower()
+                    if "musteri" in ln and "no" in ln:
+                        kwargs[n] = cust
+                    elif "kullanici" in ln or "user" in ln:
+                        kwargs[n] = username
+                    elif "sifre" in ln or "pass" in ln:
+                        kwargs[n] = password
+                    elif "gonderino" in ln or "referans" in ln or ("siparis" in ln and "no" in ln):
+                        kwargs[n] = v
+                    elif "rapor" in ln:
+                        kwargs[n] = "1"
+                    else:
+                        kwargs[n] = ""
+                try:
+                    r = getattr(c.service, op_name)(**kwargs)
+                    ser = serialize_object(r)
+                    trk = _find_tracking(ser)
+                    fk = sorted(_flatten_row(ser if isinstance(ser, (dict, list)) else {}).keys())[:25]
+                    if fk and fk not in keys_seen:
+                        keys_seen.append(fk)
+                    tried.append(f"{op_name}({v[:14]}): {'OK ' + trk if trk else str(ser)[:80]}")
+                    if trk:
+                        return {"ok": True, "tracking": trk, "method": op_name, "variant": v, "tried": tried, "keys": keys_seen}
+                except Exception as e:
+                    tried.append(f"{op_name}({v[:14]}): {str(e)[:80]}")
+                if "musteri" not in "".join(names).lower():
+                    break   # müşteri no parametresi yoksa tek deneme yeter
+    return {"ok": False, "tracking": "", "method": "", "tried": tried[:12], "keys": keys_seen[:3]}
 
 
 def baglanti_test() -> Dict:

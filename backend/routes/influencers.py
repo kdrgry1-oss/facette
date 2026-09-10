@@ -1439,6 +1439,7 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                     from collections import Counter as _Ctr
                     _rows = res.get("rows") or []
                     bd["rows_with_tracking"] = sum(1 for r in _rows if r.get("tracking"))
+                    bd["rows_with_mng_ref"] = sum(1 for r in _rows if r.get("mng_ref"))
                     def _rk(ref):
                         ref = str(ref or "")
                         return "RE-" if ref.upper().startswith("RE") else ("INF" if ref.upper().startswith("INF") else
@@ -1472,10 +1473,12 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                 except Exception as _de:
                     bd["diag_error"] = str(_de)[:120]
                 used = set()
+                _resolve_diag = []
                 for row in res["rows"]:
                     trk = str(row.get("tracking") or "").strip()
+                    mref = str(row.get("mng_ref") or "").strip()
                     nm = str(row.get("name") or "").strip()
-                    if not trk or not nm or trk in used or "*" in nm:
+                    if not (trk or mref) or not nm or (trk or mref) in used or "*" in nm:
                         continue
                     hits = [c for c in pend if any(_mng_name_match(n, nm) for n in
                                                    [c.get("influencer_name") or "", inf_names.get(c.get("influencer_id") or "", "")] if n)]
@@ -1493,15 +1496,34 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                     c = hits[0]
                     if _dist(c) > 20 and _dist(c) != 9999:
                         continue
-                    used.add(trk)
+                    used.add(trk or mref)
                     pend = [x for x in pend if x["id"] != c["id"]]
-                    await db.influencer_pr.update_one({"id": c["id"]}, {"$set": {
-                        "cargo_gonderi_no": trk, "cargo_tracking_url": f"https://kargotakip.dhlecommerce.com.tr/?takipNo={trk}",
-                        "cargo_mng_ref": str(row.get("ref") or ""), "cargo_last_status_text": str(row.get("status") or ""),
-                        "cargo_track_note": "MNG gönderi listesinden alıcı adıyla eşlendi", "cargo_track_error": "",
-                        "cargo_status_checked_at": datetime.now(timezone.utc).isoformat()}})
-                    bd["matched"] += 1
-                    stats["found"] += 1
+                    # Raporda yalnız MNG referansı (RE - …) varsa 12 haneli takip no'yu referanstan çöz
+                    _how = "MNG gönderi listesinden alıcı adıyla eşlendi"
+                    if not trk and mref:
+                        try:
+                            from mng_kargo_client import resolve_mng_ref as _rres
+                            rr = await _aio.to_thread(_rres, username=user, password=pw, mng_ref=mref, customer_codes=_cc + [user])
+                            if len(_resolve_diag) < 3:
+                                _resolve_diag.append({"ref": mref[:14], "ok": rr.get("ok"), "method": rr.get("method"),
+                                                      "tried": rr.get("tried"), "keys": rr.get("keys")})
+                            if rr.get("ok"):
+                                trk = rr["tracking"]
+                                _how = f"MNG listesi + {rr.get('method')} ile çözüldü"
+                        except Exception as _re_err:
+                            _resolve_diag.append({"ref": mref[:14], "error": str(_re_err)[:100]})
+                    _upd = {"cargo_mng_ref": mref or str(row.get("ref") or ""), "cargo_last_status_text": str(row.get("status") or ""),
+                            "cargo_track_note": _how, "cargo_track_error": "",
+                            "cargo_status_checked_at": datetime.now(timezone.utc).isoformat()}
+                    if trk:
+                        _upd.update({"cargo_gonderi_no": trk, "cargo_tracking_url": f"https://kargotakip.dhlecommerce.com.tr/?takipNo={trk}"})
+                        bd["matched"] += 1
+                        stats["found"] += 1
+                    else:
+                        _upd["cargo_track_note"] = f"MNG'de kurye referansı bulundu ({mref}); takip no çözülemedi"
+                        bd["ref_only"] = bd.get("ref_only", 0) + 1
+                    await db.influencer_pr.update_one({"id": c["id"]}, {"$set": _upd})
+                bd["resolve_diag"] = _resolve_diag
             stats["by_date"] = bd
     except Exception as _bde:
         stats["by_date"] = {"ok": False, "error": str(_bde)[:200]}
