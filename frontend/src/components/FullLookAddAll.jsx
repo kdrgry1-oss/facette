@@ -131,9 +131,10 @@ export default function FullLookAddAll({ products = [] }) {
             <div className="text-[12px] md:text-[13px] tracking-[0.2em] uppercase text-stone-900">Tüm Kombini Al</div>
             <div className="mt-1 text-[11px] tracking-[0.12em] uppercase text-stone-400">{addable.length} parça</div>
           </div>
-          <div className="flex items-baseline gap-3 md:justify-end md:text-right">
+          {/* İlk (liste) fiyat üstte, indirimli toplam altında, rozet en altta — mockup düzeni */}
+          <div className="flex flex-col items-start md:items-end gap-1 md:text-right">
             {listTotal > total + 0.5 && <del className="text-[13px] text-stone-400">{fmtTL(listTotal)}</del>}
-            <span className={`text-[20px] md:text-[22px] font-medium leading-none ${listTotal > total + 0.5 ? "text-red-700" : "text-stone-900"}`}>{fmtTL(total)}</span>
+            <span className={`text-[22px] md:text-[24px] font-medium leading-none ${listTotal > total + 0.5 ? "text-red-700" : "text-stone-900"}`}>{fmtTL(total)}</span>
             {totalPct > 0 && <span className="text-[12px] px-2 py-0.5 bg-red-50 text-red-700">%{totalPct}</span>}
           </div>
         </div>
