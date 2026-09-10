@@ -112,13 +112,13 @@ export default function FullLookAddAll({ products = [] }) {
                   ) : r.hasSizes ? (
                     <>
                       <div className="text-[13px] text-stone-500 mb-2">Beden</div>
-                      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={`${r.p.name} beden`}>
+                      <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 -mb-1 [scrollbar-width:none]" role="radiogroup" aria-label={`${r.p.name} beden`}>
                         {r.sizes.map((s) => {
                           const active = sel[r.p.id] === s.size;
                           return (
                             <button key={s.size} type="button" disabled={s.stock <= 0}
                               onClick={() => setSel((prev) => ({ ...prev, [r.p.id]: s.size }))}
-                              className={`min-w-[52px] md:min-w-[64px] px-3 py-2.5 text-[13px] border rounded-sm transition-colors ${
+                              className={`shrink-0 min-w-[42px] md:min-w-[56px] px-2 md:px-3 py-2 text-[12px] md:text-[13px] border transition-colors ${
                                 active ? "bg-stone-900 text-white border-stone-900"
                                   : s.stock <= 0 ? "border-stone-200 text-stone-300 line-through cursor-not-allowed"
                                   : "border-stone-200 bg-white text-stone-800 hover:border-stone-900"}`}

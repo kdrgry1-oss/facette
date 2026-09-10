@@ -4,9 +4,10 @@
 .full-look-heading p{max-width:650px;margin:14px 0 0;color:#686761;font-size:14px;line-height:1.7}
 .full-look-flow{max-width:1500px;margin:auto;container-type:inline-size}
 .full-look-section{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(24px,4vw,64px);padding:40px 32px 56px;border-bottom:1px solid #e5e3df;align-items:start}
-.full-look-hero{position:sticky;top:88px;background:#f4f3f0;min-width:0}
+.full-look-hero{position:sticky;top:88px;background:#fff;min-width:0}
+.full-look-section{scroll-margin-top:84px}
 .full-look-section{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr)}
-.full-look-hero>img{width:100%;height:auto;aspect-ratio:2/3;object-fit:contain;display:block}
+.full-look-hero>img{width:100%;height:auto;object-fit:contain;display:block;background:#fff}
 .full-look-label{color:#20201e;font-weight:600}
 .full-look-selection{scroll-margin-top:88px}
 .full-look-placeholder{aspect-ratio:2/3;display:grid;place-content:center;text-align:center;color:#777;padding:20px}
@@ -32,7 +33,7 @@ a.full-look-product:focus-visible{outline:2px solid #292824;outline-offset:5px}
 /* Container sizing also gives the admin's 390px preview the real mobile layout. */
 @container (max-width:640px){
   .full-look-section,.full-look-editor-preview .full-look-section{grid-template-columns:1fr;padding:0 0 32px;gap:0;border-bottom:8px solid #f5f4f1;margin-bottom:24px}
-  .full-look-hero>img{max-height:72svh;object-fit:contain}
+  .full-look-hero>img{max-height:none;width:100%;height:auto;object-fit:contain}
   .full-look-hero{position:relative;top:auto}
   .full-look-selection{padding:24px 16px 0}
   .full-look-caption,.full-look-editor-preview .full-look-caption{padding:0 0 18px}

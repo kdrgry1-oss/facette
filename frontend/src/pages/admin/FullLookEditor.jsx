@@ -96,7 +96,13 @@ export default function FullLookEditor() {
         <span>{page.looks.length} / 50 kombin</span><button type="button" aria-pressed={mobile} onClick={() => setMobile(!mobile)}>{mobile ? 'Masaüstü önizleme' : 'Mobil önizleme'}</button></div>
       {!page.looks.length && <div className="look-editor-empty">İlk kombininizi ekleyin. Fotoğraf ve ürünler seçilmeden yayınlanmaz.</div>}
       {page.looks.map((row, index) => <article className="look-editor-card" key={row.id}>
-        <div className="look-card-heading"><h2>Kombin {index + 1}</h2><label className="look-publish"><input type="checkbox" checked={row.is_active} onChange={e => patch(row.id, { is_active: e.target.checked })} /> Yayında</label>
+        <div className="look-card-heading"><h2>Kombin {index + 1}</h2>
+          {/* Reklam alt linki: Meta/Google/TikTok reklamı bu linke verilir, müşteri doğrudan bu kombine iner */}
+          <span className="look-ad-link" title="Reklam linki — bu kombine doğrudan iner">
+            <code>{`${window.location.origin}/full-look/${row.id}`}</code>
+            <button type="button" onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/full-look/${row.id}`); }}>Linki kopyala</button>
+          </span>
+          <label className="look-publish"><input type="checkbox" checked={row.is_active} onChange={e => patch(row.id, { is_active: e.target.checked })} /> Yayında</label>
           <button type="button" disabled={!index} aria-label={`Kombin ${index + 1} yukarı`} onClick={() => setPage({ ...page, looks: move(page.looks, index, -1) })}>↑</button>
           <button type="button" disabled={index === page.looks.length - 1} aria-label={`Kombin ${index + 1} aşağı`} onClick={() => setPage({ ...page, looks: move(page.looks, index, 1) })}>↓</button>
           <button type="button" onClick={() => { if (window.confirm('Bu kombin taslaktan kaldırılsın mı? Yayına yansıması için kaydetmeniz gerekir.')) setPage({ ...page, looks: page.looks.filter(r => r.id !== row.id) }); }}>Kombini kaldır</button>

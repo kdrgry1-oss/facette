@@ -150,6 +150,7 @@ function App() {
                 <Route path="/" element={isNative && appTarget === "admin" ? <Navigate to="/admin" replace /> : <Home />} />
                 <Route path="/kategori/:slug" element={<Category />} />
                 <Route path="/full-look" element={<FullLook />} />
+                <Route path="/full-look/:lookRef" element={<FullLook />} />
                 <Route path="/kategori/full-look" element={<FullLook />} />
                 <Route path="/sepet" element={<Cart />} />
                 <Route path="/odeme" element={<Checkout />} />

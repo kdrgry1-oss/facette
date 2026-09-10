@@ -5,7 +5,7 @@ import './fullLook.css';
 // bedenler vb. site geneliyle aynı. Verilmezse (editör önizlemesi / test) sade kart çizilir.
 export default function FullLookSections({ looks = [], interactive = true, startIndex = 0, renderProduct = null, renderAfterProducts = null, renderProducts = null }) {
   return <div className="full-look-flow" data-testid="full-look-flow">
-    {looks.map((look, index) => <section className="full-look-section" key={look.id} aria-label={look.title || `Kombin ${startIndex + index + 1}`}>
+    {looks.map((look, index) => <section className="full-look-section" id={`look-${look.id}`} key={look.id} aria-label={look.title || `Kombin ${startIndex + index + 1}`}>
       <div className="full-look-hero">
         {look.image ? <img src={look.image} alt={look.title || `Kombin ${startIndex + index + 1}`} loading={startIndex + index ? 'lazy' : 'eager'} />
           : <div className="full-look-placeholder">Soldaki kombin fotoğrafını seçin</div>}
