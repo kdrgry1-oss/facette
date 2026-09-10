@@ -1293,12 +1293,14 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
             if not refs:
                 continue
             gonderi, statu_ac, got_ok, err_txt = "", "", False, ""
+            debug_parts = []
             for ref in refs:
                 try:
                     info = await _aio.to_thread(
                         get_mng_shipment_status, username=user, password=pw, siparis_no=ref)
                 except Exception as pe:
                     err_txt = str(pe)[:200]
+                    debug_parts.append(f"{ref}: istisna {str(pe)[:80]}")
                     stats["errors"] += 1
                     await _aio.sleep(0.2)
                     continue
@@ -1306,15 +1308,20 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                     got_ok = True
                     statu_ac = (info.get("kargo_statu_aciklama") or "").strip() or statu_ac
                     g = (info.get("gonderi_no") or "").strip()
+                    debug_parts.append(
+                        f"{ref}: {info.get('method') or '?'} statu={info.get('kargo_statu') or '0'} "
+                        f"mng_no={info.get('mng_siparis_no') or '-'} gonderi={g or '-'}")
                     if g:
                         gonderi = g
                         break
                 else:
                     err_txt = str((info or {}).get("error") or "")[:200]
+                    debug_parts.append(f"{ref}: {err_txt[:80] or 'yanıt yok'}")
                 await _aio.sleep(0.2)
             stats["checked"] += 1
             now_iso = datetime.now(timezone.utc).isoformat()
-            upd = {"cargo_status_checked_at": now_iso}
+            upd = {"cargo_status_checked_at": now_iso,
+                   "cargo_track_debug": " | ".join(debug_parts)[:400]}
             if got_ok:
                 upd["cargo_last_status_text"] = statu_ac
                 upd["cargo_track_error"] = ""

@@ -225,6 +225,29 @@ function PRTrackTab() {
     setStart(periodStart(kind)); setEnd("");
   };
 
+  // Takip taraması — saatlik cron'un yaptığı işi ŞİMDİ çalıştırır; sonucu (bulunan / hata / son hata)
+  // toast + üst bilgi satırında gösterir (teşhis için: MNG neden takip no vermiyor görünür olsun).
+  const [scanning, setScanning] = useState(false);
+  const [trackHealth, setTrackHealth] = useState(null);
+  const loadTrackHealth = useCallback(async () => {
+    try { const r = await axios.get(`${API}/influencer-pr/tracking-health`, auth()); setTrackHealth(r.data || null); } catch { /* sessiz */ }
+  }, []);
+  useEffect(() => { loadTrackHealth(); }, [loadTrackHealth]);
+  const runTrackingScan = async () => {
+    setScanning(true);
+    const t = toast.loading("DHL/MNG takip sorgulanıyor…");
+    try {
+      const r = await axios.post(`${API}/influencer-pr/tracking-scan`, {}, auth());
+      const d = r.data || {};
+      const msg = `Aday ${d.candidates ?? 0} · sorgulanan ${d.checked ?? 0} · takip no bulunan ${d.found ?? 0} · hata ${d.errors ?? 0}` + (d.last_error ? ` · son hata: ${d.last_error}` : "");
+      if (d.status === "inactive") toast.error(d.last_error || "MNG/DHL entegrasyonu aktif değil", { id: t });
+      else if ((d.found ?? 0) > 0) toast.success(msg, { id: t });
+      else toast(msg, { id: t, duration: 9000 });
+      setTrackHealth(d); load();
+    } catch (err) { toast.error(err.response?.data?.detail || "Takip taraması çalıştırılamadı", { id: t }); }
+    finally { setScanning(false); }
+  };
+
   // Excel'e aktar — ekrandaki AYNI filtreyle (durum/tarih/arama). Auth header gerektiği
   // için blob olarak çekip indiriyoruz (window.open header taşımaz).
   const exportXlsx = async () => {
@@ -321,8 +344,13 @@ function PRTrackTab() {
           <option value="">Tüm durumlar</option>
           {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
         </select>
+        <button onClick={runTrackingScan} disabled={scanning} data-testid="pr-track-scan-btn"
+                title="Takip no'ları DHL/MNG'den ŞİMDİ sorgula (saatlik otomatik taramayla aynı iş) — sonuç ve varsa hata burada gösterilir"
+                className="inline-flex items-center gap-2 border px-3 py-2 rounded-lg text-sm hover:bg-gray-50 ml-auto disabled:opacity-50">
+          <Truck size={15} /> {scanning ? "Taranıyor…" : "Takip Tara"}
+        </button>
         <button onClick={exportXlsx} data-testid="pr-export-btn"
-                className="inline-flex items-center gap-2 border px-3 py-2 rounded-lg text-sm hover:bg-gray-50 ml-auto">
+                className="inline-flex items-center gap-2 border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">
           <Download size={15} /> Excel'e Aktar
         </button>
         <button onClick={() => { setEditTarget(null); setShowForm(true); }} data-testid="new-pr-btn"
@@ -340,11 +368,19 @@ function PRTrackTab() {
         </div>
       ) : (
         <div className="overflow-x-auto border rounded-xl bg-white" data-testid="pr-list">
+          {trackHealth && (
+            <div className="px-3 py-1.5 text-[11px] text-gray-500 border-b bg-gray-50/60 flex flex-wrap gap-x-4 gap-y-1" data-testid="pr-track-health">
+              <span>Otomatik takip taraması (saatlik): <b className={trackHealth.status === "ok" ? "text-emerald-700" : "text-amber-700"}>{trackHealth.status || "bilinmiyor"}</b></span>
+              {trackHealth.last_run_at && <span>son çalışma {new Date(trackHealth.last_run_at).toLocaleString("tr-TR")}</span>}
+              <span>aday {trackHealth.candidates ?? 0} · sorgulanan {trackHealth.checked ?? 0} · bulunan {trackHealth.found ?? 0} · hata {trackHealth.errors ?? 0}</span>
+              {trackHealth.last_error && <span className="text-red-600">son hata: {trackHealth.last_error}</span>}
+            </div>
+          )}
           <table className="w-full text-sm min-w-[920px]">
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500 text-left">
               <tr>
                 {["Influencer", "İş Birliği", "İletişim", "Ürün", "Beden", "Gönderim Tarihi",
-                  "Gönderim Durumu", "Paylaştı", "Not", "İşlemler"].map((h, i) => (
+                  "Paylaştı", "Not", "İşlemler"].map((h, i) => (
                   <th key={i} className="px-2 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -356,13 +392,6 @@ function PRTrackTab() {
                 <th className="px-1.5 py-1.5"><FTxt v={colF.urun} onCh={(v) => setF("urun", v)} ph="Ürün/barkod…" /></th>
                 <th className="px-1.5 py-1.5"><FTxt v={colF.beden} onCh={(v) => setF("beden", v)} ph="Beden…" /></th>
                 <th className="px-1.5 py-1.5"></th>
-                <th className="px-1.5 py-1.5">
-                  <select value={colF.durum || ""} onChange={(e) => setF("durum", e.target.value)}
-                    className="w-full border rounded px-1.5 py-1 text-[11px] font-normal bg-white focus:outline-none focus:border-black">
-                    <option value="">Tümü</option>
-                    {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
-                  </select>
-                </th>
                 <th className="px-1.5 py-1.5">
                   <select value={colF.paylasti || ""} onChange={(e) => setF("paylasti", e.target.value)}
                     className="w-full border rounded px-1.5 py-1 text-[11px] font-normal bg-white focus:outline-none focus:border-black">
@@ -379,7 +408,7 @@ function PRTrackTab() {
             </thead>
             <tbody>
               {fEntries.length === 0 && (
-                <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400 text-sm">
+                <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400 text-sm">
                   Filtrelerle eşleşen kayıt yok. {anyColF && <button onClick={clearF} className="underline hover:text-black">Temizle</button>}
                 </td></tr>
               )}
@@ -444,7 +473,6 @@ function PRThumb({ src, name }) {
 function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }) {
   const [open, setOpen] = useState(false);
   const [noteEdit, setNoteEdit] = useState(false);
-  const st = prStatusMeta(e.status);
   const td = "px-2 py-2 align-top";
   const items = Array.isArray(e.products) && e.products.length ? e.products : null;
   const canShip = (items && e.influencer_id);
@@ -502,13 +530,6 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
         <td className={`${td} whitespace-nowrap text-gray-900`}>
           {items ? <div className="space-y-1">{items.map((p, i) => <div key={i} className="h-7 flex items-center">{p.gonderim_tarihi ? fmtDate(p.gonderim_tarihi) : (e.shipped_at ? fmtDate(e.shipped_at) : "—")}</div>)}</div>
                  : (e.shipped_at ? fmtDate(e.shipped_at) : "—")}
-        </td>
-        {/* Gönderim Durumu — sipariş listesi gibi rozet + inline değiştir */}
-        <td className={`${td} whitespace-nowrap`}>
-          <select value={e.status || "beklemede"} onChange={(ev) => onPatch(e.id, { status: ev.target.value })}
-                  className={`text-[11px] rounded-full px-2 py-1 border-0 focus:outline-none cursor-pointer ${st.c}`} data-testid={`pr-status-cell-${e.id}`}>
-            {PR_STATUS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
-          </select>
         </td>
         {/* Paylaştı — KALEM BAZLI (her ürün AYRI); Beden/Gönderim Tarihi ile hizalı (h-7) */}
         <td className={td}>
@@ -570,9 +591,9 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
                         <Truck size={14} /><span className="font-mono text-[10px] font-bold text-gray-700 max-w-[92px] truncate">{trackNo}</span>
                       </a>
                     ) : (
-                      <span title={`Takip no otomatik çekilir (her saat tarama).${e.cargo_status_checked_at ? " Son kontrol: " + new Date(e.cargo_status_checked_at).toLocaleString("tr-TR") : " Henüz taranmadı."}${e.cargo_last_status_text ? " · " + e.cargo_last_status_text : ""}${e.cargo_track_error ? " · Hata: " + e.cargo_track_error : ""}`}
+                      <span title={`Takip no otomatik çekilir (her saat tarama).${e.cargo_status_checked_at ? " Son kontrol: " + new Date(e.cargo_status_checked_at).toLocaleString("tr-TR") : " Henüz taranmadı."}${e.cargo_last_status_text ? " · " + e.cargo_last_status_text : ""}${e.cargo_track_error ? " · Hata: " + e.cargo_track_error : ""}${e.cargo_track_debug ? " · " + e.cargo_track_debug : ""}`}
                         className={`inline-flex items-center gap-1 border rounded px-1.5 py-1 ${e.cargo_track_error ? "text-red-500 border-red-200 bg-red-50" : "text-gray-400 border-gray-200"}`}
-                        data-testid={`pr-track-pending-${e.id}`}><Truck size={14} /><span className="text-[10px] font-medium">takip bekleniyor</span></span>
+                        data-testid={`pr-track-pending-${e.id}`}><Truck size={14} /><span className="text-[10px] font-medium">{e.cargo_track_error ? "takip hatası" : "takip bekleniyor"}</span></span>
                     )}
                     <button
                       onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/cargo-label`, "width=420,height=640", true).catch((err) => toast.error(err.message)); }}
@@ -602,7 +623,7 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
       </tr>
       {open && (
         <tr className="bg-gray-50/70 border-t" data-testid={`pr-detail-${e.id}`}>
-          <td colSpan={10} className="px-4 py-3">
+          <td colSpan={9} className="px-4 py-3">
             <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
               <div><span className="text-gray-400">Kullanıcı Adı: </span><span className="font-medium text-gray-900">{uname}</span></div>
               <div><span className="text-gray-400">Influencer Türü: </span><span className="font-medium text-gray-900">{e.influencer_turu || "—"}</span></div>
