@@ -11,7 +11,7 @@
   --sf-success: #23633f;
   --sf-warning: #81520c;
   --sf-danger: #a1262f;
-  --sf-focus: #245bdb;
+  --sf-focus: #1a1a1a; /* eskiden mavi (#245bdb) — kullanıcı isteği: mavi odak halkası olmasın; nötr koyu */
   --sf-font-body: "Mulish", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --sf-space-1: 0.25rem;
   --sf-space-2: 0.5rem;
@@ -28,9 +28,25 @@
   font-family: var(--sf-font-body);
 }
 
-.storefront-shell :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+/* Odak halkası YALNIZ klavye ile gezilen bağlantı/düğmelerde (erişilebilirlik). Metin
+   kutuları (input/select/textarea) HARİÇ: onlar dokunmayla odaklanınca da :focus-visible
+   eşleştiğinden site genelinde (arama, ödeme adımları) mavi çerçeve çıkıyordu (kullanıcı
+   isteği: "mavi bir şey çıkmasın"). Form alanları kendi alt-çizgi/kenarlık odak stilini kullanır. */
+.storefront-shell :where(a, button, [tabindex]):not(input):not(select):not(textarea):focus-visible {
   outline: 2px solid var(--sf-focus);
   outline-offset: 3px;
+}
+
+/* Form alanlarında hiçbir odak halkası/kutusu yok (tarayıcı varsayılanı dahil); odak göstergesi
+   yalnız kenarlık/alt-çizgi rengi (aşağıdaki :focus kuralı). Mobilde dokunma vurgusu da kapalı. */
+.storefront-shell :where(input, select, textarea):focus,
+.storefront-shell :where(input, select, textarea):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.storefront-shell,
+.storefront-shell :where(a, button, input, select, textarea) {
+  -webkit-tap-highlight-color: transparent;
 }
 
 .storefront-shell :where(input, select, textarea) {
