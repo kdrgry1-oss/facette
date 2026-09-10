@@ -960,6 +960,8 @@ api_router.include_router(influencers_router)
 # Amazon Selling Partner API (SP-API) — LWA only, no SigV4
 from routes.amazon_spapi import router as amazon_spapi_router
 api_router.include_router(amazon_spapi_router)
+from routes.amazon_catalog import router as amazon_catalog_router
+api_router.include_router(amazon_catalog_router)
 
 # Amazon DPP / Compliance (PII retention + checklist)
 from routes.compliance import router as compliance_router

@@ -176,6 +176,52 @@ export default function AmazonSpApi({ embedded = false }) {
   const [repQ, setRepQ] = useState("");
   const [rep, setRep] = useState(null);
   const [repLoading, setRepLoading] = useState(false);
+  // Katalog eşleştirme: Amazon'da (platform dışı) açılmış listeleri bizim ürünlerle eşle, stok/fiyat gönder, rapor
+  const [cat, setCat] = useState(null);
+  const [catRep, setCatRep] = useState(null);
+  const [catBusy, setCatBusy] = useState(false);
+  const loadCatStatus = useCallback(async () => {
+    try { const r = await axios.get(`${API}/amazon/spapi/catalog/status`, auth()); setCat(r.data || null); } catch { /* sessiz */ }
+  }, []);
+  useEffect(() => { loadCatStatus(); }, [loadCatStatus]);
+  useEffect(() => {
+    if (cat?.status !== "running") return undefined;
+    const t = setInterval(loadCatStatus, 8000);
+    return () => clearInterval(t);
+  }, [cat?.status, loadCatStatus]);
+  const startCatSync = async () => {
+    setCatBusy(true);
+    try {
+      const r = await axios.post(`${API}/amazon/spapi/catalog/sync`, {}, auth());
+      toast(r.data?.already_running ? "Zaten çalışıyor" : "Amazon kataloğu çekiliyor (1–5 dk)…");
+      setTimeout(loadCatStatus, 2000);
+    } catch (e) { toast.error(e.response?.data?.detail || "Başlatılamadı"); }
+    finally { setCatBusy(false); }
+  };
+  const loadCatReport = async () => {
+    setCatBusy(true);
+    try { const r = await axios.get(`${API}/amazon/spapi/catalog/report`, auth()); setCatRep(r.data || null); }
+    catch (e) { toast.error(e.response?.data?.detail || "Rapor alınamadı"); }
+    finally { setCatBusy(false); }
+  };
+  const downloadCatXlsx = async () => {
+    try {
+      const r = await axios.get(`${API}/amazon/spapi/catalog/report.xlsx`, { ...auth(), responseType: "blob" });
+      const url = URL.createObjectURL(r.data); const a = document.createElement("a");
+      a.href = url; a.download = "amazon-katalog-raporu.xlsx"; a.click(); URL.revokeObjectURL(url);
+    } catch { toast.error("Excel oluşturulamadı"); }
+  };
+  const pushMapped = async () => {
+    if (!(await window.appConfirm("Amazon'da eşleşen (platform dışı açılmış) tüm SKU'lara bizim stok ve marjlı fiyat gönderilecek. Devam?"))) return;
+    setCatBusy(true);
+    const t = toast.loading("Stok/fiyat gönderiliyor…");
+    try {
+      const r = await axios.post(`${API}/amazon/spapi/catalog/push`, {}, auth());
+      const d = r.data || {};
+      toast[d.dry_run ? "warning" : "success"](d.message || `${d.pushed ?? 0} gönderildi / ${d.failed ?? 0} hata`, { id: t, duration: 9000 });
+    } catch (e) { toast.error(e.response?.data?.detail || "Gönderim hatası", { id: t }); }
+    finally { setCatBusy(false); }
+  };
   const [cleanLoading, setCleanLoading] = useState(false);
   const runCleanup = async (confirm) => {
     const q = (repQ || "").trim();
@@ -364,6 +410,62 @@ export default function AmazonSpApi({ embedded = false }) {
           match_report'ta <b>matched:false</b> ise Amazon SellerSKU'n Facette stok kodu/barkoduyla eşleşmiyor →
           bu yüzden resim/stok gelmiyor. Sonucu bana gönder, eşlemeyi ona göre kurayım.
         </p>
+      </div>
+
+      {/* Katalog Eşleştirme & Rapor */}
+      <div className="bg-white border rounded-lg p-4 mt-4" data-testid="amazon-catalog-match">
+        <h3 className="font-semibold text-sm mb-1">🗂️ Amazon Katalog Eşleştirme & Rapor</h3>
+        <p className="text-[11px] text-gray-500 mb-2">
+          Amazon'da daha önce (bu platform dışında) açılmış tüm listelemeler çekilir, EAN/barkod ve SKU ile bizim ürünlerimize
+          eşlenir; eşleşenlere stok + marjlı fiyat gönderilir (otomatik senkrona da dahil olur). Rapor: hangi ürünümüz Amazon'da var, hangisi yok, hangi bedenler eksik.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={startCatSync} disabled={catBusy || !status?.connected || cat?.status === "running"}
+            className="inline-flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg text-sm hover:bg-slate-900 disabled:opacity-50">
+            {cat?.status === "running" ? "Çekiliyor…" : "1) Amazon kataloğunu çek & eşleştir"}
+          </button>
+          <button onClick={loadCatReport} disabled={catBusy || !cat?.map_matched && !cat?.map_unmatched}
+            className="inline-flex items-center gap-2 border px-4 py-2 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">2) Raporu göster</button>
+          <button onClick={downloadCatXlsx} disabled={!cat?.map_matched && !cat?.map_unmatched}
+            className="inline-flex items-center gap-2 border px-4 py-2 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">Excel indir</button>
+          <button onClick={pushMapped} disabled={catBusy || !cat?.map_matched}
+            className="inline-flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50">3) Eşleşenlere stok/fiyat gönder</button>
+        </div>
+        {cat && (
+          <div className="mt-2 text-[11px] text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
+            <span>Durum: <b className={cat.status === "ok" ? "text-emerald-700" : cat.status === "error" ? "text-red-600" : "text-amber-700"}>{cat.status}</b>{cat.step ? ` · ${cat.step}` : ""}</span>
+            {cat.finished_at && <span>son çekim {new Date(cat.finished_at).toLocaleString("tr-TR")}</span>}
+            {cat.rows != null && <span>Amazon satırı {cat.rows}</span>}
+            <span>eşleşen SKU {cat.map_matched ?? 0} · eşleşmeyen {cat.map_unmatched ?? 0}</span>
+            {cat.error && <span className="text-red-600">hata: {cat.error}</span>}
+          </div>
+        )}
+        {catRep && (
+          <div className="mt-3 text-xs space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {[["Aktif ürünümüz", catRep.summary.our_active_products], ["Amazon'da tam", catRep.summary.on_amazon_full],
+                ["Kısmen (beden eksik)", catRep.summary.on_amazon_partial], ["Amazon'da YOK", catRep.summary.not_on_amazon],
+                ["Amazon listeleme", catRep.summary.amazon_rows], ["Eşleşen SKU", catRep.summary.amazon_matched_skus],
+                ["Eşleşmeyen SKU", catRep.summary.amazon_unmatched_skus]].map(([l, v]) => (
+                <div key={l} className="border rounded p-2"><div className="text-gray-500">{l}</div><div className="text-lg font-bold">{v}</div></div>
+              ))}
+            </div>
+            {[["Amazon'da OLMAYAN ürünler", catRep.not_on_amazon, "text-red-700"], ["Kısmen olan (eksik bedenler)", catRep.partial, "text-amber-700"]].map(([title, rows, cls]) => (
+              <div key={title} className="border rounded p-2 max-h-56 overflow-auto">
+                <div className={`font-semibold mb-1 ${cls}`}>{title} ({rows.length})</div>
+                {rows.length === 0 ? <div className="text-gray-400">Yok</div> : rows.slice(0, 300).map((r, i) => (
+                  <div key={i} className="flex gap-2 border-b last:border-0 py-0.5"><span className="font-mono text-gray-500 w-32 shrink-0">{r.stock_code}</span><span className="flex-1">{r.product}</span>{r.missing_sizes?.length ? <span className="text-gray-500">eksik: {r.missing_sizes.join(", ")}</span> : null}</div>
+                ))}
+              </div>
+            ))}
+            <div className="border rounded p-2 max-h-56 overflow-auto">
+              <div className="font-semibold mb-1 text-gray-700">Amazon'da olup bizde karşılığı bulunamayan SKU'lar ({catRep.amazon_unmatched.length})</div>
+              {catRep.amazon_unmatched.slice(0, 300).map((u, i) => (
+                <div key={i} className="flex gap-2 border-b last:border-0 py-0.5"><span className="font-mono w-44 shrink-0 truncate">{u.sku}</span><span className="font-mono text-gray-500 w-24 shrink-0">{u.asin}</span><span className="flex-1 truncate">{u.item_name}</span><span className="text-gray-500">EAN {u.amazon_product_id || "-"}</span></div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Listeleme Teşhisi — Amazon'daki canlı durum */}

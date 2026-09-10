@@ -1109,7 +1109,8 @@ async def _run_amazon_auto_orders_pull(lookback_days: int = 7):
         return summary
 
 
-async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=False, manual=False):
+async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=False, manual=False,
+                                      mapped_only=False):
     """Scheduler / manuel — Amazon stok+fiyat CANLI push (Trendyol/HB ile simetrik).
     Amazon SellerSKU = Facette variant.stock_code (yoksa barcode). Otomatik turda YALNIZ stoğu/
     fiyatı DEĞİŞEN varyantı yollar (amazon_sku_state değişiklik tespiti). Manuel tetik `barcodes`/
@@ -1147,8 +1148,40 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
             return (str(v.get("barcode") or "").strip() in _bset
                     or str(v.get("stock_code") or "").strip() in _sset)
 
-        summary["candidates"] = sum(1 for p in products for v in (p.get("variants") or [])
-                                    if _sku_of(v, p) and _in_target(v))
+        # HEDEF LİSTESİ: (1) bizim ürettiğimiz SKU'lar (stokkodu-renk-beden), (2) Amazon'da bu
+        # platform dışında açılmış ve KATALOG EŞLEŞTİRMESİ ile eşlenen harici SKU'lar
+        # (db.amazon_sku_map, matched=True) — aynı varyantın stok/fiyatı oraya da gider.
+        targets = []  # (sku, product, variant, product_type|None)
+        _seen_sku = set()
+        if not mapped_only:
+            for p in products:
+                for v in (p.get("variants") or []):
+                    sk = _sku_of(v, p)
+                    if sk and _in_target(v) and sk not in _seen_sku:
+                        _seen_sku.add(sk)
+                        targets.append((sk, p, v, None))
+        try:
+            _pmap = {p.get("id"): p for p in products}
+            async for m in _db.amazon_sku_map.find({"matched": True}, {"_id": 0, "sku": 1, "product_id": 1,
+                                                                        "variant_barcode": 1, "variant_size": 1,
+                                                                        "product_type": 1}):
+                sk = m.get("sku")
+                p = _pmap.get(m.get("product_id"))
+                if not sk or not p or sk in _seen_sku:
+                    continue
+                v = None
+                for vv in (p.get("variants") or []):
+                    if (m.get("variant_barcode") and str(vv.get("barcode") or "") == m["variant_barcode"]) or \
+                       (not m.get("variant_barcode") and str(vv.get("size") or "") == (m.get("variant_size") or "")):
+                        v = vv
+                        break
+                if v is None or not _in_target(v):
+                    continue
+                _seen_sku.add(sk)
+                targets.append((sk, p, v, m.get("product_type") or None))
+        except Exception as _me:
+            logger.warning(f"[amazon] eşleşmiş harici SKU'lar okunamadı: {_me}")
+        summary["candidates"] = len(targets)
 
         if not ALLOW_WRITE:
             summary["dry_run"] = True
@@ -1164,14 +1197,9 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
         # Otomatik cron: 40/tur (seed'i yay). Manuel tetik: TAVAN YOK (tümünü gönder).
         _CAP = 1000000 if (manual or _filtered) else 40
         _force = force or _filtered
-        for p in products:
+        for (sku, p, v, _map_pt) in targets:
             pr = _amazon_price_of(p, markup)  # marjlı satış fiyatı
-            for v in (p.get("variants") or []):
-                if not _in_target(v):
-                    continue
-                sku = _sku_of(v, p)
-                if not sku:
-                    continue
+            if True:
                 try:
                     qty = int(v.get("stock") or 0)
                 except Exception:
@@ -1201,7 +1229,8 @@ async def _run_amazon_auto_stock_sync(barcodes=None, stock_codes=None, force=Fal
                             _pt_cache[_pid] = _pt or "PRODUCT"
                         except Exception:
                             _pt_cache[_pid] = "PRODUCT"
-                    res = await _amazon_push_stock_price(sku, qty, pr, product_type=_pt_cache[_pid])
+                    # Harici (eşleştirilmiş) SKU'da Amazon'un kendi productType'ı öncelikli
+                    res = await _amazon_push_stock_price(sku, qty, pr, product_type=(_map_pt or _pt_cache[_pid]))
                 except Exception as _pe:
                     res = {}
                     _push_error = _pe
