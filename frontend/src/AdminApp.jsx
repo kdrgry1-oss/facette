@@ -32,6 +32,7 @@ import TrendyolGhostScanner from "./pages/admin/TrendyolGhostScanner";
 import ProductAttributes from "./pages/admin/ProductAttributes";
 import Manufacturing from "./pages/admin/Manufacturing";
 import Members from "./pages/admin/Members";
+import Consents from "./pages/admin/Consents";
 import Attribution from "./pages/admin/Attribution";
 import SizeTablesList from "./pages/admin/SizeTablesList";
 import Coupons from "./pages/admin/Coupons";
@@ -159,6 +160,7 @@ export default function AdminApp() {
         <Route path="kullanicilar" element={<Navigate to="/admin/ayarlar?tab=users-roles" replace />} />
         <Route path="imalat" element={<Manufacturing />} />
         <Route path="uyeler" element={<Members />} />
+        <Route path="izinler" element={<Consents />} />
         <Route path="kaynak" element={<Attribution />} />
         <Route path="hepsiburada-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
         <Route path="temu-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />

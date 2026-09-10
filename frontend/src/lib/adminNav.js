@@ -93,6 +93,7 @@ export const navigationGroups = [
       { label: "Müşteri Soruları", path: "/admin/sorular", icon: MessageSquare },
       { label: "Destek Talepleri", path: "/admin/tickets", icon: MessageSquare },
       { label: "Bloklu Müşteriler", path: "/admin/bloklu-musteriler", icon: Users },
+      { label: "Pazarlama İzinleri (E-posta/SMS)", path: "/admin/izinler", icon: Users },
     ],
   },
   {

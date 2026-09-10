@@ -58,6 +58,7 @@ from routes.ai_assistant import router as ai_assistant_router
 from routes.locations import router as locations_router
 from routes.attribution import router as attribution_router
 from routes.members import router as members_router
+from routes.consents import router as consents_router
 from routes.coupons import admin_router as coupons_admin_router, public_router as coupons_public_router, campaigns_router as campaigns_router
 from routes.reports import router as reports_router
 from routes.extras import (
@@ -847,6 +848,7 @@ api_router.include_router(push_router)
 from routes.consent import router as consent_router  # KVKK çerez onayı kaydı
 api_router.include_router(consent_router)
 api_router.include_router(members_router)
+api_router.include_router(consents_router)
 api_router.include_router(coupons_admin_router)
 api_router.include_router(coupons_public_router)
 api_router.include_router(campaigns_router)
