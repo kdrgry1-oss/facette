@@ -47,6 +47,21 @@ export default function FullLookAddAll({ products = [] }) {
   const listTotal = addable.reduce((a, r) => a + (Number(r.price.list) || 0), 0);
   const totalPct = listTotal > 0 && listTotal > total + 0.5 ? Math.round((1 - total / listTotal) * 100) : 0;
 
+  // Tek parça: seçili beden (ya da bedensiz/tek bedenli) ile o ürünü sepete ekle
+  const addOne = (r) => {
+    if (r.soldOut) return;
+    if (r.hasSizes) {
+      const sz = sel[r.p.id];
+      const sv = sz ? r.sizes.find((x) => x.size === sz) : null;
+      if (!sv || sv.stock <= 0) { toast.error(`${r.p.name} için beden seçin`); return; }
+      addItem(r.p, sv.variant);
+    } else {
+      addItem(r.p);
+    }
+    toast.success(`${r.p.name} sepete eklendi`);
+    try { setIsOpen(true); } catch { /* çekmece yoksa */ }
+  };
+
   const addAll = () => {
     if (!ready) {
       toast.error(missing.length ? `Beden seçin: ${missing.map((r) => r.p.name).join(", ")}` : "Bu kombinde stokta ürün yok");
@@ -116,6 +131,13 @@ export default function FullLookAddAll({ products = [] }) {
                     </>
                   ) : (
                     <span className="text-[11px] tracking-[0.1em] uppercase text-stone-400 inline-flex items-center gap-1"><Check size={12} /> Tek beden</span>
+                  )}
+                  {!r.soldOut && (
+                    <button type="button" onClick={() => addOne(r)}
+                      className="mt-4 inline-flex items-center justify-center bg-black text-white px-5 py-2.5 text-[11px] uppercase tracking-[0.2em] hover:bg-black/85 transition-colors"
+                      data-testid={`fl-add-one-${r.p.id}`}>
+                      Sepete Ekle
+                    </button>
                   )}
                 </div>
               </div>
