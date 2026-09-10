@@ -468,10 +468,14 @@ export default function Header({ hideMenu = false, announcement = null, announce
                 {cols.every((c) => !c.items.length) ? (
                 <ul className="space-y-1">
                   {cols.map((col) => (
-                    <li key={col.title} className={_isFullLook(col.title) ? "mt-5 pt-4 border-t border-black/10" : ""}>
+                    <li key={col.title} className={_isFullLook(col.title) ? "mt-8 pt-1" : ""}>
+                      {/* Full Look: diğer başlıklardan belirgin aşağıda, üstünde KISA ayraç çizgi, kalın yazı
+                          (index.css .font-bold'u 600'e çekiyor → inline 700). */}
+                      {_isFullLook(col.title) && <span aria-hidden="true" className="block w-7 h-px bg-black/25 mb-3" />}
                       <Link
                         to={col.link}
-                        className={`block py-1 text-sm text-gray-700 hover:text-black transition-colors${_isDowntownCode(col.title) ? " italic" : ""}${_isFullLook(col.title) ? " font-bold text-black tracking-[0.06em]" : ""}`}
+                        style={_isFullLook(col.title) ? { fontWeight: 700 } : undefined}
+                        className={`block py-1 text-sm text-gray-700 hover:text-black transition-colors${_isDowntownCode(col.title) ? " italic" : ""}${_isFullLook(col.title) ? " text-black tracking-[0.08em]" : ""}`}
                         onClick={() => setActiveMenu(null)}
                         onMouseEnter={() => setHoveredCategory(col.slug)}
                       >
@@ -569,13 +573,15 @@ export default function Header({ hideMenu = false, announcement = null, announce
                       </summary>
                       <div className="pb-3 pl-1 space-y-3">
                         {cols.map((col) => (
-                          <div key={col.title} className={_isFullLook(col.title) ? "mt-4 pt-3 border-t border-black/10" : ""}>
+                          <div key={col.title} className={_isFullLook(col.title) ? "mt-6 pt-1" : ""}>
+                            {_isFullLook(col.title) && <span aria-hidden="true" className="block w-7 h-px bg-black/25 mb-2.5" />}
                             {/* Alt kategorisi olmayan kolon (ör. koleksiyon) normal satır linki olarak ALT ALTA */}
                             <Link
                               to={col.link}
+                              style={_isFullLook(col.title) ? { fontWeight: 700 } : undefined}
                               className={`${col.items.length
                                 ? "block text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5 hover:underline"
-                                : "block py-1.5 text-[13px] font-light text-black/75"}${_isDowntownCode(col.title) ? " italic" : ""}${_isFullLook(col.title) ? " !font-bold !text-black" : ""}`}
+                                : "block py-1.5 text-[13px] font-light text-black/75"}${_isDowntownCode(col.title) ? " italic" : ""}${_isFullLook(col.title) ? " !text-black tracking-[0.08em]" : ""}`}
                               onClick={() => setMobileMenuOpen(false)}
                             >
                               {col.title}
