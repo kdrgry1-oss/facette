@@ -565,8 +565,13 @@ function PRRow({ e, onEdit, onDelete, onHistory, onShip, onPatch, onItemShared }
                       </a>
                     ) : (
                       <span title={`Takip no otomatik çekilir (her saat tarama).${e.cargo_status_checked_at ? " Son kontrol: " + new Date(e.cargo_status_checked_at).toLocaleString("tr-TR") : " Henüz taranmadı."}${e.cargo_last_status_text ? " · " + e.cargo_last_status_text : ""}${e.cargo_track_error ? " · Hata: " + e.cargo_track_error : ""}${e.cargo_track_debug ? " · " + e.cargo_track_debug : ""}`}
-                        className={`inline-flex items-center gap-1 border rounded px-1.5 py-1 ${e.cargo_track_error ? "text-red-500 border-red-200 bg-red-50" : "text-gray-400 border-gray-200"}`}
-                        data-testid={`pr-track-pending-${e.id}`}><Truck size={14} /><span className="text-[10px] font-medium">{e.cargo_track_error ? "takip hatası" : "takip bekleniyor"}</span></span>
+                        className={`inline-flex flex-wrap items-center gap-1 border rounded px-1.5 py-1 ${e.cargo_track_error ? "text-red-500 border-red-200 bg-red-50" : "text-gray-400 border-gray-200"}`}
+                        data-testid={`pr-track-pending-${e.id}`}><Truck size={14} /><span className="text-[10px] font-medium">{e.cargo_track_error ? "takip hatası" : "takip bekleniyor"}</span>
+                        {(e.cargo_last_status_text || e.cargo_track_error || e.cargo_track_debug) && (
+                          <span className="block w-full basis-full text-[9px] text-gray-400 font-normal normal-case max-w-[170px] truncate" title={e.cargo_track_debug || ""}>
+                            {(e.cargo_last_status_text || e.cargo_track_error || e.cargo_track_debug || "").slice(0, 70)}
+                          </span>
+                        )}</span>
                     )}
                     <button
                       onClick={() => { openAdminDocument(`/influencer-pr/${e.id}/cargo-label`, "width=420,height=640", true).catch((err) => toast.error(err.message)); }}
