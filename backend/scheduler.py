@@ -257,6 +257,82 @@ async def retry_pending_iys_consents():
         logger.exception(f"[scheduler] retry_pending_iys_consents failed: {e}")
 
 
+async def send_havale_payment_reminders():
+    """Havale/EFT siparişinde ödeme N saat içinde gelmediyse müşteriye 'Siparişiniz Alındı ·
+    Ödeme Bekleniyor' (order_awaiting_payment) bildirimini OTOMATİK bir kez daha gönderir.
+    Süre: İşletme Kuralları → order.havale_reminder_hours (varsayılan 24; 0 = kapalı).
+    Kapsam: awaiting_payment + ödenmemiş + dekont bildirilmemiş (payment_notified değil) +
+    daha önce hatırlatılmamış. Otomatik iptal süresine (havale_cancel_hours) girmiş siparişe
+    hatırlatma GİTMEZ (iptal işi onu süpürür). Kanal: Sipariş Durumları ayarı; boşsa e-posta (+SMS).
+    Yalnız en az bir kanal başarılıysa 'hatırlatıldı' damgalanır (SMTP hatasında tekrar denenir)."""
+    from routes.deps import db  # lazy import
+    import business_rules as _BR
+    try:
+        _hrs = int(await _BR.get_rule(db, "order.havale_reminder_hours", 24) or 0)
+        if _hrs <= 0:
+            return
+        _cancel_hrs = int(await _BR.get_rule(db, "order.havale_cancel_hours", 72) or 72)
+        now = datetime.now(timezone.utc)
+        due_before = (now - timedelta(hours=_hrs)).isoformat()
+        alive_after = (now - timedelta(hours=max(_cancel_hrs, _hrs + 1))).isoformat()
+        query = {
+            "payment_status": {"$nin": ["paid", "expired", "refunded"]},
+            "status": "awaiting_payment",
+            "payment_method": {"$in": ["transfer", "havale", "bank_transfer", "eft", "havale_eft", "banka_havale"]},
+            "payment_notified": {"$ne": True},
+            "havale_reminder_sent_at": {"$in": [None, ""]},
+            "created_at": {"$lt": due_before, "$gt": alive_after},
+        }
+        try:
+            from notification_service import send_notification
+            from routes.orders import _order_notify_vars
+            from order_statuses import get_status_config
+        except Exception as e:
+            logger.warning(f"[scheduler][havale-reminder] import skip: {e}")
+            return
+        try:
+            _cfg = await get_status_config(db)
+            _nz = (_cfg.get("notify") or {}).get("awaiting_payment") or {}
+        except Exception:
+            _nz = {}
+        sent = failed = 0
+        async for order in db.orders.find(query, {"_id": 0}).limit(200):
+            ship = order.get("shipping_address") or {}
+            phone = ship.get("phone") or order.get("phone")
+            email = ship.get("email") or order.get("email") or order.get("customer_email")
+            if not (phone or email):
+                await db.orders.update_one({"id": order["id"]},
+                                           {"$set": {"havale_reminder_sent_at": now.isoformat(),
+                                                     "havale_reminder_result": "alıcı yok (telefon/e-posta boş)"}})
+                continue
+            channels = [c for c in ("sms", "email") if _nz.get(c)]
+            if not channels:
+                channels = ["email"] + (["sms"] if phone else [])
+            try:
+                variables = await _order_notify_vars(order)
+                res = await send_notification(db, "order_awaiting_payment", to_phone=phone,
+                                              to_email=email, variables=variables, channels=channels)
+                results = (res or {}).get("results") or {}
+                ok = any((v or {}).get("success") for v in results.values())
+                if ok:
+                    sent += 1
+                    await db.orders.update_one(
+                        {"id": order["id"]},
+                        {"$set": {"havale_reminder_sent_at": now.isoformat(),
+                                  "havale_reminder_result": ",".join(k for k, v in results.items() if (v or {}).get("success"))}})
+                else:
+                    failed += 1
+                    logger.warning(f"[scheduler][havale-reminder] gönderilemedi order={order.get('order_number')} res={results}")
+            except Exception as e:
+                failed += 1
+                logger.warning(f"[scheduler][havale-reminder] hata order={order.get('order_number')}: {e}")
+            await asyncio.sleep(0.2)
+        if sent or failed:
+            logger.info(f"[scheduler][havale-reminder] {_hrs}s hatırlatma: gönderilen={sent} başarısız={failed}")
+    except Exception as e:
+        logger.exception(f"[scheduler] send_havale_payment_reminders failed: {e}")
+
+
 async def _ensure_hb_2min_sync():
     """Tek seferlik: Hepsiburada hesabını 2 dk'da bir STOK + SİPARİŞ senkronuna ayarlar.
     settings.hb_sync_2min_v1 bayrağıyla yalnızca bir kez uygulanır; sonradan
@@ -2528,6 +2604,16 @@ def start_scheduler():
         minutes=30,
         id="auto_cancel_havale_48h",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Havale/EFT ödeme HATIRLATMA — her 30 dk; süre İşletme Kuralları'ndan (varsayılan 24 saat)
+    _add(
+        send_havale_payment_reminders,
+        "interval",
+        minutes=30,
+        id="havale_payment_reminder",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
         max_instances=1,
         coalesce=True,
     )
