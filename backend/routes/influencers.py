@@ -1409,15 +1409,27 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
             _days = sorted(_days, reverse=True)[:14]
             _cc = [str(s.get("customer_code") or "").strip()] if str(s.get("customer_code") or "").strip().isdigit() else []
             _disc = await db.settings.find_one({"id": "mng_report_discovery_v2"}, {"_id": 0}) or {}
+            _tried = set(str(x) for x in (_disc.get("tried") or []))
+            _pool = [str(x) for x in ([10, 12, 13] + list(range(16, 31)))]
+            _next = [] if _disc.get("rapor_no_tracking") else [x for x in _pool if x not in _tried][:2]
             res = await _aio.to_thread(_by_date, username=user, password=pw, start=_start, end=_end, dates=_days,
-                                       customer_codes=_cc + [user], preferred_rapor=str(_disc.get("rapor_no") or ""))
+                                       customer_codes=_cc + [user],
+                                       preferred_rapor=str(_disc.get("rapor_no_tracking") or _disc.get("rapor_no") or "7"),
+                                       discover_rapor=_next)
             try:
-                _rn = ((res.get("diag") or {}).get("MusteriOzelRapor") or {}).get("rapor_no")
-                if _rn and _rn != _disc.get("rapor_no"):
-                    await db.settings.update_one({"id": "mng_report_discovery_v2"}, {"$set": {"rapor_no": _rn, "at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
-            except Exception:
-                pass
-            bd = {"ok": bool(res.get("ok")), "method": res.get("method"), "diag": res.get("diag"),
+                _md = (res.get("diag") or {}).get("MusteriOzelRapor") or {}
+                _set = {"at": datetime.now(timezone.utc).isoformat(), "tried": sorted(_tried | set(_next)),
+                        "rapor_keys": {**(_disc.get("rapor_keys") or {}), **(_md.get("rapor_keys") or {})}}
+                if _md.get("rapor_no") and not _disc.get("rapor_no"):
+                    _set["rapor_no"] = _md["rapor_no"]
+                if _md.get("rapor_no_tracking"):
+                    _set["rapor_no_tracking"] = _md["rapor_no_tracking"]
+                await db.settings.update_one({"id": "mng_report_discovery_v2"}, {"$set": _set}, upsert=True)
+                bd_disc = {"tried": _set["tried"], "rapor_no_tracking": _set.get("rapor_no_tracking") or _disc.get("rapor_no_tracking"),
+                           "rapor_keys": {k: {"rows": v.get("rows"), "has_tracking": v.get("has_tracking"), "keys": (v.get("keys") or [])[:14]} for k, v in _set["rapor_keys"].items()}}
+            except Exception as _de2:
+                bd_disc = {"error": str(_de2)[:120]}
+            bd = {"ok": bool(res.get("ok")), "method": res.get("method"), "diag": res.get("diag"), "discovery": bd_disc,
                   "days": [d.strftime("%d.%m") for d in _days],
                   "rows": len(res.get("rows") or []), "error": (res.get("error") or "")[:400], "matched": 0,
                   "sample_keys": ((res.get("rows") or [{}])[0].get("raw_keys") if res.get("rows") else None),
@@ -1474,11 +1486,21 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
                     bd["diag_error"] = str(_de)[:120]
                 used = set()
                 _resolve_diag = []
+                # Takip no'lu satırlar önce (yalnız referanslı satır aynı kaydı tüketmesin)
+                res["rows"].sort(key=lambda r: 0 if r.get("tracking") else 1)
+                _ours = {str(x).strip() for x in (_cc + [user]) if x}
+                bd["rows_from_us"] = sum(1 for r in res["rows"] if (str(r.get("sender_no") or "").strip() in _ours)
+                                         or ("facette" in _inf_norm(r.get("sender_name") or "")))
+                bd["rows_with_sender"] = sum(1 for r in res["rows"] if r.get("sender_no") or r.get("sender_name"))
                 for row in res["rows"]:
                     trk = str(row.get("tracking") or "").strip()
                     mref = str(row.get("mng_ref") or "").strip()
                     nm = str(row.get("name") or "").strip()
                     if not (trk or mref) or not nm or (trk or mref) in used or "*" in nm:
+                        continue
+                    # GÖNDERİCİ BİZ OLMALI: rapor başka müşterilerin gönderilerini de içerebilir (60 bin satır)
+                    _sn, _sname = str(row.get("sender_no") or "").strip(), _inf_norm(row.get("sender_name") or "")
+                    if (_sn or _sname) and not (_sn in _ours or "facette" in _sname):
                         continue
                     hits = [c for c in pend if any(_mng_name_match(n, nm) for n in
                                                    [c.get("influencer_name") or "", inf_names.get(c.get("influencer_id") or "", "")] if n)]

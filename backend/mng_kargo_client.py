@@ -240,7 +240,7 @@ def _largest_row_list(obj) -> list:
 
 
 def list_shipments_by_date(*, username: str, password: str, start, end, dates=None, customer_codes=None,
-                           preferred_rapor: str = "") -> Dict:
+                           preferred_rapor: str = "", discover_rapor=None) -> Dict:
     """KargoBilgileriByTarih / FaturaSiparisListesiByTarih → gönderi listesi.
     Amaç: kuryenin bizim referansımız yerine kendi (RE-…) referansıyla açtığı paketleri alıcı
     adına göre bulmak. Alan adları WSDL sürümüne göre değiştiği için parametreler ve satır
@@ -274,6 +274,8 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                 # "RE - 329844" gibi MNG gönderi referansı → takip no DEĞİL; ayrı sakla
                 _mng_ref, _trk = _trk.strip(), ""
             rows.append({"tracking": _trk, "mng_ref": _mng_ref,
+                         "sender_no": pick("gonmusterino") or pick("gondericimusterino") or pick("gonderici", "no"),
+                         "sender_name": pick("gonmusteriadi") or pick("gondericimusteriadi") or pick("gondericiadi") or pick("gonderici", "ad"),
                          "name": pick("aliciadi") or pick("almusteriadi") or pick("alici", "ad") or pick("alici", "unvan") or pick("alicimusteri") or pick("alici"),
                          "ref": f.get("siparisno") or f.get("referansno") or pick("referans") or pick("siparisno") or pick("rfanlasmano"),
                          "date": pick("gondericikis", "tarih") or pick("gonderitarihi") or pick("kargostatu", "tarih") or pick("siparistarihi") or pick("tarih"),
@@ -321,7 +323,8 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
             # MusteriOzelRapor: rapor no keşfi (1 = şube listesi çıktı; gönderi listesi hangisi?)
             # 1 = şube listesi, 15 = sipariş listesi (takip no yok), 2-6/8/9/11 tanımsız; 7/10/12/13 zaman aşımı
             # (büyük rapor → gönderi listesi olabilir) → uzun zaman aşımı + kısa aralıkla önce onlar denenir.
-            rapor_variants = [preferred_rapor] if preferred_rapor else (["7", "10", "12", "13"] + [str(i) for i in range(16, 31)])
+            # preferred (7: gönderi listesi, yalnız RE/RG referansı) + bu turda keşfedilecek 1-2 yeni rapor no
+            rapor_variants = ([preferred_rapor] if preferred_rapor else ["7"]) + [str(x) for x in (discover_rapor or []) if str(x) != preferred_rapor]
         else:
             rapor_variants = ["1", "2"] if rapor_slot else [""]     # KargoBilgileriByTarih: hep boş döndü → az dene
         alt_variants = ["0"] if alt_slot else [""]
@@ -348,15 +351,17 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         for cust, rv, av in cust_candidates:
           if cust_slot:
               base[cust_slot] = cust
+          if got_any and rapor_slot and "raporno" in rapor_slot.lower() and d.get("rapor_no_tracking"):
+              break   # takip no'lu rapor bulundu → daha fazla deneme
           if rapor_slot:
               base[rapor_slot] = rv
           if alt_slot:
               base[alt_slot] = av
           if cust_slot or rapor_slot:
               d.setdefault("cust_tried", []).append(f"{str(cust)[:4]}…/rapor={rv}/alt={av}")
-          _variant_tag = f"rapor={rv}/alt={av}"
-          if got_any:
+          if got_any and not (rapor_slot and "raporno" in rapor_slot.lower()):
               break
+          _variant_tag = f"rapor={rv}/alt={av}"
           for fmt in (fmts[:1] if cust_slot else fmts):
               errs = []
               rows_here = []
@@ -376,12 +381,18 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                           errs.append(str(ser)[:140])
                   except Exception as e:
                       errs.append(str(e)[:120])
-              if rows_here and not any(("gonderino" in k or "takipno" in k or "kargono" in k or "barkod" in k) for k in (rows_here[0].get("raw_keys") or [])):
-                  # Satır var ama gönderi/alıcı alanı yok (örn. şube listesi) → bu rapor gönderi listesi değil
+              if rows_here:
+                  _keys = rows_here[0].get("raw_keys") or []
+                  _has_trk = any(rows_here[i].get("tracking") for i in range(min(50, len(rows_here))))
                   d.setdefault("by_variant", {})
-                  d["by_variant"][_variant_tag] = f"{len(rows_here)} satır, alanlar: " + ",".join((rows_here[0].get("raw_keys") or [])[:8])
-                  rows_here = []
-                  errs = errs or ["gönderi alanı yok"]
+                  d["by_variant"][_variant_tag] = f"{len(rows_here)} satır, takipNo={'VAR' if _has_trk else 'yok'}, alanlar: " + ",".join(_keys[:24])
+                  d.setdefault("rapor_keys", {})[rv] = {"rows": len(rows_here), "has_tracking": _has_trk, "keys": _keys[:40]}
+                  if _has_trk:
+                      d["rapor_no_tracking"] = rv
+                  elif rv != (preferred_rapor or "7"):
+                      # Keşif turunda gönderi/takip alanı olmayan rapor → satırları kullanma
+                      rows_here = []
+                      errs = errs or ["takip no alanı yok"]
               if errs:
                   d.setdefault("by_variant", {})
                   if len(d["by_variant"]) < 40:
