@@ -1583,12 +1583,13 @@ export default function AdminProducts() {
     let sizeList = [];
     if (mode === 'single') {
       sizeList = [...new Set((product?.variants || []).map(v => (v.size || '').trim()).filter(Boolean))];
-      // Beden yoksa (varyantsız ürün) direkt yazdır; beden varsa (tek bile olsa) adet girilebilsin diye seçici açılır.
-      if (sizeList.length === 0) { handlePrintBarcode(product.id); return; }
+      // Beden yoksa (varyantsız ürün) seçici tek satır "Tüm barkodlar" ile açılır (adet yine burada girilir;
+      // yazdırma sayfasında ikinci bir adet çubuğu ÇIKMAZ).
+      if (sizeList.length === 0) sizeList = ['*'];
     } else {
       const chosen = products.filter(p => selectedProducts.includes(p.id));
       sizeList = [...new Set(chosen.flatMap(p => (p.variants || []).map(v => (v.size || '').trim())).filter(Boolean))];
-      if (sizeList.length === 0) { handleBulkPrintBarcodes(); return; }
+      if (sizeList.length === 0) sizeList = ['*'];
     }
     // Bedenleri mantıklı sırala (XS→XXL, sonra sayısal/diğer alfabetik)
     const ORDER = ['XXS','XS','S','M','L','XL','XXL','3XL','4XL'];
@@ -1615,7 +1616,8 @@ export default function AdminProducts() {
     const picked = barcodeSizeModal.sizes.filter(s => barcodeSizeModal.selected[s] && (parseInt(cnt[s], 10) || 0) > 0);
     if (picked.length === 0) { toast.error("En az bir beden seçip adet giriniz"); return; }
     const all = picked.length === barcodeSizeModal.sizes.length;
-    const sizes = all ? null : picked; // hepsi seçiliyse filtre gönderme
+    // hepsi seçiliyse (ya da '*' = tüm barkodlar) beden filtresi gönderme; adetler counts ile gider
+    const sizes = (all || picked.includes('*')) ? null : picked;
     const counts = Object.fromEntries(picked.map(s => [s, Math.max(1, parseInt(cnt[s], 10) || 1)]));
     if (barcodeSizeModal.mode === 'single') {
       handlePrintBarcode(barcodeSizeModal.productId, sizes, counts);
@@ -1649,7 +1651,7 @@ export default function AdminProducts() {
       if (w) {
         w.document.write(res.data);
         w.document.close();
-        w.focus(); // otomatik yazdirma yok: kopya adedini secip "Yazdir"a bas
+        w.focus(); // adetler seçicide girildi: sayfa açılınca yazdırma diyaloğu kendiliğinden açılır
       }
     } catch (err) {
       toast.error("Barkod kartları oluşturulamadı: " + (err.response?.data?.detail || err.message));
@@ -4796,7 +4798,7 @@ export default function AdminProducts() {
                       onChange={(e) => setBarcodeSizeModal(m => ({ ...m, selected: { ...m.selected, [s]: e.target.checked } }))}
                       className="rounded border-gray-300"
                     />
-                    <span className="text-sm text-gray-700">{s}</span>
+                    <span className="text-sm text-gray-700">{s === '*' ? 'Tüm barkodlar' : s}</span>
                   </label>
                   <input
                     type="number" min="0" max="500"
@@ -4806,7 +4808,7 @@ export default function AdminProducts() {
                       const v = e.target.value;
                       setBarcodeSizeModal(m => ({ ...m, counts: { ...(m.counts || {}), [s]: v === '' ? '' : Math.max(0, parseInt(v, 10) || 0) } }));
                     }}
-                    title={`${s} bedeninden kaç etiket`}
+                    title={s === '*' ? 'Her barkoddan kaç etiket' : `${s} bedeninden kaç etiket`}
                     className="w-16 border border-gray-300 rounded px-1.5 py-0.5 text-sm text-right disabled:opacity-40"
                   />
                 </div>

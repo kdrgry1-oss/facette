@@ -124,7 +124,9 @@ def _card_html_for_variant(product: dict, variant: dict) -> str:
     """
 
 
-def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
+def _build_html(cards_html: str, title: str = "Barkod Kartlari", auto_print: bool = False) -> str:
+    """auto_print=True: adetler ilk ekranda (beden seçici) girildi → üstteki "Her barkoddan adet"
+    çubuğu GÖSTERİLMEZ ve sayfa açılır açılmaz yazdırma diyaloğu tetiklenir (kullanıcı isteği)."""
     """
     Etiket sayfasi: yan yana 2 barkod, her etiket 5cm x 4cm.
     Kesme payi (bos seritler): sol + orta + sag = 0.5cm -> satir genisligi 11.5cm.
@@ -193,15 +195,26 @@ def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
         "};})();</script>"
     )
 
+    if auto_print:
+        toolbar = ""
+        script = (
+            "<script>(function(){if(window.__fcPrint)return;window.__fcPrint=1;"
+            "var go=function(){setTimeout(function(){try{window.focus();window.print();}catch(e){}},300);};"
+            "if(document.readyState==='complete')go();else window.addEventListener('load',go);})();</script>"
+        )
+    else:
+        toolbar = (
+            "<div class='no-print'>"
+            "<span><strong>" + title + "</strong> &middot; %100 olcek / 'Gercek boyut' ile yazdirin.</span>"
+            "<span style='display:flex;align-items:center;gap:8px'>"
+            "<label>Her barkoddan adet: <input id='copies' type='number' min='1' value='1'/></label>"
+            "<button class='btn' onclick='doPrint()'>Yazdir</button>"
+            "</span></div>"
+        )
     return (
         "<!DOCTYPE html><html lang='tr'><head><meta charset='utf-8'/>"
         "<title>" + title + "</title><style>" + css + "</style></head><body>"
-        "<div class='no-print'>"
-        "<span><strong>" + title + "</strong> &middot; %100 olcek / 'Gercek boyut' ile yazdirin.</span>"
-        "<span style='display:flex;align-items:center;gap:8px'>"
-        "<label>Her barkoddan adet: <input id='copies' type='number' min='1' value='1'/></label>"
-        "<button class='btn' onclick='doPrint()'>Yazdir</button>"
-        "</span></div>"
+        + toolbar +
         "<div class='sheet'><div class='grid'>" + cards_html + "</div></div>"
         + script +
         "</body></html>"
@@ -301,7 +314,7 @@ async def get_product_barcode_card(
     cards = _product_cards_html(product, sizes=_sizes, counts=_parse_counts(counts))
     if not cards:
         raise HTTPException(status_code=404, detail="Seçilen bedenlerde varyant bulunamadı")
-    html = _build_html(cards, title=f"{product.get('name', 'Ürün')} — Barkod Kartı")
+    html = _build_html(cards, title=f"{product.get('name', 'Ürün')} — Barkod Kartı", auto_print=bool(counts))
     return Response(content=html, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
@@ -336,5 +349,5 @@ async def get_bulk_barcode_cards(
     cards = "".join(_product_cards_html(p, sizes=_sizes, counts=_counts) for p in products)
     if not cards:
         raise HTTPException(status_code=404, detail="Seçilen bedenlerde varyant bulunamadı")
-    html = _build_html(cards, title=f"{len(products)} Ürün — Barkod Kartları")
+    html = _build_html(cards, title=f"{len(products)} Ürün — Barkod Kartları", auto_print=bool(_counts))
     return Response(content=html, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
