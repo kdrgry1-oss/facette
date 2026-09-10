@@ -668,6 +668,7 @@ function PRFormModal({ initial, onClose, onSaved }) {
     anlasma_sekli: initial?.anlasma_sekli || "",
     phone: initial?.phone || "",
     adres: initial?.adres || "",
+    cargo_gonderi_no: initial?.cargo_gonderi_no || "",
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -751,6 +752,12 @@ function PRFormModal({ initial, onClose, onSaved }) {
         <Field label="Cevap"><input className="inp" value={form.response} onChange={(e) => set("response", e.target.value)} placeholder="Ne cevap geldi" /></Field>
         <Field label="Follow-up"><input className="inp" value={form.follow_up} onChange={(e) => set("follow_up", e.target.value)} placeholder="Tekrar iletişim / hatırlatma" /></Field>
         <Field label="Not" full><textarea className="inp h-20" value={form.note} onChange={(e) => set("note", e.target.value)} /></Field>
+        {initial?.cargo_barcode && (
+          <Field label={`Kargo takip no (elle) — MNG kaydı: ${initial?.cargo_mng_no || initial?.cargo_barcode}`} full>
+            <input className="inp font-mono" value={form.cargo_gonderi_no} onChange={(e) => set("cargo_gonderi_no", e.target.value)}
+              placeholder="Kurye fişindeki takip no (MNG bizim kayda atamadıysa buraya yaz)" data-testid="pr-manual-tracking" />
+          </Field>
+        )}
       </div>
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm border rounded-lg">İptal</button>

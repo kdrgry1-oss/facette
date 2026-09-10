@@ -1077,6 +1077,15 @@ async def update_pr_entry(entry_id: str, payload: dict, current_user: dict = Dep
     update = {k: v for k, v in (payload or {}).items() if k in _PR_FIELDS}
     if "status" in update and (update.get("status") or "") not in PR_STATUSES:
         update.pop("status")
+    # ELLE TAKİP NO: kurye paketi bizim MNG kaydımız yerine elden irsaliyeyle aldıysa MNG
+    # bizim sipariş no'muza takip no atamaz; kurye fişindeki numara buradan girilir.
+    if "cargo_gonderi_no" in (payload or {}):
+        g = str(payload.get("cargo_gonderi_no") or "").strip()
+        if g and g != (existing.get("cargo_gonderi_no") or ""):
+            update.update({"cargo_gonderi_no": g, "cargo_tracking_url": f"https://kargotakip.dhlecommerce.com.tr/?takipNo={g}",
+                           "cargo_track_note": "Takip no elle girildi", "cargo_track_error": "", "cargo_manual_tracking": True})
+        elif not g and existing.get("cargo_manual_tracking"):
+            update.update({"cargo_gonderi_no": "", "cargo_tracking_url": "", "cargo_manual_tracking": False, "cargo_track_note": ""})
     update["updated_at"] = _now_iso()
     await db.influencer_pr.update_one({"id": entry_id}, {"$set": update})
     doc = await db.influencer_pr.find_one({"id": entry_id}, {"_id": 0})
