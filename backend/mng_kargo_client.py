@@ -222,7 +222,8 @@ def _largest_row_list(obj) -> list:
     return best
 
 
-def list_shipments_by_date(*, username: str, password: str, start, end, dates=None, customer_codes=None) -> Dict:
+def list_shipments_by_date(*, username: str, password: str, start, end, dates=None, customer_codes=None,
+                           preferred_rapor: str = "") -> Dict:
     """KargoBilgileriByTarih / FaturaSiparisListesiByTarih → gönderi listesi.
     Amaç: kuryenin bizim referansımız yerine kendi (RE-…) referansıyla açtığı paketleri alıcı
     adına göre bulmak. Alan adları WSDL sürümüne göre değiştiği için parametreler ve satır
@@ -294,7 +295,8 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
         # Rapor tipi / alt firma bayrağı bilinmiyor → boş sonuçta kombinasyonlar sırayla denenir
         alt_slot = next((n for n in names if "altfirma" in n.lower()), "")
         if rapor_slot and "raporno" in rapor_slot.lower():
-            rapor_variants = [str(i) for i in range(1, 13)]          # MusteriOzelRapor: rapor no 1..12
+            # MusteriOzelRapor: rapor no keşfi (1 = şube listesi çıktı; gönderi listesi hangisi?)
+            rapor_variants = [preferred_rapor] if preferred_rapor else [str(i) for i in range(2, 21)]
         else:
             rapor_variants = ["1", "2"] if rapor_slot else [""]     # KargoBilgileriByTarih: hep boş döndü → az dene
         alt_variants = ["0"] if alt_slot else [""]
@@ -344,11 +346,18 @@ def list_shipments_by_date(*, username: str, password: str, start, end, dates=No
                           errs.append(str(ser)[:140])
                   except Exception as e:
                       errs.append(str(e)[:120])
+              if rows_here and not any(("gonderi" in k or "alici" in k or "takip" in k) for k in (rows_here[0].get("raw_keys") or [])):
+                  # Satır var ama gönderi/alıcı alanı yok (örn. şube listesi) → bu rapor gönderi listesi değil
+                  d.setdefault("by_variant", {})
+                  d["by_variant"][_variant_tag] = f"{len(rows_here)} satır, alanlar: " + ",".join((rows_here[0].get("raw_keys") or [])[:8])
+                  rows_here = []
+                  errs = errs or ["gönderi alanı yok"]
               if errs:
                   d.setdefault("by_variant", {})
                   if len(d["by_variant"]) < 40:
-                      d["by_variant"][_variant_tag] = errs[0][:90]
+                      d["by_variant"].setdefault(_variant_tag, errs[0][:90])
               if rows_here:
+                  d["rapor_no"] = rv
                   # Kimlik denemesi (2 gün) başarılıysa kalan günleri de aynı kimlikle çek
                   if cust_slot and len(plans) > 1:
                       for plan in plans[1:]:
