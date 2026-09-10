@@ -221,74 +221,113 @@ def _largest_row_list(obj) -> list:
     return best
 
 
-def list_shipments_by_date(*, username: str, password: str, start, end) -> Dict:
-    """KargoBilgileriByTarih / FaturaSiparisListesiByTarih → tarih aralığındaki TÜM gönderiler.
+def list_shipments_by_date(*, username: str, password: str, start, end, dates=None) -> Dict:
+    """KargoBilgileriByTarih / FaturaSiparisListesiByTarih → gönderi listesi.
     Amaç: kuryenin bizim referansımız yerine kendi (RE-…) referansıyla açtığı paketleri alıcı
     adına göre bulmak. Alan adları WSDL sürümüne göre değiştiği için parametreler ve satır
-    alanları çalışma anında sezgisel eşlenir. start/end: datetime.
-    Dönüş: {ok, method, rows:[{tracking, name, ref, date, mng_no, status, phone, raw_keys}], error}"""
+    alanları çalışma anında sezgisel eşlenir.
+      • İki tarih parametresi alan operasyon → tek çağrı (start..end)
+      • TEK tarih parametresi alan operasyon (FaturaSiparisListesiByTarih: pSiparisTarih) →
+        `dates` listesindeki her gün için ayrı çağrı (günlük sorgu limitini korumak için az gün).
+    Dönüş: {ok, method, rows:[{tracking,name,ref,date,mng_no,status,phone,raw_keys}], diag:{op:{params,error}}}"""
     c = _get_client()
     from zeep.helpers import serialize_object
-    fmts = ["%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y-%m-%dT%H:%M:%S"]
-    errors = []
+    fmts = ["%d.%m.%Y", "%Y-%m-%d"]
+    diag: Dict[str, Dict] = {}
+    all_rows: list = []
+    used_method = ""
+
+    def _parse_rows(ser) -> list:
+        rows_raw = _largest_row_list(ser)
+        rows = []
+        for rr in rows_raw:
+            f = _flatten_row(rr)
+
+            def pick(*preds):
+                for k, v in f.items():
+                    if all(p in k for p in preds):
+                        return v
+                return ""
+            rows.append({"tracking": pick("gonderino") or pick("gonderi", "no") or pick("takipno") or pick("barkod"),
+                         "name": pick("aliciadi") or pick("alici", "ad") or pick("alici", "unvan") or pick("alici"),
+                         "ref": pick("siparisno") or pick("referans") or pick("siparis", "no"),
+                         "date": pick("gondericikis", "tarih") or pick("kargostatu", "tarih") or pick("siparistarihi") or pick("tarih"),
+                         "mng_no": pick("mngsiparisno") or pick("mng", "no"),
+                         "status": pick("statu", "aciklama") or pick("statu") or pick("durum"),
+                         "phone": pick("telcep") or pick("alici", "tel") or pick("tel"),
+                         "raw_keys": sorted(f.keys())[:40]})
+        return rows
+
     for op_name in ("KargoBilgileriByTarih", "FaturaSiparisListesiByTarih"):
         names = _op_param_names(c, op_name)
+        d = diag.setdefault(op_name, {"params": names, "error": "", "calls": 0, "rows": 0})
         if not names:
-            errors.append(f"{op_name}: parametreler okunamadı")
+            d["error"] = "parametreler okunamadı"
             continue
-        for fmt in fmts:
-            kwargs = {}
-            date_slots = []
-            for n in names:
-                ln = n.lower()
-                if "kullanici" in ln or "user" in ln:
-                    kwargs[n] = username
-                elif "sifre" in ln or "pass" in ln:
-                    kwargs[n] = password
-                elif "tarih" in ln or "date" in ln:
-                    date_slots.append(n)
-                else:
-                    kwargs[n] = ""
-            if len(date_slots) >= 2:
-                # ilk = başlangıç, ikinci = bitiş (isimde bas/ilk/bit/son ipucu varsa ona göre)
-                ds = sorted(date_slots, key=lambda n: (0 if any(k in n.lower() for k in ("bas", "ilk", "start", "from")) else
-                                                        (2 if any(k in n.lower() for k in ("bit", "son", "end", "to")) else 1)))
-                kwargs[ds[0]] = start.strftime(fmt)
-                kwargs[ds[-1]] = end.strftime(fmt)
-            elif len(date_slots) == 1:
-                kwargs[date_slots[0]] = start.strftime(fmt)
-            try:
-                r = getattr(c.service, op_name)(**kwargs)
-                ser = serialize_object(r)
-                raw = str(ser)[:300]
-                rows_raw = _largest_row_list(ser)
-                if not rows_raw:
-                    # metin hata yanıtı olabilir → sonraki format/operasyon
-                    errors.append(f"{op_name}[{fmt}]: satır yok ({raw[:120]})")
-                    continue
-                rows = []
-                for rr in rows_raw:
-                    f = _flatten_row(rr)
-                    def pick(*preds):
-                        for k, v in f.items():
-                            if all(p in k for p in preds):
-                                return v
-                        return ""
-                    tracking = pick("gonderino") or pick("gonderi", "no") or pick("takipno") or pick("takip", "no") or pick("barkod")
-                    name = pick("alici", "ad") or pick("alici", "unvan") or pick("aliciadi") or pick("alici")
-                    ref = pick("referans") or pick("siparisno") or pick("siparis", "no")
-                    date = pick("kargo", "tarih") or pick("siparis", "tarih") or pick("tarih")
-                    rows.append({"tracking": tracking, "name": name, "ref": ref, "date": date,
-                                 "mng_no": pick("mngsiparisno") or pick("mng", "no"),
-                                 "status": pick("statu", "aciklama") or pick("statu") or pick("durum"),
-                                 "phone": pick("alici", "tel") or pick("telefon") or pick("tel"),
-                                 "raw_keys": sorted(f.keys())[:40]})
-                return {"ok": True, "method": op_name, "fmt": fmt, "params": names, "rows": rows,
-                        "error": "; ".join(errors)[:300]}
-            except Exception as e:
-                errors.append(f"{op_name}[{fmt}]: {str(e)[:100]}")
+        date_slots = [n for n in names if "tarih" in n.lower() or "date" in n.lower()]
+        base = {}
+        for n in names:
+            ln = n.lower()
+            if n in date_slots:
                 continue
-    return {"ok": False, "method": "", "rows": [], "error": "; ".join(errors)[:600]}
+            if "kullanici" in ln or "user" in ln:
+                base[n] = username
+            elif "sifre" in ln or "pass" in ln:
+                base[n] = password
+            else:
+                base[n] = ""
+        # Çağrı planı: iki tarih → (start,end); tek tarih → her gün ayrı
+        if len(date_slots) >= 2:
+            ds = sorted(date_slots, key=lambda n: (0 if any(k in n.lower() for k in ("bas", "ilk", "start", "from")) else
+                                                    (2 if any(k in n.lower() for k in ("bit", "son", "end", "to")) else 1)))
+            plans = [{ds[0]: start, ds[-1]: end}]
+        elif len(date_slots) == 1:
+            plans = [{date_slots[0]: dt} for dt in (dates or [start])]
+        else:
+            plans = [{}]
+        got_any = False
+        for fmt in fmts:
+            errs = []
+            rows_here = []
+            for plan in plans:
+                kwargs = dict(base)
+                for k, dt in plan.items():
+                    kwargs[k] = dt.strftime(fmt)
+                try:
+                    d["calls"] += 1
+                    r = getattr(c.service, op_name)(**kwargs)
+                    ser = serialize_object(r)
+                    rows = _parse_rows(ser)
+                    if rows:
+                        rows_here.extend(rows)
+                    else:
+                        errs.append(str(ser)[:140])
+                except Exception as e:
+                    errs.append(str(e)[:120])
+            if rows_here:
+                all_rows.extend(rows_here)
+                d["rows"] += len(rows_here)
+                d["fmt"] = fmt
+                got_any = True
+                if errs:
+                    d["error"] = errs[0][:200]
+                break
+            d["error"] = (errs[0] if errs else "satır yok")[:200]
+            # Kimlik hatası formatla ilgili değil → diğer formatı deneme
+            if any("KULLANICI" in x.upper() or "SIFRE" in x.upper() for x in errs):
+                break
+        if got_any and not used_method:
+            used_method = op_name
+    # Aynı takip no birden çok operasyondan gelirse tekilleştir
+    seen, uniq = set(), []
+    for r in all_rows:
+        key = r.get("tracking") or (r.get("ref") + "|" + r.get("name"))
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(r)
+    return {"ok": bool(uniq), "method": used_method, "rows": uniq, "diag": diag,
+            "error": "; ".join(f"{k}: {v.get('error')}" for k, v in diag.items() if v.get("error"))[:500]}
 
 
 def baglanti_test() -> Dict:

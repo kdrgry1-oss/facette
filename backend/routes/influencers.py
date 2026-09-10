@@ -1397,9 +1397,20 @@ async def auto_refresh_pr_tracking(limit: int = 150) -> dict:
             from mng_kargo_client import list_shipments_by_date as _by_date
             _end = datetime.now(timezone.utc) + timedelta(days=1)
             _start = _end - timedelta(days=31)
-            res = await _aio.to_thread(_by_date, username=user, password=pw, start=_start, end=_end)
-            bd = {"ok": bool(res.get("ok")), "method": res.get("method"), "fmt": res.get("fmt"), "params": res.get("params"),
-                  "rows": len(res.get("rows") or []), "error": (res.get("error") or "")[:300], "matched": 0,
+            # Tek-tarih operasyonu için gün listesi: bekleyen kayıtların gönderim günü ve ertesi gün
+            # (kurye çoğu zaman ertesi gün okutur). Günlük sorgu limitini korumak için en çok 14 gün.
+            _days = set()
+            for c in pend:
+                try:
+                    d0 = datetime.fromisoformat(str(c.get("shipped_at") or "")[:19]).replace(hour=0, minute=0, second=0, microsecond=0)
+                    _days.add(d0); _days.add(d0 + timedelta(days=1))
+                except Exception:
+                    pass
+            _days = sorted(_days, reverse=True)[:14]
+            res = await _aio.to_thread(_by_date, username=user, password=pw, start=_start, end=_end, dates=_days)
+            bd = {"ok": bool(res.get("ok")), "method": res.get("method"), "diag": res.get("diag"),
+                  "days": [d.strftime("%d.%m") for d in _days],
+                  "rows": len(res.get("rows") or []), "error": (res.get("error") or "")[:400], "matched": 0,
                   "sample_keys": ((res.get("rows") or [{}])[0].get("raw_keys") if res.get("rows") else None),
                   "sample_row": None, "pending": len(pend), "at": datetime.now(timezone.utc).isoformat()}
             if res.get("rows"):
