@@ -2368,10 +2368,27 @@ async def _acquire_or_renew_leadership() -> bool:
 
 def _lead(fn):
     """İşi yalnız lider instance koşsun diye sarmalar. Lease hatasında tek-instance
-    varsayımıyla koşar (regresyon önleme)."""
-    async def _w(*a, **k):
+    varsayımıyla koşar (regresyon önleme).
+
+    KÖK NEDEN DÜZELTMESİ (havale 72s / influencer takip "hiç çalışmıyor"): deploy sırasında yeni
+    instance ilk _LEASE_TTL_SEC (120 sn) boyunca lider olamaz; açılışta +30 sn / +2 dk'ya kurulan
+    ilk çalışmalar SESSİZCE atlanıyor ve 30 dk / 1 saatlik işler bir sonraki periyoda kalıyordu
+    (art arda deploy'larda hiç sıra alamıyordu). Artık lider olunamayan çalışma, lease süresi
+    dolduktan sonra (TTL+30 sn) BİR KEZ yeniden denenir; o da lider değilse gerçekten başka
+    instance liderdir → bırakılır."""
+    async def _w(*a, _lead_retry=False, **k):
         try:
             if not await _acquire_or_renew_leadership():
+                if not _lead_retry and _scheduler is not None:
+                    try:
+                        _scheduler.add_job(
+                            _w, "date",
+                            run_date=datetime.now(timezone.utc) + timedelta(seconds=_LEASE_TTL_SEC + 30),
+                            id=f"{_w.__name__}__lead_retry", replace_existing=True,
+                            kwargs={"_lead_retry": True}, misfire_grace_time=300)
+                        logger.info(f"[scheduler] {_w.__name__}: lider değil — {_LEASE_TTL_SEC + 30} sn sonra yeniden denenecek")
+                    except Exception as _re:
+                        logger.warning(f"[scheduler] {_w.__name__}: lider-retry kurulamadı: {_re}")
                 return None
         except Exception as _e:
             logger.warning(f"[scheduler] liderlik kontrolü atlandı ({_e}) — iş yine koşuyor")

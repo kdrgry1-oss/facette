@@ -986,7 +986,21 @@ async def root():
 async def health():
     # Deploy teşhisi: hangi commit çalışıyor (Railway RAILWAY_GIT_COMMIT_SHA sağlar).
     _sha = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or os.environ.get("GIT_SHA") or "")[:12]
-    return {"status": "healthy", "version": _sha or None}
+    # Havale 72s taraması sağlığı (PII yok: yalnız zaman/sayaç/hata) — teşhis.
+    _hv = {}
+    try:
+        _hv = await db.settings.find_one({"id": "havale_sweep_health"}, {"_id": 0, "id": 0}) or {}
+    except Exception as _e:
+        _hv = {"error": f"okunamadı: {str(_e)[:80]}"}
+    # Zamanlayıcı canlı mı? (job listesi — yalnız id'ler)
+    _jobs = None
+    try:
+        from scheduler import _scheduler as _sched
+        _jobs = sorted(j.id for j in _sched.get_jobs())[:60] if _sched else []
+    except Exception as _e:
+        _jobs = [f"okunamadı: {str(_e)[:60]}"]
+    return {"status": "healthy", "version": _sha or None, "havale_sweep": _hv or None,
+            "scheduler_jobs": _jobs}
 
 # Include API router
 app.include_router(api_router)
