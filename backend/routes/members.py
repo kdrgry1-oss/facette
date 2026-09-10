@@ -503,13 +503,33 @@ async def _member_360_data(u: dict, start=None, end=None):
     oid = [o.get("id") for o in orders if o.get("id")]
     ret_amt, ret_n, returns_list = 0.0, 0, []
     if oid:
+        # SİPARİŞ BAŞINA TEK SATIR: aynı siparişin birden çok iade kaydı (kalem bazlı talep, durum
+        # geçişleri: talep → onaylandı) ayrı ayrı sayılıp "İadeler (5)" görünüyordu; oysa 2 sipariş.
+        # Tutar = siparişin iade kayıtlarının toplamı; durum = en ileri durum; sebep = ilk dolu sebep.
+        _rank = {"approved": 3, "refunded": 3, "completed": 3, "received": 2, "in_transit": 2, "pending": 1, "requested": 1, "rejected": 0}
+        by_order: dict = {}
         async for r in db.customer_returns.find({"order_id": {"$in": oid}}, {"_id": 0}):
             ra = float(r.get("refund_amount") or 0)
             ret_amt += ra
-            ret_n += 1
-            returns_list.append({"order_number": r.get("order_number"), "status": r.get("status"),
-                                 "refund_amount": round(ra, 2), "reason": r.get("reason"),
-                                 "created_at": r.get("created_at") or r.get("updated_at")})
+            key = r.get("order_id") or r.get("order_number")
+            g = by_order.get(key)
+            if not g:
+                g = by_order[key] = {"order_number": r.get("order_number"), "status": r.get("status"),
+                                     "refund_amount": 0.0, "reason": r.get("reason") or "",
+                                     "created_at": r.get("created_at") or r.get("updated_at"), "records": 0}
+            g["refund_amount"] += ra
+            g["records"] += 1
+            if _rank.get(str(r.get("status") or ""), 1) >= _rank.get(str(g.get("status") or ""), 1):
+                g["status"] = r.get("status")
+            if not g["reason"] and r.get("reason"):
+                g["reason"] = r.get("reason")
+            if (r.get("created_at") or "") and (r.get("created_at") or "") < (g.get("created_at") or "~"):
+                g["created_at"] = r.get("created_at")
+        for g in by_order.values():
+            g["refund_amount"] = round(g["refund_amount"], 2)
+            returns_list.append(g)
+        returns_list.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        ret_n = len(returns_list)
 
     sip_n = len(valid)
     iptal_amt = round(sum(float(o.get("total") or 0) for o in cancels), 2)

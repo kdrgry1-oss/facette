@@ -514,7 +514,7 @@ export default function Members() {
                           <div className="space-y-1 max-h-40 overflow-y-auto">
                             {m360.returns.map((r, i) => (
                               <div key={i} className="flex items-center justify-between text-[11px] p-1.5 bg-rose-50/50 rounded border border-rose-100">
-                                <span className="font-mono">{r.order_number}<span className="text-gray-400 ml-2">{r.reason || r.status}</span></span>
+                                <span className="font-mono">{r.order_number}<span className="text-gray-400 ml-2">{r.reason ? `${r.reason} · ` : ""}{r.status}{r.records > 1 ? ` (${r.records} kayıt)` : ""}</span></span>
                                 <span className="font-semibold text-rose-700">-{tl(r.refund_amount)}</span>
                               </div>
                             ))}
