@@ -2,7 +2,7 @@
 import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from .deps import db, require_permission
+from .deps import db, require_admin
 from activity_audit import record_admin_audit
 from full_look_rules import clean_full_look, full_look_projection, gallery_images
 from .products import _members_only_cat_ids, _auto_campaigns_for_badges, _apply_campaign_badge
@@ -66,12 +66,12 @@ async def public_full_look():
 
 
 @router.get('/admin')
-async def admin_full_look(current_user: dict = Depends(require_permission('tasarim.page_design'))):
+async def admin_full_look(current_user: dict = Depends(require_admin)):
     return await _hydrate(await _read())
 
 
 @router.get('/products')
-async def search_products(search: str = Query('', max_length=100), current_user: dict = Depends(require_permission('tasarim.page_design'))):
+async def search_products(search: str = Query('', max_length=100), current_user: dict = Depends(require_admin)):
     query = {'is_deleted': {'$ne': True}, 'is_active': True}
     if search.strip():
         term = {'$regex': re.escape(search.strip()), '$options': 'i'}
@@ -85,7 +85,7 @@ async def search_products(search: str = Query('', max_length=100), current_user:
 
 
 @router.put('/admin')
-async def save_full_look(payload: dict, request: Request, current_user: dict = Depends(require_permission('tasarim.page_design'))):
+async def save_full_look(payload: dict, request: Request, current_user: dict = Depends(require_admin)):
     try:
         clean = clean_full_look(payload)
     except ValueError as e:
