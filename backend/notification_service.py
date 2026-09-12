@@ -243,6 +243,44 @@ SMS_IMPL = {
 }
 
 
+# ── SMS KARA LİSTESİ (db.sms_suppressions) ────────────────────────────────────
+# Yanlış kayıtlı numaralara (başkasına giden mesaj şikâyeti) HİÇBİR yoldan SMS gitmesin:
+# tüm sağlayıcı fonksiyonları tek kapıdan geçer (bildirim, OTP, influencer, kampanya).
+_SMS_BLOCK = {"set": set(), "at": 0.0}
+
+
+async def sms_suppressed(to: str) -> bool:
+    import time as _t
+    try:
+        if _t.time() - _SMS_BLOCK["at"] > 120:
+            from routes.deps import db as _db
+            found = set()
+            async for r in _db.sms_suppressions.find({}, {"_id": 0, "phone": 1}):
+                n = normalize_phone_tr(r.get("phone") or "")
+                if n:
+                    found.add(n)
+            _SMS_BLOCK["set"], _SMS_BLOCK["at"] = found, _t.time()
+    except Exception:
+        pass
+    n = normalize_phone_tr(to or "")
+    return bool(n) and (n in _SMS_BLOCK["set"] or n[-10:] in {x[-10:] for x in _SMS_BLOCK["set"]})
+
+
+def _sms_guard(fn):
+    async def _wrapped(cfg, to, message, *a, **k):
+        if await sms_suppressed(to):
+            logger.warning("[sms] kara listedeki numaraya gönderim engellendi")
+            return {"success": False, "response": "suppressed", "suppressed": True}
+        return await fn(cfg, to, message, *a, **k)
+    _wrapped.__name__ = getattr(fn, "__name__", "sms")
+    return _wrapped
+
+
+for _k in list(SMS_IMPL):
+    SMS_IMPL[_k] = _sms_guard(SMS_IMPL[_k])
+_sms_generic = _sms_guard(_sms_generic)
+
+
 # =============================================================================
 # WHATSAPP (META CLOUD API)
 # =============================================================================

@@ -426,6 +426,8 @@ async def lifespan(app: FastAPI):
             _asyncio.create_task(hb_cargo_backfill_once())
         except Exception as _hbe:
             logger.warning(f"[hb] cargo backfill task kurulamadı: {_hbe}")
+        # Yanlış kayıtlı telefon temizliği (üye talebi): numara tüm kayıtlardan silinir + SMS kara listesi
+        _asyncio.create_task(scrub_phone_once("05337173151", "Üye talebi: numara üyeye ait değil, başkasına SMS gidiyordu"))
     except Exception as e:
         logger.warning(f"Coupon exception seed start warning: {e}")
 
@@ -986,6 +988,52 @@ async def root():
     }
 
 # Health check
+async def scrub_phone_once(raw_phone: str, reason: str = "") -> None:
+    """Bir telefon numarasını TÜM kayıtlardan siler (üye, adres, sipariş, İYS izni, OTP, influencer)
+    ve SMS kara listesine alır. Tek seferlik (bayraklı); sonuç sayaçları settings.phone_scrub_<tail>."""
+    import re as _re
+    from datetime import datetime as _dt, timezone as _tz
+    from notification_service import normalize_phone_tr as _norm
+    from routes.deps import db as _db
+    norm = _norm(raw_phone)
+    tail = norm[-10:] if len(norm) >= 10 else norm
+    if not tail:
+        return
+    flag_id = f"phone_scrub_{tail}"
+    try:
+        if await _db.settings.find_one({"id": flag_id, "done": True}):
+            return
+        rx = {"$regex": _re.escape(tail) + r"\s*$"}
+        now = _dt.now(_tz.utc).isoformat()
+        counts = {}
+        r = await _db.users.update_many({"phone": rx}, {"$set": {"phone": "", "phone_verified": False, "phone_scrubbed_at": now}})
+        counts["users"] = r.modified_count
+        r = await _db.addresses.update_many({"phone": rx}, {"$set": {"phone": "", "phone_scrubbed_at": now}})
+        counts["addresses"] = r.modified_count
+        for fld in ("shipping_address.phone", "billing_address.phone", "phone", "customer_phone"):
+            r = await _db.orders.update_many({fld: rx}, {"$set": {fld: "", "phone_scrubbed_at": now}})
+            counts[f"orders.{fld}"] = r.modified_count
+        r = await _db.iys_consents.update_many({"phone": rx}, {"$set": {"phone": "", "phone_scrubbed_at": now}, "$pull": {"channels": "MESAJ"}})
+        counts["iys_consents"] = r.modified_count
+        r = await _db.otp_verifications.delete_many({"phone": rx})
+        counts["otp_verifications"] = r.deleted_count
+        for coll, fld in (("influencers", "phone"), ("influencers", "shipping_address.phone"), ("influencer_pr", "phone")):
+            try:
+                r = await getattr(_db, coll).update_many({fld: rx}, {"$set": {fld: "", "phone_scrubbed_at": now}})
+                counts[f"{coll}.{fld}"] = r.modified_count
+            except Exception:
+                pass
+        await _db.sms_suppressions.update_one({"phone": norm}, {"$set": {"phone": norm, "reason": reason, "created_at": now}}, upsert=True)
+        await _db.settings.update_one({"id": flag_id}, {"$set": {"id": flag_id, "done": True, "at": now, "counts": counts}}, upsert=True)
+        logger.warning(f"[phone-scrub] tamamlandı: {counts}")
+    except Exception as e:
+        logger.error(f"[phone-scrub] hata: {e}")
+        try:
+            await _db.settings.update_one({"id": flag_id}, {"$set": {"id": flag_id, "done": False, "error": str(e)[:200]}}, upsert=True)
+        except Exception:
+            pass
+
+
 @api_router.get("/health")
 async def health():
     # Deploy teşhisi: hangi commit çalışıyor (Railway RAILWAY_GIT_COMMIT_SHA sağlar).
@@ -1011,8 +1059,13 @@ async def health():
                                           "found": 1, "errors": 1, "mng_ops": 1, "mng_ops_at": 1, "by_date": 1, "nz_retro": 1}) or {}
     except Exception as _e:
         _pt = {"error": f"okunamadı: {str(_e)[:80]}"}
+    _ps = None
+    try:
+        _ps = await db.settings.find_one({"id": "phone_scrub_5337173151"}, {"_id": 0, "done": 1, "at": 1, "counts": 1, "error": 1})
+    except Exception:
+        pass
     return {"status": "healthy", "version": _sha or None, "havale_sweep": _hv or None,
-            "scheduler_jobs": _jobs, "pr_track": _pt or None}
+            "scheduler_jobs": _jobs, "pr_track": _pt or None, "phone_scrub": _ps}
 
 # Include API router
 app.include_router(api_router)
